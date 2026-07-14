@@ -36,6 +36,7 @@ def create_exact_bsp_patch_fixture(root: Path) -> Path:
     tracked = {
         "touch.c": (b"touch base\n", b"touch patched\n"),
         "compat.c": (b"compat base\n", b"compat patched\n"),
+        "origin.c": (b"origin base\n", b"origin patched\n"),
     }
     for name, (base, _patched) in tracked.items():
         (submodule / name).write_bytes(base)
@@ -133,6 +134,7 @@ def write_fake_notices(root: Path) -> None:
         "partitions_d1l.csv": "nvs,data,nvs,0x9000,0x6000\n",
         "patches/sensecap_indicator_idf55_compat.patch": "compat patch\n",
         "patches/sensecap_indicator_touch_fix.patch": "touch patch\n",
+        "patches/sensecap_indicator_tx_origin.patch": "origin patch\n",
         "scripts/compare_release_reproducibility_d1l.py": "# comparator fixture\n",
         "scripts/meshcore_conformance_d1l.py": "# conformance fixture\n",
         "scripts/meshcore_signed_advert_runtime_d1l.py": "# signed runtime fixture\n",
@@ -1108,6 +1110,7 @@ def test_git_info_treats_expected_bsp_patches_as_clean(monkeypatch, tmp_path):
     assert info["source_patches"] == [
         "patches/sensecap_indicator_touch_fix.patch",
         "patches/sensecap_indicator_idf55_compat.patch",
+        "patches/sensecap_indicator_tx_origin.patch",
     ]
 
 

@@ -21,6 +21,7 @@
 #include "mesh/ed25519_canonical.h"
 #include "mesh/meshcore_ack_dispatch.h"
 #include "mesh/meshcore_radio_profile.h"
+#include "mesh/meshcore_runtime_guard.h"
 #include "mesh/meshcore_route_selection.h"
 #include "mesh/meshcore_trace.h"
 #include "mesh/meshcore_wire.h"
@@ -51,12 +52,14 @@
 #define D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS 30000U
 #define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 8192U
 #define D1L_MESHCORE_SERVICE_QUEUE_LEN 6U
+#define D1L_MESHCORE_REQUEST_SLOT_COUNT D1L_MESHCORE_SERVICE_QUEUE_LEN
 #define D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN 8U
+#define D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN
 #define D1L_MESHCORE_MAX_EVENT_BURST 4U
-#define D1L_MESHCORE_RECOVERY_TX_DONE (1U << 0)
-#define D1L_MESHCORE_RECOVERY_TX_TIMEOUT (1U << 1)
-#define D1L_MESHCORE_RECOVERY_RX_RESTART (1U << 2)
+#define D1L_MESHCORE_OWNER_POLL_MS 250U
+#define D1L_MESHCORE_TX_WATCHDOG_GRACE_MS 250U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
+#define D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS 5000U
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ chars");
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
@@ -99,27 +102,39 @@ static uint32_t s_runtime_command_queue_high_water;
 static uint32_t s_runtime_event_queue_high_water;
 static uint32_t s_runtime_queue_drops;
 static uint32_t s_runtime_callback_event_drops;
-static uint32_t s_pending_radio_recovery_flags;
+static uint32_t s_pending_rx_recovery;
+static uint64_t s_next_radio_tx_operation_id;
+static d1l_mesh_tx_operation_identity_t s_active_radio_tx;
+static d1l_mesh_tx_watchdog_t s_radio_tx_watchdog;
 
 typedef struct {
-    bool active;
+    volatile uint32_t sequence;
+    volatile uint32_t operation_id_low;
+    volatile uint32_t operation_id_high;
+    volatile uint32_t kind;
+    volatile uint32_t dm_session_id_low;
+    volatile uint32_t dm_session_id_high;
+    volatile uint32_t dm_revision;
+} d1l_callback_tx_snapshot_t;
+
+static d1l_callback_tx_snapshot_t
+    s_callback_tx_history[D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN];
+
+typedef struct {
+    d1l_dm_delivery_owner_t delivery;
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char alias[D1L_CONTACT_ALIAS_LEN];
     char text[D1L_MESSAGE_TEXT_LEN];
-    uint8_t path_hash_bytes;
-    uint8_t path_hops;
+    d1l_meshcore_route_selection_t selection;
     uint8_t attempt;
     uint32_t ack_hash;
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
+    uint8_t raw_len;
+    bool path_probe;
+    bool ack_persistence_pending;
 } d1l_pending_dm_tx_t;
 
 static d1l_pending_dm_tx_t s_pending_dm_tx;
-
-typedef struct {
-    d1l_meshcore_route_selection_t selection;
-    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
-    char alias[D1L_CONTACT_ALIAS_LEN];
-    uint8_t raw_len;
-} d1l_dm_send_result_t;
 
 typedef struct {
     bool active;
@@ -158,6 +173,7 @@ typedef enum {
     D1L_MESHCORE_SERVICE_CMD_START_RX,
     D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
     D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
+    D1L_MESHCORE_SERVICE_CMD_SEND_DM,
     D1L_MESHCORE_SERVICE_EVENT_TX_DONE,
     D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT,
     D1L_MESHCORE_SERVICE_EVENT_RX_DONE,
@@ -175,11 +191,39 @@ typedef struct {
     char advert_pub_prefix[17];
     char advert_node_name[D1L_NODE_NAME_LEN];
     uint8_t advert_path_hash_bytes;
+    char dm_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char dm_text[D1L_MESSAGE_TEXT_LEN];
+    bool dm_path_probe;
     int16_t rssi;
     int8_t snr;
     uint64_t monotonic_us;
-    TaskHandle_t reply_task;
+    uint32_t request_id;
+    uint8_t request_slot;
+    uint64_t request_deadline_us;
+    d1l_mesh_tx_operation_identity_t tx_operation;
 } d1l_meshcore_service_cmd_t;
+
+typedef struct {
+    d1l_mesh_request_guard_t guard;
+    StaticSemaphore_t completion_storage;
+    SemaphoreHandle_t completion;
+    esp_err_t result;
+} d1l_meshcore_request_slot_t;
+
+static d1l_meshcore_request_slot_t
+    s_request_slots[D1L_MESHCORE_REQUEST_SLOT_COUNT];
+static uint32_t s_request_slots_init_state;
+static uint32_t s_next_request_id;
+
+typedef enum {
+    D1L_LATCHED_TERMINAL_EMPTY = 0,
+    D1L_LATCHED_TERMINAL_WRITING,
+    D1L_LATCHED_TERMINAL_READY,
+    D1L_LATCHED_TERMINAL_READING,
+} d1l_latched_terminal_state_t;
+
+static volatile uint32_t s_latched_terminal_state;
+static d1l_meshcore_service_cmd_t s_latched_terminal_event;
 
 static const uint8_t s_public_secret[D1L_MESHCORE_PUB_KEY_SIZE] = {
     0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a,
@@ -200,6 +244,371 @@ static esp_err_t meshcore_service_send_ack_async(
     const d1l_meshcore_ack_dispatch_plan_t *plan,
     const uint8_t *raw,
     uint8_t raw_len);
+static void finalize_pending_dm_radio_result(bool sent, esp_err_t error);
+
+static bool meshcore_request_slots_init(void)
+{
+    uint32_t state = __atomic_load_n(&s_request_slots_init_state,
+                                     __ATOMIC_ACQUIRE);
+    if (state == 2U) {
+        return true;
+    }
+    uint32_t expected = 0U;
+    if (__atomic_compare_exchange_n(
+            &s_request_slots_init_state, &expected, 1U, false,
+            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        bool valid = true;
+        for (size_t i = 0U; i < D1L_MESHCORE_REQUEST_SLOT_COUNT; ++i) {
+            s_request_slots[i].completion = xSemaphoreCreateBinaryStatic(
+                &s_request_slots[i].completion_storage);
+            valid = valid && s_request_slots[i].completion != NULL;
+        }
+        __atomic_store_n(&s_request_slots_init_state, valid ? 2U : 3U,
+                         __ATOMIC_RELEASE);
+        return valid;
+    }
+    while ((state = __atomic_load_n(&s_request_slots_init_state,
+                                    __ATOMIC_ACQUIRE)) == 1U) {
+        taskYIELD();
+    }
+    return state == 2U;
+}
+
+static uint32_t meshcore_request_next_id(void)
+{
+    uint32_t observed = __atomic_load_n(&s_next_request_id,
+                                        __ATOMIC_ACQUIRE);
+    for (;;) {
+        if (observed == D1L_MESH_REQUEST_ID_MAX) {
+            return 0U;
+        }
+        const uint32_t candidate = observed + 1U;
+        if (__atomic_compare_exchange_n(
+                &s_next_request_id, &observed, candidate, false,
+                __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            return candidate;
+        }
+    }
+}
+
+static d1l_meshcore_request_slot_t *meshcore_request_slot_for(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd || cmd->request_id == 0U ||
+        cmd->request_slot >= D1L_MESHCORE_REQUEST_SLOT_COUNT) {
+        return NULL;
+    }
+    d1l_meshcore_request_slot_t *slot =
+        &s_request_slots[cmd->request_slot];
+    return d1l_mesh_request_guard_matches(&slot->guard, cmd->request_id) ?
+        slot : NULL;
+}
+
+static esp_err_t meshcore_request_claim(
+    d1l_meshcore_service_cmd_t *cmd, uint32_t timeout_ms)
+{
+    if (!cmd || !meshcore_request_slots_init()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const uint32_t request_id = meshcore_request_next_id();
+    if (request_id == 0U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    for (size_t i = 0U; i < D1L_MESHCORE_REQUEST_SLOT_COUNT; ++i) {
+        d1l_meshcore_request_slot_t *slot = &s_request_slots[i];
+        if (!d1l_mesh_request_guard_claim(&slot->guard, request_id)) {
+            continue;
+        }
+        while (xSemaphoreTake(slot->completion, 0) == pdTRUE) {
+        }
+        slot->result = ESP_ERR_TIMEOUT;
+        if (!d1l_mesh_request_guard_publish(&slot->guard, request_id)) {
+            (void)d1l_mesh_request_guard_release(
+                &slot->guard, request_id, D1L_MESH_REQUEST_CLAIMED);
+            return ESP_ERR_INVALID_STATE;
+        }
+        cmd->request_id = request_id;
+        cmd->request_slot = (uint8_t)i;
+        const uint64_t now_us = (uint64_t)esp_timer_get_time();
+        cmd->request_deadline_us =
+            now_us + ((uint64_t)timeout_ms * 1000ULL);
+        return ESP_OK;
+    }
+    return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t meshcore_request_consume(
+    const d1l_meshcore_service_cmd_t *cmd,
+    d1l_mesh_request_state_t expected_state)
+{
+    d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
+    if (!slot ||
+        d1l_mesh_request_guard_state(&slot->guard) != expected_state) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t result = slot->result;
+    (void)xSemaphoreTake(slot->completion, 0);
+    if (!d1l_mesh_request_guard_release(
+            &slot->guard, cmd->request_id, expected_state)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return result;
+}
+
+static esp_err_t meshcore_request_wait(
+    const d1l_meshcore_service_cmd_t *cmd, TickType_t timeout_ticks)
+{
+    d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
+    if (!slot) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(slot->completion, timeout_ticks) == pdTRUE) {
+        const d1l_mesh_request_state_t state =
+            d1l_mesh_request_guard_state(&slot->guard);
+        if (state == D1L_MESH_REQUEST_COMPLETED ||
+            state == D1L_MESH_REQUEST_OWNER_EXPIRED) {
+            return meshcore_request_consume(cmd, state);
+        }
+    }
+
+    if (d1l_mesh_request_guard_transition(
+            &slot->guard, cmd->request_id, D1L_MESH_REQUEST_PENDING,
+            D1L_MESH_REQUEST_CALLER_CANCELLED)) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    d1l_mesh_request_state_t state =
+        d1l_mesh_request_guard_state(&slot->guard);
+    if (state == D1L_MESH_REQUEST_ADMITTED ||
+        state == D1L_MESH_REQUEST_COMPLETED ||
+        state == D1L_MESH_REQUEST_OWNER_EXPIRED) {
+        /* Admission or owner expiry won the timeout race. Wait for the exact
+         * slot generation's signal before releasing it; otherwise a late
+         * semaphore give could leak into the next request that claims it. */
+        while (xSemaphoreTake(slot->completion, portMAX_DELAY) != pdTRUE) {
+        }
+        state = d1l_mesh_request_guard_state(&slot->guard);
+    }
+    if (state == D1L_MESH_REQUEST_COMPLETED ||
+        state == D1L_MESH_REQUEST_OWNER_EXPIRED) {
+        return meshcore_request_consume(cmd, state);
+    }
+    return state == D1L_MESH_REQUEST_CALLER_CANCELLED ?
+        ESP_ERR_TIMEOUT : ESP_ERR_INVALID_STATE;
+}
+
+static void meshcore_request_abort_unqueued(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
+    if (!slot) {
+        return;
+    }
+    if (d1l_mesh_request_guard_transition(
+            &slot->guard, cmd->request_id, D1L_MESH_REQUEST_PENDING,
+            D1L_MESH_REQUEST_CALLER_CANCELLED)) {
+        (void)d1l_mesh_request_guard_release(
+            &slot->guard, cmd->request_id,
+            D1L_MESH_REQUEST_CALLER_CANCELLED);
+    }
+}
+
+static bool meshcore_request_admit(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd || cmd->request_id == 0U) {
+        return true;
+    }
+    d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
+    if (!slot) {
+        return false;
+    }
+    if ((uint64_t)esp_timer_get_time() >= cmd->request_deadline_us) {
+        slot->result = ESP_ERR_TIMEOUT;
+        if (d1l_mesh_request_guard_transition(
+                &slot->guard, cmd->request_id,
+                D1L_MESH_REQUEST_PENDING,
+                D1L_MESH_REQUEST_OWNER_EXPIRED)) {
+            (void)xSemaphoreGive(slot->completion);
+            return false;
+        }
+    }
+    if (d1l_mesh_request_guard_transition(
+            &slot->guard, cmd->request_id, D1L_MESH_REQUEST_PENDING,
+            D1L_MESH_REQUEST_ADMITTED)) {
+        return true;
+    }
+    if (d1l_mesh_request_guard_state(&slot->guard) ==
+        D1L_MESH_REQUEST_CALLER_CANCELLED) {
+        (void)d1l_mesh_request_guard_release(
+            &slot->guard, cmd->request_id,
+            D1L_MESH_REQUEST_CALLER_CANCELLED);
+    }
+    return false;
+}
+
+static void meshcore_request_complete(
+    const d1l_meshcore_service_cmd_t *cmd, esp_err_t result)
+{
+    if (!cmd || cmd->request_id == 0U) {
+        return;
+    }
+    d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
+    if (!slot) {
+        return;
+    }
+    slot->result = result;
+    if (d1l_mesh_request_guard_transition(
+            &slot->guard, cmd->request_id, D1L_MESH_REQUEST_ADMITTED,
+            D1L_MESH_REQUEST_COMPLETED)) {
+        (void)xSemaphoreGive(slot->completion);
+    }
+}
+
+static void publish_callback_tx_operation(
+    const d1l_mesh_tx_operation_identity_t *identity)
+{
+    if (!d1l_mesh_tx_operation_identity_valid(identity) ||
+        identity->operation_id > UINT32_MAX) {
+        return;
+    }
+    d1l_callback_tx_snapshot_t *snapshot =
+        &s_callback_tx_history[(identity->operation_id - 1U) %
+                               D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN];
+    uint32_t sequence = __atomic_load_n(
+        &snapshot->sequence, __ATOMIC_RELAXED);
+    if ((sequence & 1U) != 0U) {
+        sequence++;
+    }
+    __atomic_store_n(&snapshot->sequence, sequence + 1U,
+                     __ATOMIC_RELEASE);
+    const uint64_t operation_id = identity->operation_id;
+    const uint64_t session_id = identity->dm_session_id;
+    __atomic_store_n(&snapshot->operation_id_low,
+                     (uint32_t)operation_id, __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->operation_id_high,
+                     (uint32_t)(operation_id >> 32U), __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->kind, (uint32_t)identity->kind,
+                     __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->dm_session_id_low,
+                     (uint32_t)session_id, __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->dm_session_id_high,
+                     (uint32_t)(session_id >> 32U), __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->dm_revision, identity->dm_revision,
+                     __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->sequence, sequence + 2U,
+                     __ATOMIC_RELEASE);
+}
+
+static bool capture_callback_tx_operation(
+    uint32_t origin, d1l_mesh_tx_operation_identity_t *out_identity)
+{
+    if (origin == 0U || !out_identity) {
+        return false;
+    }
+    memset(out_identity, 0, sizeof(*out_identity));
+    const d1l_callback_tx_snapshot_t *snapshot =
+        &s_callback_tx_history[(origin - 1U) %
+                               D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN];
+    for (unsigned attempt = 0U; attempt < 3U; ++attempt) {
+        const uint32_t before = __atomic_load_n(
+            &snapshot->sequence, __ATOMIC_ACQUIRE);
+        if ((before & 1U) != 0U) {
+            continue;
+        }
+        const uint32_t operation_low = __atomic_load_n(
+            &snapshot->operation_id_low, __ATOMIC_RELAXED);
+        const uint32_t operation_high = __atomic_load_n(
+            &snapshot->operation_id_high, __ATOMIC_RELAXED);
+        const uint32_t kind = __atomic_load_n(
+            &snapshot->kind, __ATOMIC_RELAXED);
+        const uint32_t session_low = __atomic_load_n(
+            &snapshot->dm_session_id_low, __ATOMIC_RELAXED);
+        const uint32_t session_high = __atomic_load_n(
+            &snapshot->dm_session_id_high, __ATOMIC_RELAXED);
+        const uint32_t revision = __atomic_load_n(
+            &snapshot->dm_revision, __ATOMIC_RELAXED);
+        const uint32_t after = __atomic_load_n(
+            &snapshot->sequence, __ATOMIC_ACQUIRE);
+        if (before != after || (after & 1U) != 0U) {
+            continue;
+        }
+        out_identity->operation_id =
+            ((uint64_t)operation_high << 32U) | operation_low;
+        out_identity->kind = (d1l_mesh_tx_operation_kind_t)kind;
+        out_identity->dm_session_id =
+            ((uint64_t)session_high << 32U) | session_low;
+        out_identity->dm_revision = revision;
+        return out_identity->operation_id == origin &&
+               d1l_mesh_tx_operation_identity_valid(out_identity);
+    }
+    return false;
+}
+
+static bool meshcore_radio_tx_operation_begin(
+    d1l_mesh_tx_operation_kind_t kind,
+    const d1l_dm_delivery_owner_t *dm_delivery)
+{
+    if (d1l_mesh_tx_operation_identity_valid(&s_active_radio_tx) ||
+        s_next_radio_tx_operation_id == UINT32_MAX) {
+        return false;
+    }
+    d1l_mesh_tx_operation_identity_t identity = {
+        .operation_id = ++s_next_radio_tx_operation_id,
+        .kind = kind,
+    };
+    if (kind == D1L_MESH_TX_OPERATION_DM) {
+        if (!dm_delivery || !dm_delivery->active) {
+            return false;
+        }
+        identity.dm_session_id = dm_delivery->session_id;
+        identity.dm_revision = dm_delivery->revision;
+    }
+    if (!d1l_mesh_tx_operation_identity_valid(&identity)) {
+        return false;
+    }
+    s_active_radio_tx = identity;
+    const uint64_t watchdog_timeout_us =
+        (uint64_t)(D1L_MESHCORE_TX_TIMEOUT_MS +
+                   D1L_MESHCORE_TX_WATCHDOG_GRACE_MS) * 1000ULL;
+    if (!d1l_mesh_tx_watchdog_arm(
+            &s_radio_tx_watchdog, &identity,
+            (uint64_t)esp_timer_get_time(), watchdog_timeout_us)) {
+        d1l_mesh_tx_watchdog_reset(&s_radio_tx_watchdog);
+        memset(&s_active_radio_tx, 0, sizeof(s_active_radio_tx));
+        return false;
+    }
+    publish_callback_tx_operation(&identity);
+    return true;
+}
+
+static void meshcore_radio_tx_operation_clear(void)
+{
+    d1l_mesh_tx_watchdog_reset(&s_radio_tx_watchdog);
+    memset(&s_active_radio_tx, 0, sizeof(s_active_radio_tx));
+}
+
+static bool meshcore_radio_terminal_matches(
+    const d1l_meshcore_service_cmd_t *event)
+{
+    if (!event ||
+        (event->type != D1L_MESHCORE_SERVICE_EVENT_TX_DONE &&
+         event->type != D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT) ||
+        !d1l_mesh_tx_operation_identity_equal(
+            &event->tx_operation, &s_active_radio_tx)) {
+        return false;
+    }
+    if (event->tx_operation.kind == D1L_MESH_TX_OPERATION_DM) {
+        return s_pending_dm_tx.delivery.active &&
+               s_pending_dm_tx.delivery.session_id ==
+                   event->tx_operation.dm_session_id &&
+               s_pending_dm_tx.delivery.revision ==
+                   event->tx_operation.dm_revision &&
+               s_pending_dm_tx.delivery.state ==
+                   D1L_DM_DELIVERY_TX_ACTIVE;
+    }
+    return true;
+}
 
 static void runtime_note_queue_drop(bool callback_event)
 {
@@ -232,32 +641,54 @@ static void meshcore_service_wake(void)
     }
 }
 
-static uint32_t meshcore_service_recovery_flag(
-    d1l_meshcore_service_cmd_type_t type)
+static void meshcore_service_latch_radio_recovery(
+    d1l_meshcore_service_cmd_type_t type,
+    const d1l_mesh_tx_operation_identity_t *tx_operation)
 {
-    switch (type) {
-    case D1L_MESHCORE_SERVICE_EVENT_TX_DONE:
-        return D1L_MESHCORE_RECOVERY_TX_DONE;
-    case D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT:
-        return D1L_MESHCORE_RECOVERY_TX_TIMEOUT;
-    case D1L_MESHCORE_SERVICE_EVENT_RX_DONE:
-    case D1L_MESHCORE_SERVICE_EVENT_RX_TIMEOUT:
-    case D1L_MESHCORE_SERVICE_EVENT_RX_ERROR:
-        return D1L_MESHCORE_RECOVERY_RX_RESTART;
-    default:
-        return 0U;
+    if (type == D1L_MESHCORE_SERVICE_EVENT_TX_DONE ||
+        type == D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT) {
+        uint32_t expected = D1L_LATCHED_TERMINAL_EMPTY;
+        if (__atomic_compare_exchange_n(
+                &s_latched_terminal_state, &expected,
+                D1L_LATCHED_TERMINAL_WRITING, false,
+                __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            memset(&s_latched_terminal_event, 0,
+                   sizeof(s_latched_terminal_event));
+            s_latched_terminal_event.type = type;
+            s_latched_terminal_event.monotonic_us =
+                (uint64_t)esp_timer_get_time();
+            if (tx_operation) {
+                s_latched_terminal_event.tx_operation = *tx_operation;
+            }
+            __atomic_store_n(&s_latched_terminal_state,
+                             D1L_LATCHED_TERMINAL_READY,
+                             __ATOMIC_RELEASE);
+        }
+        meshcore_service_wake();
+        return;
     }
+    __atomic_store_n(&s_pending_rx_recovery, 1U, __ATOMIC_RELEASE);
+    meshcore_service_wake();
 }
 
-static void meshcore_service_latch_radio_recovery(
-    d1l_meshcore_service_cmd_type_t type)
+static bool meshcore_service_take_latched_terminal(
+    d1l_meshcore_service_cmd_t *out_event)
 {
-    const uint32_t flag = meshcore_service_recovery_flag(type);
-    if (flag != 0U) {
-        (void)__atomic_fetch_or(&s_pending_radio_recovery_flags, flag,
-                                __ATOMIC_RELEASE);
-        meshcore_service_wake();
+    if (!out_event) {
+        return false;
     }
+    uint32_t expected = D1L_LATCHED_TERMINAL_READY;
+    if (!__atomic_compare_exchange_n(
+            &s_latched_terminal_state, &expected,
+            D1L_LATCHED_TERMINAL_READING, false,
+            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        return false;
+    }
+    *out_event = s_latched_terminal_event;
+    memset(&s_latched_terminal_event, 0, sizeof(s_latched_terminal_event));
+    __atomic_store_n(&s_latched_terminal_state,
+                     D1L_LATCHED_TERMINAL_EMPTY, __ATOMIC_RELEASE);
+    return true;
 }
 
 static void status_lock(void)
@@ -459,25 +890,163 @@ static void append_public_message_store_tx(const char *message)
     }
 }
 
-static bool append_dm_store_tx(const d1l_pending_dm_tx_t *pending)
-{
-    if (!pending || !pending->active) {
-        return true;
-    }
-    esp_err_t ret = d1l_dm_store_append(pending->fingerprint, pending->alias, "tx",
-                                        pending->text, 0, 0, pending->path_hash_bytes,
-                                        pending->path_hops, pending->attempt, false, false,
-                                        pending->ack_hash);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "DM tx store append failed: %s", esp_err_to_name(ret));
-        return false;
-    }
-    return true;
-}
-
 static void clear_pending_dm_tx(void)
 {
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+}
+
+static void record_dm_delivery_status(uint64_t session_id,
+                                      uint32_t revision,
+                                      d1l_dm_delivery_state_t state,
+                                      esp_err_t error)
+{
+    status_lock();
+    s_status.dm_delivery_session_id = session_id;
+    s_status.dm_delivery_revision = revision;
+    s_status.dm_delivery_state = (uint8_t)state;
+    s_status.dm_delivery_last_error = error;
+    status_unlock();
+}
+
+static bool begin_pending_dm_tx(
+    const d1l_contact_entry_t *contact, const char *text,
+    const d1l_meshcore_route_selection_t *selection,
+    uint8_t attempt, uint32_t ack_hash, const uint8_t *raw,
+    uint8_t raw_len, bool path_probe,
+    const d1l_dm_store_append_outcome_t *append_outcome)
+{
+    if (!contact || !text || !selection || !raw || raw_len == 0U ||
+        !append_outcome || !append_outcome->inserted ||
+        !append_outcome->durable || append_outcome->delivery_session_id == 0U) {
+        return false;
+    }
+
+    clear_pending_dm_tx();
+    if (!d1l_dm_delivery_owner_begin(
+            &s_pending_dm_tx.delivery,
+            append_outcome->delivery_session_id, 1U, ack_hash)) {
+        clear_pending_dm_tx();
+        return false;
+    }
+    sanitize_note(s_pending_dm_tx.fingerprint,
+                  sizeof(s_pending_dm_tx.fingerprint), contact->fingerprint);
+    sanitize_note(s_pending_dm_tx.alias, sizeof(s_pending_dm_tx.alias),
+                  contact->alias[0] ? contact->alias : contact->fingerprint);
+    sanitize_note(s_pending_dm_tx.text, sizeof(s_pending_dm_tx.text), text);
+    s_pending_dm_tx.selection = *selection;
+    s_pending_dm_tx.attempt = attempt;
+    s_pending_dm_tx.ack_hash = ack_hash;
+    memcpy(s_pending_dm_tx.raw, raw, raw_len);
+    s_pending_dm_tx.raw_len = raw_len;
+    s_pending_dm_tx.path_probe = path_probe;
+    record_dm_delivery_status(s_pending_dm_tx.delivery.session_id,
+                              s_pending_dm_tx.delivery.revision,
+                              s_pending_dm_tx.delivery.state, ESP_OK);
+    return true;
+}
+
+static esp_err_t transition_pending_dm_tx(
+    d1l_dm_delivery_state_t next_state,
+    d1l_dm_delivery_reason_t reason, esp_err_t error)
+{
+    if (!s_pending_dm_tx.delivery.active) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const uint64_t session_id = s_pending_dm_tx.delivery.session_id;
+    const uint32_t expected_revision = s_pending_dm_tx.delivery.revision;
+    const d1l_dm_delivery_state_t expected_state =
+        s_pending_dm_tx.delivery.state;
+    d1l_dm_delivery_transition_outcome_t outcome = {0};
+    esp_err_t ret = d1l_dm_store_transition_delivery(
+        session_id, expected_state, expected_revision, next_state,
+        reason, error, &outcome);
+    const bool accepted = outcome.changed || outcome.persistence_retry;
+    const bool publish_to_owner = accepted &&
+        (next_state != D1L_DM_DELIVERY_ACKNOWLEDGED || outcome.durable);
+    if (next_state == D1L_DM_DELIVERY_ACKNOWLEDGED && accepted &&
+        !outcome.durable) {
+        s_pending_dm_tx.ack_persistence_pending = true;
+    }
+    if (publish_to_owner) {
+        if (!d1l_dm_delivery_owner_apply(
+                &s_pending_dm_tx.delivery, outcome.delivery_session_id,
+                expected_revision, outcome.current_state,
+                outcome.delivery_revision)) {
+            record_dm_delivery_status(session_id, expected_revision,
+                                      expected_state,
+                                      ESP_ERR_INVALID_STATE);
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (next_state == D1L_DM_DELIVERY_ACKNOWLEDGED) {
+            s_pending_dm_tx.ack_persistence_pending = false;
+        }
+    }
+    if (publish_to_owner) {
+        record_dm_delivery_status(
+            s_pending_dm_tx.delivery.session_id,
+            s_pending_dm_tx.delivery.revision,
+            s_pending_dm_tx.delivery.state,
+            ret == ESP_OK ? error : ret);
+    } else if (ret != ESP_OK) {
+        record_dm_delivery_status(session_id, expected_revision,
+                                  expected_state, ret);
+    }
+    return ret;
+}
+
+static void reconcile_pending_dm_ack_persistence(void)
+{
+    d1l_dm_delivery_owner_t *owner = &s_pending_dm_tx.delivery;
+    if (!s_pending_dm_tx.ack_persistence_pending || !owner->active ||
+        owner->state != D1L_DM_DELIVERY_AWAITING_ACK ||
+        owner->revision == UINT32_MAX) {
+        return;
+    }
+
+    d1l_dm_entry_t durable = {0};
+    if (!d1l_dm_store_find_delivery_session(owner->session_id, &durable) ||
+        durable.delivery_session_id != owner->session_id ||
+        durable.delivery_state != D1L_DM_DELIVERY_ACKNOWLEDGED ||
+        durable.delivery_revision != owner->revision + 1U ||
+        !durable.acked || !durable.delivered) {
+        return;
+    }
+
+    /* The store query masks an ACK while any persistence receipt is pending.
+     * Reaching this branch therefore proves the same revision is durable; the
+     * sole runtime owner may now publish delivery and release the session. */
+    if (!d1l_dm_delivery_owner_apply(
+            owner, durable.delivery_session_id, owner->revision,
+            durable.delivery_state, durable.delivery_revision)) {
+        return;
+    }
+    s_pending_dm_tx.ack_persistence_pending = false;
+    record_dm_delivery_status(owner->session_id, owner->revision,
+                              owner->state, ESP_OK);
+    ESP_LOGI(TAG, "DM ACK persistence reconciled at revision %lu",
+             (unsigned long)owner->revision);
+    clear_pending_dm_tx();
+}
+
+static esp_err_t record_detached_dm_queue_failure(
+    const d1l_dm_store_append_outcome_t *append_outcome, esp_err_t error)
+{
+    if (!append_outcome || !append_outcome->inserted ||
+        append_outcome->delivery_session_id == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_dm_delivery_transition_outcome_t outcome = {0};
+    const esp_err_t ret = d1l_dm_store_transition_delivery(
+        append_outcome->delivery_session_id, D1L_DM_DELIVERY_QUEUED, 1U,
+        D1L_DM_DELIVERY_FAILED_QUEUE,
+        D1L_DM_DELIVERY_REASON_QUEUE_REJECTED, error, &outcome);
+    if (outcome.changed) {
+        record_dm_delivery_status(
+            outcome.delivery_session_id, outcome.delivery_revision,
+            outcome.current_state, ret == ESP_OK ? error : ret);
+    }
+    return ret;
 }
 
 static void remember_pending_public_tx(const char *message)
@@ -499,28 +1068,6 @@ static void flush_pending_public_tx(void)
 static void flush_pending_tx(void)
 {
     flush_pending_public_tx();
-    (void)append_dm_store_tx(&s_pending_dm_tx);
-    clear_pending_dm_tx();
-}
-
-static void remember_pending_dm_tx(const d1l_contact_entry_t *contact, const char *text,
-                                   uint8_t path_hash_bytes, uint8_t path_hops, uint8_t attempt,
-                                   uint32_t ack_hash)
-{
-    memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
-    if (!contact || !text || text[0] == '\0') {
-        return;
-    }
-    s_pending_dm_tx.active = true;
-    sanitize_note(s_pending_dm_tx.fingerprint, sizeof(s_pending_dm_tx.fingerprint),
-                  contact->fingerprint);
-    sanitize_note(s_pending_dm_tx.alias, sizeof(s_pending_dm_tx.alias),
-                  contact->alias[0] ? contact->alias : contact->fingerprint);
-    sanitize_note(s_pending_dm_tx.text, sizeof(s_pending_dm_tx.text), text);
-    s_pending_dm_tx.path_hash_bytes = path_hash_bytes;
-    s_pending_dm_tx.path_hops = path_hops;
-    s_pending_dm_tx.attempt = attempt;
-    s_pending_dm_tx.ack_hash = ack_hash;
 }
 
 static void write_le32(uint8_t *dest, uint32_t value)
@@ -1602,22 +2149,47 @@ static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *p
                           int16_t rssi, int8_t snr, uint16_t size, const uint8_t *raw,
                           size_t raw_len, const char *source)
 {
-    d1l_dm_entry_t acked = {0};
-    esp_err_t ret = d1l_dm_store_mark_acked(ack_hash, &acked);
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    if (ret == ESP_OK) {
+    if (d1l_dm_delivery_owner_ack_matches(
+            &s_pending_dm_tx.delivery, ack_hash)) {
+        const esp_err_t ret = transition_pending_dm_tx(
+            D1L_DM_DELIVERY_ACKNOWLEDGED,
+            D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK);
+        if (ret != ESP_OK) {
+            snprintf(note, sizeof(note), "%s persistence %lu",
+                     source ? source : "ack", (unsigned long)ack_hash);
+            append_packet_log(
+                "rx", "dm_ack_persistence_pending", rssi, snr,
+                packet->path_hash_bytes, packet->path_hops, size, raw,
+                raw_len, note);
+            ESP_LOGW(TAG, "DM ACK state persistence pending: %s",
+                     esp_err_to_name(ret));
+            return;
+        }
+        if (!s_pending_dm_tx.delivery.active ||
+            s_pending_dm_tx.delivery.state !=
+                D1L_DM_DELIVERY_ACKNOWLEDGED) {
+            snprintf(note, sizeof(note), "%s stale %lu",
+                     source ? source : "ack", (unsigned long)ack_hash);
+            append_packet_log("rx", "dm_ack_unmatched", rssi, snr,
+                              packet->path_hash_bytes, packet->path_hops,
+                              size, raw, raw_len, note);
+            return;
+        }
         snprintf(note, sizeof(note), "ack %lu %.12s", (unsigned long)ack_hash,
-                 acked.contact_alias);
+                 s_pending_dm_tx.alias);
         esp_err_t route_ret =
-            d1l_route_store_upsert_observation(acked.contact_fingerprint, acked.contact_alias,
-                                               "dm_ack", route_name(packet->route), "rx", rssi,
-                                               (snr * 10) / 4, packet->path_hash_bytes,
-                                               packet->path_hops, size);
+            d1l_route_store_upsert_observation(
+                s_pending_dm_tx.fingerprint, s_pending_dm_tx.alias,
+                "dm_ack", route_name(packet->route), "rx", rssi,
+                (snr * 10) / 4, packet->path_hash_bytes,
+                packet->path_hops, size);
         if (route_ret != ESP_OK) {
             ESP_LOGW(TAG, "route store DM ACK rx failed: %s", esp_err_to_name(route_ret));
         }
         append_packet_log("rx", "dm_ack", rssi, snr, packet->path_hash_bytes,
                           packet->path_hops, size, raw, raw_len, note);
+        clear_pending_dm_tx();
     } else {
         snprintf(note, sizeof(note), "%s unmatched %lu", source ? source : "ack",
                  (unsigned long)ack_hash);
@@ -2146,33 +2718,127 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
                       packet.path_hops, size, payload, size, note);
 }
 
-static void meshcore_service_handle_radio_tx_done(void)
+static void meshcore_service_handle_radio_tx_done(
+    const d1l_meshcore_service_cmd_t *event)
 {
-    if (s_active_tx_ack_response) {
-        complete_pending_ack_tx(true, ESP_OK);
-    } else {
-        flush_pending_tx();
+    if (!meshcore_radio_terminal_matches(event)) {
+        return;
     }
+    const bool ack_response =
+        event->tx_operation.kind == D1L_MESH_TX_OPERATION_ACK_RESPONSE;
+    const bool dm_tx =
+        event->tx_operation.kind == D1L_MESH_TX_OPERATION_DM;
+
+    /* Re-arm RX before any retained-store work so a prompt peer ACK can be
+     * copied into the radio event queue while the sole owner persists state. */
+    meshcore_radio_tx_operation_clear();
     s_active_tx_ack_response = false;
     s_tx_busy = false;
     s_status.tx_packets++;
     s_status.state = D1L_MESHCORE_SERVICE_READY;
     d1l_meshcore_start_rx();
+
+    if (ack_response) {
+        complete_pending_ack_tx(true, ESP_OK);
+    } else if (dm_tx) {
+        esp_err_t ret = transition_pending_dm_tx(
+            D1L_DM_DELIVERY_TX_DONE,
+            D1L_DM_DELIVERY_REASON_RADIO_COMPLETED, ESP_OK);
+        if (s_pending_dm_tx.delivery.active &&
+            s_pending_dm_tx.delivery.state == D1L_DM_DELIVERY_TX_DONE) {
+            const esp_err_t awaiting_ret = transition_pending_dm_tx(
+                D1L_DM_DELIVERY_AWAITING_ACK,
+                D1L_DM_DELIVERY_REASON_ACK_EXPECTED, ESP_OK);
+            if (awaiting_ret != ESP_OK) {
+                ret = awaiting_ret;
+            }
+        }
+        if (ret != ESP_OK || !s_pending_dm_tx.delivery.active ||
+            s_pending_dm_tx.delivery.state !=
+                D1L_DM_DELIVERY_AWAITING_ACK) {
+            ESP_LOGW(TAG, "DM TxDone state persistence failed: %s",
+                     esp_err_to_name(ret));
+        }
+        finalize_pending_dm_radio_result(true, ESP_OK);
+    } else {
+        flush_pending_tx();
+    }
 }
 
-static void meshcore_service_handle_radio_tx_timeout(void)
+static void meshcore_service_handle_radio_tx_timeout(
+    const d1l_meshcore_service_cmd_t *event)
 {
-    if (s_active_tx_ack_response) {
-        complete_pending_ack_tx(false, ESP_ERR_TIMEOUT);
-    } else {
-        s_pending_public_tx = false;
-        s_pending_public_text[0] = '\0';
-        memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+    if (!meshcore_radio_terminal_matches(event)) {
+        return;
     }
+    const bool ack_response =
+        event->tx_operation.kind == D1L_MESH_TX_OPERATION_ACK_RESPONSE;
+    const bool dm_tx =
+        event->tx_operation.kind == D1L_MESH_TX_OPERATION_DM;
+
+    meshcore_radio_tx_operation_clear();
     s_active_tx_ack_response = false;
     s_tx_busy = false;
     s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
     d1l_meshcore_start_rx();
+
+    if (ack_response) {
+        complete_pending_ack_tx(false, ESP_ERR_TIMEOUT);
+    } else if (dm_tx) {
+        const esp_err_t ret = transition_pending_dm_tx(
+            D1L_DM_DELIVERY_FAILED_RADIO,
+            D1L_DM_DELIVERY_REASON_RADIO_ERROR, ESP_ERR_TIMEOUT);
+        finalize_pending_dm_radio_result(false, ESP_ERR_TIMEOUT);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "DM TxTimeout state persistence failed: %s",
+                     esp_err_to_name(ret));
+        }
+        if (s_pending_dm_tx.delivery.active &&
+            d1l_dm_delivery_state_terminal(
+                s_pending_dm_tx.delivery.state)) {
+            clear_pending_dm_tx();
+        }
+    } else {
+        s_pending_public_tx = false;
+        s_pending_public_text[0] = '\0';
+    }
+}
+
+static void meshcore_service_handle_radio_tx_watchdog(void)
+{
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    d1l_mesh_tx_operation_identity_t operation = {0};
+    if (!d1l_mesh_tx_watchdog_take_due(
+            &s_radio_tx_watchdog, now_us, &operation)) {
+        return;
+    }
+    if (!Radio.RecoverTxWithOrigin((uint32_t)operation.operation_id)) {
+        /* The vendor IRQ task may already own the exact terminal path. Keep
+         * the runtime fail-closed on A and poll again; never release A while
+         * driver cleanup could still arrive after a successor B starts. */
+        if (d1l_mesh_tx_operation_identity_equal(
+                &operation, &s_active_radio_tx) &&
+            !d1l_mesh_tx_watchdog_arm(
+                &s_radio_tx_watchdog, &operation, now_us,
+                (uint64_t)D1L_MESHCORE_OWNER_POLL_MS * 1000ULL)) {
+            ESP_LOGE(TAG, "TX watchdog exact-origin recovery retry failed");
+        }
+        return;
+    }
+    const d1l_meshcore_service_cmd_t event = {
+        .type = D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT,
+        .monotonic_us = now_us,
+        .tx_operation = operation,
+    };
+    ESP_LOGW(TAG, "TX watchdog recovered operation %lu",
+             (unsigned long)operation.operation_id);
+    meshcore_service_handle_radio_tx_timeout(&event);
+}
+
+static void meshcore_service_run_owner_maintenance(void)
+{
+    meshcore_service_handle_radio_tx_watchdog();
+    reconcile_pending_dm_ack_persistence();
 }
 
 static void meshcore_service_handle_radio_rx_done(
@@ -2199,31 +2865,30 @@ static void meshcore_service_handle_radio_rx_error(void)
     d1l_meshcore_start_rx();
 }
 
-static void meshcore_service_handle_latched_radio_recovery(uint32_t flags)
+static void meshcore_service_handle_latched_radio_terminal(
+    const d1l_meshcore_service_cmd_t *event)
 {
-    bool tx_terminal_recovered = false;
-    if ((flags & D1L_MESHCORE_RECOVERY_TX_TIMEOUT) != 0U) {
-        meshcore_service_handle_radio_tx_timeout();
-        tx_terminal_recovered = true;
-    } else if ((flags & D1L_MESHCORE_RECOVERY_TX_DONE) != 0U) {
-        meshcore_service_handle_radio_tx_done();
-        tx_terminal_recovered = true;
+    if (!event) {
+        return;
     }
-    if (!tx_terminal_recovered && !s_tx_busy &&
-        (flags & D1L_MESHCORE_RECOVERY_RX_RESTART) != 0U) {
-        meshcore_service_handle_radio_rx_error();
+    if (event->type == D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT) {
+        meshcore_service_handle_radio_tx_timeout(event);
+    } else if (event->type == D1L_MESHCORE_SERVICE_EVENT_TX_DONE) {
+        meshcore_service_handle_radio_tx_done(event);
     }
 }
 
 static void enqueue_radio_event(d1l_meshcore_service_cmd_type_t type,
                                 const uint8_t *payload, uint16_t size,
-                                int16_t rssi, int8_t snr)
+                                int16_t rssi, int8_t snr,
+                                const d1l_mesh_tx_operation_identity_t *
+                                    tx_operation)
 {
     if (!s_radio_event_queue ||
         (type == D1L_MESHCORE_SERVICE_EVENT_RX_DONE &&
          (!payload || size == 0U || size > D1L_MESHCORE_MAX_RAW_PACKET))) {
         runtime_note_queue_drop(true);
-        meshcore_service_latch_radio_recovery(type);
+        meshcore_service_latch_radio_recovery(type, tx_operation);
         return;
     }
 
@@ -2233,13 +2898,16 @@ static void enqueue_radio_event(d1l_meshcore_service_cmd_type_t type,
         .snr = snr,
         .monotonic_us = (uint64_t)esp_timer_get_time(),
     };
+    if (tx_operation) {
+        event.tx_operation = *tx_operation;
+    }
     if (type == D1L_MESHCORE_SERVICE_EVENT_RX_DONE) {
         event.raw_len = (uint8_t)size;
         memcpy(event.raw, payload, size);
     }
     if (xQueueSend(s_radio_event_queue, &event, 0) != pdTRUE) {
         runtime_note_queue_drop(true);
-        meshcore_service_latch_radio_recovery(type);
+        meshcore_service_latch_radio_recovery(type, tx_operation);
         return;
     }
     runtime_note_queue_depth(s_radio_event_queue,
@@ -2251,35 +2919,43 @@ static void enqueue_radio_event(d1l_meshcore_service_cmd_type_t type,
  * bytes into the event queue, timestamp from the monotonic clock, and return.
  * Protocol parsing, retained writes, status transitions, and RX restarts are
  * owned by meshcore_service_task. */
-static void on_tx_done(void)
+static void on_tx_done(uint32_t origin)
 {
-    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_TX_DONE, NULL, 0U, 0, 0);
+    d1l_mesh_tx_operation_identity_t identity = {0};
+    (void)capture_callback_tx_operation(origin, &identity);
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_TX_DONE, NULL, 0U,
+                        0, 0, &identity);
 }
 
-static void on_tx_timeout(void)
+static void on_tx_timeout(uint32_t origin)
 {
-    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT, NULL, 0U, 0, 0);
+    d1l_mesh_tx_operation_identity_t identity = {0};
+    (void)capture_callback_tx_operation(origin, &identity);
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT, NULL, 0U,
+                        0, 0, &identity);
 }
 
 static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_DONE, payload, size,
-                        rssi, snr);
+                        rssi, snr, NULL);
 }
 
 static void on_rx_timeout(void)
 {
-    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_TIMEOUT, NULL, 0U, 0, 0);
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_TIMEOUT, NULL, 0U,
+                        0, 0, NULL);
 }
 
 static void on_rx_error(void)
 {
-    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_ERROR, NULL, 0U, 0, 0);
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_ERROR, NULL, 0U,
+                        0, 0, NULL);
 }
 
 static RadioEvents_t s_radio_events = {
-    .TxDone = on_tx_done,
-    .TxTimeout = on_tx_timeout,
+    .TxDoneWithOrigin = on_tx_done,
+    .TxTimeoutWithOrigin = on_tx_timeout,
     .RxDone = on_rx_done,
     .RxTimeout = on_rx_timeout,
     .RxError = on_rx_error,
@@ -2399,10 +3075,24 @@ static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd
         return ret;
     }
 
+    d1l_mesh_tx_operation_kind_t operation_kind =
+        D1L_MESH_TX_OPERATION_GENERIC;
+    if (cmd->ack_response) {
+        operation_kind = D1L_MESH_TX_OPERATION_ACK_RESPONSE;
+    } else if (cmd->type == D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT) {
+        operation_kind = D1L_MESH_TX_OPERATION_ADVERT;
+    } else if (s_pending_public_tx) {
+        operation_kind = D1L_MESH_TX_OPERATION_PUBLIC;
+    }
+    if (!meshcore_radio_tx_operation_begin(operation_kind, NULL)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     s_active_tx_ack_response = cmd->ack_response;
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
-    Radio.Send(cmd->raw, cmd->raw_len);
+    Radio.SendWithOrigin(
+        cmd->raw, cmd->raw_len,
+        (uint32_t)s_active_radio_tx.operation_id);
     return ESP_OK;
 }
 
@@ -2475,11 +3165,223 @@ static void meshcore_service_finalize_send_advert(
     }
 }
 
+static void finalize_pending_dm_radio_result(bool sent, esp_err_t error)
+{
+    if (!s_pending_dm_tx.delivery.active) {
+        return;
+    }
+
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(note, sizeof(note), "%s age=%lu %.20s",
+             d1l_meshcore_route_selection_reason_name(
+                 s_pending_dm_tx.selection.reason),
+             (unsigned long)s_pending_dm_tx.selection.path_age_ms,
+             s_pending_dm_tx.text);
+    if (sent) {
+        esp_err_t route_ret = d1l_route_store_upsert_observation(
+            s_pending_dm_tx.fingerprint, s_pending_dm_tx.alias, "dm_text",
+            route_name(s_pending_dm_tx.selection.route), "tx", 0, 0,
+            s_pending_dm_tx.selection.path_hash_bytes,
+            s_pending_dm_tx.selection.path_hops,
+            s_pending_dm_tx.raw_len);
+        if (route_ret != ESP_OK) {
+            ESP_LOGW(TAG, "route store DM tx failed: %s",
+                     esp_err_to_name(route_ret));
+        }
+        if (s_pending_dm_tx.path_probe) {
+            route_ret = d1l_route_store_upsert_observation(
+                s_pending_dm_tx.fingerprint, s_pending_dm_tx.alias,
+                "path_probe", route_name(s_pending_dm_tx.selection.route),
+                "tx", 0, 0, s_pending_dm_tx.selection.path_hash_bytes,
+                s_pending_dm_tx.selection.path_hops,
+                s_pending_dm_tx.raw_len);
+            if (route_ret != ESP_OK) {
+                ESP_LOGW(TAG, "route store path probe tx failed: %s",
+                         esp_err_to_name(route_ret));
+            }
+        }
+        append_packet_log(
+            "tx", "dm_text", 0, 0,
+            s_pending_dm_tx.selection.path_hash_bytes,
+            s_pending_dm_tx.selection.path_hops,
+            s_pending_dm_tx.raw_len, s_pending_dm_tx.raw,
+            s_pending_dm_tx.raw_len, note);
+    } else {
+        snprintf(note, sizeof(note), "radio=%s %.20s",
+                 esp_err_to_name(error), s_pending_dm_tx.text);
+        append_packet_log(
+            "tx_fail", "dm_text_failed", 0, 0,
+            s_pending_dm_tx.selection.path_hash_bytes,
+            s_pending_dm_tx.selection.path_hops,
+            s_pending_dm_tx.raw_len, s_pending_dm_tx.raw,
+            s_pending_dm_tx.raw_len, note);
+    }
+}
+
+static esp_err_t fail_pending_dm_before_radio(esp_err_t error)
+{
+    if (!s_pending_dm_tx.delivery.active) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const d1l_dm_delivery_state_t failure_state =
+        s_pending_dm_tx.delivery.state == D1L_DM_DELIVERY_TX_ACTIVE ?
+            D1L_DM_DELIVERY_FAILED_RADIO :
+            D1L_DM_DELIVERY_FAILED_QUEUE;
+    const d1l_dm_delivery_reason_t failure_reason =
+        failure_state == D1L_DM_DELIVERY_FAILED_RADIO ?
+            D1L_DM_DELIVERY_REASON_RADIO_ERROR :
+            D1L_DM_DELIVERY_REASON_QUEUE_REJECTED;
+    const esp_err_t transition_ret = transition_pending_dm_tx(
+        failure_state, failure_reason,
+        error == ESP_OK ? ESP_ERR_INVALID_STATE : error);
+    if (d1l_dm_delivery_state_terminal(s_pending_dm_tx.delivery.state)) {
+        clear_pending_dm_tx();
+    }
+    return transition_ret;
+}
+
+static esp_err_t meshcore_service_handle_send_dm(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd || cmd->dm_fingerprint[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = validate_user_text(cmd->dm_text);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    if (cmd->dm_path_probe && s_last_path_probe_fingerprint[0] != '\0' &&
+        strncmp(s_last_path_probe_fingerprint, cmd->dm_fingerprint,
+                sizeof(s_last_path_probe_fingerprint)) == 0 &&
+        (uint32_t)(now_ms - s_last_path_probe_ms) <
+            D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* One expected-ACK session is retained by this bounded slice.  Reject a
+     * second DM before it can evict the active session from the 16-row store;
+     * the deadline/retry scheduler will generalize this in the next slice. */
+    if (s_pending_dm_tx.delivery.active) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    if (!d1l_contact_store_find_by_fingerprint(
+            cmd->dm_fingerprint, &contact)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (!d1l_contact_store_can_dm(&contact)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ret = d1l_meshcore_service_ensure_identity();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    const d1l_settings_t *settings = d1l_settings_current();
+    uint32_t route_learned_at_ms = 0U;
+    const bool route_learned_this_boot = contact.out_path_valid &&
+        lookup_boot_route(contact.fingerprint, contact.out_path,
+                          contact.out_path_len, &route_learned_at_ms);
+    d1l_meshcore_route_selection_t selection = {0};
+    if (!d1l_meshcore_route_select(
+            contact.out_path_valid, route_learned_this_boot,
+            contact.out_path, contact.out_path_len,
+            route_learned_at_ms, now_ms, settings->path_hash_bytes,
+            &selection)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint32_t tx_timestamp = 0U;
+    ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
+    uint8_t raw_len = 0U;
+    uint32_t ack_hash = 0U;
+    ret = build_dm_text_packet(settings, &contact, cmd->dm_text, &selection,
+                               tx_timestamp, raw, sizeof(raw), &raw_len,
+                               &ack_hash);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    d1l_dm_store_append_outcome_t append_outcome = {0};
+    ret = d1l_dm_store_append_tx(
+        contact.fingerprint,
+        contact.alias[0] ? contact.alias : contact.fingerprint,
+        cmd->dm_text, 0, 0, selection.path_hash_bytes,
+        selection.path_hops, 0U, ack_hash, &append_outcome);
+    if (ret != ESP_OK) {
+        if (append_outcome.inserted) {
+            (void)record_detached_dm_queue_failure(&append_outcome, ret);
+        }
+        return ret;
+    }
+
+    /* The command reached the sole owner, but another radio operation may
+     * still hold the transmitter. Keep that rejection as a durable row. */
+    if (s_tx_busy) {
+        (void)record_detached_dm_queue_failure(
+            &append_outcome, ESP_ERR_INVALID_STATE);
+        return ESP_ERR_INVALID_STATE;
+    }
+    ret = ensure_radio_started();
+    if (ret != ESP_OK) {
+        (void)record_detached_dm_queue_failure(&append_outcome, ret);
+        return ret;
+    }
+    if (!begin_pending_dm_tx(&contact, cmd->dm_text, &selection, 0U,
+                             ack_hash, raw, raw_len, cmd->dm_path_probe,
+                             &append_outcome)) {
+        (void)record_detached_dm_queue_failure(
+            &append_outcome, ESP_ERR_INVALID_STATE);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ret = transition_pending_dm_tx(
+        D1L_DM_DELIVERY_WAITING_RADIO,
+        D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK);
+    if (ret != ESP_OK) {
+        (void)fail_pending_dm_before_radio(ret);
+        return ret;
+    }
+    ret = transition_pending_dm_tx(
+        D1L_DM_DELIVERY_TX_ACTIVE,
+        D1L_DM_DELIVERY_REASON_RADIO_STARTED, ESP_OK);
+    if (ret != ESP_OK) {
+        (void)fail_pending_dm_before_radio(ret);
+        return ret;
+    }
+    if (!meshcore_radio_tx_operation_begin(
+            D1L_MESH_TX_OPERATION_DM,
+            &s_pending_dm_tx.delivery)) {
+        (void)fail_pending_dm_before_radio(ESP_ERR_INVALID_STATE);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_active_tx_ack_response = false;
+    s_tx_busy = true;
+    s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    Radio.SendWithOrigin(
+        s_pending_dm_tx.raw, s_pending_dm_tx.raw_len,
+        (uint32_t)s_active_radio_tx.operation_id);
+    record_dm_route_selection(&selection);
+    if (cmd->dm_path_probe) {
+        snprintf(s_last_path_probe_fingerprint,
+                 sizeof(s_last_path_probe_fingerprint), "%s",
+                 contact.fingerprint);
+        s_last_path_probe_ms = now_ms;
+    }
+    return ESP_OK;
+}
+
 static void meshcore_service_reply(const d1l_meshcore_service_cmd_t *cmd, esp_err_t ret)
 {
-    if (cmd && cmd->reply_task) {
-        (void)xTaskNotify(cmd->reply_task, (uint32_t)ret, eSetValueWithOverwrite);
-    }
+    meshcore_request_complete(cmd, ret);
 }
 
 static void meshcore_service_task(void *arg)
@@ -2488,15 +3390,28 @@ static void meshcore_service_task(void *arg)
     d1l_meshcore_service_cmd_t cmd = {0};
     uint8_t radio_event_burst = 0U;
     for (;;) {
-        const uint32_t recovery_flags = __atomic_exchange_n(
-            &s_pending_radio_recovery_flags, 0U, __ATOMIC_ACQ_REL);
-        if (recovery_flags != 0U) {
+        d1l_meshcore_service_cmd_t recovery_event = {0};
+        const bool terminal_recovery =
+            meshcore_service_take_latched_terminal(&recovery_event);
+        const bool rx_recovery = __atomic_exchange_n(
+            &s_pending_rx_recovery, 0U, __ATOMIC_ACQ_REL) != 0U;
+        if (terminal_recovery || rx_recovery) {
             status_lock();
             s_status.runtime_task_heartbeat++;
             s_status.runtime_task_stack_free_words =
                 (uint32_t)uxTaskGetStackHighWaterMark(NULL);
             status_unlock();
-            meshcore_service_handle_latched_radio_recovery(recovery_flags);
+        }
+        if (terminal_recovery) {
+            meshcore_service_handle_latched_radio_terminal(&recovery_event);
+        }
+        if (rx_recovery) {
+            if (s_tx_busy) {
+                __atomic_store_n(&s_pending_rx_recovery, 1U,
+                                 __ATOMIC_RELEASE);
+            } else {
+                meshcore_service_handle_radio_rx_error();
+            }
         }
 
         bool radio_event = false;
@@ -2516,7 +3431,9 @@ static void meshcore_service_task(void *arg)
             received = radio_event;
         }
         if (!received) {
-            (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            meshcore_service_run_owner_maintenance();
+            (void)ulTaskNotifyTake(
+                pdTRUE, pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS));
             continue;
         }
         if (radio_event) {
@@ -2536,6 +3453,13 @@ static void meshcore_service_task(void *arg)
         }
         status_unlock();
 
+        /* A synchronous command becomes side-effect eligible only when this
+         * owner wins admission for its exact request ID before its deadline.
+         * Cancelled, expired, and stale slot generations are dropped here. */
+        if (!meshcore_request_admit(&cmd)) {
+            continue;
+        }
+
         esp_err_t ret = ESP_ERR_INVALID_ARG;
         switch (cmd.type) {
         case D1L_MESHCORE_SERVICE_CMD_START_RX:
@@ -2550,12 +3474,18 @@ static void meshcore_service_task(void *arg)
                 s_status.rejected_commands++;
             }
             break;
+        case D1L_MESHCORE_SERVICE_CMD_SEND_DM:
+            ret = meshcore_service_handle_send_dm(&cmd);
+            if (ret != ESP_OK) {
+                s_status.rejected_commands++;
+            }
+            break;
         case D1L_MESHCORE_SERVICE_EVENT_TX_DONE:
-            meshcore_service_handle_radio_tx_done();
+            meshcore_service_handle_radio_tx_done(&cmd);
             ret = ESP_OK;
             break;
         case D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT:
-            meshcore_service_handle_radio_tx_timeout();
+            meshcore_service_handle_radio_tx_timeout(&cmd);
             ret = ESP_OK;
             break;
         case D1L_MESHCORE_SERVICE_EVENT_RX_DONE:
@@ -2576,7 +3506,7 @@ static void meshcore_service_task(void *arg)
             break;
         }
         if (cmd.type == D1L_MESHCORE_SERVICE_CMD_START_RX &&
-            cmd.reply_task == NULL && ret != ESP_OK) {
+            cmd.request_id == 0U && ret != ESP_OK) {
             ESP_LOGW(TAG, "asynchronous MeshCore RX start failed: %s", esp_err_to_name(ret));
         }
         if (cmd.type == D1L_MESHCORE_SERVICE_CMD_SEND_RAW &&
@@ -2587,14 +3517,17 @@ static void meshcore_service_task(void *arg)
         meshcore_service_reply(&cmd, ret);
         if (cmd.type == D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT &&
             ret == ESP_OK) {
-            cmd.reply_task = NULL;
             meshcore_service_finalize_send_advert(&cmd);
         }
+        meshcore_service_run_owner_maintenance();
     }
 }
 
 static esp_err_t meshcore_service_start_task(void)
 {
+    if (!meshcore_request_slots_init()) {
+        return ESP_ERR_NO_MEM;
+    }
     if (!s_status_mutex) {
         s_status_mutex = xSemaphoreCreateMutex();
         if (!s_status_mutex) {
@@ -2642,25 +3575,20 @@ static esp_err_t meshcore_service_send_command(d1l_meshcore_service_cmd_t *cmd,
         return ret;
     }
 
-    cmd->reply_task = xTaskGetCurrentTaskHandle();
-    (void)xTaskNotifyStateClear(NULL);
+    ret = meshcore_request_claim(cmd, timeout_ms);
+    if (ret != ESP_OK) {
+        return ret;
+    }
     const TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
     if (xQueueSend(s_service_queue, cmd, timeout_ticks) != pdTRUE) {
-        cmd->reply_task = NULL;
+        meshcore_request_abort_unqueued(cmd);
         runtime_note_queue_drop(false);
         return ESP_ERR_TIMEOUT;
     }
     runtime_note_queue_depth(s_service_queue,
                              &s_runtime_command_queue_high_water);
     meshcore_service_wake();
-    uint32_t notify_value = (uint32_t)ESP_ERR_TIMEOUT;
-    if (xTaskNotifyWait(0, UINT32_MAX, &notify_value, timeout_ticks) == pdTRUE) {
-        ret = (esp_err_t)notify_value;
-    } else {
-        ret = ESP_ERR_TIMEOUT;
-    }
-    cmd->reply_task = NULL;
-    return ret;
+    return meshcore_request_wait(cmd, timeout_ticks);
 }
 
 esp_err_t d1l_meshcore_service_start_rx_async(void)
@@ -2761,6 +3689,12 @@ void d1l_meshcore_service_init(void)
         s_trace_last_route_summary_accepted = false;
         s_trace_last_packet_preview_retained = false;
         d1l_store_lock_give(&s_trace_lock);
+        s_next_radio_tx_operation_id = 0U;
+        meshcore_radio_tx_operation_clear();
+        memset(s_callback_tx_history, 0, sizeof(s_callback_tx_history));
+        __atomic_store_n(&s_latched_terminal_state,
+                         D1L_LATCHED_TERMINAL_EMPTY, __ATOMIC_RELEASE);
+        __atomic_store_n(&s_pending_rx_recovery, 0U, __ATOMIC_RELEASE);
     }
     status_lock();
     // Runtime settings flows reuse init; preserve the live radio and queued work.
@@ -2989,13 +3923,9 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
     return ESP_OK;
 }
 
-static esp_err_t meshcore_service_send_dm_with_result(
-    const char *fingerprint, const char *text,
-    d1l_dm_send_result_t *out_result)
+static esp_err_t meshcore_service_send_dm_command(
+    const char *fingerprint, const char *text, bool path_probe)
 {
-    if (out_result) {
-        memset(out_result, 0, sizeof(*out_result));
-    }
     if (!fingerprint || fingerprint[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
@@ -3004,107 +3934,36 @@ static esp_err_t meshcore_service_send_dm_with_result(
         return ret;
     }
 
-    /* Resolve and authorize the target before identity/radio side effects.
-     * Only canonical chat adverts are direct-message endpoints. */
+    /* Fail closed before queueing, then re-authorize on the sole runtime owner
+     * immediately before identity/timestamp/store/radio side effects. */
     d1l_contact_entry_t contact = {0};
     if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact)) {
-        s_status.rejected_commands++;
         return ESP_ERR_NOT_FOUND;
     }
     if (!d1l_contact_store_can_dm(&contact)) {
-        s_status.rejected_commands++;
         return ESP_ERR_INVALID_STATE;
     }
 
-    ret = d1l_meshcore_service_ensure_identity();
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
-    }
-    d1l_meshcore_service_cmd_t start_cmd = {
-        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_DM,
+        .dm_path_probe = path_probe,
     };
-    ret = meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
+    const int fingerprint_len = snprintf(
+        cmd.dm_fingerprint, sizeof(cmd.dm_fingerprint), "%s", fingerprint);
+    const int text_len = snprintf(
+        cmd.dm_text, sizeof(cmd.dm_text), "%s", text);
+    if (fingerprint_len <= 0 ||
+        (size_t)fingerprint_len >= sizeof(cmd.dm_fingerprint) ||
+        text_len <= 0 || (size_t)text_len >= sizeof(cmd.dm_text)) {
+        return ESP_ERR_INVALID_SIZE;
     }
-    if (s_tx_busy) {
-        s_status.rejected_commands++;
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
-    uint8_t raw_len = 0;
-    uint32_t ack_hash = 0;
-    const d1l_settings_t *settings = d1l_settings_current();
-    const uint32_t route_now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    uint32_t route_learned_at_ms = 0U;
-    const bool route_learned_this_boot = contact.out_path_valid &&
-        lookup_boot_route(contact.fingerprint, contact.out_path,
-                          contact.out_path_len, &route_learned_at_ms);
-    d1l_meshcore_route_selection_t selection = {0};
-    if (!d1l_meshcore_route_select(
-            contact.out_path_valid, route_learned_this_boot,
-            contact.out_path, contact.out_path_len,
-            route_learned_at_ms, route_now_ms, settings->path_hash_bytes,
-            &selection)) {
-        s_status.rejected_commands++;
-        return ESP_ERR_INVALID_STATE;
-    }
-    uint32_t tx_timestamp = 0;
-    ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
-    }
-    ret = build_dm_text_packet(settings, &contact, text, &selection,
-                               tx_timestamp, raw, sizeof(raw), &raw_len, &ack_hash);
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
-    }
-
-    remember_pending_dm_tx(&contact, text, selection.path_hash_bytes,
-                           selection.path_hops, 0, ack_hash);
-    ret = meshcore_service_send_raw(raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        clear_pending_dm_tx();
-        s_status.rejected_commands++;
-        return ret;
-    }
-    (void)append_dm_store_tx(&s_pending_dm_tx);
-    clear_pending_dm_tx();
-    record_dm_route_selection(&selection);
-    esp_err_t route_ret =
-        d1l_route_store_upsert_observation(contact.fingerprint, contact.alias, "dm_text",
-                                           route_name(selection.route),
-                                           "tx", 0, 0, selection.path_hash_bytes,
-                                           selection.path_hops,
-                                           raw_len);
-    if (route_ret != ESP_OK) {
-        ESP_LOGW(TAG, "route store DM tx failed: %s", esp_err_to_name(route_ret));
-    }
-    char route_note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    snprintf(route_note, sizeof(route_note), "%s age=%lu %.20s",
-             d1l_meshcore_route_selection_reason_name(selection.reason),
-             (unsigned long)selection.path_age_ms, text);
-    append_packet_log("tx", "dm_text", 0, 0, selection.path_hash_bytes,
-                      selection.path_hops, raw_len, raw, raw_len, route_note);
-    if (out_result) {
-        out_result->selection = selection;
-        snprintf(out_result->fingerprint, sizeof(out_result->fingerprint), "%s",
-                 contact.fingerprint);
-        snprintf(out_result->alias, sizeof(out_result->alias), "%s",
-                 contact.alias[0] ? contact.alias : contact.fingerprint);
-        out_result->raw_len = raw_len;
-    }
-    return ESP_OK;
+    return meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS);
 }
 
 esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text)
 {
-    return meshcore_service_send_dm_with_result(fingerprint, text, NULL);
+    return meshcore_service_send_dm_command(fingerprint, text, false);
 }
 
 esp_err_t d1l_meshcore_service_request_path_discovery_probe(
@@ -3116,16 +3975,6 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
         return ESP_ERR_INVALID_ARG;
     }
 
-    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    if (s_last_path_probe_fingerprint[0] != '\0' &&
-        strncmp(s_last_path_probe_fingerprint, fingerprint,
-                sizeof(s_last_path_probe_fingerprint)) == 0 &&
-        (uint32_t)(now_ms - s_last_path_probe_ms) <
-            D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS) {
-        s_status.rejected_commands++;
-        return ESP_ERR_INVALID_STATE;
-    }
-
     char token[D1L_MESSAGE_TEXT_LEN] = {0};
     const int written = snprintf(token, sizeof(token), "path_%08lX",
                                  (unsigned long)esp_random());
@@ -3134,26 +3983,11 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
         return ESP_ERR_INVALID_SIZE;
     }
 
-    d1l_dm_send_result_t send_result = {0};
-    esp_err_t ret = meshcore_service_send_dm_with_result(
-        fingerprint, token, &send_result);
+    esp_err_t ret = meshcore_service_send_dm_command(
+        fingerprint, token, true);
     if (ret != ESP_OK) {
         return ret;
     }
-
-    esp_err_t route_ret =
-        d1l_route_store_upsert_observation(
-            send_result.fingerprint, send_result.alias, "path_probe",
-            route_name(send_result.selection.route), "tx", 0, 0,
-            send_result.selection.path_hash_bytes,
-            send_result.selection.path_hops, send_result.raw_len);
-    if (route_ret != ESP_OK) {
-        ESP_LOGW(TAG, "route store path probe tx failed: %s", esp_err_to_name(route_ret));
-    }
-
-    snprintf(s_last_path_probe_fingerprint, sizeof(s_last_path_probe_fingerprint),
-             "%s", fingerprint);
-    s_last_path_probe_ms = now_ms;
     if (out_token && out_token_size > 0) {
         snprintf(out_token, out_token_size, "%s", token);
     }

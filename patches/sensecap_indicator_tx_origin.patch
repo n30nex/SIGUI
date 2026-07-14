@@ -1,0 +1,342 @@
+diff --git a/components/lora/radio.c b/components/lora/radio.c
+index 17e370241a9836fbd9763eed291351583c987452..01d50efd532bfd4f8672aee06997ac3166b52a9f 100644
+--- a/components/lora/radio.c
++++ b/components/lora/radio.c
+@@ -32,7 +32,9 @@
+  *
+  * \param [IN] events Structure containing the driver callback functions
+  */
+-void RadioInit( RadioEvents_t *events );
++void RadioInit( RadioEvents_t *events );
++void RadioSendWithOrigin( uint8_t *buffer, uint8_t size, uint32_t origin );
++bool RadioRecoverTxWithOrigin( uint32_t origin );
+ 
+ /*!
+  * Return current radio status
+@@ -371,8 +373,10 @@ const struct Radio_s Radio =
+     RadioGetWakeupTime,
+     RadioIrqProcess,
+     // Available on SX126x only
+-    RadioRxBoosted,
+-    RadioSetRxDutyCycle
++    RadioRxBoosted,
++    RadioSetRxDutyCycle,
++    RadioSendWithOrigin,
++    RadioRecoverTxWithOrigin
+ };
+ 
+ /*
+@@ -431,7 +435,24 @@ bool RxContinuous = false;
+ PacketStatus_t RadioPktStatus;
+ uint8_t RadioRxPayload[255];
+ 
+-bool IrqFired = false;
++bool IrqFired = false;
++static volatile uint32_t RadioTxOrigin = 0;
++static uint32_t RadioIrqTxOrigin = 0;
++static uint32_t RadioTxTimeoutOrigin = 0;
++static volatile uint32_t RadioIrqRecoveryClaim = 0;
++
++static bool RadioTryClaimIrqRecovery( void )
++{
++    uint32_t expected = 0;
++    return __atomic_compare_exchange_n( &RadioIrqRecoveryClaim, &expected, 1,
++                                        false, __ATOMIC_ACQ_REL,
++                                        __ATOMIC_ACQUIRE );
++}
++
++static void RadioReleaseIrqRecovery( void )
++{
++    __atomic_store_n( &RadioIrqRecoveryClaim, 0, __ATOMIC_RELEASE );
++}
+ 
+ /*
+  * SX126x DIO IRQ callback functions prototype
+@@ -1026,9 +1047,22 @@ uint32_t RadioTimeOnAir( RadioModems_t modem, uint32_t bandwidth,
+     return ( numerator + denominator - 1 ) / denominator;
+ }
+ 
+-void RadioSend( uint8_t *buffer, uint8_t size )
+-{
+-    SX126xSetDioIrqParams( IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
++uint32_t RadioGetTxOrigin( void )
++{
++    return __atomic_load_n( &RadioTxOrigin, __ATOMIC_ACQUIRE );
++}
++
++void RadioSend( uint8_t *buffer, uint8_t size )
++{
++    RadioSendWithOrigin( buffer, size, 0 );
++}
++
++void RadioSendWithOrigin( uint8_t *buffer, uint8_t size, uint32_t origin )
++{
++    TimerStop( &TxTimeoutTimer );
++    RadioTxTimeoutOrigin = 0;
++    __atomic_store_n( &RadioTxOrigin, origin, __ATOMIC_RELEASE );
++    SX126xSetDioIrqParams( IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
+                            IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
+                            IRQ_RADIO_NONE,
+                            IRQ_RADIO_NONE );
+@@ -1043,10 +1077,38 @@ void RadioSend( uint8_t *buffer, uint8_t size )
+     }
+     SX126xSetPacketParams( &SX126x.PacketParams );
+ 
+-    SX126xSendPayload( buffer, size, 0 );
+-    TimerSetValue( &TxTimeoutTimer, TxTimeout );
+-    TimerStart( &TxTimeoutTimer );
+-}
++    const uint32_t hardwareTimeout = TxTimeout > 0x3FFFFU ?
++        0xFFFFFFU : ( TxTimeout << 6 );
++    SX126xSendPayload( buffer, size, hardwareTimeout );
++}
++
++bool RadioRecoverTxWithOrigin( uint32_t origin )
++{
++    if( ( origin == 0 ) || !RadioTryClaimIrqRecovery( ) )
++    {
++        return false;
++    }
++    if( __atomic_load_n( &RadioTxOrigin, __ATOMIC_ACQUIRE ) != origin )
++    {
++        RadioReleaseIrqRecovery( );
++        return false;
++    }
++
++    /* The watchdog owns this exact transmission. Quiesce the SX1262 and
++     * acknowledge both the radio IRQ and the TCA9535 input latch before the
++     * runtime can admit a successor. Queued stale board events then observe
++     * DIO1 low and cannot consume a later transmission's terminal IRQ. */
++    TimerStop( &TxTimeoutTimer );
++    RadioStandby( );
++    SX126xClearIrqStatus( IRQ_RADIO_ALL );
++    ( void )SX126xGetDio1PinState( );
++    RadioTxTimeoutOrigin = 0;
++    RadioIrqTxOrigin = 0;
++    IrqFired = false;
++    __atomic_store_n( &RadioTxOrigin, 0, __ATOMIC_RELEASE );
++    RadioReleaseIrqRecovery( );
++    return true;
++}
+ 
+ void RadioSleep( void )
+ {
+@@ -1239,9 +1301,16 @@ uint32_t RadioGetWakeupTime( void )
+     return SX126xGetBoardTcxoWakeupTime( ) + RADIO_WAKEUP_TIME;
+ }
+ 
+-void RadioOnTxTimeoutIrq( void* context )
+-{
+-    if( ( RadioEvents != NULL ) && ( RadioEvents->TxTimeout != NULL ) )
++void RadioOnTxTimeoutIrq( void* context )
++{
++    const uint32_t origin = RadioTxTimeoutOrigin;
++    RadioTxTimeoutOrigin = 0;
++    if( ( RadioEvents != NULL ) &&
++        ( RadioEvents->TxTimeoutWithOrigin != NULL ) )
++    {
++        RadioEvents->TxTimeoutWithOrigin( origin );
++    }
++    else if( ( RadioEvents != NULL ) && ( RadioEvents->TxTimeout != NULL ) )
+     {
+         RadioEvents->TxTimeout( );
+     }
+@@ -1255,11 +1324,27 @@ void RadioOnRxTimeoutIrq( void* context )
+     }
+ }
+ 
+-void RadioOnDioIrq( void* context )
+-{
+-    IrqFired = true;
+-
+-    RadioIrqProcess();
++void RadioOnDioIrq( void* context )
++{
++    const uint32_t origin = ( uint32_t )( uintptr_t )context;
++    if( !RadioTryClaimIrqRecovery( ) )
++    {
++        return;
++    }
++    const uint32_t activeOrigin =
++        __atomic_load_n( &RadioTxOrigin, __ATOMIC_ACQUIRE );
++    if( ( ( origin != 0 ) || ( activeOrigin != 0 ) ) &&
++        ( origin != activeOrigin ) )
++    {
++        RadioReleaseIrqRecovery( );
++        return;
++    }
++
++    RadioIrqTxOrigin = origin;
++    IrqFired = true;
++
++    RadioIrqProcess();
++    RadioReleaseIrqRecovery( );
+ }
+ 
+ void RadioIrqProcess( void )
+@@ -1283,13 +1368,24 @@ void RadioIrqProcess( void )
+         }
+         //CRITICAL_SECTION_END( );
+ 
+-        if( ( irqRegs & IRQ_TX_DONE ) == IRQ_TX_DONE )
+-        {
+-            TimerStop( &TxTimeoutTimer );
++        const uint32_t txDoneOrigin = RadioIrqTxOrigin;
++        if( ( ( irqRegs & IRQ_TX_DONE ) == IRQ_TX_DONE ) &&
++            ( ( txDoneOrigin == 0 ) ||
++              ( txDoneOrigin == __atomic_load_n( &RadioTxOrigin,
++                                                 __ATOMIC_ACQUIRE ) ) ) )
++        {
++            __atomic_store_n( &RadioTxOrigin, 0, __ATOMIC_RELEASE );
++            TimerStop( &TxTimeoutTimer );
+             //!< Update operating mode state to a value lower than \ref MODE_STDBY_XOSC
+             SX126xSetOperatingMode( MODE_STDBY_RC );
+             RadioStandby(); //todo
+-            if( ( RadioEvents != NULL ) && ( RadioEvents->TxDone != NULL ) )
++            if( ( RadioEvents != NULL ) &&
++                ( RadioEvents->TxDoneWithOrigin != NULL ) )
++            {
++                RadioEvents->TxDoneWithOrigin( txDoneOrigin );
++            }
++            else if( ( RadioEvents != NULL ) &&
++                     ( RadioEvents->TxDone != NULL ) )
+             {
+                 RadioEvents->TxDone( );
+             }
+@@ -1347,12 +1443,23 @@ void RadioIrqProcess( void )
+ 
+         if( ( irqRegs & IRQ_RX_TX_TIMEOUT ) == IRQ_RX_TX_TIMEOUT )
+         {
+-            if( SX126xGetOperatingMode( ) == MODE_TX )
+-            {
+-                TimerStop( &TxTimeoutTimer );
++            const uint32_t txTimeoutOrigin = RadioIrqTxOrigin;
++            if( ( SX126xGetOperatingMode( ) == MODE_TX ) &&
++                ( ( txTimeoutOrigin == 0 ) ||
++                  ( txTimeoutOrigin == __atomic_load_n( &RadioTxOrigin,
++                                                        __ATOMIC_ACQUIRE ) ) ) )
++            {
++                __atomic_store_n( &RadioTxOrigin, 0, __ATOMIC_RELEASE );
++                TimerStop( &TxTimeoutTimer );
+                 //!< Update operating mode state to a value lower than \ref MODE_STDBY_XOSC
+                 SX126xSetOperatingMode( MODE_STDBY_RC );
+-                if( ( RadioEvents != NULL ) && ( RadioEvents->TxTimeout != NULL ) )
++                if( ( RadioEvents != NULL ) &&
++                    ( RadioEvents->TxTimeoutWithOrigin != NULL ) )
++                {
++                    RadioEvents->TxTimeoutWithOrigin( txTimeoutOrigin );
++                }
++                else if( ( RadioEvents != NULL ) &&
++                         ( RadioEvents->TxTimeout != NULL ) )
+                 {
+                     RadioEvents->TxTimeout( );
+                 }
+diff --git a/components/lora/radio.h b/components/lora/radio.h
+index 16a2484f2dd78550112c3276d3c071de2552fe0d..9cfa1a488eca4be17d99afc79843d776a1d19791 100644
+--- a/components/lora/radio.h
++++ b/components/lora/radio.h
+@@ -110,8 +110,13 @@ typedef struct
+     /*!
+      * \brief  Gnss Done Done callback prototype.
+     */
+-    void    ( *WifiDone )( void );
+-}RadioEvents_t;
++    void    ( *WifiDone )( void );
++
++    /* Optional origin-aware TX callbacks. SendWithOrigin binds a non-zero
++     * generation to the physical IRQ that terminates that transmission. */
++    void    ( *TxDoneWithOrigin )( uint32_t origin );
++    void    ( *TxTimeoutWithOrigin )( uint32_t origin );
++}RadioEvents_t;
+ 
+ /*!
+  * \brief Radio driver definition
+@@ -404,8 +409,20 @@ struct Radio_s
+      * \param [in]  rxTime        Structure describing reception timeout value
+      * \param [in]  sleepTime     Structure describing sleep timeout value
+      */
+-    void ( *SetRxDutyCycle ) ( uint32_t rxTime, uint32_t sleepTime );
+-};
++    void ( *SetRxDutyCycle ) ( uint32_t rxTime, uint32_t sleepTime );
++
++    /* Origin-aware send used by runtimes that reject delayed terminal
++     * callbacks from a previous transmission. */
++    void ( *SendWithOrigin )( uint8_t *buffer, uint8_t size,
++                              uint32_t origin );
++
++    /* Exact-origin watchdog recovery. Returns false while another IRQ owner
++     * is completing the terminal path or when origin is no longer current. */
++    bool ( *RecoverTxWithOrigin )( uint32_t origin );
++};
++
++/* ISR-safe 32-bit snapshot copied into the board DIO queue. */
++uint32_t RadioGetTxOrigin( void );
+ 
+ /*!
+  * \brief Radio driver
+diff --git a/components/lora/sx126x_sensecap_board.c b/components/lora/sx126x_sensecap_board.c
+index 78a78ad6e46a23319781f8e7a7916010398aeb98..300833dfad03825968d572a6d729590584ecfd34 100644
+--- a/components/lora/sx126x_sensecap_board.c
++++ b/components/lora/sx126x_sensecap_board.c
+@@ -27,24 +27,32 @@ static const char *TAG = "sx126x";
+ static RadioOperatingModes_t OperatingMode;
+ static bool init_flag = false;
+ 
+-TimerTime_t g_lora_irq_time = 0;
+-bool  g_have_tcxo = false;
+-
+-static void IRAM_ATTR gpio_isr_handler(void* arg)
+-{
+-    TimerTime_t irq_time = TimerGetCurrentTime();
+-    xQueueSendFromISR(gpio_evt_queue, &irq_time, NULL);
++TimerTime_t g_lora_irq_time = 0;
++bool  g_have_tcxo = false;
++
++typedef struct {
++    TimerTime_t irq_time;
++    uint32_t tx_origin;
++} radio_irq_event_t;
++
++static void IRAM_ATTR gpio_isr_handler(void* arg)
++{
++    const radio_irq_event_t event = {
++        .irq_time = TimerGetCurrentTime(),
++        .tx_origin = RadioGetTxOrigin(),
++    };
++    xQueueSendFromISR(gpio_evt_queue, &event, NULL);
+ }
+ 
+ uint32_t SX126xGetDio1PinState( void );
+ 
+ static void expander_io_int(void* arg)
+ {
+-    TimerTime_t irq_time;
++    radio_irq_event_t event;
+     RadioOperatingModes_t  mode;
+     for(;;) {
+-        if(xQueueReceive(gpio_evt_queue, &irq_time, portMAX_DELAY)) {
+-            g_lora_irq_time = irq_time;
++        if(xQueueReceive(gpio_evt_queue, &event, portMAX_DELAY)) {
++            g_lora_irq_time = event.irq_time;
+             // printf("lora irq:%d\n", g_lora_irq_time);
+ 
+             if( SX126xGetDio1PinState()) { // Only handle DIO1 interrupt
+@@ -52,7 +60,7 @@ static void expander_io_int(void* arg)
+                 mode = SX126xGetOperatingMode();
+                 xSemaphoreGive(radio_mutex);
+                 if( mode !=  MODE_SLEEP ) { // Filter out sleep mode interrupts
+-                    (g_dioIrq) (0); //handle irq
++                    (g_dioIrq) ((void *)(uintptr_t)event.tx_origin); //handle irq
+                 }
+             }
+         }
+@@ -231,7 +239,7 @@ void SX126xIoIrqInit( DioIrqHandler dioIrq )
+     io_conf.mode = GPIO_MODE_INPUT;
+     io_conf.pull_up_en = 1;
+     gpio_config(&io_conf);
+-    gpio_evt_queue = xQueueCreate(10, sizeof(TimerTime_t));
++    gpio_evt_queue = xQueueCreate(10, sizeof(radio_irq_event_t));
+     xTaskCreate(expander_io_int, "expander_io_int", GPIO_QUEUE_STACK, NULL, 10, NULL);
+ 
+     gpio_install_isr_service(0);
+

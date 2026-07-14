@@ -1635,6 +1635,272 @@ static void test_v5_migration_never_invents_delivery_success(void)
     assert(((const test_blob_v6_t *)s_nvs.data)->schema == TEST_SCHEMA_V6);
 }
 
+static d1l_dm_store_append_outcome_t append_awaiting_ack(
+    uint32_t ack_hash, const char *text)
+{
+    d1l_dm_store_append_outcome_t append = {0};
+    assert(d1l_dm_store_append_tx(
+               "0123456789abcdef", "Node", text, -50, 40,
+               1U, 1U, 0U, ack_hash, &append) == ESP_OK);
+    assert(append.inserted && append.durable);
+    assert(d1l_dm_store_transition_delivery(
+               append.delivery_session_id, D1L_DM_DELIVERY_QUEUED, 1U,
+               D1L_DM_DELIVERY_WAITING_RADIO,
+               D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK, NULL) ==
+           ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               append.delivery_session_id,
+               D1L_DM_DELIVERY_WAITING_RADIO, 2U,
+               D1L_DM_DELIVERY_TX_ACTIVE,
+               D1L_DM_DELIVERY_REASON_RADIO_STARTED, ESP_OK, NULL) ==
+           ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               append.delivery_session_id, D1L_DM_DELIVERY_TX_ACTIVE, 3U,
+               D1L_DM_DELIVERY_TX_DONE,
+               D1L_DM_DELIVERY_REASON_RADIO_COMPLETED, ESP_OK, NULL) ==
+           ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               append.delivery_session_id, D1L_DM_DELIVERY_TX_DONE, 4U,
+               D1L_DM_DELIVERY_AWAITING_ACK,
+               D1L_DM_DELIVERY_REASON_ACK_EXPECTED, ESP_OK, NULL) ==
+           ESP_OK);
+    return append;
+}
+
+static void append_inbound_rows(size_t count, const char *prefix)
+{
+    char text[48] = {0};
+    for (size_t i = 0U; i < count; ++i) {
+        (void)snprintf(text, sizeof(text), "%s-%lu", prefix,
+                       (unsigned long)i);
+        assert(d1l_dm_store_append(
+                   "fedcba9876543210", "Peer", "rx", text, -60, 30,
+                   1U, 1U, 0U, true, false, (uint32_t)i + 1U) == ESP_OK);
+    }
+}
+
+static void test_full_ring_preserves_nonterminal_tx_until_exact_terminal(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    const d1l_dm_store_append_outcome_t first =
+        append_awaiting_ack(0xB101U, "protected-awaiting-ack");
+    append_inbound_rows(D1L_DM_STORE_CAPACITY - 1U, "fill-protected");
+
+    const d1l_dm_store_stats_t before = d1l_dm_store_stats();
+    assert(before.count == D1L_DM_STORE_CAPACITY);
+    assert(before.dropped_oldest == 0U);
+    const mock_blob_t durable_before = s_nvs;
+    const uint32_t nvs_writes_before = s_nvs_write_count;
+    const size_t operations_before = s_operation_count;
+
+    const uint8_t identity[D1L_DM_IDENTITY_DIGEST_BYTES] = {0xB1U};
+    d1l_dm_store_append_outcome_t rejected = {
+        .inserted = true,
+        .durable = true,
+        .row_seq = UINT32_MAX,
+        .delivery_session_id = UINT64_MAX,
+        .error = ESP_OK,
+    };
+    assert(d1l_dm_store_append_rx_identity(
+               "aaaaaaaaaaaaaaaa", "Blocked", "must-not-evict", -61, 20,
+               1U, 1U, 0U, 0xB102U, identity, &rejected) ==
+           ESP_ERR_NO_MEM);
+    assert(!rejected.inserted && !rejected.durable);
+    assert(rejected.row_seq == 0U && rejected.delivery_session_id == 0U);
+    assert(rejected.error == ESP_ERR_NO_MEM);
+
+    const d1l_dm_store_stats_t after = d1l_dm_store_stats();
+    assert(after.next_seq == before.next_seq);
+    assert(after.total_written == before.total_written);
+    assert(after.dropped_oldest == before.dropped_oldest);
+    assert(after.content_revision == before.content_revision);
+    assert(after.persistence_revision == before.persistence_revision);
+    assert(after.persistence_commit_count == before.persistence_commit_count);
+    assert(after.persistence_fail_count == before.persistence_fail_count);
+    assert(after.count == before.count);
+    assert(after.persistence_dirty == before.persistence_dirty);
+    assert(s_nvs_write_count == nvs_writes_before);
+    assert(s_operation_count == operations_before);
+    assert(memcmp(&s_nvs, &durable_before, sizeof(s_nvs)) == 0);
+
+    d1l_dm_entry_t protected = {0};
+    assert(d1l_dm_store_find_delivery_session(
+        first.delivery_session_id, &protected));
+    assert(protected.delivery_state == D1L_DM_DELIVERY_AWAITING_ACK);
+    assert(protected.delivery_revision == 5U);
+
+    d1l_dm_delivery_transition_outcome_t acknowledged = {0};
+    assert(d1l_dm_store_transition_delivery(
+               first.delivery_session_id,
+               D1L_DM_DELIVERY_AWAITING_ACK, 5U,
+               D1L_DM_DELIVERY_ACKNOWLEDGED,
+               D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK,
+               &acknowledged) == ESP_OK);
+    assert(acknowledged.changed && acknowledged.durable);
+    assert(acknowledged.delivery_revision == 6U);
+    const test_blob_v6_t *durable = (const test_blob_v6_t *)s_nvs.data;
+    assert(durable->entries[0].delivery_session_id ==
+           first.delivery_session_id);
+    assert(durable->entries[0].delivery_state ==
+           D1L_DM_DELIVERY_ACKNOWLEDGED);
+    assert(durable->entries[0].delivery_revision == 6U);
+
+    d1l_dm_store_append_outcome_t later = {0};
+    assert(d1l_dm_store_append_tx(
+               "bbbbbbbbbbbbbbbb", "Later", "after-terminal", -50, 40,
+               1U, 1U, 0U, 0xB103U, &later) == ESP_OK);
+    assert(later.inserted && later.durable);
+    d1l_dm_entry_t evicted = {0};
+    assert(!d1l_dm_store_find_delivery_session(
+        first.delivery_session_id, &evicted));
+    d1l_dm_delivery_transition_outcome_t proceeding = {0};
+    assert(d1l_dm_store_transition_delivery(
+               later.delivery_session_id, D1L_DM_DELIVERY_QUEUED, 1U,
+               D1L_DM_DELIVERY_WAITING_RADIO,
+               D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK,
+               &proceeding) == ESP_OK);
+    assert(proceeding.changed && proceeding.durable);
+    assert(proceeding.delivery_revision == 2U);
+}
+
+static void test_full_ring_terminal_head_still_evicts_normally(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    d1l_dm_store_append_outcome_t terminal = {0};
+    assert(d1l_dm_store_append_tx(
+               "0123456789abcdef", "Node", "terminal-head", -50, 40,
+               1U, 1U, 0U, 0xB201U, &terminal) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               terminal.delivery_session_id, D1L_DM_DELIVERY_QUEUED, 1U,
+               D1L_DM_DELIVERY_FAILED_QUEUE,
+               D1L_DM_DELIVERY_REASON_QUEUE_REJECTED, ESP_FAIL, NULL) ==
+           ESP_OK);
+    append_inbound_rows(D1L_DM_STORE_CAPACITY - 1U, "fill-terminal");
+
+    const d1l_dm_store_stats_t before = d1l_dm_store_stats();
+    assert(before.count == D1L_DM_STORE_CAPACITY);
+    const uint8_t identity[D1L_DM_IDENTITY_DIGEST_BYTES] = {0xB2U};
+    d1l_dm_store_append_outcome_t appended = {0};
+    assert(d1l_dm_store_append_rx_identity(
+               "cccccccccccccccc", "Replacement", "terminal-evicted",
+               -62, 10, 1U, 1U, 0U, 0xB202U, identity, &appended) ==
+           ESP_OK);
+    assert(appended.inserted && appended.durable);
+    const d1l_dm_store_stats_t after = d1l_dm_store_stats();
+    assert(after.count == D1L_DM_STORE_CAPACITY);
+    assert(after.next_seq == before.next_seq + 1U);
+    assert(after.total_written == before.total_written + 1U);
+    assert(after.dropped_oldest == before.dropped_oldest + 1U);
+    assert(after.content_revision == before.content_revision + 1U);
+    d1l_dm_entry_t evicted = {0};
+    assert(!d1l_dm_store_find_delivery_session(
+        terminal.delivery_session_id, &evicted));
+    d1l_dm_entry_t newest = {0};
+    assert(d1l_dm_store_copy_recent(&newest, 1U) == 1U);
+    assert(strcmp(newest.text, "terminal-evicted") == 0);
+}
+
+static void test_ack_persistence_failure_recovers_same_revision_durably(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    const d1l_dm_store_append_outcome_t append =
+        append_awaiting_ack(0xACACU, "ack-persistence-retry");
+
+    s_nvs_write_error = ESP_FAIL;
+    d1l_dm_delivery_transition_outcome_t failed = {0};
+    assert(d1l_dm_store_transition_delivery(
+               append.delivery_session_id,
+               D1L_DM_DELIVERY_AWAITING_ACK, 5U,
+               D1L_DM_DELIVERY_ACKNOWLEDGED,
+               D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &failed) ==
+           ESP_FAIL);
+    assert(failed.changed && !failed.durable && !failed.persistence_retry);
+    assert(failed.current_state == D1L_DM_DELIVERY_ACKNOWLEDGED);
+    assert(failed.delivery_revision == 6U);
+
+    /* Failed persistence is not public delivery truth. The owner can retain
+     * the same awaiting-ACK state/revision and retry the exact transition. */
+    d1l_dm_entry_t row = {0};
+    assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
+    assert(row.delivery_state == D1L_DM_DELIVERY_AWAITING_ACK);
+    assert(row.delivery_revision == 5U);
+    assert(!row.acked && !row.delivered);
+    d1l_dm_entry_t session_truth = {0};
+    assert(d1l_dm_store_find_delivery_session(
+        append.delivery_session_id, &session_truth));
+    assert(session_truth.delivery_state == D1L_DM_DELIVERY_AWAITING_ACK);
+    assert(session_truth.delivery_revision == 5U);
+    assert(!session_truth.acked && !session_truth.delivered);
+
+    s_nvs_write_error = ESP_OK;
+    s_now_us +=
+        (int64_t)D1L_DM_STORE_PERSIST_RETRY_INTERVAL_MS * 1000LL;
+    assert(d1l_dm_store_flush() == ESP_OK);
+    assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
+    assert(row.delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED);
+    assert(row.delivery_revision == 6U);
+    assert(row.acked && row.delivered);
+    memset(&session_truth, 0, sizeof(session_truth));
+    assert(d1l_dm_store_find_delivery_session(
+        append.delivery_session_id, &session_truth));
+    assert(session_truth.delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED);
+    assert(session_truth.delivery_revision == 6U);
+    assert(session_truth.acked && session_truth.delivered);
+
+    /* A background flush may make the ACK durable before the service owner
+     * sees another copy of the packet. Replaying the same expected tuple is
+     * an idempotent publication of revision 6, never a second transition. */
+    d1l_dm_delivery_transition_outcome_t recovered = {0};
+    assert(d1l_dm_store_transition_delivery(
+               append.delivery_session_id,
+               D1L_DM_DELIVERY_AWAITING_ACK, 5U,
+               D1L_DM_DELIVERY_ACKNOWLEDGED,
+               D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &recovered) ==
+           ESP_OK);
+    assert(!recovered.changed && recovered.persistence_retry);
+    assert(recovered.durable);
+    assert(recovered.previous_state == D1L_DM_DELIVERY_AWAITING_ACK);
+    assert(recovered.current_state == D1L_DM_DELIVERY_ACKNOWLEDGED);
+    assert(recovered.delivery_revision == 6U);
+
+    assert(d1l_dm_store_init() == ESP_OK);
+    assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
+    assert(row.delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED);
+    assert(row.delivery_revision == 6U);
+    assert(row.acked && row.delivered);
+}
+
+static void test_failed_ack_reboot_never_invents_delivery(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    const d1l_dm_store_append_outcome_t append =
+        append_awaiting_ack(0xADADU, "ack-failure-reboot");
+
+    s_nvs_write_error = ESP_FAIL;
+    d1l_dm_delivery_transition_outcome_t failed = {0};
+    assert(d1l_dm_store_transition_delivery(
+               append.delivery_session_id,
+               D1L_DM_DELIVERY_AWAITING_ACK, 5U,
+               D1L_DM_DELIVERY_ACKNOWLEDGED,
+               D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &failed) ==
+           ESP_FAIL);
+    assert(failed.changed && !failed.durable);
+
+    /* Reboot reloads the last durable awaiting state and normalizes it as an
+     * interruption. It must never resurrect the volatile ACK projection. */
+    assert(d1l_dm_store_init() == ESP_OK);
+    d1l_dm_entry_t row = {0};
+    assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
+    assert(row.delivery_state ==
+           D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT);
+    assert(row.delivery_revision == 6U);
+    assert(!row.acked && !row.delivered);
+}
+
 static void test_delivery_transition_cas_survives_reboot_truthfully(void)
 {
     reset_backend();
@@ -1989,6 +2255,10 @@ int main(void)
     test_pending_kind_rebind_preserves_the_reserved_budget();
     test_late_reconcile_resequence_keeps_pending_callback_budget();
     test_v5_migration_never_invents_delivery_success();
+    test_full_ring_preserves_nonterminal_tx_until_exact_terminal();
+    test_full_ring_terminal_head_still_evicts_normally();
+    test_ack_persistence_failure_recovers_same_revision_durably();
+    test_failed_ack_reboot_never_invents_delivery();
     test_delivery_transition_cas_survives_reboot_truthfully();
     test_v5_dual_backend_migration_session_id_is_deterministic();
     test_v5_migration_session_collision_fails_closed();

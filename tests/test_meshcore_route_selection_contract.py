@@ -19,8 +19,11 @@ def test_production_dm_send_consumes_one_boot_proven_fail_closed_route_plan():
     service = read("main/mesh/meshcore_service.c")
     selector = read("main/mesh/meshcore_route_selection.h")
     send_dm = service.split(
-        "static esp_err_t meshcore_service_send_dm_with_result", 1
-    )[1].split("esp_err_t d1l_meshcore_service_send_dm", 1)[0]
+        "static esp_err_t meshcore_service_handle_send_dm", 1
+    )[1].split("static void meshcore_service_reply", 1)[0]
+    finalize = service.split(
+        "static void finalize_pending_dm_radio_result", 1
+    )[1].split("static esp_err_t fail_pending_dm_before_radio", 1)[0]
     wrapper = service.split("esp_err_t d1l_meshcore_service_send_dm", 1)[1].split(
         "esp_err_t d1l_meshcore_service_request_path_discovery_probe", 1
     )[0]
@@ -42,16 +45,16 @@ def test_production_dm_send_consumes_one_boot_proven_fail_closed_route_plan():
     assert "contact.out_path_updated_ms" not in send_dm
     assert "route_learned_this_boot" in send_dm
     assert "d1l_meshcore_route_select(" in send_dm
-    assert "build_dm_text_packet(settings, &contact, text, &selection" in send_dm
+    assert "build_dm_text_packet(settings, &contact, cmd->dm_text, &selection" in send_dm
     assert "const bool use_direct = contact.out_path_valid" not in send_dm
-    assert "route_name(selection.route)" in send_dm
-    assert '"dm_text"' in send_dm
+    assert "route_name(s_pending_dm_tx.selection.route)" in finalize
+    assert '"dm_text"' in finalize
     assert "record_dm_route_selection(&selection)" in send_dm
-    assert "d1l_meshcore_route_selection_reason_name(selection.reason)" in send_dm
+    assert "d1l_meshcore_route_selection_reason_name(" in finalize
     assert send_dm.index("record_dm_route_selection(&selection)") > send_dm.index(
-        "ret = meshcore_service_send_raw"
+        "Radio.SendWithOrigin("
     )
-    assert "meshcore_service_send_dm_with_result(fingerprint, text, NULL)" in wrapper
+    assert "meshcore_service_send_dm_command(fingerprint, text, false)" in wrapper
 
     assert "d1l_contact_store_update_path(" in path_rx
     assert "remember_boot_route(" in path_rx
@@ -61,23 +64,27 @@ def test_production_dm_send_consumes_one_boot_proven_fail_closed_route_plan():
     assert "clear_boot_routes();" in initialization
 
 
-def test_path_probe_records_only_the_immutable_actual_send_result():
+def test_path_probe_records_only_the_owner_immutable_actual_send_snapshot():
     service = read("main/mesh/meshcore_service.c")
     trace = service.split(
         "esp_err_t d1l_meshcore_service_request_path_discovery_probe", 1
     )[1].split("esp_err_t d1l_meshcore_service_send_trace_loop", 1)[0]
 
-    assert "d1l_dm_send_result_t send_result" in trace
-    assert "meshcore_service_send_dm_with_result(" in trace
-    assert "send_result.selection.route" in trace
-    assert "send_result.selection.path_hash_bytes" in trace
-    assert "send_result.selection.path_hops" in trace
-    assert "send_result.raw_len" in trace
+    finalize = service.split(
+        "static void finalize_pending_dm_radio_result", 1
+    )[1].split("static esp_err_t fail_pending_dm_before_radio", 1)[0]
+
+    assert "meshcore_service_send_dm_command(" in trace
+    assert "fingerprint, token, true" in trace
+    assert "s_pending_dm_tx.selection.route" in finalize
+    assert "s_pending_dm_tx.selection.path_hash_bytes" in finalize
+    assert "s_pending_dm_tx.selection.path_hops" in finalize
+    assert "s_pending_dm_tx.raw_len" in finalize
+    assert "s_pending_dm_tx.path_probe" in finalize
+    assert '"path_probe"' in finalize
     assert "d1l_contact_store_find_by_fingerprint" not in trace
     assert "contact.out_path_valid" not in trace
-    assert trace.index("meshcore_service_send_dm_with_result(") < trace.index(
-        "d1l_route_store_upsert_observation("
-    )
+    assert "d1l_route_store_upsert_observation(" not in trace
 
 
 def test_inbound_dm_ack_consumes_the_same_immutable_route_selection():

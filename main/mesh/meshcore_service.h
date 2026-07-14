@@ -35,6 +35,10 @@ typedef struct {
     uint32_t dm_route_malformed_fallback;
     uint32_t dm_route_last_path_age_ms;
     uint8_t dm_route_last_reason;
+    uint64_t dm_delivery_session_id;
+    uint32_t dm_delivery_revision;
+    uint8_t dm_delivery_state;
+    esp_err_t dm_delivery_last_error;
     uint32_t trace_tx_queued;
     uint32_t trace_rx_matched;
     uint32_t trace_rx_duplicates;

@@ -112,7 +112,7 @@ def test_only_verified_non_self_newer_adverts_reach_node_and_route_stores():
     receiver = function_slice(
         source,
         "static void parse_rx_advert_packet",
-        "static void on_tx_done",
+        "static void meshcore_service_handle_radio_tx_done",
     )
 
     verify = receiver.index("verify_advert_signature")
@@ -339,17 +339,19 @@ def test_legacy_node_and_contact_roles_migrate_fail_closed():
     assert "if (type_id == 0U)" in export
 
 
-def test_dm_service_rejects_non_chat_roles_before_identity_or_radio_side_effects():
+def test_dm_service_rejects_noncanonical_contacts_before_side_effects():
     service = read("main/mesh/meshcore_service.c")
     sender = function_slice(
         service,
-        "static esp_err_t meshcore_service_send_dm_with_result",
-        "esp_err_t d1l_meshcore_service_send_dm",
+        "static esp_err_t meshcore_service_handle_send_dm",
+        "static void meshcore_service_reply",
     )
 
     lookup = sender.index("d1l_contact_store_find_by_fingerprint")
     role_gate = sender.index("!d1l_contact_store_can_dm(&contact)")
     identity = sender.index("d1l_meshcore_service_ensure_identity()")
-    start_rx = sender.index("D1L_MESHCORE_SERVICE_CMD_START_RX")
-    assert lookup < role_gate < identity < start_rx
+    timestamp = sender.index("d1l_settings_next_mesh_timestamp")
+    store = sender.index("d1l_dm_store_append_tx(")
+    radio = sender.index("ensure_radio_started()")
+    assert lookup < role_gate < identity < timestamp < store < radio
     assert "return ESP_ERR_INVALID_STATE;" in sender[role_gate:identity]

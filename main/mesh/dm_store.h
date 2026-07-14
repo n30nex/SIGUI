@@ -75,6 +75,7 @@ typedef struct {
 typedef struct {
     bool changed;
     bool durable;
+    bool persistence_retry;
     uint64_t delivery_session_id;
     uint32_t row_seq;
     d1l_dm_delivery_state_t previous_state;
@@ -142,6 +143,8 @@ esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry);
 bool d1l_dm_store_find_rx_identity(
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     d1l_dm_entry_t *out_entry);
+bool d1l_dm_store_find_delivery_session(
+    uint64_t delivery_session_id, d1l_dm_entry_t *out_entry);
 esp_err_t d1l_dm_store_reserve_ack_dispatch(
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation);
