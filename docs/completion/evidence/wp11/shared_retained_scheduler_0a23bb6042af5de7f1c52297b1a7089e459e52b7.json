@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp11_shared_retained_scheduler_exact_main_aggregate",
+  "generated_utc": "2026-07-14T21:49:09Z",
+  "claim_scope": "Portable premerge and exact-main software/artifact evidence for the first bounded WP-11 shared retained-flush scheduler slice. Public, DM, packet, and route stores share one descriptor scheduler while retaining isolated serializers; one absolute deadline spans request-mutex wait, queue residence, flush-mutex wait, and the descriptor pass; later stores do not start after deadline or quiesce cancellation; coherent active and last-pass status exposes dirty, reconciliation, revision, commit, and failure outcomes; and finite FreeRTOS tick conversion is overflow-safe. Exact merged-main software and artifact acceptance is banked. Remaining schema/reset/power-loss/NVS write-amplification and exact-candidate physical durability acceptance remain open.",
+  "exact_pair": {
+    "pull_request": 118,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/118",
+    "base_sha": "e7acafa2d4b7ee40a3668dc9da2470908192c11b",
+    "head_sha": "43eb1e1c33b81e12f05b85fc8045c23ace1a5f3f",
+    "synthetic_merge_sha": "a6cfe11dca6acf780e8699d0768636a67dc58b8a",
+    "merged_main_sha": "0a23bb6042af5de7f1c52297b1a7089e459e52b7",
+    "head_synthetic_and_main_tree_sha": "8ca245922fa62c311e8253c9966ea98d347f2b6f",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29369126426,
+    "actions_event": "pull_request",
+    "checkout_sha": "a6cfe11dca6acf780e8699d0768636a67dc58b8a",
+    "conclusion": "success",
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73669004,
+    "downloaded_tree_sha256": "900061277329f3bb7ad3358b0ac0ef1ae89654823c23975efd1cf711aeea21ab",
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "focused_storage_tests_reported": 50,
+    "independent_review_remaining_p0_p1_p2": 0,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr118-43eb1e1/pr118_strict_gate_43eb1e1c33b81e12f05b85fc8045c23ace1a5f3f.json",
+    "strict_receipt_sha256": "a660c9d61f092ba121255a0514cc2f4b090e043640cab554ad036af73c77f6b4"
+  },
+  "premerge_artifact_zip_sha256": {
+    "d1l-firmware-artifacts": "653911f0525f87752c6c1a4596af386d5639e47bcd658109c3ac85ce71c5425f",
+    "d1l-host-artifacts": "24b9e215755cc4543bc2d8f6539939a4bfabb67675d6a9a67d745ca3fed4ed0d",
+    "d1l-idf55-migration-state": "1ee46c3a0f21827dee76442a6343461434a811d80ddb1b4b2e71dfd9f405123e",
+    "d1l-meshcore-wire-conformance": "8d14611f15a1da86f81d8241855193d949fb942529b46aaab68b2807f7d6ced2",
+    "d1l-release-package": "0bf9e248741b3a4aa136daad1d394abffdc8550773ee2b6d73ebb38a05f6aeb0"
+  },
+  "implementation_boundary": {
+    "scheduler_files": [
+      "main/storage/retained_store_scheduler.c",
+      "main/storage/retained_store_scheduler.h"
+    ],
+    "worker_integration_files": [
+      "main/mesh/route_store_worker.c",
+      "main/mesh/route_store_worker.h",
+      "main/comms/usb_console.c"
+    ],
+    "scheduled_stores": [
+      "public_messages",
+      "direct_messages",
+      "packets",
+      "routes"
+    ],
+    "serializers_remain_isolated": true,
+    "single_absolute_deadline_across_request_queue_flush_and_descriptor_pass": true,
+    "deadline_and_quiesce_rechecked_before_later_store": true,
+    "active_and_last_pass_status_coherent": true,
+    "dirty_reconcile_revision_commit_and_failure_outcomes_exposed": true,
+    "storage_status_json_safe_and_redacted": true,
+    "finite_tick_conversion_overflow_safe": true,
+    "actual_worker_lifecycle_harness": true,
+    "inflight_synchronous_callback_midcall_cancellation": false,
+    "bounded_inflight_callback_behavior": "An already-running synchronous store callback may finish after its caller receives ESP_ERR_TIMEOUT. It remains observable as active, no later descriptor starts, and locks are released after the callback returns."
+  },
+  "exact_main_gate": {
+    "actions_run": 29370050844,
+    "validated_main_sha": "0a23bb6042af5de7f1c52297b1a7089e459e52b7",
+    "validated_tree_sha": "8ca245922fa62c311e8253c9966ea98d347f2b6f",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 1011,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "artifact_zip_total_bytes": 22986992,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73669010,
+    "downloaded_tree_sha256": "1d6b87626a5dddde0cd73165510587605533125a9ff7b7e157e602972dfc6494",
+    "artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "5544cb85e003910239f1d4623ccac40b4df0f8252b97fb5e391d5a942d9d3b63",
+      "d1l-host-artifacts": "8bff141721072fffe3c57977eb3f116ec68141460a7dfc5cc7038cb6f8b87cad",
+      "d1l-idf55-migration-state": "b028695064f1f8e710509e54dd81a1c546d18e06c5458aad6ed5b6cecffa3f18",
+      "d1l-meshcore-wire-conformance": "1442abcbf3a48c598432446cc74fc868a49faced56e947dd77f7ae4f39c3faa4",
+      "d1l-release-package": "78d17e98eccbbbf539551437c2780512ed1b7eefea78b4330e2147cfae1930a8"
+    },
+    "firmware_manifest_sha256": "175747642940a164dd93ab30eb22e838c774a11fb212e67de961f361676a1a00",
+    "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+    "release_manifest_sha256": "095d56659cb4e6d2f32d1b2d0e0d60fcbbaa1471c86718a6570248a22781000a",
+    "host_success_marker_sha256": "50c26d6eae69f3c7efec4d6b4c307fb2fcd6ee34ceaf33f9fe052cae597727ee",
+    "meshcore_conformance_receipt_sha256": "9e0ec4c74836376ab4969ffc73ab7752a5a0bb94dac71933f026eb02a9c3f28f",
+    "meshcore_signed_runtime_receipt_sha256": "0d1a5ae0c7dc50bdd4d1b69d9eace6e8ef680f7a3b36248cd9b45346ba09e4fa",
+    "release_audit_sha256": "874f2260c4ff266ec7d9dbc0e64d3b61e123ceee5e0aafdd9864c8281193f0ed",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "release_package_manifest_json_sha256": "4e15fc1d87a95e8434a9f868cb23b5cf36fbb3ff96bdd5d43d7a838f8911767e",
+    "application_sha256": "5f7bc622f9bb08556494cbcbfa582315a24ea4730705a894e8c4abd1e30df3c8",
+    "full_flash_sha256": "8e0fa01f01914a9d46370e74849434ce7aca0421fcc8110261ab1fdccb8bc7a2",
+    "provenance_sha256": "494a21c2a4ced5f86ad2115a80a09237e06c8289d8762b633308b4f2c5355819",
+    "sbom_sha256": "9713415719cc8aa0719d4e45efaece965dc6a149d00b6c0023a6f46c6de8d07c",
+    "completion_ledger_validation_sha256": "6a708c4aeb5acb616820e990cb9d0aa9665340430ff5a16b1adad39ebdd05a20",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-0a23bb6-qa/main_strict_gate_0a23bb6042af5de7f1c52297b1a7089e459e52b7.json",
+    "receipt_sha256": "266f49e6420c83834928fc32aff03864cd2b9b0fe5d5d3fef6892d810f9e82ca",
+    "verdict": "exact_merged_main_software_and_artifact_gate_banked"
+  },
+  "residual_wp11_gates": {
+    "closed": false,
+    "remaining": [
+      "schema_and_migration_completion",
+      "factory_reset_and_recovery_semantics",
+      "power_loss_and_interrupted_write_acceptance",
+      "nvs_write_amplification_and_endurance_acceptance",
+      "exact_candidate_physical_durability"
+    ]
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "sd_closure_claimed": false,
+    "wp11_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "first_wp11_shared_retained_scheduler_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp11_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}

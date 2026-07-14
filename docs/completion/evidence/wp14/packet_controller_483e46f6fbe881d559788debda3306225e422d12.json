@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp14_packet_controller_exact_main_aggregate",
+  "generated_utc": "2026-07-14T20:25:01.873Z",
+  "claim_scope": "Portable retained-PR and exact-main Actions checkpoint for the third WP-14 slice. Packet-feed state now has one bounded controller, with a separate PSRAM query scratch adapter that copies immutable results into controller-owned rows. Filter/search, pause/resume, paging/fallback, and row status/color behavior are host-tested while the controller remains independent of LVGL, UI-task, storage, and RP2040 side effects. This aggregate does not close the remaining UI-runtime extraction, lifecycle/redraw ownership, exact-candidate physical UI, WP-14, or release gates.",
+  "exact_pair": {
+    "pull_request": 115,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/115",
+    "base_sha": "cfe0792909cb120b6d6f6bbc9f5b5d7bba34abd7",
+    "head_sha": "fe929fb5300824b440378e54de9af4b188e374b2",
+    "synthetic_merge_sha": "cec41f98bd1a2b8577be5992c274a66c6f380bad",
+    "merged_main_sha": "483e46f6fbe881d559788debda3306225e422d12",
+    "head_synthetic_and_main_tree_sha": "a672ded6471b5f4b5fe9f9b140499705f0c39d8f",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29363499611,
+    "actions_event": "pull_request",
+    "checkout_sha": "cec41f98bd1a2b8577be5992c274a66c6f380bad",
+    "conclusion": "success",
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73382985,
+    "downloaded_tree_sha256": "ca9389ee2bdc93d08dfa35f282146a027ea803cc0315b625b2968818888d9c4e",
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr115-fe929fb5300824b440378e54de9af4b188e374b2/pr115_strict_gate_fe929fb5300824b440378e54de9af4b188e374b2.json",
+    "strict_receipt_sha256": "95d63516544ffb7bc54fe08a1341870b480bfe4a0d50d31819e1867c310011c2"
+  },
+  "implementation_boundary": {
+    "new_modules": [
+      "main/ui/ui_packets.c",
+      "main/ui/ui_packets.h"
+    ],
+    "integration_files": [
+      "main/CMakeLists.txt",
+      "main/ui/ui_phase1.c"
+    ],
+    "native_and_contract_tests": [
+      "tests/native/ui_packets_controller_test.c",
+      "tests/test_ui_packets_contract.py",
+      "tests/test_ui_packets_native.py",
+      "tests/test_ui_shell_contract.py"
+    ],
+    "single_bounded_controller_owner": true,
+    "controller_rows_in_psram": true,
+    "separate_psram_query_scratch": true,
+    "adapter_copies_immutable_results": true,
+    "filter_search_pause_and_paging_state_owned": true,
+    "empty_older_page_falls_back_to_newest": true,
+    "row_status_and_color_mapping_owned": true,
+    "controller_calls_lvgl": false,
+    "controller_calls_ui_task": false,
+    "controller_calls_storage": false,
+    "controller_calls_rp2040": false
+  },
+  "exact_main_gate": {
+    "actions_run": 29364365425,
+    "validated_main_sha": "483e46f6fbe881d559788debda3306225e422d12",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 984,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73382991,
+    "downloaded_tree_sha256": "732adeb02815ca978cc767cb46a5b34994cf553b0aa5c0cffd7bbb235bb7bdc7",
+    "host_success_marker_sha256": "157910f6ee233f62a4e4672eb9bb0fe8c3452482400e33439ca317944b736c80",
+    "release_audit_sha256": "842e86702baa0f2b4c63019d51e6c4ee3cab66e7287d61e3fc637ffcb4d8d261",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "release_manifest_sha256": "61a7859b5e76e7ad7be7a38787f0b8dec36f4ab4c5d873d7cd4c1f462b143c45",
+    "release_package_manifest_sha256": "a66ac1e2b6982e89bd98142e41f457e1eabbe35eb398e027f6d745f5478fdab5",
+    "application_sha256": "8ee236bf06d42be166331d4ef53318f694dfa2b9fea7cb2e131110bd0075ab13",
+    "full_flash_sha256": "e6cb9a0341646814357920c8150d8f963d4a1dbb1da371f51e5ccabee35a0eed",
+    "provenance_sha256": "62756290d9888ae2376e6268a29cc1d22f0252d9ce54e4daa58909eba3a2f8e4",
+    "sbom_sha256": "09b88f4dd62554e7a9a5ce8a4ca914e5f186eb9d24d64b007524c4a57a48659c",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-483e46f-qa/main_strict_gate_483e46f6fbe881d559788debda3306225e422d12.json",
+    "receipt_sha256": "0581fd6ac744b8cb347736a47e534d1f9912bda30c98c4b3d4e103481900d9a5",
+    "verdict": "exact_merged_main_software_and_artifact_gate_banked"
+  },
+  "artifact_zip_sha256": {
+    "d1l-firmware-artifacts": "3e40b5907487015e26c83ed625ff1b94c551b00b7737c35370fc17170c673a21",
+    "d1l-host-artifacts": "0631839c9a60d4c04b1b845567e36c38280aec8730ac8b0a65a1dd7f00b12604",
+    "d1l-idf55-migration-state": "c5238ec3af8ffe85471f60fbd86825ff3b8659bfc439369019f019cf6f7190c9",
+    "d1l-meshcore-wire-conformance": "475c93c4f51c9efe1e751291e7798c4d422f40028985b0f988c62b7c6e4bcdca",
+    "d1l-release-package": "e030e70871cc0c471182c38f8e1a2091b02093ca15406967ac06c76d8ddb0b47"
+  },
+  "residual_wp14_gates": {
+    "closed": false,
+    "remaining": "Complete remaining screen/shared-state extraction and single UI-task ownership, add lifecycle/generation/redraw invariants, and run exact-candidate physical Packet scrolling, filtering, search, pause/resume, navigation, and corruption acceptance before WP-14 can close."
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "ui_hardware_closure_claimed": false,
+    "wp14_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "third_wp14_packet_controller_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp14_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
