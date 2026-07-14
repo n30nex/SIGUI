@@ -55,6 +55,26 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert manifest["wp04_closure_eligible"] is False
     assert manifest["sanitizer_policy"] == conformance.ED25519_SANITIZER_POLICY
     assert manifest["upstream"]["commit"] == UPSTREAM_COMMIT
+    repeater_stats_header = (
+        "third_party/MeshCore/examples/simple_repeater/MyMesh.h"
+    )
+    repeater_stats_header_sha256 = (
+        "a48c6c0827687d18472c3652401a2a2a9d544f2b884f1518e52812dfd78a22f6"
+    )
+    assert manifest["upstream"]["sources"][repeater_stats_header] == (
+        repeater_stats_header_sha256
+    )
+    assert repeater_stats_header in conformance.EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS
+    assert repeater_stats_header in manifest["host_admin_session_fixture"][
+        "pinned_upstream_sources"
+    ]
+    assert canonical_lf_sha256(ROOT / repeater_stats_header) == (
+        repeater_stats_header_sha256
+    )
+    assert (
+        manifest["host_admin_session_fixture"]
+        == conformance.EXPECTED_HOST_ADMIN_SESSION_FIXTURE
+    )
     assert manifest["interface"] == {
         "language": "c_abi",
         "header": "tests/meshcore_oracle/meshcore_oracle.h",
@@ -1101,8 +1121,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
     )
     assert pending["login_request_response_admin"]["blocked_by"] == (
-        "request_schema_tags_and_concrete_packet_pool_dispatch_execution_"
-        "fixtures"
+        "concrete_packet_pool_dispatch_runtime_and_physical_delivery_evidence"
     )
     assert pending["login_request_response_admin"]["implemented_prerequisites"] == [
         "anonymous_login_request_packets",
@@ -1115,7 +1134,11 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "authenticated_request_replay_transition_fixtures",
         "authenticated_text_replay_response_session_fixtures",
         "login_response_creation_dispatch_orchestration_fixtures",
+        "host_authenticated_admin_session_fixture",
     ]
+    assert pending["login_request_response_admin"]["host_only_receipt"] == (
+        "RCPT-WP04-HOST-ADMIN-SESSION-20260714"
+    )
 
     for relative, expected in {
         **manifest["upstream"]["sources"],
@@ -1135,6 +1158,7 @@ def test_oracle_coverage_manifest_accounts_for_every_required_surface():
     summary = conformance.summarize_oracle_coverage(coverage, oracle_manifest)
 
     assert coverage == json.loads(COVERAGE_MANIFEST.read_text(encoding="utf-8"))
+    assert coverage["host_only_evidence"] == conformance.EXPECTED_HOST_ONLY_EVIDENCE
     assert summary["validated"] is True
     assert summary["wp04_closure_eligible"] is False
     assert summary["closure_ready"] is False
@@ -1369,6 +1393,8 @@ def test_conformance_plan_builds_the_oracle_as_a_separate_target():
     flattened = [" ".join(command) for command in commands]
 
     assert any("meshcore_oracle.cpp" in command for command in flattened)
+    assert any("meshcore_admin_session_fixture.cpp" in command for command in flattened)
+    assert any("meshcore_admin_session_fixture.o" in command for command in flattened)
     assert any("meshcore_oracle_vectors.cpp" in command for command in flattened)
     assert any("AdvertDataHelpers.cpp" in command for command in flattened)
     assert any("meshcore_advert_data.o" in command for command in flattened)
@@ -1638,6 +1664,7 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         ),
         str(conformance.ORACLE_UTILS_SOURCE),
         str(ORACLE_ROOT / "meshcore_oracle.cpp"),
+        str(ORACLE_ROOT / "meshcore_admin_session_fixture.cpp"),
         str(ORACLE_ROOT / "meshcore_oracle_vectors.cpp"),
         str(aes_object),
         *ed25519_objects,
@@ -1654,7 +1681,91 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
     )
     assert first.stdout == second.stdout
     assert first.stderr == second.stderr == ""
-    assert json.loads(first.stdout) == {
+    actual = json.loads(first.stdout)
+    admin_session = actual.pop("admin_session_fixture")
+    conformance.validate_host_admin_session_receipt(admin_session)
+    assert admin_session["artifact_type"] == "meshcore_host_admin_session_fixture"
+    assert admin_session["receipt_id"] == "RCPT-WP04-HOST-ADMIN-SESSION-20260714"
+    assert admin_session["status"] == "pass"
+    assert admin_session["host_only"] is True
+    assert admin_session["production_runtime_proven"] is False
+    assert admin_session["wp18_closure_eligible"] is False
+    assert admin_session["rf_closure_eligible"] is False
+    assert admin_session["ui_closure_eligible"] is False
+    assert admin_session["hardware_closure_eligible"] is False
+    assert admin_session["upstream_commit"] == UPSTREAM_COMMIT
+    assert admin_session["invariants"] == {
+        "identity_bytes": 32,
+        "prefix_authorization": False,
+        "login_payload_type": 7,
+        "request_payload_type": 0,
+        "response_payload_type": 1,
+        "admin_permissions": 3,
+        "login_response_bytes": 13,
+        "get_status_request_bytes": 13,
+        "repeater_stats_bytes": 56,
+        "repeater_stats_fields": 18,
+        "get_status_response_bytes": 60,
+        "get_status_type": 1,
+        "login_timestamp": 0x01020304,
+        "request_tag": 0x01020305,
+    }
+    assert admin_session["canonical_bytes"] == {
+        "get_status_request_hex": "050302010100000000a1b2c3d4",
+        "login_response_hex": "88776655000001031020304002",
+        "get_status_response_hex": (
+            "05030201740e07008bffadff0403020114131211242322213433323144434241"
+            "5453525164636261747372718281ecff9291a2a1b4b3b2b1c4c3c2c1"
+        ),
+    }
+    assert admin_session["repeater_stats"] == {
+        "batt_milli_volts": 3700,
+        "curr_tx_queue_len": 7,
+        "noise_floor": -117,
+        "last_rssi": -83,
+        "n_packets_recv": 0x01020304,
+        "n_packets_sent": 0x11121314,
+        "total_air_time_secs": 0x21222324,
+        "total_up_time_secs": 0x31323334,
+        "n_sent_flood": 0x41424344,
+        "n_sent_direct": 0x51525354,
+        "n_recv_flood": 0x61626364,
+        "n_recv_direct": 0x71727374,
+        "err_events": 0x8182,
+        "last_snr": -20,
+        "n_direct_dups": 0x9192,
+        "n_flood_dups": 0xA1A2,
+        "total_rx_air_time_secs": 0xB1B2B3B4,
+        "n_recv_errors": 0xC1C2C3C4,
+    }
+    assert admin_session["positive_checks"] == 6
+    assert admin_session["negative_checks"] == 16
+    assert [entry["id"] for entry in admin_session["negative_matrix"]] == [
+        "wrong_password",
+        "wrong_full_key_colliding_prefix",
+        "wrong_secret_mac",
+        "malformed_payload",
+        "truncated_payload",
+        "extra_payload",
+        "unsolicited_response",
+        "wrong_tag_response",
+        "duplicate_response",
+        "late_response",
+        "replayed_response",
+        "replayed_request",
+        "stale_replayed_login_timestamp",
+        "permission_failure",
+        "response_from_another_full_identity",
+        "request_from_another_full_identity",
+    ]
+    assert all(entry["rejected"] is True for entry in admin_session["negative_matrix"])
+    assert admin_session["zeroization"] == {
+        "timeout_pending_state": True,
+        "timeout_pending_login_state": True,
+        "explicit_logout_client_server_session": True,
+    }
+    assert len(admin_session["transcript"]) == 11
+    assert actual == {
         "passed": True,
         "coverage_boundary": BOUNDARY,
         "wp04_closure_eligible": False,

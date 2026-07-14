@@ -1,4 +1,5 @@
 #include "meshcore_oracle.h"
+#include "meshcore_admin_session_fixture.h"
 
 #include "AES.h"
 #include "Packet.h"
@@ -6977,7 +6978,13 @@ int main()
         failures.push_back("null path TRACE parse changed output");
     }
 
-    const bool passed = failures.empty();
+    const auto admin_session =
+        d1l::meshcore::host_fixture::run_admin_session_fixture();
+    for (const std::string &failure : admin_session.failures) {
+        failures.push_back("admin session fixture: " + failure);
+    }
+
+    const bool passed = failures.empty() && admin_session.passed;
     for (const std::string &failure : failures) {
         std::cerr << failure << '\n';
     }
@@ -7346,6 +7353,8 @@ int main()
               << ",\"direct_flood_headers\":true"
               << ",\"ack_frames\":true"
               << ",\"trace_source_frames\":true}"
+              << ",\"admin_session_fixture\":"
+              << admin_session.receipt_json
               << ",\"failures\":" << failures.size() << "}\n";
     return passed ? 0 : 1;
 }

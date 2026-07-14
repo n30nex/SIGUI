@@ -196,6 +196,22 @@
       }
     ]
   },
+  "host_only_evidence": {
+    "id": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
+    "status": "implemented",
+    "receipt_field": "admin_session_fixture",
+    "host_only": true,
+    "production_runtime_proven": false,
+    "wp18_closure_eligible": false,
+    "rf_closure_eligible": false,
+    "ui_closure_eligible": false,
+    "hardware_closure_eligible": false,
+    "full_identity_bytes": 32,
+    "prefix_authorization": false,
+    "positive_checks": 6,
+    "negative_checks": 16,
+    "remaining_surface_status": "partial_until_concrete_packet_pool_dispatch_runtime_and_physical_delivery_evidence"
+  },
   "submodule_update_policy": {
     "reviewed_upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "reviewed_corpus_version": 23,

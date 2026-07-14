@@ -28,6 +28,7 @@
     "commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "sources": {
       "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp": "4e7ff8473e00260d4938d58fcf3192946be96dd2e490ab5252c1adec510fe526",
+      "third_party/MeshCore/examples/simple_repeater/MyMesh.h": "a48c6c0827687d18472c3652401a2a2a9d544f2b884f1518e52812dfd78a22f6",
       "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp": "efcaedf703aafd754b2a1ffbe01d31f780dd12fc9ae59fe1bf0e04f352dbd09d",
       "third_party/MeshCore/src/Dispatcher.cpp": "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e",
       "third_party/MeshCore/src/Dispatcher.h": "70eef11430c3aebb86e4e329978744bf20e8138ac27053045ad11aa7fc2a47bf",
@@ -83,14 +84,96 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "c3ead67e2edd1d7328e407581ad4a909a0c24ff0a440b08e0cb1261f8218f032",
+    "tests/meshcore_oracle/coverage_manifest.json": "4fab5283f63930d754a44b3d27e76cf4dd983583a2bc557a68df954e2659943b",
+    "tests/meshcore_oracle/meshcore_admin_session_fixture.cpp": "0ccc70a6a0d8d0e6cea62f6a9da38e3513f1947d098a71718c9d6e419b5608d6",
+    "tests/meshcore_oracle/meshcore_admin_session_fixture.h": "4ca2ffdb4598af5c30f4eaa5af5555545b1eee4afd4a231309ad52ce1c640688",
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "4215276571af0a1b3241341b00c434b9d9de788f6103cdffe42d7f45795e4bb3",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
     "tests/meshcore_oracle/stubs/Stream.h": "53d95e4db77aac9088b3b39a5bb0416ca2c4cbca5ab7c2435106bd7212bd20ad"
+  },
+  "host_admin_session_fixture": {
+    "schema_version": 1,
+    "receipt_id": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
+    "status": "implemented",
+    "host_only": true,
+    "production_runtime_proven": false,
+    "wp18_closure_eligible": false,
+    "rf_closure_eligible": false,
+    "ui_closure_eligible": false,
+    "hardware_closure_eligible": false,
+    "source": "tests/meshcore_oracle/meshcore_admin_session_fixture.cpp",
+    "receipt_field": "admin_session_fixture",
+    "identity_bytes": 32,
+    "login_payload_type": "ANON_REQ",
+    "login_response_bytes": 13,
+    "request_schema": "LE32 unique tag, GET_STATUS 0x01, four reserved zero bytes, four deterministic uniqueness bytes",
+    "response_schema": "LE32 reflected request tag followed by the explicit little-endian 56-byte RepeaterStats fields in simple_repeater/MyMesh.h order",
+    "get_status_response_bytes": 60,
+    "repeater_stats_bytes": 56,
+    "repeater_stats_field_order": [
+      "batt_milli_volts",
+      "curr_tx_queue_len",
+      "noise_floor",
+      "last_rssi",
+      "n_packets_recv",
+      "n_packets_sent",
+      "total_air_time_secs",
+      "total_up_time_secs",
+      "n_sent_flood",
+      "n_sent_direct",
+      "n_recv_flood",
+      "n_recv_direct",
+      "err_events",
+      "last_snr",
+      "n_direct_dups",
+      "n_flood_dups",
+      "total_rx_air_time_secs",
+      "n_recv_errors"
+    ],
+    "response_correlation": "exact LE32 tag and complete 32-byte server identity",
+    "routes": [
+      "direct",
+      "flood_path_return"
+    ],
+    "lifecycle": [
+      "timeout_pending_login_state_zeroization",
+      "timeout_pending_request_state_zeroization",
+      "explicit_logout_client_server_session_zeroization"
+    ],
+    "positive_checks": 6,
+    "negative_checks": 16,
+    "negative_matrix": [
+      "wrong_password",
+      "wrong_full_key_colliding_prefix",
+      "wrong_secret_mac",
+      "malformed_payload",
+      "truncated_payload",
+      "extra_payload",
+      "unsolicited_response",
+      "wrong_tag_response",
+      "duplicate_response",
+      "late_response",
+      "replayed_response",
+      "replayed_request",
+      "stale_replayed_login_timestamp",
+      "permission_failure",
+      "response_from_another_full_identity",
+      "request_from_another_full_identity"
+    ],
+    "pinned_upstream_sources": [
+      "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+      "third_party/MeshCore/src/helpers/ClientACL.cpp",
+      "third_party/MeshCore/src/helpers/ClientACL.h",
+      "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+      "third_party/MeshCore/examples/simple_repeater/MyMesh.h",
+      "third_party/MeshCore/src/Mesh.cpp",
+      "third_party/MeshCore/src/Packet.cpp",
+      "third_party/MeshCore/src/Utils.cpp"
+    ]
   },
   "interface": {
     "language": "c_abi",
@@ -658,7 +741,7 @@
       "id": "login_request_response_admin",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "request_schema_tags_and_concrete_packet_pool_dispatch_execution_fixtures",
+      "blocked_by": "concrete_packet_pool_dispatch_runtime_and_physical_delivery_evidence",
       "implemented_prerequisites": [
         "anonymous_login_request_packets",
         "regular_request_response_packets",
@@ -669,8 +752,10 @@
         "authorized_login_acl_transition_fixtures",
         "authenticated_request_replay_transition_fixtures",
         "authenticated_text_replay_response_session_fixtures",
-        "login_response_creation_dispatch_orchestration_fixtures"
-      ]
+        "login_response_creation_dispatch_orchestration_fixtures",
+        "host_authenticated_admin_session_fixture"
+      ],
+      "host_only_receipt": "RCPT-WP04-HOST-ADMIN-SESSION-20260714"
     },
     {
       "id": "signed_advert_packet_creation",
