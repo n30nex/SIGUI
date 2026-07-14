@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "artifact_type": "wp03_release_reproducibility_aggregate",
+  "repository": "n30nex/SIGUI",
+  "pull_request": 90,
+  "source_commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+  "merge": {
+    "head_commit": "f731e465bb5dc31cb1a8a88a82dafda1e3c38577",
+    "parents": [
+      "5a4e7f2777b306ad4d7b62311fd79296d7d45747",
+      "f731e465bb5dc31cb1a8a88a82dafda1e3c38577"
+    ],
+    "tree": "3439772dd333c506a9ebded9e5b695ea88113664"
+  },
+  "merged_main": {
+    "workflow_run": "29300795502",
+    "status": "success",
+    "host_tests_passed": 891,
+    "checksum_contract_tests_passed": 28,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 44,
+    "downloaded_tree_file_count": 214,
+    "downloaded_tree_total_bytes": 72120370,
+    "downloaded_tree_sha256": "f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738",
+    "firmware_manifest_sha256": "6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb",
+    "release_manifest_sha256": "499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18",
+    "package_manifest_sha256": "8323d0865afb8297718af8c8eaf8633e789670a162ffadc7a2a9ed1f3abb0a59",
+    "application_sha256": "a0234efd0d132e833968eeeb69fcb6f00b70bc67df8a557e563c626169253e98",
+    "full_flash_sha256": "1ab37593e8c2d4d231e25dd5720ad0ef6b5d59041c25069033e9b3241a0b2232",
+    "sbom_sha256": "78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037",
+    "provenance_sha256": "7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c"
+  },
+  "full_release_dispatches": [
+    {
+      "label": "first",
+      "workflow_run": "29300805114",
+      "status": "success",
+      "checksum_manifests_verified": 9,
+      "checksum_entries_verified": 89,
+      "downloaded_tree_file_count": 257,
+      "checksum_manifest_sha256": "9a8e4b4691cd9bb98510a53a87ae47c5d9b1d367de6b607f1364178d8504c859",
+      "manifest_sha256": "8800ef8f4735324d7d8940608264d37d8930bc1a72efb01837ea4f669e737853"
+    },
+    {
+      "label": "second",
+      "workflow_run": "29300806682",
+      "status": "success",
+      "checksum_manifests_verified": 9,
+      "checksum_entries_verified": 89,
+      "downloaded_tree_file_count": 257,
+      "checksum_manifest_sha256": "e073e5d168f44e43d4e7157c7ec4b6694e54609d39c7f741a7e781a0de34eff1",
+      "manifest_sha256": "f34242061f28b08409b51f8933b1206d0ed28e3dc0562c338f4aaf44a1d078d9"
+    }
+  ],
+  "full_release_common": {
+    "sbom_sha256": "827c19cbd3362a82a1fe5aaaee150bffb995f0302254072e09f5e5a358e17373",
+    "sbom_package_count": 5,
+    "sbom_file_count": 64,
+    "provenance_sha256": "8cfa73a5fd4acae4a44d1dabc35af8e493b3a79e86b097a2beebd05314fb521b",
+    "provenance_subject_count": 41,
+    "provenance_material_count": 27
+  },
+  "positive_comparator": {
+    "external_receipt": "F:/SIGUI-evidence/actions/pr90-e79fb561-full-release-comparison-exact-29300805114-29300806682.json",
+    "external_receipt_sha256": "babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f",
+    "status": "pass",
+    "reproducible": true,
+    "failures": [],
+    "comparison_checks_passed": 8,
+    "file_count": 45,
+    "stable_payload_count": 43,
+    "stable_payload_fingerprint": "4cf8a96173022af1fa88c68b053e1eb1e73e67abf96a1f9b9a401a250aa70f84",
+    "input_fingerprint": "021028fa268a7543a1a85ea73ac1a7e893e75fa8eb721cc22faf811153036268",
+    "toolchain_fingerprint": "7730a6766362d34e20bd07703eef7abdb66a265318135edd866fafc7d1e8452a",
+    "normalized_manifest_sha256": "05132f0d29dda659b235080b8152052d54947162070b924980ee15b26c72a1c1"
+  },
+  "preserved_negative_comparator": {
+    "external_receipt": "F:/SIGUI-evidence/actions/pr90-8b7b2c03-full-release-comparison-29299613481-29299614693.json",
+    "external_receipt_sha256": "a03bdb8112bc309a64ea185d2d29e7a09a8e41a282dd8fc22e2b466c9218a31e",
+    "source_commit": "8b7b2c0368216bfe2f945d93323384ff6a10d7db",
+    "workflow_runs": [
+      "29299613481",
+      "29299614693"
+    ],
+    "error_code": "invalid_sbom",
+    "root_cause": "WindowsPath case-folded package ordering differed from canonical POSIX ordering while final records matched.",
+    "fixed_by": "f731e465bb5dc31cb1a8a88a82dafda1e3c38577",
+    "closure_eligible": false
+  },
+  "non_product_anomalies": {
+    "stale_github_check_run": {
+      "check_run_id": "86982414954",
+      "actions_run": "29300286530",
+      "head_commit": "f731e465bb5dc31cb1a8a88a82dafda1e3c38577",
+      "name": "change-filter",
+      "api_status": "in_progress",
+      "conclusion": "success",
+      "completed_at": "2026-07-14T02:07:35Z",
+      "product_failure": false
+    },
+    "operator_context_source_guard": {
+      "external_receipt": "F:/SIGUI-evidence/actions/pr90-e79fb561-full-release-comparison-29300805114-29300806682.json",
+      "external_receipt_sha256": "8bfc4d8cf586c1b5c1cf4d78c9cd734275305cc3185f0357cf619a4ad4050f6e",
+      "error_code": "source_sha_mismatch",
+      "cause": "Comparator was first invoked outside the detached exact-e79 worktree.",
+      "superseded_by": "babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f",
+      "product_failure": false
+    }
+  },
+  "checks": {
+    "exact_merge_identity": true,
+    "merged_main_actions_success": true,
+    "merged_main_checksums_verified": true,
+    "two_distinct_full_release_runs": true,
+    "full_release_checksums_verified": true,
+    "sbom_and_provenance_match": true,
+    "reproducibility_comparator_passed": true,
+    "negative_receipt_preserved": true
+  },
+  "proof_banked": true,
+  "closure_eligible": true,
+  "valid": true,
+  "release_ready": false,
+  "release_note": "This closes WP-03 only. The exact-main release audit remains fail-closed for unrelated release gates."
+}
