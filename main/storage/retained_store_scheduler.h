@@ -14,6 +14,7 @@ typedef enum {
     D1L_RETAINED_STORE_DIRECT_MESSAGES,
     D1L_RETAINED_STORE_PACKETS,
     D1L_RETAINED_STORE_ROUTES,
+    D1L_RETAINED_STORE_CONTACTS,
 } d1l_retained_store_kind_t;
 
 typedef enum {

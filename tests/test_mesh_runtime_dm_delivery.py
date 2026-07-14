@@ -336,8 +336,8 @@ def test_ack_store_masks_failed_persistence_until_same_revision_retry_is_durable
     header = read("main/mesh/dm_store.h")
     transition = body(
         store,
+        "static esp_err_t transition_delivery_internal",
         "esp_err_t d1l_dm_store_transition_delivery",
-        "esp_err_t d1l_dm_store_mark_acked",
     )
 
     assert "bool persistence_retry;" in header

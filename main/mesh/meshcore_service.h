@@ -33,6 +33,9 @@ typedef struct {
     uint32_t dm_route_preboot_fallback;
     uint32_t dm_route_stale_fallback;
     uint32_t dm_route_malformed_fallback;
+    uint32_t dm_route_expired_fallback;
+    uint32_t dm_route_failed_fallback;
+    uint32_t dm_route_direct_retry_fallback;
     uint32_t dm_route_last_path_age_ms;
     uint8_t dm_route_last_reason;
     uint64_t dm_delivery_session_id;

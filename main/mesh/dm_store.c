@@ -2685,12 +2685,13 @@ static esp_err_t apply_delivery_transition_locked(
     return ESP_OK;
 }
 
-esp_err_t d1l_dm_store_transition_delivery(
+static esp_err_t transition_delivery_internal(
     uint64_t delivery_session_id,
     d1l_dm_delivery_state_t expected_state,
     uint32_t expected_delivery_revision,
     d1l_dm_delivery_state_t next_state,
     d1l_dm_delivery_reason_t reason, esp_err_t error,
+    bool rebind_retry_ack, uint32_t retry_ack_hash,
     d1l_dm_delivery_transition_outcome_t *outcome)
 {
     if (outcome) {
@@ -2734,7 +2735,20 @@ esp_err_t d1l_dm_store_transition_delivery(
         outcome->previous_state = entry->delivery_state;
         outcome->current_state = entry->delivery_state;
         outcome->retry_count = entry->delivery_retry_count;
+        outcome->attempt = entry->attempt;
+        outcome->ack_hash = entry->ack_hash;
         outcome->delivery_revision = entry->delivery_revision;
+    }
+    if (rebind_retry_ack &&
+        (expected_state != D1L_DM_DELIVERY_RETRY_WAIT ||
+         next_state != D1L_DM_DELIVERY_RETRY_TX ||
+         reason != D1L_DM_DELIVERY_REASON_RETRY_STARTED ||
+         error != ESP_OK)) {
+        d1l_store_lock_give(&s_store_lock);
+        if (outcome) {
+            outcome->error = ESP_ERR_INVALID_STATE;
+        }
+        return ESP_ERR_INVALID_STATE;
     }
     const bool persistence_retry =
         next_state == D1L_DM_DELIVERY_ACKNOWLEDGED &&
@@ -2784,6 +2798,9 @@ esp_err_t d1l_dm_store_transition_delivery(
         }
         return ret;
     }
+    if (rebind_retry_ack) {
+        entry->ack_hash = retry_ack_hash;
+    }
     if (s_content_revision < UINT32_MAX) {
         s_content_revision++;
     }
@@ -2796,6 +2813,8 @@ esp_err_t d1l_dm_store_transition_delivery(
         outcome->changed = true;
         outcome->current_state = entry->delivery_state;
         outcome->retry_count = entry->delivery_retry_count;
+        outcome->attempt = entry->attempt;
+        outcome->ack_hash = entry->ack_hash;
         outcome->delivery_revision = entry->delivery_revision;
     }
     d1l_store_lock_give(&s_store_lock);
@@ -2806,6 +2825,31 @@ esp_err_t d1l_dm_store_transition_delivery(
         outcome->error = ret;
     }
     return ret;
+}
+
+esp_err_t d1l_dm_store_transition_delivery(
+    uint64_t delivery_session_id,
+    d1l_dm_delivery_state_t expected_state,
+    uint32_t expected_delivery_revision,
+    d1l_dm_delivery_state_t next_state,
+    d1l_dm_delivery_reason_t reason, esp_err_t error,
+    d1l_dm_delivery_transition_outcome_t *outcome)
+{
+    return transition_delivery_internal(
+        delivery_session_id, expected_state, expected_delivery_revision,
+        next_state, reason, error, false, 0U, outcome);
+}
+
+esp_err_t d1l_dm_store_transition_delivery_retry(
+    uint64_t delivery_session_id, uint32_t expected_delivery_revision,
+    uint32_t retry_ack_hash,
+    d1l_dm_delivery_transition_outcome_t *outcome)
+{
+    return transition_delivery_internal(
+        delivery_session_id, D1L_DM_DELIVERY_RETRY_WAIT,
+        expected_delivery_revision, D1L_DM_DELIVERY_RETRY_TX,
+        D1L_DM_DELIVERY_REASON_RETRY_STARTED, ESP_OK, true,
+        retry_ack_hash, outcome);
 }
 
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash,

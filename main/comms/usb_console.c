@@ -1206,7 +1206,7 @@ static void cmd_mesh_status(void)
 {
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
     ok_begin("mesh status");
-    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"ack_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,\"duplicate_rows_suppressed\":%lu,\"last_hash\":%lu,\"last_error\":\"%s\"},\"dm_route\":{\"direct_selected\":%lu,\"flood_selected\":%lu,\"missing_fallback\":%lu,\"preboot_fallback\":%lu,\"stale_fallback\":%lu,\"malformed_fallback\":%lu,\"last_reason\":\"%s\",\"last_path_age_ms\":%lu}",
+    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"ack_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,\"duplicate_rows_suppressed\":%lu,\"last_hash\":%lu,\"last_error\":\"%s\"},\"dm_route\":{\"direct_selected\":%lu,\"flood_selected\":%lu,\"missing_fallback\":%lu,\"preboot_fallback\":%lu,\"stale_fallback\":%lu,\"malformed_fallback\":%lu,\"expired_fallback\":%lu,\"failed_fallback\":%lu,\"direct_retry_fallback\":%lu,\"last_reason\":\"%s\",\"last_path_age_ms\":%lu}",
            d1l_meshcore_service_state_name(status.state), bool_json(status.identity_ready),
            bool_json(status.radio_ready), bool_json(status.companion_framing_ready),
            status.path_hash_bytes, (unsigned long)status.rx_packets,
@@ -1224,6 +1224,9 @@ static void cmd_mesh_status(void)
            (unsigned long)status.dm_route_preboot_fallback,
            (unsigned long)status.dm_route_stale_fallback,
            (unsigned long)status.dm_route_malformed_fallback,
+           (unsigned long)status.dm_route_expired_fallback,
+           (unsigned long)status.dm_route_failed_fallback,
+           (unsigned long)status.dm_route_direct_retry_fallback,
            d1l_meshcore_route_selection_reason_name(
                (d1l_meshcore_route_selection_reason_t)status.dm_route_last_reason),
            (unsigned long)status.dm_route_last_path_age_ms);

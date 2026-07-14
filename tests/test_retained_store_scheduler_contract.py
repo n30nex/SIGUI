@@ -20,7 +20,13 @@ def test_common_scheduler_owns_descriptor_order_and_one_forced_deadline():
     descriptor_block = worker.split(
         "static const d1l_retained_store_descriptor_t s_retained_stores[]", 1
     )[1].split("static int64_t scheduler_clock", 1)[0]
-    names = ['.name = "messages"', '.name = "direct_messages"', '.name = "packets"', '.name = "routes"']
+    names = [
+        '.name = "messages"',
+        '.name = "direct_messages"',
+        '.name = "packets"',
+        '.name = "routes"',
+        '.name = "contacts"',
+    ]
     positions = [descriptor_block.index(name) for name in names]
     assert positions == sorted(positions)
 

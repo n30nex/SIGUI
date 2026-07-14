@@ -152,7 +152,7 @@ def test_outbound_delivery_state_is_persisted_cas_guarded_and_reboot_safe():
         1
     ].split("static bool delivery_reason_matches_target", 1)[0]
     assert "esp_random" not in migration
-    transition = source.split("esp_err_t d1l_dm_store_transition_delivery(", 1)[
+    transition = source.split("static esp_err_t transition_delivery_internal(", 1)[
         1
     ].split("esp_err_t d1l_dm_store_mark_acked", 1)[0]
     assert "s_entries[i].delivery_session_id == delivery_session_id" in transition
@@ -162,6 +162,8 @@ def test_outbound_delivery_state_is_persisted_cas_guarded_and_reboot_safe():
     assert "entry->delivered = entry->acked" in source
     assert "entry->attempt++" in source
     assert "entry->attempt == UINT8_MAX" in source
+    assert "d1l_dm_store_transition_delivery_retry" in header
+    assert "entry->ack_hash = retry_ack_hash" in transition
     assert "blob->entries[previous].delivery_session_id" in source
     assert '"mesh/dm_delivery_state.c"' in cmake
 

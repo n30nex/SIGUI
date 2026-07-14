@@ -26,6 +26,7 @@ def test_meshcore_route_selection_native_vectors(tmp_path: Path):
         "-I",
         str(ROOT / "main"),
         str(ROOT / "main/mesh/meshcore_wire.c"),
+        str(ROOT / "main/mesh/meshcore_path_state.c"),
         str(ROOT / "tests/native/meshcore_route_selection_test.c"),
         "-o",
         str(binary),

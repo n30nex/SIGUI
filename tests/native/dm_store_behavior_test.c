@@ -2161,14 +2161,16 @@ static void test_retry_attempt_advances_once_and_fails_closed_at_overflow(void)
                D1L_DM_DELIVERY_RETRY_WAIT,
                D1L_DM_DELIVERY_REASON_RETRY_SCHEDULED, ESP_FAIL,
                NULL) == ESP_OK);
-    assert(d1l_dm_store_transition_delivery(
-               session_id, D1L_DM_DELIVERY_RETRY_WAIT, 3U,
-               D1L_DM_DELIVERY_RETRY_TX,
-               D1L_DM_DELIVERY_REASON_RETRY_STARTED, ESP_OK,
-               NULL) == ESP_OK);
+    d1l_dm_delivery_transition_outcome_t retry = {0};
+    assert(d1l_dm_store_transition_delivery_retry(
+               session_id, 3U, 0x6061U, &retry) == ESP_OK);
+    assert(retry.changed && retry.durable);
+    assert(retry.attempt == 1U && retry.retry_count == 1U);
+    assert(retry.ack_hash == 0x6061U);
     d1l_dm_entry_t row = {0};
     assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
     assert(row.attempt == 1U && row.delivery_retry_count == 1U);
+    assert(row.ack_hash == 0x6061U);
 
     assert(d1l_dm_store_transition_delivery(
                session_id, D1L_DM_DELIVERY_RETRY_TX, 4U,
@@ -2214,6 +2216,115 @@ static void test_retry_attempt_advances_once_and_fails_closed_at_overflow(void)
     assert(rejected.delivery_revision == 3U);
     assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
     assert(row.attempt == UINT8_MAX && row.delivery_retry_count == 0U);
+}
+
+static void test_direct_timeout_flood_retry_then_final_timeout_is_one_session(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    d1l_dm_store_append_outcome_t append = {0};
+    assert(d1l_dm_store_append_tx(
+               "0123456789abcdef", "Node", "one-flood-retry", -50, 40,
+               1U, 2U, 0U, 0x7000U, &append) == ESP_OK);
+    const uint64_t session = append.delivery_session_id;
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_QUEUED, 1U,
+               D1L_DM_DELIVERY_WAITING_RADIO,
+               D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_WAITING_RADIO, 2U,
+               D1L_DM_DELIVERY_TX_ACTIVE,
+               D1L_DM_DELIVERY_REASON_RADIO_STARTED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_TX_ACTIVE, 3U,
+               D1L_DM_DELIVERY_TX_DONE,
+               D1L_DM_DELIVERY_REASON_RADIO_COMPLETED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_TX_DONE, 4U,
+               D1L_DM_DELIVERY_AWAITING_ACK,
+               D1L_DM_DELIVERY_REASON_ACK_EXPECTED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_AWAITING_ACK, 5U,
+               D1L_DM_DELIVERY_RETRY_WAIT,
+               D1L_DM_DELIVERY_REASON_RETRY_SCHEDULED,
+               ESP_ERR_TIMEOUT, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery_retry(
+               session, 6U, 0x7001U, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_RETRY_TX, 7U,
+               D1L_DM_DELIVERY_WAITING_RADIO,
+               D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_WAITING_RADIO, 8U,
+               D1L_DM_DELIVERY_TX_ACTIVE,
+               D1L_DM_DELIVERY_REASON_RADIO_STARTED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_TX_ACTIVE, 9U,
+               D1L_DM_DELIVERY_TX_DONE,
+               D1L_DM_DELIVERY_REASON_RADIO_COMPLETED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_TX_DONE, 10U,
+               D1L_DM_DELIVERY_AWAITING_ACK,
+               D1L_DM_DELIVERY_REASON_ACK_EXPECTED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_AWAITING_ACK, 11U,
+               D1L_DM_DELIVERY_FAILED_TIMEOUT,
+               D1L_DM_DELIVERY_REASON_ACK_TIMEOUT,
+               ESP_ERR_TIMEOUT, NULL) == ESP_OK);
+
+    d1l_dm_entry_t row = {0};
+    assert(d1l_dm_store_find_delivery_session(session, &row));
+    assert(row.delivery_state == D1L_DM_DELIVERY_FAILED_TIMEOUT);
+    assert(row.delivery_revision == 12U);
+    assert(row.attempt == 1U && row.delivery_retry_count == 1U);
+    assert(row.ack_hash == 0x7001U);
+    assert(!row.acked && !row.delivered);
+}
+
+static void test_awaiting_ack_owner_survives_transition_persistence_failure(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    d1l_dm_store_append_outcome_t append = {0};
+    assert(d1l_dm_store_append_tx(
+               "0123456789abcdef", "Node", "txdone-persist-failure",
+               -50, 40, 1U, 1U, 0U, 0x7100U, &append) == ESP_OK);
+    const uint64_t session = append.delivery_session_id;
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_QUEUED, 1U,
+               D1L_DM_DELIVERY_WAITING_RADIO,
+               D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_WAITING_RADIO, 2U,
+               D1L_DM_DELIVERY_TX_ACTIVE,
+               D1L_DM_DELIVERY_REASON_RADIO_STARTED, ESP_OK, NULL) == ESP_OK);
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_TX_ACTIVE, 3U,
+               D1L_DM_DELIVERY_TX_DONE,
+               D1L_DM_DELIVERY_REASON_RADIO_COMPLETED, ESP_OK, NULL) == ESP_OK);
+
+    s_nvs_write_error = ESP_FAIL;
+    d1l_dm_delivery_transition_outcome_t awaiting = {0};
+    assert(d1l_dm_store_transition_delivery(
+               session, D1L_DM_DELIVERY_TX_DONE, 4U,
+               D1L_DM_DELIVERY_AWAITING_ACK,
+               D1L_DM_DELIVERY_REASON_ACK_EXPECTED, ESP_OK, &awaiting) ==
+           ESP_FAIL);
+    assert(awaiting.changed && !awaiting.durable);
+    assert(awaiting.current_state == D1L_DM_DELIVERY_AWAITING_ACK);
+    assert(awaiting.delivery_session_id == session);
+    assert(awaiting.delivery_revision == 5U);
+    d1l_dm_entry_t row = {0};
+    assert(d1l_dm_store_find_delivery_session(session, &row));
+    assert(row.delivery_state == D1L_DM_DELIVERY_AWAITING_ACK);
+    assert(row.delivery_revision == 5U);
+    assert(d1l_dm_store_stats().persistence_dirty);
+
+    s_nvs_write_error = ESP_OK;
+    s_now_us +=
+        (int64_t)D1L_DM_STORE_PERSIST_RETRY_INTERVAL_MS * 1000LL;
+    assert(d1l_dm_store_flush() == ESP_OK);
+    assert(!d1l_dm_store_stats().persistence_dirty);
 }
 
 int main(void)
@@ -2265,6 +2376,8 @@ int main(void)
     test_late_sd_resequence_transitions_by_stable_session_id();
     test_delivery_transition_rejects_aba_stale_revision();
     test_retry_attempt_advances_once_and_fails_closed_at_overflow();
+    test_direct_timeout_flood_retry_then_final_timeout_is_one_session();
+    test_awaiting_ack_owner_survives_transition_persistence_failure();
     puts("native DM retained durability: ok");
     return 0;
 }

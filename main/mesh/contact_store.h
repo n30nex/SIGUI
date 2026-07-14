@@ -6,12 +6,14 @@
 
 #include "esp_err.h"
 
+#include "mesh/meshcore_path_state.h"
 #include "mesh/node_store.h"
 
 #define D1L_CONTACT_STORE_CAPACITY 16U
 #define D1L_CONTACT_ALIAS_LEN 32U
 #define D1L_CONTACT_OUT_PATH_MAX 64U
 #define D1L_CONTACT_EXPORT_URI_LEN 224U
+#define D1L_CONTACT_PATH_PERSIST_MIN_INTERVAL_MS 1000U
 
 typedef enum {
     D1L_CONTACT_VERIFICATION_NONE = 0,
@@ -43,6 +45,7 @@ typedef struct {
     uint32_t verified_at_ms;
     uint32_t signed_advert_timestamp;
     uint32_t last_heard_ms;
+    d1l_meshcore_path_state_t out_path_state;
 } d1l_contact_entry_t;
 
 typedef struct {
@@ -51,6 +54,15 @@ typedef struct {
     uint32_t dropped_oldest;
     size_t count;
     size_t capacity;
+    /* Widened for shared retained-worker telemetry. The contact store's
+     * 32-bit backing counter saturates and rejects further mutations instead
+     * of wrapping, so equality can never ABA within a boot. */
+    uint64_t persistence_revision;
+    uint32_t persistence_commit_count;
+    uint32_t persistence_coalesced_count;
+    uint32_t persistence_fail_count;
+    esp_err_t persistence_last_error;
+    bool persistence_dirty;
 } d1l_contact_store_stats_t;
 
 typedef enum {
@@ -74,6 +86,8 @@ typedef enum {
 
 esp_err_t d1l_contact_store_init(void);
 esp_err_t d1l_contact_store_clear(void);
+esp_err_t d1l_contact_store_flush(void);
+esp_err_t d1l_contact_store_flush_if_due(void);
 esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char *alias,
                                              const d1l_node_entry_t *heard_node);
 /*
@@ -95,6 +109,16 @@ esp_err_t d1l_contact_store_import_uri(
     d1l_contact_entry_t *out_entry);
 esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *path,
                                         uint8_t path_len);
+esp_err_t d1l_contact_store_update_path_from_source(
+    const char *fingerprint, const uint8_t *path, uint8_t path_len,
+    d1l_meshcore_path_source_t source, d1l_contact_entry_t *out_entry);
+esp_err_t d1l_contact_store_prepare_path_route(
+    const char *fingerprint, uint32_t now_ms, d1l_contact_entry_t *out_entry,
+    bool *out_expired);
+esp_err_t d1l_contact_store_note_path_result(
+    const char *fingerprint, uint32_t expected_generation, bool success,
+    uint32_t now_ms, d1l_contact_entry_t *out_entry,
+    d1l_meshcore_path_result_t *out_result);
 esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bool muted,
                                       d1l_contact_entry_t *out_entry);
 esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
@@ -113,3 +137,7 @@ bool d1l_contact_store_find_by_fingerprint(const char *fingerprint, d1l_contact_
 bool d1l_contact_store_find_by_public_key(const char *public_key_hex,
                                           d1l_contact_entry_t *out_entry);
 size_t d1l_contact_store_copy_recent(d1l_contact_entry_t *out_entries, size_t max_entries);
+
+#ifdef D1L_CONTACT_STORE_TEST_HOOKS
+esp_err_t d1l_contact_store_test_set_persistence_revision(uint32_t revision);
+#endif
