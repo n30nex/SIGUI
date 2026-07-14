@@ -1692,7 +1692,8 @@ bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry)
 
 static esp_err_t append_raw_internal(const d1l_packet_log_entry_t *entry,
                                      const uint8_t *raw, size_t raw_len,
-                                     bool persist, uint32_t *out_stored_seq)
+                                     bool persist, bool defer_flush,
+                                     uint32_t *out_stored_seq)
 {
     if (out_stored_seq) {
         *out_stored_seq = 0U;
@@ -1705,8 +1706,18 @@ static esp_err_t append_raw_internal(const d1l_packet_log_entry_t *entry,
         return init_ret;
     }
 
-    d1l_store_lock_take(&s_append_clear_lock);
-    d1l_store_lock_take(&s_store_lock);
+    if (defer_flush) {
+        if (!d1l_store_lock_try_take(&s_append_clear_lock)) {
+            return ESP_ERR_TIMEOUT;
+        }
+        if (!d1l_store_lock_try_take(&s_store_lock)) {
+            d1l_store_lock_give(&s_append_clear_lock);
+            return ESP_ERR_TIMEOUT;
+        }
+    } else {
+        d1l_store_lock_take(&s_append_clear_lock);
+        d1l_store_lock_take(&s_store_lock);
+    }
     if (s_clear_in_progress) {
         d1l_store_lock_give(&s_store_lock);
         d1l_store_lock_give(&s_append_clear_lock);
@@ -1779,6 +1790,10 @@ static esp_err_t append_raw_internal(const d1l_packet_log_entry_t *entry,
          s_last_sd_flush_ms == 0 ||
          now_ms - s_last_sd_flush_ms >= D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS);
     d1l_store_lock_give(&s_store_lock);
+    if (defer_flush) {
+        d1l_store_lock_give(&s_append_clear_lock);
+        return ESP_OK;
+    }
     const esp_err_t ret = persist_store(flush_primary, false);
     if (ret == ESP_OK && out_stored_seq) {
         /* The append/clear owner excludes another packet append while a
@@ -1797,7 +1812,8 @@ esp_err_t d1l_packet_log_append_raw_checked(const d1l_packet_log_entry_t *entry,
                                             const uint8_t *raw, size_t raw_len,
                                             uint32_t *out_stored_seq)
 {
-    return append_raw_internal(entry, raw, raw_len, true, out_stored_seq);
+    return append_raw_internal(entry, raw, raw_len, true, false,
+                               out_stored_seq);
 }
 
 bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
@@ -1806,10 +1822,16 @@ bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_
     return d1l_packet_log_append_raw_checked(entry, raw, raw_len, NULL) == ESP_OK;
 }
 
+bool d1l_packet_log_append_raw_deferred(const d1l_packet_log_entry_t *entry,
+                                        const uint8_t *raw, size_t raw_len)
+{
+    return append_raw_internal(entry, raw, raw_len, true, true, NULL) == ESP_OK;
+}
+
 bool d1l_packet_log_append_raw_volatile(const d1l_packet_log_entry_t *entry,
                                         const uint8_t *raw, size_t raw_len)
 {
-    return append_raw_internal(entry, raw, raw_len, false, NULL) == ESP_OK;
+    return append_raw_internal(entry, raw, raw_len, false, false, NULL) == ESP_OK;
 }
 
 esp_err_t d1l_packet_log_flush(void)
