@@ -20,6 +20,7 @@
 #include "mesh/route_store.h"
 #include "mesh/route_store_worker.h"
 #include "mesh/meshcore_service.h"
+#include "platform/time_service.h"
 #include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
@@ -40,6 +41,11 @@ void app_main(void)
     if (retained_nvs_ret != ESP_OK) {
         ESP_LOGE(TAG, "retained NVS unavailable; preserving legacy mirrors: %s",
                  esp_err_to_name(retained_nvs_ret));
+    }
+    esp_err_t time_ret = d1l_time_service_init();
+    if (time_ret != ESP_OK) {
+        ESP_LOGE(TAG, "truthful time protocol guard unavailable: %s",
+                 esp_err_to_name(time_ret));
     }
 
     printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\",\"boot_nonce\":%lu,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"retained_nvs_marker_ready\":%s,\"retained_nvs_markers_complete\":%s,\"retained_nvs_anchor_ready\":%s,\"retained_nvs_sentinel_ready\":%s,\"retained_nvs_external_init_required\":%s,\"retained_nvs_initialized_this_boot\":%s,\"retained_nvs_ready\":%s,\"retained_nvs_init_error\":\"%s\",\"retained_nvs_migration_error\":\"%s\"}\n",

@@ -69,6 +69,7 @@ esp_err_t d1l_settings_clear_wifi_profile(void);
 esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enabled,
                                            bool ble_companion_enabled, bool observer_enabled);
 esp_err_t d1l_settings_reset_onboarding(void);
+/* Compatibility alias implemented by the truthful time service. */
 esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp);
 const d1l_settings_t *d1l_settings_current(void);
 esp_err_t d1l_settings_load_status(void);

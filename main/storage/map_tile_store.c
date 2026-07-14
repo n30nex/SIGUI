@@ -5,13 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <time.h>
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
-#include "esp_netif_sntp.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "platform/time_service.h"
 #include "storage/storage_status_policy.h"
 
 #define D1L_MAP_TILE_CANARY_Z 12U
@@ -19,14 +16,8 @@
 #define D1L_MAP_TILE_CANARY_Y 2U
 #define D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000
 #define D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U
-#define D1L_MAP_TILE_TIME_SYNC_TIMEOUT_MS 15000U
-#define D1L_MAP_TILE_TIME_SYNC_SLICE_MS 500U
-#define D1L_MAP_TILE_TLS_MIN_EPOCH 1704067200LL
 #define D1L_MAP_TILE_ATTRIBUTION_PATH "map/tiles/attribution.json"
 #define D1L_MAP_TILE_ATTRIBUTION_TMP_PATH "map/tiles/attribution.tmp"
-
-static bool s_map_sntp_initialized;
-static bool s_map_sntp_can_sync_wait;
 
 bool d1l_map_tile_store_coord_valid(uint8_t z, uint32_t x, uint32_t y)
 {
@@ -320,66 +311,6 @@ static bool continue_allowed(d1l_map_tile_continue_cb_t should_continue, void *c
     return !should_continue || should_continue(context);
 }
 
-static bool tls_clock_ready(void)
-{
-    const time_t now = time(NULL);
-    return now != (time_t)-1 && (int64_t)now >= D1L_MAP_TILE_TLS_MIN_EPOCH;
-}
-
-static esp_err_t ensure_tls_clock(d1l_map_tile_continue_cb_t should_continue,
-                                  void *continue_context)
-{
-    if (tls_clock_ready()) {
-        return ESP_OK;
-    }
-    if (!s_map_sntp_initialized) {
-        esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-        const esp_err_t init_ret = esp_netif_sntp_init(&config);
-        if (init_ret != ESP_OK && init_ret != ESP_ERR_INVALID_STATE) {
-            return init_ret;
-        }
-        s_map_sntp_initialized = true;
-        /* Another owner may have initialized SNTP without wait_for_sync.  In
-         * that case we share its clock but poll it instead of requiring its
-         * private semaphore. */
-        s_map_sntp_can_sync_wait = init_ret == ESP_OK;
-    }
-
-    uint32_t elapsed_ms = 0U;
-    while (elapsed_ms < D1L_MAP_TILE_TIME_SYNC_TIMEOUT_MS) {
-        if (!continue_allowed(should_continue, continue_context)) {
-            return ESP_ERR_INVALID_STATE;
-        }
-        uint32_t slice_ms = D1L_MAP_TILE_TIME_SYNC_TIMEOUT_MS - elapsed_ms;
-        if (slice_ms > D1L_MAP_TILE_TIME_SYNC_SLICE_MS) {
-            slice_ms = D1L_MAP_TILE_TIME_SYNC_SLICE_MS;
-        }
-        TickType_t wait_ticks = pdMS_TO_TICKS(slice_ms);
-        if (wait_ticks == 0U) {
-            wait_ticks = 1U;
-        }
-        esp_err_t wait_ret = ESP_ERR_TIMEOUT;
-        if (s_map_sntp_can_sync_wait) {
-            wait_ret = esp_netif_sntp_sync_wait(wait_ticks);
-            if (wait_ret == ESP_ERR_INVALID_STATE) {
-                s_map_sntp_can_sync_wait = false;
-                vTaskDelay(wait_ticks);
-                wait_ret = ESP_ERR_TIMEOUT;
-            }
-        } else {
-            vTaskDelay(wait_ticks);
-        }
-        if (tls_clock_ready()) {
-            return ESP_OK;
-        }
-        if (wait_ret != ESP_ERR_TIMEOUT && wait_ret != ESP_ERR_NOT_FINISHED) {
-            return wait_ret;
-        }
-        elapsed_ms += slice_ms;
-    }
-    return ESP_ERR_TIMEOUT;
-}
-
 static void init_download_result(d1l_map_tile_download_result_t *result,
                                  uint8_t z,
                                  uint32_t x,
@@ -588,7 +519,9 @@ esp_err_t d1l_map_tile_store_fetch(uint8_t z,
         *out_result = result;
         return result.last_error;
     }
-    esp_err_t ret = ensure_tls_clock(should_continue, continue_context);
+    esp_err_t ret = d1l_time_service_wait_for_certificate_time(
+        D1L_TIME_TLS_WAIT_TIMEOUT_MS, D1L_TIME_TLS_WAIT_SLICE_MS,
+        should_continue, continue_context);
     if (ret != ESP_OK) {
         if (!continue_allowed(should_continue, continue_context)) {
             result.cancelled = true;
