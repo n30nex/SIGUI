@@ -7,13 +7,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_dm_retained_backend_reconciliation_and_split_retry(tmp_path):
+def test_dm_delivery_state_native_matrix(tmp_path):
     compiler = shutil.which("gcc") or shutil.which("clang")
     if compiler is None:
-        raise AssertionError("A C compiler is required for native DM store tests")
+        raise AssertionError("A C compiler is required for native DM state tests")
 
     executable = tmp_path / (
-        "dm_store_behavior_test.exe" if os.name == "nt" else "dm_store_behavior_test"
+        "dm_delivery_state_test.exe" if os.name == "nt" else "dm_delivery_state_test"
     )
     command = [
         compiler,
@@ -22,12 +22,9 @@ def test_dm_retained_backend_reconciliation_and_split_retry(tmp_path):
         "-Wextra",
         "-Werror",
         "-I",
-        str(ROOT / "tests/native/stubs"),
-        "-I",
         str(ROOT / "main"),
         str(ROOT / "main/mesh/dm_delivery_state.c"),
-        str(ROOT / "main/mesh/dm_store.c"),
-        str(ROOT / "tests/native/dm_store_behavior_test.c"),
+        str(ROOT / "tests/native/dm_delivery_state_test.c"),
         "-o",
         str(executable),
     ]
@@ -35,4 +32,4 @@ def test_dm_retained_backend_reconciliation_and_split_retry(tmp_path):
     completed = subprocess.run(
         [str(executable)], cwd=ROOT, check=True, capture_output=True, text=True
     )
-    assert completed.stdout.strip() == "native DM retained durability: ok"
+    assert completed.stdout.strip() == "native DM delivery state: ok"

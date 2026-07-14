@@ -29,6 +29,7 @@ idf_component_register(
         "map/map_view_service.c"
         "mesh/advert_data.c"
         "mesh/contact_store.c"
+        "mesh/dm_delivery_state.c"
         "mesh/dm_store.c"
         "mesh/mesh_inspector.c"
         "mesh/message_store.c"

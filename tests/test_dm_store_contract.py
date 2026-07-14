@@ -26,7 +26,8 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert 'D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"' in blob_store
     assert 'D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"' in blob_store
     assert "D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
-    assert "D1L_DM_STORE_SCHEMA 5U" in source
+    assert "D1L_DM_STORE_SCHEMA 6U" in source
+    assert "D1L_DM_STORE_SCHEMA_V5 5U" in source
     assert "D1L_DM_STORE_SCHEMA_V4 4U" in source
     assert "D1L_DM_STORE_SCHEMA_V3 3U" in source
     assert "D1L_DM_STORE_SCHEMA_V2 2U" in source
@@ -35,6 +36,9 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "convert_v1_blob" in source
     assert "convert_v3_blob" in source
     assert "convert_v4_blob" in source
+    assert "convert_v5_blob" in source
+    assert "d1l_dm_entry_v5_t" in source
+    assert "d1l_dm_store_blob_v5_t" in source
     assert "d1l_dm_entry_v4_t" in source
     assert "d1l_dm_store_blob_v4_t" in source
     assert "D1L_DM_IDENTITY_DIGEST_BYTES 32U" in header
@@ -80,7 +84,7 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "nvs_fallback_dirty" in header
     assert "nvs_get_blob" not in source
     assert "nvs_set_blob" not in source
-    assert "entry->acked = true" in source
+    assert "entry->acked = next_state == D1L_DM_DELIVERY_ACKNOWLEDGED" in source
     assert "path_hash_bytes > 3U" in source
     assert "path_hops > 63U" in source
     assert "(uint16_t)path_hash_bytes * path_hops > 64U" in source
@@ -96,6 +100,70 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "static d1l_dm_entry_t s_overlay_entries" in source
     assert '"mesh/dm_store.c"' in cmake
     assert "d1l_dm_store_init()" in app_main
+
+
+def test_outbound_delivery_state_is_persisted_cas_guarded_and_reboot_safe():
+    header = read("main/mesh/dm_store.h")
+    source = read("main/mesh/dm_store.c")
+    state_h = read("main/mesh/dm_delivery_state.h")
+    state_c = read("main/mesh/dm_delivery_state.c")
+    cmake = read("main/CMakeLists.txt")
+
+    for state in (
+        "QUEUED",
+        "WAITING_RADIO",
+        "TX_ACTIVE",
+        "TX_DONE",
+        "AWAITING_ACK",
+        "ACKNOWLEDGED",
+        "RETRY_WAIT",
+        "RETRY_TX",
+        "FAILED_RADIO",
+        "FAILED_TIMEOUT",
+        "FAILED_QUEUE",
+        "INTERRUPTED_BY_REBOOT",
+        "CANCELLED",
+    ):
+        assert f"D1L_DM_DELIVERY_{state}" in state_h
+
+    assert "d1l_dm_delivery_transition_allowed" in state_h
+    assert "d1l_dm_delivery_interrupted_by_reboot" in state_h
+    assert "from == to" in state_c
+    assert "from != D1L_DM_DELIVERY_FAILED_QUEUE" in state_c
+    assert "delivery_state" in header
+    assert "uint64_t delivery_session_id" in header
+    assert "delivery_reason" in header
+    assert "delivery_last_error" in header
+    assert "delivery_retry_count" in header
+    assert "delivery_revision" in header
+    assert "d1l_dm_store_transition_delivery" in header
+    assert "d1l_dm_store_append_tx" in header
+    assert "uint32_t expected_delivery_revision" in header
+    assert "entry->delivery_state != expected_state" in source
+    assert "entry->delivery_revision != expected_delivery_revision" in source
+    assert "apply_delivery_transition_locked" in source
+    assert "normalize_interrupted_delivery_locked" in source
+    assert "D1L_DM_DELIVERY_REASON_REBOOT_RECOVERY" in source
+    assert "initialize_legacy_delivery_metadata" in source
+    assert "D1L_DM_DELIVERY_REASON_LEGACY_IMPORT" in source
+    assert "entry.delivered = acked;" in source
+    assert "migration_delivery_session_id" in source
+    migration = source.split("static uint64_t migration_delivery_session_id", 1)[
+        1
+    ].split("static bool delivery_reason_matches_target", 1)[0]
+    assert "esp_random" not in migration
+    transition = source.split("esp_err_t d1l_dm_store_transition_delivery(", 1)[
+        1
+    ].split("esp_err_t d1l_dm_store_mark_acked", 1)[0]
+    assert "s_entries[i].delivery_session_id == delivery_session_id" in transition
+    assert "s_entries[i].seq ==" not in transition
+    assert "outcome->row_seq = entry->seq" in transition
+    assert "outcome->delivery_revision = entry->delivery_revision" in transition
+    assert "entry->delivered = entry->acked" in source
+    assert "entry->attempt++" in source
+    assert "entry->attempt == UINT8_MAX" in source
+    assert "blob->entries[previous].delivery_session_id" in source
+    assert '"mesh/dm_delivery_state.c"' in cmake
 
 
 def test_meshcore_service_builds_private_text_packets_from_contacts():
@@ -219,11 +287,13 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
         "esp_err_t d1l_meshcore_service_ensure_identity", 1
     )[0]
 
-    assert "D1L_DM_STORE_SCHEMA 5U" in store_c
+    assert "D1L_DM_STORE_SCHEMA 6U" in store_c
+    assert "D1L_DM_STORE_SCHEMA_V5 5U" in store_c
     assert "D1L_DM_STORE_SCHEMA_V4 4U" in store_c
     assert "d1l_dm_entry_v4_t" in store_c
     assert "d1l_dm_store_blob_v4_t" in store_c
     assert "convert_v4_blob" in store_c
+    assert "convert_v5_blob" in store_c
     assert "D1L_DM_ACK_STATE_LEGACY_UNVERIFIED" in store_h
     assert "D1L_DM_ACK_STATE_PENDING" in store_h
     assert "D1L_DM_ACK_STATE_SENT" in store_h
@@ -237,7 +307,7 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
     assert "outcome->durable = ret == ESP_OK" in store_c
     assert "A split SD/NVS write can partially commit" in store_c
     assert "rolling it\n         * back" in store_c
-    assert "previous_state" not in store_c
+    assert "d1l_dm_ack_state_t previous_state" not in store_c
 
     reserve_at = dispatch.index("d1l_dm_store_reserve_ack_dispatch(")
     queue_at = dispatch.index("meshcore_service_send_ack_async(")

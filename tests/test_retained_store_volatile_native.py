@@ -28,6 +28,7 @@ def test_volatile_ui_canaries_do_not_consume_durable_store_lineage(tmp_path):
         "-I",
         str(ROOT / "main"),
         str(ROOT / "main/mesh/message_store.c"),
+        str(ROOT / "main/mesh/dm_delivery_state.c"),
         str(ROOT / "main/mesh/dm_store.c"),
         str(ROOT / "main/mesh/packet_log.c"),
         str(ROOT / "tests/native/retained_store_volatile_test.c"),

@@ -7,6 +7,7 @@
 #include "esp_err.h"
 
 #include "mesh/contact_store.h"
+#include "mesh/dm_delivery_state.h"
 #include "mesh/message_store.h"
 
 #define D1L_DM_STORE_CAPACITY 16U
@@ -16,6 +17,7 @@
 #define D1L_DM_ACK_DISPATCH_MAX 2U
 #define D1L_DM_ACK_DISPATCH_KIND_MAX 3U
 #define D1L_DM_ACK_INTERRUPTED_ERROR ESP_ERR_INVALID_STATE
+#define D1L_DM_DELIVERY_INTERRUPTED_ERROR ESP_ERR_INVALID_STATE
 
 typedef enum {
     D1L_DM_ACK_STATE_LEGACY_UNVERIFIED = 0,
@@ -27,6 +29,7 @@ typedef enum {
 
 typedef struct {
     uint32_t seq;
+    uint64_t delivery_session_id;
     uint32_t uptime_ms;
     char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char contact_alias[D1L_CONTACT_ALIAS_LEN];
@@ -46,12 +49,18 @@ typedef struct {
     d1l_dm_ack_state_t ack_state;
     esp_err_t ack_last_error;
     bool identity_digest_valid;
+    d1l_dm_delivery_state_t delivery_state;
+    d1l_dm_delivery_reason_t delivery_reason;
+    esp_err_t delivery_last_error;
+    uint8_t delivery_retry_count;
+    uint32_t delivery_revision;
 } d1l_dm_entry_t;
 
 typedef struct {
     bool inserted;
     bool durable;
     uint32_t row_seq;
+    uint64_t delivery_session_id;
     esp_err_t error;
 } d1l_dm_store_append_outcome_t;
 
@@ -62,6 +71,18 @@ typedef struct {
     uint8_t dispatch_count;
     esp_err_t error;
 } d1l_dm_ack_reservation_t;
+
+typedef struct {
+    bool changed;
+    bool durable;
+    uint64_t delivery_session_id;
+    uint32_t row_seq;
+    d1l_dm_delivery_state_t previous_state;
+    d1l_dm_delivery_state_t current_state;
+    uint8_t retry_count;
+    uint32_t delivery_revision;
+    esp_err_t error;
+} d1l_dm_delivery_transition_outcome_t;
 
 typedef struct {
     uint32_t next_seq;
@@ -100,6 +121,11 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
                               int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
                               uint8_t attempt, bool delivered, bool acked,
                               uint32_t ack_hash);
+esp_err_t d1l_dm_store_append_tx(
+    const char *contact_fingerprint, const char *contact_alias,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, uint8_t attempt,
+    uint32_t ack_hash, d1l_dm_store_append_outcome_t *outcome);
 esp_err_t d1l_dm_store_append_rx_identity(
     const char *contact_fingerprint, const char *contact_alias,
     const char *text, int rssi_dbm, int snr_tenths,
@@ -127,6 +153,13 @@ esp_err_t d1l_dm_store_complete_ack_dispatch(
     uint32_t row_seq,
     const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
     bool sent, esp_err_t error);
+esp_err_t d1l_dm_store_transition_delivery(
+    uint64_t delivery_session_id,
+    d1l_dm_delivery_state_t expected_state,
+    uint32_t expected_delivery_revision,
+    d1l_dm_delivery_state_t next_state,
+    d1l_dm_delivery_reason_t reason, esp_err_t error,
+    d1l_dm_delivery_transition_outcome_t *outcome);
 const char *d1l_dm_ack_state_name(d1l_dm_ack_state_t state);
 const char *d1l_dm_ack_dispatch_kind_name(uint8_t dispatch_kind);
 d1l_dm_store_stats_t d1l_dm_store_stats(void);
