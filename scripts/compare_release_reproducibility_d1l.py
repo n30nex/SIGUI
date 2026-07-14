@@ -4,8 +4,9 @@
 The current package has two explicitly permitted byte-variable metadata files:
 
 * ``manifest.json`` may differ only at ``created_at``, the GitHub Actions run
-  id/attempt/URL, ``source_build_dir``, and the bound raw conformance-run
-  receipt identity whose semantic projection is byte-stable in the package;
+  id/attempt/URL, ``source_build_dir``, and the bound raw wire-conformance and
+  signed-advert runtime receipt identities whose semantic projections are
+  byte-stable in the package;
 * ``SHA256SUMS.txt`` may consequently differ only in its ``manifest.json`` row.
 
 Every other file, resolved build input, toolchain lock, package identity, and
@@ -26,6 +27,11 @@ from typing import Any
 
 if __package__:
     from .meshcore_conformance_d1l import validate_completed_report
+    from .meshcore_signed_advert_runtime_d1l import (
+        SIGNED_ADVERT_ARTIFACT_TYPE,
+        SIGNED_ADVERT_EVIDENCE_PROFILE,
+        validate_completed_report as validate_signed_advert_report,
+    )
     from .package_release_d1l import (
         git_info,
         package_inventory_payloads,
@@ -52,6 +58,11 @@ if __package__:
 else:
     from meshcore_conformance_d1l import (  # type: ignore[no-redef]
         validate_completed_report,
+    )
+    from meshcore_signed_advert_runtime_d1l import (  # type: ignore[no-redef]
+        SIGNED_ADVERT_ARTIFACT_TYPE,
+        SIGNED_ADVERT_EVIDENCE_PROFILE,
+        validate_completed_report as validate_signed_advert_report,
     )
     from package_release_d1l import (  # type: ignore[no-redef]
         git_info,
@@ -94,12 +105,17 @@ RP2040_ARTIFACT_NAMES = (
 CANONICAL_CONFORMANCE_PROFILE = "d1l_meshcore_wire_conformance_package_v1"
 CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
 CONFORMANCE_MAX_AGE_DAYS = 14
+SIGNED_ADVERT_ACTIONS_ARTIFACT = CONFORMANCE_ACTIONS_ARTIFACT
 PERMITTED_MANIFEST_PATHS = (
     "/created_at",
     "/meshcore_conformance/run_receipt/expires_at",
     "/meshcore_conformance/run_receipt/generated_at",
     "/meshcore_conformance/run_receipt/sha256",
     "/meshcore_conformance/run_receipt/size",
+    "/meshcore_signed_advert_runtime/run_receipt/expires_at",
+    "/meshcore_signed_advert_runtime/run_receipt/generated_at",
+    "/meshcore_signed_advert_runtime/run_receipt/sha256",
+    "/meshcore_signed_advert_runtime/run_receipt/size",
     "/source_build_dir",
     "/workflow/run_attempt",
     "/workflow/run_id",
@@ -290,6 +306,21 @@ def normalize_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         receipt["expires_at"] = "<permitted-conformance-expires-at>"
         receipt["sha256"] = "<permitted-conformance-run-receipt-sha256>"
         receipt["size"] = "<permitted-conformance-run-receipt-size>"
+    signed_advert = normalized.get("meshcore_signed_advert_runtime")
+    signed_receipt = (
+        signed_advert.get("run_receipt")
+        if isinstance(signed_advert, dict)
+        else None
+    )
+    if isinstance(signed_receipt, dict):
+        signed_receipt["generated_at"] = (
+            "<permitted-signed-advert-generated-at>"
+        )
+        signed_receipt["expires_at"] = "<permitted-signed-advert-expires-at>"
+        signed_receipt["sha256"] = (
+            "<permitted-signed-advert-run-receipt-sha256>"
+        )
+        signed_receipt["size"] = "<permitted-signed-advert-run-receipt-size>"
     return normalized
 
 
@@ -332,6 +363,7 @@ def required_package_paths(source_commit: str, profile: str) -> set[str]:
         "docs/RP2040_SD_BRIDGE_FLASH_D1L.md",
         "docs/USER_GUIDE_D1L.md",
         f"evidence/meshcore_conformance_{source_commit}.json",
+        f"evidence/meshcore_signed_advert_runtime_{source_commit}.json",
         f"build_inputs_{source_commit}.json",
         f"capability_manifest_{source_commit}.json",
         "firmware/bootloader.bin",
@@ -347,6 +379,7 @@ def required_package_paths(source_commit: str, profile: str) -> set[str]:
         "notices/LICENSE",
         "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
         "notices/THIRD_PARTY_NOTICES.md",
+        "notices/ORLP_ED25519_ZLIB_LICENSE.txt",
         f"provenance_{source_commit}.json",
         f"release_evidence_index_{source_commit}.json",
         f"sbom_{source_commit}.spdx.json",
@@ -596,6 +629,90 @@ def validate_manifest_shape(
             "invalid_conformance_binding",
             "raw conformance receipt expiry does not match the release policy",
         )
+
+    signed_advert = manifest.get("meshcore_signed_advert_runtime")
+    expected_signed_advert = (
+        f"evidence/meshcore_signed_advert_runtime_{source_commit}.json"
+    )
+    if (
+        not isinstance(signed_advert, dict)
+        or signed_advert.get("path") != expected_signed_advert
+    ):
+        raise ComparisonError(
+            "missing_required_payload",
+            "exact-SHA signed-advert runtime evidence is missing",
+        )
+    signed_receipt = signed_advert.get("run_receipt")
+    if (
+        signed_advert.get("artifact_type") != SIGNED_ADVERT_ARTIFACT_TYPE
+        or signed_advert.get("source_commit") != source_commit
+        or signed_advert.get("evidence_profile")
+        != SIGNED_ADVERT_EVIDENCE_PROFILE
+        or signed_advert.get("max_age_days") != CONFORMANCE_MAX_AGE_DAYS
+        or signed_advert.get("wp04_closure_eligible") is not False
+        or signed_advert.get("closure_ready") is not False
+        or signed_advert.get("full_ubsan_clean") is not True
+        or signed_advert.get("passed") is not True
+        or signed_advert.get("execution_complete") is not True
+        or not isinstance(signed_receipt, dict)
+        or signed_receipt.get("artifact") != SIGNED_ADVERT_ACTIONS_ARTIFACT
+        or signed_receipt.get("path")
+        != f"meshcore_signed_advert_runtime_{source_commit}.json"
+        or isinstance(signed_receipt.get("size"), bool)
+        or not isinstance(signed_receipt.get("size"), int)
+        or signed_receipt["size"] <= 0
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(signed_receipt.get("sha256") or "")
+        )
+        is None
+    ):
+        raise ComparisonError(
+            "invalid_signed_advert_binding",
+            "canonical signed-advert evidence has no valid raw Actions receipt binding",
+        )
+    try:
+        canonical_signed_advert = load_json_object(
+            package_dir / expected_signed_advert,
+            "canonical MeshCore signed-advert runtime evidence",
+        )
+        validate_signed_advert_report(
+            canonical_signed_advert,
+            source_commit,
+            require_generated_at=False,
+            require_commands=False,
+        )
+        if (
+            canonical_signed_advert.get("evidence_profile")
+            != SIGNED_ADVERT_EVIDENCE_PROFILE
+            or signed_advert.get("coverage_boundary")
+            != canonical_signed_advert.get("coverage_boundary")
+        ):
+            raise ValueError("signed-advert evidence profile or boundary drifted")
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ComparisonError(
+            "invalid_signed_advert_semantics",
+            f"canonical signed-advert evidence is incomplete: {exc}",
+        ) from exc
+    signed_generated_at = parse_utc(
+        signed_receipt.get("generated_at"), "signed-advert generated_at"
+    )
+    signed_expires_at = parse_utc(
+        signed_receipt.get("expires_at"), "signed-advert expires_at"
+    )
+    signed_generated_time = datetime.fromisoformat(
+        signed_generated_at.replace("Z", "+00:00")
+    )
+    signed_expires_time = datetime.fromisoformat(
+        signed_expires_at.replace("Z", "+00:00")
+    )
+    if signed_expires_time != signed_generated_time + timedelta(
+        days=CONFORMANCE_MAX_AGE_DAYS
+    ):
+        raise ComparisonError(
+            "invalid_signed_advert_binding",
+            "raw signed-advert receipt expiry does not match the release policy",
+        )
+
     sbom = manifest.get("sbom")
     provenance = manifest.get("provenance")
     expected_sbom = f"sbom_{source_commit}.spdx.json"

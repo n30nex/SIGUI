@@ -32,6 +32,21 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     )
 
 try:
+    from meshcore_signed_advert_runtime_d1l import (
+        SIGNED_ADVERT_ARTIFACT_TYPE,
+        SIGNED_ADVERT_EVIDENCE_PROFILE,
+        canonicalize_release_report as canonicalize_signed_advert_report,
+        validate_completed_report as validate_signed_advert_report,
+    )
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.meshcore_signed_advert_runtime_d1l import (
+        SIGNED_ADVERT_ARTIFACT_TYPE,
+        SIGNED_ADVERT_EVIDENCE_PROFILE,
+        canonicalize_release_report as canonicalize_signed_advert_report,
+        validate_completed_report as validate_signed_advert_report,
+    )
+
+try:
     from verify_arduino_build_inputs import validate_build_receipt
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.verify_arduino_build_inputs import validate_build_receipt
@@ -88,6 +103,7 @@ MESHCORE_CONFORMANCE_BOUNDARY = "wire_envelope_only"
 MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
 MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
 MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
+MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT = MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
 HOST_CHECKS_ARTIFACT_TYPE = "d1l_host_checks_success"
 REQUIRED_ESP32_FLASH_ROLES = {
     0x0: "build/bootloader/bootloader.bin",
@@ -138,6 +154,7 @@ REQUIRED_NOTICE_FILES = {
     "notices/THIRD_PARTY_NOTICES.md",
     "notices/ATTRIBUTIONS.md",
     "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
+    "notices/ORLP_ED25519_ZLIB_LICENSE.txt",
 }
 FULL_SOAK_SECONDS = 12 * 60 * 60
 MAX_FULL_SOAK_SAMPLE_INTERVAL_SECONDS = 5 * 60
@@ -733,6 +750,307 @@ def meshcore_conformance_evidence_gate(
             "coverage_level": report.get("coverage_level") if report else None,
             "closure_ready": report.get("closure_ready") if report else None,
             "issue_65_closure_eligible": report.get("issue_65_closure_eligible") if report else None,
+        },
+    )
+
+
+def meshcore_signed_advert_evidence_gate(
+    github_run_dir: Path | None,
+    root: Path,
+    commit: str | None,
+    now: datetime | None = None,
+    expected_run_id: str | None = None,
+) -> GateResult:
+    """Bind the raw signed-advert Actions receipt to its packaged projection."""
+
+    failures: list[str] = []
+
+    def resolve_inside(
+        base: Path | None,
+        relative: object,
+        *,
+        missing_code: str,
+        outside_code: str,
+        unresolvable_code: str,
+    ) -> Path | None:
+        if base is None or not isinstance(relative, str) or not relative:
+            failures.append(missing_code)
+            return None
+        try:
+            candidate = (base / relative).resolve()
+            candidate.relative_to(base.resolve())
+        except ValueError:
+            failures.append(outside_code)
+            return None
+        except (OSError, RuntimeError):
+            failures.append(unresolvable_code)
+            return None
+        return candidate
+
+    def json_report(path: Path | None, invalid_code: str) -> dict[str, Any]:
+        try:
+            value = read_json(path)
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            failures.append(invalid_code)
+            return {}
+        if not isinstance(value, dict):
+            failures.append(invalid_code)
+            return {}
+        return value
+
+    def file_identity(
+        path: Path | None, hash_code: str, stat_code: str
+    ) -> tuple[str | None, int | None]:
+        if path is None or not path.is_file():
+            return None, None
+        try:
+            digest = sha256_file(path)
+        except OSError:
+            failures.append(hash_code)
+            digest = None
+        try:
+            size = path.stat().st_size
+        except OSError:
+            failures.append(stat_code)
+            size = None
+        return digest, size
+
+    package = find_release_package(github_run_dir)
+    manifest_path = package / "manifest.json" if package else None
+    manifest = json_report(manifest_path, "manifest_json_invalid")
+    metadata = manifest.get("meshcore_signed_advert_runtime")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    run_receipt = metadata.get("run_receipt")
+    run_receipt = run_receipt if isinstance(run_receipt, dict) else {}
+    if not package:
+        failures.append("release_package_missing")
+    if not commit:
+        failures.append("expected_commit_missing")
+    if github_run_dir is not None and not expected_run_id:
+        failures.append("expected_run_id_missing")
+    if not metadata:
+        failures.append("manifest_metadata_missing")
+
+    evidence_path = resolve_inside(
+        package,
+        metadata.get("path"),
+        missing_code="evidence_path_missing",
+        outside_code="evidence_path_outside_package",
+        unresolvable_code="evidence_path_unresolvable",
+    )
+    if evidence_path and not evidence_path.is_file():
+        failures.append("evidence_file_missing")
+
+    receipt_artifact = run_receipt.get("artifact")
+    receipt_root = (
+        github_run_dir / receipt_artifact
+        if github_run_dir is not None
+        and receipt_artifact == MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT
+        else None
+    )
+    run_receipt_path = resolve_inside(
+        receipt_root,
+        run_receipt.get("path"),
+        missing_code="run_receipt_path_missing",
+        outside_code="run_receipt_path_outside_artifact",
+        unresolvable_code="run_receipt_path_unresolvable",
+    )
+    if run_receipt_path and not run_receipt_path.is_file():
+        failures.append("run_receipt_file_missing")
+
+    canonical_report = json_report(evidence_path, "evidence_json_invalid")
+    report = json_report(run_receipt_path, "run_receipt_json_invalid")
+    if report and commit:
+        try:
+            validate_signed_advert_report(report, commit)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+            failures.append("run_receipt_semantics_incomplete")
+    if canonical_report and commit:
+        try:
+            validate_signed_advert_report(
+                canonical_report,
+                commit,
+                require_generated_at=False,
+                require_commands=False,
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+            failures.append("canonical_evidence_semantics_incomplete")
+
+    repository = report.get("repository")
+    repository = repository if isinstance(repository, dict) else {}
+    source_commit = repository.get("repository_commit")
+    package_git = (
+        manifest.get("git") if isinstance(manifest.get("git"), dict) else {}
+    )
+    package_workflow = (
+        manifest.get("workflow")
+        if isinstance(manifest.get("workflow"), dict)
+        else {}
+    )
+    expected_name = (
+        f"meshcore_signed_advert_runtime_{commit}.json" if commit else None
+    )
+    if metadata:
+        checks = {
+            "metadata_artifact_type": metadata.get("artifact_type")
+            == SIGNED_ADVERT_ARTIFACT_TYPE,
+            "metadata_source_commit": metadata.get("source_commit") == commit,
+            "metadata_evidence_profile": metadata.get("evidence_profile")
+            == SIGNED_ADVERT_EVIDENCE_PROFILE,
+            "metadata_boundary": metadata.get("coverage_boundary")
+            == report.get("coverage_boundary"),
+            "metadata_closure_ready_false": metadata.get("closure_ready") is False,
+            "metadata_wp04_closure_eligible_false": metadata.get(
+                "wp04_closure_eligible"
+            )
+            is False,
+            "metadata_full_ubsan_clean": metadata.get("full_ubsan_clean") is True,
+            "metadata_passed": metadata.get("passed") is True,
+            "metadata_execution_complete": metadata.get("execution_complete")
+            is True,
+            "metadata_max_age": metadata.get("max_age_days")
+            == MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
+            "package_git_commit": package_git.get("commit") == commit,
+            "package_git_clean": package_git.get("dirty") is False
+            and package_git.get("dirty_entries") == [],
+            "package_workflow_sha": package_workflow.get("sha") == commit,
+            "package_workflow_run_id": bool(expected_run_id)
+            and str(package_workflow.get("run_id")) == str(expected_run_id),
+            "evidence_filename": bool(
+                evidence_path and evidence_path.name == expected_name
+            ),
+            "run_receipt_artifact": receipt_artifact
+            == MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT,
+            "run_receipt_filename": bool(
+                run_receipt_path and run_receipt_path.name == expected_name
+            ),
+        }
+        failures.extend(name for name, ok in checks.items() if not ok)
+    if report:
+        checks = {
+            "report_schema_version": report.get("schema_version") == 1,
+            "report_artifact_type": report.get("artifact_type")
+            == SIGNED_ADVERT_ARTIFACT_TYPE,
+            "report_passed": report.get("passed") is True,
+            "report_status": report.get("status") == "pass",
+            "report_execution_complete": report.get("execution_complete") is True,
+            "report_source_commit": source_commit == commit,
+            "report_closure_ready_false": report.get("closure_ready") is False,
+            "report_wp04_closure_eligible_false": report.get(
+                "wp04_closure_eligible"
+            )
+            is False,
+            "report_full_ubsan_clean": report.get("full_ubsan_clean") is True,
+        }
+        failures.extend(name for name, ok in checks.items() if not ok)
+    if canonical_report:
+        canonical_matches = False
+        if report and commit:
+            try:
+                canonical_matches = canonical_report == canonicalize_signed_advert_report(
+                    report, commit
+                )
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+                canonical_matches = False
+        checks = {
+            "canonical_evidence_profile": canonical_report.get("evidence_profile")
+            == SIGNED_ADVERT_EVIDENCE_PROFILE,
+            "canonical_evidence_matches_run_receipt": canonical_matches,
+        }
+        failures.extend(name for name, ok in checks.items() if not ok)
+
+    actual_sha, evidence_size = file_identity(
+        evidence_path, "evidence_hash_unreadable", "evidence_stat_unreadable"
+    )
+    receipt_sha, receipt_size = file_identity(
+        run_receipt_path,
+        "run_receipt_hash_unreadable",
+        "run_receipt_stat_unreadable",
+    )
+    if metadata and actual_sha != metadata.get("sha256"):
+        failures.append("evidence_sha256_mismatch")
+    if evidence_size is not None and metadata.get("size") != evidence_size:
+        failures.append("evidence_size_mismatch")
+    if run_receipt and receipt_sha != run_receipt.get("sha256"):
+        failures.append("run_receipt_sha256_mismatch")
+    if receipt_size is not None and run_receipt.get("size") != receipt_size:
+        failures.append("run_receipt_size_mismatch")
+
+    generated_at = parse_utc_timestamp(report.get("generated_at")) if report else None
+    metadata_generated_at = (
+        parse_utc_timestamp(run_receipt.get("generated_at")) if run_receipt else None
+    )
+    metadata_expires_at = (
+        parse_utc_timestamp(run_receipt.get("expires_at")) if run_receipt else None
+    )
+    checked_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    expected_expires_at = None
+    expires_at_computable = generated_at is not None
+    if generated_at is not None:
+        try:
+            expected_expires_at = generated_at + timedelta(
+                days=MESHCORE_CONFORMANCE_MAX_AGE_DAYS
+            )
+        except OverflowError:
+            expires_at_computable = False
+    timestamp_checks = {
+        "generated_at_valid": generated_at is not None,
+        "expires_at_computable": expires_at_computable,
+        "metadata_generated_at_matches": generated_at is not None
+        and metadata_generated_at == generated_at,
+        "metadata_expires_at_matches": expected_expires_at is not None
+        and metadata_expires_at == expected_expires_at,
+        "generated_at_not_future": generated_at is not None
+        and generated_at
+        <= checked_at + timedelta(minutes=MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES),
+        "evidence_not_expired": expected_expires_at is not None
+        and checked_at < expected_expires_at,
+    }
+    failures.extend(name for name, ok in timestamp_checks.items() if not ok)
+    failures = list(dict.fromkeys(failures))
+    ok = not failures
+    evidence = []
+    if manifest_path and manifest_path.is_file():
+        evidence.append(rel(manifest_path, root))
+    if evidence_path and evidence_path.is_file():
+        evidence.append(rel(evidence_path, root))
+    if run_receipt_path and run_receipt_path.is_file():
+        evidence.append(rel(run_receipt_path, root))
+    return GateResult(
+        "meshcore_signed_advert_runtime_packaged",
+        "P0",
+        ok,
+        "Current-commit MeshCore signed-advert runtime packaged",
+        evidence,
+        (
+            "Release package contains matching, unexpired signed-advert runtime "
+            "evidence with exception-free sanitizer proof. This prerequisite "
+            "does not close WP-04 or issue #65."
+            if ok
+            else "Release package is missing matching, unexpired MeshCore "
+            "signed-advert runtime evidence; WP-04 and issue #65 remain open."
+        ),
+        {
+            "failures": failures,
+            "expected_commit": commit,
+            "expected_run_id": expected_run_id,
+            "package_run_id": package_workflow.get("run_id"),
+            "package_git_dirty": package_git.get("dirty"),
+            "package_git_dirty_entries": package_git.get("dirty_entries"),
+            "source_commit": source_commit,
+            "sha256": actual_sha,
+            "run_receipt_sha256": receipt_sha,
+            "generated_at": generated_at.isoformat() if generated_at else None,
+            "expires_at": (
+                expected_expires_at.isoformat() if expected_expires_at else None
+            ),
+            "checked_at": checked_at.isoformat(),
+            "coverage_boundary": report.get("coverage_boundary") if report else None,
+            "closure_ready": report.get("closure_ready") if report else None,
+            "wp04_closure_eligible": (
+                report.get("wp04_closure_eligible") if report else None
+            ),
+            "full_ubsan_clean": report.get("full_ubsan_clean") if report else None,
         },
     )
 
@@ -4081,6 +4399,14 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(checksum_gate(github_run_dir, root))
     gates.append(
         meshcore_conformance_evidence_gate(
+            github_run_dir,
+            root,
+            args.commit,
+            expected_run_id=args.github_run_id,
+        )
+    )
+    gates.append(
+        meshcore_signed_advert_evidence_gate(
             github_run_dir,
             root,
             args.commit,
