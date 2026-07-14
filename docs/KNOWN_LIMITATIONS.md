@@ -1,32 +1,40 @@
 # Known Limitations
 
-As of the 2026-07-13 merged WP-02 software-integration checkpoint:
+As of the 2026-07-14 merged WP-04 oracle-foundation checkpoint:
 
-- Live `main` is `e79fb56160914f4483515f4f70998aa2f8961496` after PR #90 completed WP-03 reproducibility. Exact-main Actions `29300795502` passed 891 host tests plus 28 checksum-contract tests, and all five downloaded artifacts strict-verified across 3 manifests / 44 entries and 214 files. Exact-head dispatch `29296995585` executed the pinned Arduino action and strict-verified 9 manifests / 81 entries, but it is CI evidence only, not physical proof. WP-01 remains banked on predecessor source `092293f2311a24c9899bc9bf343ab014c4ba0411`. WP-02 software integration is complete, but its fail-closed baseline still lacks board, UI, SD, reboot, and Map-open receipts. Those five roles are deferred to the frozen final candidate, and the broader release matrices remain limitations; this non-execution blocker does not stop WP-04.
+- Live `main` is `977cbd2590ddd0b73fe24274ba45f9d1e4051a37` after PR #92 merged the bounded WP-04 MeshCore oracle foundation. Exact-main Actions `29306243447` passed 906 host tests, 28 checksum-contract tests, MeshCore conformance, ESP32 firmware, and release packaging. All five downloaded artifact archives matched their GitHub API SHA-256 digests; all 3 available checksum trees / 44 entries passed and 215 extracted files were independently hashed. Together with the exact PR push/merge-test runs, 15 archives, 9 manifests, 132 checksum entries, and 645 extracted files were independently verified. Portable aggregate `docs/completion/evidence/wp04/oracle_foundation_977cbd2590ddd0b73fe24274ba45f9d1e4051a37.json` (SHA-256 `a4ccb0dde40b87fb3646149579a10c78e3778fcf0cf5885a46c02c1ac7f9b2ff`) banks those facts while retaining `proof_banked=false` and `closure_eligible=false`. This is host/build evidence, not physical proof. WP-01 remains banked on predecessor source `092293f2311a24c9899bc9bf343ab014c4ba0411`. WP-02 software integration is complete, but its fail-closed baseline still lacks board, UI, SD, reboot, and Map-open receipts. Those roles remain deferred to the frozen final candidate.
 
 - ESP-IDF v5.1.x is end of life and is no longer the selected production target. Standalone migration commit `39a043c` uses version-pinned `espressif/idf:v5.5.4`, commits the exact Actions-generated `dependencies.lock`, applies the tracked Seeed BSP compatibility patch, and passes host, firmware, package, checksum, release, and effective-config checks. That evidence does not yet qualify the combined Map/Wi-Fi candidate: exact COM12 must still report `"idf":"v5.5.4"` and pass board/display/touch/Wi-Fi/RF/RP2040-SD/Map/health/reboot/power-cycle smoke with refreshed commit-matched release evidence. No supported-SDK waiver or hardware qualification is implied by the standalone green build.
 - Manual visual confirmation of display bars and touch target movement is still pending; the serial `display test` and `touch test` commands return OK on hardware. The COM12 hardware pixel-capture path reconstructed the current PR #56 hierarchy from `51258ba` / Actions `29060900359` with matching firmware/host CRC `E72745BA`, a passing simulator diff, `public_rf_tx=false`, and `formats_sd=false`; a three-round all-tab health probe also passed cleanly. PR #51, PR #40, and PR #33 captures remain history for superseded layouts. Physical photos/manual review and final-release-SHA evidence are still pending.
 - MeshCore Public group text TX/RX and signed advert TX/RX are implemented and validated through the serial console, firmware-local contacts can promote heard nodes by fingerprint, full advertised public keys are retained for DM targeting and have passed reboot persistence on `COM7`, contact favorite/mute flags persist across reboot, Public unread/read state persists across reboot, per-thread DM read cursors are implemented, firmware-local routes are learned from Public/advert path metadata, route detail diagnostics and a first route detail sheet are implemented, and serial DM flood TX plus the bounded DM store are validated. DM ACK/PATH receive parsing, direct-route TX selection, contact-row DM compose, first contact detail actions, a bounded Public History/search sheet, and a bounded scrollable DM thread/detail history sheet are implemented, and targeted outbound hardware DM receive by the local COM11 Meshcorebot has passed. `scripts/rf_full_acceptance_d1l.py` now provides a single COM12-side artifact path for identity, Meshcorebot status, outbound DM, controlled inbound DM, ACK/PATH, direct-route, health, and no-Public-command proof. All current automated RF must use only `#test` or targeted DMs; default Public stays silent. The COM11 Discord Python bot is an independent radio peer and COM11 must never be opened as D1L serial. Manual touch review, a passing full RF acceptance artifact, controlled inbound DM unread proof, and physical DM workflow review are still pending.
-- Issue #65's first conformance job is deliberately `wire_envelope_only`: it
-  checks structural bidirectional packet envelopes plus malformed local RX
-  inputs under ASan/UBSan/libFuzzer against the exact pinned MeshCore packet
-  code. It does not test production cryptography, packet semantics, ACK/retry,
-  duplicate/replay/lifetime behavior, retained state, routing behavior, an
-  official peer, or hardware. Its artifact must keep `closure_ready=false`, so
-  a green job is not issue #65 closure or release qualification.
-- The bounded follow-on signed-advert semantic runtime gate compiles pinned
-  upstream `Identity`/`Packet`/`Dispatcher`/`Mesh`/`BaseChatMesh` behavior with
-  the independently checksum-verified `rweather/Crypto` 0.4.0 verifier. It
-  executes real create/sign/send/filter/verify/dispatch/contact promotion and
-  proves exact-scenario duplicate, forged-signature, self, ownership, lifetime,
-  and deterministic-replay behavior on the host. It does not prove firmware
+- PR #92 expands issue #65's bounded foundation to a 931-case pinned-upstream
+  oracle for packet, advert, group, DM, ACK, PATH, TRACE, identity, and login
+  boundaries, while retaining the separate 100,000-input wire-envelope fuzz
+  gate. Receipts are bound to the exact ordered 22-command build plan and keep
+  `closure_ready=false`. Real ACK delivery/correlation, route forwarding,
+  TRACE discovery, admin sessions, retained-state recovery, official-peer RF,
+  and hardware remain outside this merged slice. Draft PR #93 executes the
+  first real signed-advert Identity/Mesh/Dispatcher runtime path, but it is not
+  merged evidence yet.
+- The bounded signed-advert semantic runtime gate compiles pinned upstream
+  `Identity`/`Packet`/`Dispatcher`/`Mesh`/`BaseChatMesh` behavior with the
+  independently checksum-verified `rweather/Crypto` 0.4.0 verifier. It executes
+  real create/sign/send/filter/verify/dispatch/contact promotion and proves
+  exact-scenario duplicate, forged-signature, self, ownership, lifetime, and
+  deterministic-replay behavior on the host. It does not prove firmware
   binding, persisted keypair consistency, retained-contact recovery, peer/RF
-  interoperability, routing, ACK delivery, trace, admin sessions, or hardware,
-  and it keeps WP-04 and issue #65 open. The vendored Ed25519 `fe.c`, `ge.c`,
-  and `sc.c` shift-base sanitizer exception remains explicitly release-blocking.
-  The pinned `BaseChatMesh` callback also reports `is_new=false` for the tested
-  newly auto-added contact; integration must not rely on that flag as a truthful
+  interoperability, routing, ACK delivery, trace, admin sessions, or hardware.
+  The pinned `BaseChatMesh` callback reports `is_new=false` for the tested newly
+  auto-added contact; integration must not rely on that flag as a truthful
   new-contact indicator until the upstream behavior is reconciled.
+- The pinned legacy ref10 `fe.c`, `ge.c`, and `sc.c` contain negative signed
+  left shifts. The merged host oracle truthfully applies only the exact
+  object-level `shift-base` exception to those three hashes, retains ASan and
+  every other UBSan check, and reports `full_ubsan_clean=false`.
+  `BLK-WP04-ED25519-SHIFT-UB-20260714` blocks release. Draft PR #94 contains a
+  215-expression defined-arithmetic overlay with byte-identical differential,
+  RFC 8032, and exception-free Clang 18 sanitizer proof, but production and the
+  main oracle have not selected that overlay yet.
 - Settings are implemented as an NVS-backed firmware model and have passed reboot persistence smoke on real D1L flash. The persisted radio profile is exposed through `settings get`, serial radio setters, and a touch Radio Settings sheet; the user-facing More page groups tools, connections, storage/maps, device, support, and advanced functions behind disclosure rows instead of a flat settings grid. PR #56 proves the collapsed hierarchy and all-tab navigation on COM12; expanded category touch behavior and the remaining system-page redesigns still need physical touch review.
 - First-boot onboarding now persists a setup-complete flag, collects the node name, confirms Canada/USA defaults, keeps Wi-Fi/BLE/observer disabled, and generates/retains the local MeshCore identity. Optional-radio choices in onboarding remain limited until live Wi-Fi/BLE runtime support is enabled.
 - `identity status` now generates and reports an NVS-retained Ed25519 local identity fingerprint. This is a minimal firmware identity model, not the final full MeshCore C++ store integration.

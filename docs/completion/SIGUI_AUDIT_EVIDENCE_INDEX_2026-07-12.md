@@ -1,6 +1,6 @@
 # SIGUI Audit Evidence Index
 
-**Audit date:** 2026-07-12  
+**Audit date:** 2026-07-12; live reconciliation refreshed 2026-07-14
 **Repository:** `n30nex/SIGUI`  
 **Purpose:** make the master roadmap traceable to the exact repository state inspected.
 
@@ -8,20 +8,22 @@
 
 | Item | Value |
 |---|---|
-| Live merged `main` | `e79fb56160914f4483515f4f70998aa2f8961496` |
+| Live merged `main` | `977cbd2590ddd0b73fe24274ba45f9d1e4051a37` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
-| Active PR stack | none for WP-03; PR #90 head `f731e465bb5dc31cb1a8a88a82dafda1e3c38577` merged as `e79fb56160914f4483515f4f70998aa2f8961496` |
-| Candidate integration state | PRs #62, #64, #80, #84, #85, #86, #87, #88, #89, and #90 are merged; WP-03 reproducibility is banked, while frozen-candidate physical qualification remains open |
+| Active PR stack | draft PR #93 head `e0f44a20fe52c795189c3bc40f0c17238aa764e2` (signed-advert runtime); draft PR #94 head `be36fe10b1ac34966b83f2a73d43d17df9f7d2c7` (defined Ed25519 overlay) |
+| Candidate integration state | PRs #62, #64, #80, #84-#92 are merged; WP-03 proof is banked, WP-04 oracle foundation is merged/in progress, and frozen-candidate physical qualification remains open |
 | Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
 | SDK | ESP-IDF 5.5.4 |
-| Candidate host suite | 845 passing tests in exact merged-main Actions host job |
-| Candidate CI | run `29300795502` green; 3 emitted manifests / 44 checksum entries verified across 214 downloaded files; exact-head RP2040 dispatch `29296995585` verified 9 / 81 |
-| Conformance closure | false; `wire_envelope_only` |
-| Release status | not ready to tag; exact-main audit `29300795502` reports 32 P0 failures / 34 overall across the expanded gate set |
+| Candidate host suite | 906 passing tests in exact-main Actions `29306243447` and each PR #92 push/merge-test run |
+| Candidate CI | Exact main and PR #92 runs are green; 15 archives matched API digests, 9 manifests / 132 entries passed, and 645 extracted files were hashed across all three runs |
+| Conformance closure | false; merged bounded oracle plus `wire_envelope_only` fuzzing, semantic runtime incomplete |
+| Release status | not ready to tag; audit remains fail-closed with 32 P0 failures / 34 overall |
 
 ## Live post-audit reconciliation
 
+- Live `main` is `977cbd2590ddd0b73fe24274ba45f9d1e4051a37` after PR #92 merged the fail-closed WP-04 oracle foundation. Exact PR head `a1aa3567567642f8479c64098414a5174359bab4` passed push/PR Actions `29305643722` / `29305644969`: 906 host tests and 28 checksum-contract tests per run, 931 oracle cases, 864 bidirectional packet vectors, 100,000 fuzz inputs, zero enabled-sanitizer/memory findings, exact 22-command receipt binding, ESP32 firmware, and release packaging. All 10 downloaded artifact archive digests matched GitHub, all 6 available checksum manifests / 88 entries passed, and 430 extracted files were SHA-256 indexed. RP2040 correctly skipped for this ESP32-only slice. WP-04 and issue #65 remain open; the exact three-source Ed25519 `shift-base` exception is declared by `BLK-WP04-ED25519-SHIFT-UB-20260714` and blocks release, not parallel implementation.
+- Exact merged-main Actions `29306243447` also passed 906 host tests, 28 checksum-contract tests, conformance/fuzz, ESP32 firmware, and packaging. All 5 downloaded archives matched GitHub API digests, all 3 checksum manifests / 44 entries passed, and 215 extracted files were independently hashed with inventory SHA-256 `519c3a0af21c2c50120c64e35c5fc9e3c5bdb96fb9c65f00c5b3864907bdaa4b`. Portable aggregate `docs/completion/evidence/wp04/oracle_foundation_977cbd2590ddd0b73fe24274ba45f9d1e4051a37.json` (SHA-256 `a4ccb0dde40b87fb3646149579a10c78e3778fcf0cf5885a46c02c1ac7f9b2ff`) records the exact run, artifact IDs and digests, semantic counts, release audit, and open blocker without claiming WP-04 closure.
 - Live `main` is `e79fb56160914f4483515f4f70998aa2f8961496`; PR #90 head `f731e465bb5dc31cb1a8a88a82dafda1e3c38577` merged at that SHA. Exact merged-main Actions `29300795502` passed 891 host tests plus 28 checksum-contract tests, and all five downloaded artifacts strict-verified across 3 manifests / 44 entries and 214 files; canonical tree is `f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738`. Root hashes are firmware `6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb`, build inputs `521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233`, and release `499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18`; package manifest is `8323d0865afb8297718af8c8eaf8633e789670a162ffadc7a2a9ed1f3abb0a59`, application `a0234efd0d132e833968eeeb69fcb6f00b70bc67df8a557e563c626169253e98`, full flash `1ab37593e8c2d4d231e25dd5720ad0ef6b5d59041c25069033e9b3241a0b2232`, SBOM `78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037`, and provenance `7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c`. RP2040 correctly skipped on merged main.
 - PR #90 exact-source rebuild comparison is closure evidence. Full-release runs `29300805114` and `29300806682` each strict-verified 9 manifests / 89 entries / 257 files. Receipt `F:/SIGUI-evidence/actions/pr90-e79fb561-full-release-comparison-exact-29300805114-29300806682.json` has SHA-256 `babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f`, reports `reproducible=true`, and has no failures. Portable aggregate `docs/completion/evidence/wp03/release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json` has SHA-256 `ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264`; WP-03 is `merged` / `proof_banked=true`. The older `a03bdb8...` `invalid_sbom` receipt remains fixed negative history. A stale GitHub check status and an initial wrong-worktree `source_sha_mismatch` guard receipt are recorded as non-product anomalies, not failures.
 - Exact merged-main run `29290978741` passed 795 host plus 24 checksum-contract tests and downloaded strict verification of 8 manifests / 78 entries. Root manifest is `22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64`; application is `44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a`; full flash is `ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd`. The earlier `29286754864` 7/8 failure remains preserved as a negative receipt, and the coverage blocker is closed.

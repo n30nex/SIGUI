@@ -1,0 +1,152 @@
+{
+  "schema": 1,
+  "artifact_type": "wp04_meshcore_oracle_foundation_aggregate",
+  "repository": "n30nex/SIGUI",
+  "work_package": "WP-04",
+  "pull_request": 92,
+  "source_commit": "977cbd2590ddd0b73fe24274ba45f9d1e4051a37",
+  "merge": {
+    "head_commit": "a1aa3567567642f8479c64098414a5174359bab4",
+    "pr_merge_test_commit": "5fac67ad0619d04867f3eb6e6088f6c87a34a218",
+    "parent": "b6a76843eef5868ea504a4194e7e55cdef750841",
+    "tree": "cb5809999b001927e329dbfb4f724b9210d922a5"
+  },
+  "pull_request_actions": {
+    "push_run": "29305643722",
+    "pull_request_run": "29305644969",
+    "status": "success",
+    "host_tests_passed_per_run": 906,
+    "checksum_contract_tests_passed_per_run": 28,
+    "artifact_archives_verified": 10,
+    "checksum_manifests_verified": 6,
+    "checksum_entries_verified": 88,
+    "extracted_files_hashed": 430
+  },
+  "merged_main": {
+    "workflow_run": "29306243447",
+    "status": "success",
+    "jobs": {
+      "change_filter": "success",
+      "meshcore_conformance": "success",
+      "host_checks": "success",
+      "firmware_build": "success",
+      "rp2040_sd_bridge_build": "skipped_include_sd_bridge_false"
+    },
+    "host_tests_passed": 906,
+    "checksum_contract_tests_passed": 28,
+    "artifact_archives": [
+      {
+        "name": "d1l-release-package",
+        "artifact_id": 8300426622,
+        "archive_bytes": 10516363,
+        "archive_sha256": "45bcfbd9f95ebb12a7918482d486a208aac7b40b56db71d60de8517510d97bad",
+        "extracted_files": 28
+      },
+      {
+        "name": "d1l-firmware-artifacts",
+        "artifact_id": 8300426149,
+        "archive_bytes": 8546812,
+        "archive_sha256": "5679e29006ad20c611ca7ff3d573b7c709fd0bb9da9626f372f36e5f10f54aba",
+        "extracted_files": 15
+      },
+      {
+        "name": "d1l-idf55-migration-state",
+        "artifact_id": 8300425063,
+        "archive_bytes": 33771,
+        "archive_sha256": "db9656986398017a7569827899e84e13697857d355207e5fb4ac9a1f2fc5736d",
+        "extracted_files": 9
+      },
+      {
+        "name": "d1l-host-artifacts",
+        "artifact_id": 8300376234,
+        "archive_bytes": 3330430,
+        "archive_sha256": "60e46cb62f0446956c4fcebe9e19d5cc4ed1420fba182ad17aab059686d3395b",
+        "extracted_files": 160
+      },
+      {
+        "name": "d1l-meshcore-wire-conformance",
+        "artifact_id": 8300327170,
+        "archive_bytes": 22752,
+        "archive_sha256": "5f465a003591020530bddd670fd8a7b634090644d885bd3eb4022d181ef67c5f",
+        "extracted_files": 3
+      }
+    ],
+    "all_archive_digests_match_github_api": true,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 44,
+    "downloaded_tree_file_count": 215,
+    "downloaded_tree_total_bytes": 72316214,
+    "downloaded_tree_inventory_sha256": "519c3a0af21c2c50120c64e35c5fc9e3c5bdb96fb9c65f00c5b3864907bdaa4b",
+    "firmware_manifest_sha256": "fbc6018d24f23f32b5d49190e2d56d6f9ddb535ea22b786b7bd8661945d46cb2",
+    "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+    "release_manifest_sha256": "3b74c4f536d57c2b71f16e5385a729ff4b537a7d1fd428554bd7183a50917892",
+    "release_package_manifest_json_sha256": "748a69da06c17bc90d2b4da4cafab56e68803224c6d95f63213a6f63d55e4fdb",
+    "application_sha256": "fae7c18b25f620e6c8b1f7e95a026afa4bf6307066f335a5292c11ef8a838c40",
+    "full_flash_sha256": "df5d9f4a3ede41c92a39fbbf996441137d74915672da9d3effed588635a85a61",
+    "host_success_marker_sha256": "3ef21dbdb63dd2105aacc189055fd2e4d54cbd590b35401626efb3c574d1a3db",
+    "completion_ledger_validation_sha256": "242fac0111083a9d013f3eb299413fc5e3f2f8b32d57b7f79f0cb841ba93c268",
+    "sbom_sha256": "f5029fb47c865900762620ecccb9ce1784017d2e8e715f0b5a1b965e5530d6cc",
+    "provenance_sha256": "1c6aa30cf27e7f1edf3b4a56dd583d9fdb1caef060f6ea4869e6e308deb9145a"
+  },
+  "meshcore_oracle": {
+    "raw_receipt_sha256": "16165dd7dfe3dc89d0da1b20661d7d18677d883bb953ade7d808aa16b6a14231",
+    "packaged_receipt_sha256": "26a8d026eefeb91e6b3e8608f2583c6298e97d7304db01d7a1ec2fdaca23ee42",
+    "oracle_manifest_sha256": "982c9db96ecd5824233af90e1527b0222a579fe60147889a185979a158e53d32",
+    "exact_command_plan_entries": 22,
+    "oracle_cases": 931,
+    "oracle_failures": 0,
+    "bidirectional_packet_vectors": 864,
+    "wire_failures": 0,
+    "fuzz_runs": 100000,
+    "fuzz_findings": 0,
+    "pinned_sources": 51,
+    "source_mismatches": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "full_ubsan_clean": false,
+    "shift_base_exception_count": 3,
+    "closure_ready": false
+  },
+  "release_audit": {
+    "sha256": "bfb483168199f971c5a45907eef732e826c97b7af66820df7c6183220ab612aa",
+    "gates_total": 35,
+    "gates_passed": 1,
+    "gates_failed": 34,
+    "p0_total": 33,
+    "p0_failed": 32,
+    "p1_total": 2,
+    "p1_failed": 2,
+    "ready_for_public_release": false
+  },
+  "open_release_blockers": [
+    {
+      "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
+      "reason": "Pinned legacy fe.c, ge.c, and sc.c still require exact shift-base sanitizer exceptions in the merged oracle.",
+      "blocks_execution": false,
+      "blocks_release": true
+    }
+  ],
+  "residual_capabilities": [
+    "real_signed_advert_runtime_merge_and_exact_actions",
+    "ack_dispatch_correlation_and_delivery",
+    "route_selection_and_forwarding",
+    "trace_forwarding_and_path_discovery",
+    "login_request_response_admin",
+    "retained_state_recovery",
+    "official_peer_rf_and_final_hardware_evidence"
+  ],
+  "checks": {
+    "exact_merge_identity": true,
+    "merged_main_actions_success": true,
+    "all_github_archive_digests_verified": true,
+    "all_available_checksum_manifests_verified": true,
+    "meshcore_receipt_bound_to_exact_commit": true,
+    "oracle_and_fuzz_foundation_passed": true,
+    "residual_gaps_fail_closed": true
+  },
+  "proof_banked": false,
+  "closure_eligible": false,
+  "valid": true,
+  "release_ready": false,
+  "release_note": "This banks the merged WP-04 oracle foundation only. WP-04, issue #65, and the public release remain open."
+}

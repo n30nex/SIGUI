@@ -3,8 +3,8 @@ generated_at: '2026-07-14'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: e79fb56160914f4483515f4f70998aa2f8961496
-  integrated_candidate: e79fb56160914f4483515f4f70998aa2f8961496
+  merged_baseline: 977cbd2590ddd0b73fe24274ba45f9d1e4051a37
+  integrated_candidate: 977cbd2590ddd0b73fe24274ba45f9d1e4051a37
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
   proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
@@ -113,29 +113,59 @@ project:
     reproducibility_receipt_sha256: babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f
     reproducibility_aggregate_path: docs/completion/evidence/wp03/release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json
     reproducibility_aggregate_sha256: ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264
-  live_main_artifact_integrity:
-    run: 29300795502
-    status: success
+  pr91_merge:
+    head: 52e776052dd1f253ab2714dbac0c85a53148035d
+    merge_commit: b6a76843eef5868ea504a4194e7e55cdef750841
+    merged_main_actions_run: 29302533308
+    merged_main_actions_status: success
     host_tests_passed: 891
+    checksum_contract_tests_passed: 28
+    purpose: bank the exact WP-03 reproducibility aggregate and close its proof ledger
+  pr92_merge:
+    head: a1aa3567567642f8479c64098414a5174359bab4
+    pr_merge_test_commit: 5fac67ad0619d04867f3eb6e6088f6c87a34a218
+    merge_commit: 977cbd2590ddd0b73fe24274ba45f9d1e4051a37
+    push_run: 29305643722
+    pr_run: 29305644969
+    merged_main_actions_run: 29306243447
+    push_status: success
+    pr_status: success
+    merged_main_actions_status: success
+    host_tests_passed_per_pr_run: 906
+    checksum_contract_tests_passed_per_pr_run: 28
+    archive_digests_verified: 10
+    checksum_manifests_verified: 6
+    checksum_entries_verified: 88
+    extracted_files_hashed: 430
+    portable_aggregate_path: docs/completion/evidence/wp04/oracle_foundation_977cbd2590ddd0b73fe24274ba45f9d1e4051a37.json
+    portable_aggregate_sha256: a4ccb0dde40b87fb3646149579a10c78e3778fcf0cf5885a46c02c1ac7f9b2ff
+    rp2040_status: skipped_esp32_only
+  live_main_artifact_integrity:
+    run: 29306243447
+    status: success
+    host_tests_passed: 906
     checksum_contract_tests_passed: 28
     manifests_total: 3
     manifests_verified: 3
     checksum_entries_verified: 44
-    firmware_manifest_sha256: 6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb
+    firmware_manifest_sha256: fbc6018d24f23f32b5d49190e2d56d6f9ddb535ea22b786b7bd8661945d46cb2
     build_inputs_manifest_sha256: 521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233
-    release_manifest_sha256: 499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18
-    release_package_manifest_json_sha256: 8323d0865afb8297718af8c8eaf8633e789670a162ffadc7a2a9ed1f3abb0a59
-    application_sha256: a0234efd0d132e833968eeeb69fcb6f00b70bc67df8a557e563c626169253e98
-    full_flash_sha256: 1ab37593e8c2d4d231e25dd5720ad0ef6b5d59041c25069033e9b3241a0b2232
+    release_manifest_sha256: 3b74c4f536d57c2b71f16e5385a729ff4b537a7d1fd428554bd7183a50917892
+    release_package_manifest_json_sha256: 748a69da06c17bc90d2b4da4cafab56e68803224c6d95f63213a6f63d55e4fdb
+    application_sha256: fae7c18b25f620e6c8b1f7e95a026afa4bf6307066f335a5292c11ef8a838c40
+    full_flash_sha256: df5d9f4a3ede41c92a39fbbf996441137d74915672da9d3effed588635a85a61
     rp2040_bridge_uf2_sha256: null
-    downloaded_tree_file_count: 214
-    downloaded_tree_total_bytes: 72120370
-    downloaded_tree_sha256: f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738
-    host_success_marker_sha256: dd861b665cb6d0ea42aa54aadff8b293f64d0617c059f04790fb98b318a45e84
-    release_audit_sha256: 9e32893d4478d9f13d00512631058a6a0910ab6338e35c354416654da22dc96d
-    sbom_sha256: 78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037
-    provenance_sha256: 7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c
-    note: Exact merged-main Actions and downloaded recursive verification strict-passed all three emitted manifests after PR #90. Two exact-source full-release dispatches and the tracked positive comparator close WP-03 reproducibility; RP2040 correctly skipped on merged main.
+    downloaded_tree_file_count: 215
+    downloaded_tree_total_bytes: 72316214
+    downloaded_tree_sha256: 519c3a0af21c2c50120c64e35c5fc9e3c5bdb96fb9c65f00c5b3864907bdaa4b
+    host_success_marker_sha256: 3ef21dbdb63dd2105aacc189055fd2e4d54cbd590b35401626efb3c574d1a3db
+    completion_ledger_validation_sha256: 242fac0111083a9d013f3eb299413fc5e3f2f8b32d57b7f79f0cb841ba93c268
+    release_audit_sha256: bfb483168199f971c5a45907eef732e826c97b7af66820df7c6183220ab612aa
+    sbom_sha256: f5029fb47c865900762620ecccb9ce1784017d2e8e715f0b5a1b965e5530d6cc
+    provenance_sha256: 1c6aa30cf27e7f1edf3b4a56dd583d9fdb1caef060f6ea4869e6e308deb9145a
+    meshcore_receipt_sha256: 16165dd7dfe3dc89d0da1b20661d7d18677d883bb953ade7d808aa16b6a14231
+    meshcore_oracle_manifest_sha256: 982c9db96ecd5824233af90e1527b0222a579fe60147889a185979a158e53d32
+    note: Exact merged-main Actions and downloaded recursive verification strict-passed all three emitted manifests after PR #92. The bounded MeshCore foundation remains fail-closed for semantic, runtime, physical, and Ed25519 defined-arithmetic gaps; RP2040 correctly skipped on merged main.
     previous_failed_receipt:
       commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
       run: 29286754864
@@ -152,8 +182,8 @@ project:
     checksum_entries_verified: 78
   release_audit:
     ready_for_public_release: false
-    exact_main_run: 29300795502
-    receipt_sha256: 9e32893d4478d9f13d00512631058a6a0910ab6338e35c354416654da22dc96d
+    exact_main_run: 29306243447
+    receipt_sha256: bfb483168199f971c5a45907eef732e826c97b7af66820df7c6183220ab612aa
     remaining_p0_failures: 32
     failures_overall_including_p1: 34
   local_merge_rehearsals:
@@ -183,15 +213,14 @@ project:
     ruff_status: pass
     evidence_scope: tracked_4ee07caf_baseline_plus_exact_pr84_merged_main_actions_and_downloaded_artifacts
   active_pr_stack:
-  - number: 88
-    pre_ledger_head: 2ab70b19b6e31542d9c379d151ebbc2a427badb0
-    purpose: deterministic SPDX release SBOM and current ledger receipt
-  - number: 89
-    pre_ledger_head: a21682ca24ef0778b9ff1dd915d92e52414ac98a
-    purpose: deterministic exact-source release provenance
-  - number: 90
-    pre_ledger_head: afe322f99373a086587783ed98cb0f42dbf997bf
-    purpose: independent release rebuild comparator; draft pending hardening
+  - number: 93
+    head: e0f44a20fe52c795189c3bc40f0c17238aa764e2
+    status: draft
+    purpose: execute real signed-advert Identity, Mesh, Dispatcher, and BaseChatMesh runtime semantics
+  - number: 94
+    head: be36fe10b1ac34966b83f2a73d43d17df9f7d2c7
+    status: draft
+    purpose: add the standalone defined-arithmetic Ed25519 overlay and differential sanitizer proof
   pinned_meshcore: e8d3c53ba1ea863937081cd0caad759b832f3028
   esp_idf: 5.5.4
   target: seeed-sensecap-indicator-d1l
@@ -550,6 +579,62 @@ work_packages:
   tracks:
   - 65
   status: in_progress
+  foundation_merged: true
+  proof_banked: false
+  merged_slices:
+  - pull_request: 92
+    head: a1aa3567567642f8479c64098414a5174359bab4
+    pr_merge_test_commit: 5fac67ad0619d04867f3eb6e6088f6c87a34a218
+    merge_commit: 977cbd2590ddd0b73fe24274ba45f9d1e4051a37
+    actions_push_run: 29305643722
+    actions_pr_run: 29305644969
+    actions_merged_main_run: 29306243447
+    host_tests_passed_per_pr_run: 906
+    checksum_contract_tests_passed_per_pr_run: 28
+    oracle_cases: 931
+    bidirectional_packet_vectors: 864
+    fuzz_runs: 100000
+    exact_command_plan_entries: 22
+    sanitizer_errors: 0
+    memory_errors: 0
+    archive_digests_verified: 10
+    checksum_manifests_verified: 6
+    checksum_entries_verified: 88
+    extracted_files_hashed: 430
+    merged_main_actions_status: success
+    merged_main_host_tests_passed: 906
+    merged_main_checksum_contract_tests_passed: 28
+    merged_main_archive_digests_verified: 5
+    merged_main_checksum_manifests_verified: 3
+    merged_main_checksum_entries_verified: 44
+    merged_main_extracted_files_hashed: 215
+    merged_main_downloaded_tree_sha256: 519c3a0af21c2c50120c64e35c5fc9e3c5bdb96fb9c65f00c5b3864907bdaa4b
+    portable_aggregate_path: docs/completion/evidence/wp04/oracle_foundation_977cbd2590ddd0b73fe24274ba45f9d1e4051a37.json
+    portable_aggregate_sha256: a4ccb0dde40b87fb3646149579a10c78e3778fcf0cf5885a46c02c1ac7f9b2ff
+    rp2040_status: skipped_esp32_only
+  active_slices:
+  - pull_request: 93
+    head: e0f44a20fe52c795189c3bc40f0c17238aa764e2
+    capability: identity_signed_advert_runtime
+  - pull_request: 94
+    head: be36fe10b1ac34966b83f2a73d43d17df9f7d2c7
+    capability: ed25519_defined_arithmetic_overlay_foundation
+  open_receipts:
+  - id: BLK-WP04-ED25519-SHIFT-UB-20260714
+    status: open
+    blocks_execution: false
+    blocks_release: true
+    current_exception_sources:
+    - third_party/MeshCore/lib/ed25519/fe.c
+    - third_party/MeshCore/lib/ed25519/ge.c
+    - third_party/MeshCore/lib/ed25519/sc.c
+    required_closure: Production and host oracle use reviewed defined arithmetic, all three shift-base exceptions are removed, full_ubsan_clean is true, and exact Actions firmware/package evidence passes.
+  residual_capabilities:
+  - identity_signed_advert_runtime_merge_and_exact_actions
+  - ack_dispatch_correlation_and_delivery
+  - route_selection_and_forwarding
+  - trace_forwarding_and_path_discovery
+  - login_request_response_admin
   required_artifacts:
   - meshcore_oracle_manifest_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.

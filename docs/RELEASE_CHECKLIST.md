@@ -33,10 +33,14 @@
 - [x] Issue #65 has a separate Ubuntu 24.04, recursively checked-out,
   Clang-18 ASan+UBSan/libFuzzer wire-envelope job that gates firmware build
   and uploads a commit-named JSON artifact.
-- [ ] The current commit's wire-envelope artifact passes with
+- [x] Merged PR #92's current-commit wire-envelope artifact passes with
   `coverage_level="wire_envelope_only"`, `closure_ready=false`, the exact
   upstream gitlink, 100,000 deterministic fuzz inputs, and zero sanitizer or
-  canary failures. This is structural evidence only.
+  canary failures. Its bounded 931-case upstream oracle and exact 22-command
+  receipt plan also pass. This is foundation evidence only.
+- [ ] Remove the exact `shift-base` sanitizer exceptions for pinned Ed25519
+  `fe.c`, `ge.c`, and `sc.c`; production and the host oracle must use reviewed
+  defined arithmetic and report `full_ubsan_clean=true` on exact Actions.
 - [ ] Issue #65 full conformance closes only after semantic,
   production-cryptography, duplicate/replay/lifetime, retained-state, and
   real-peer coverage passes for the entire declared MeshCore 1.0 surface; the
