@@ -8,21 +8,22 @@
 
 | Item | Value |
 |---|---|
-| Live merged `main` | `14182d3f198b70ceb588d9d43312bf76d8745284` |
+| Live merged `main` | `5a4e7f2777b306ad4d7b62311fd79296d7d45747` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
-| Active PR stack | #88 SBOM, #89 provenance, #90 reproducibility comparator; all draft and dependency-stacked |
-| Candidate integration state | PRs #62, #64, #80, #84, #85, #86, and #87 are merged; software integration and the first immutable-input slices are complete, while frozen-candidate physical qualification remains open |
+| Active PR stack | #90 reproducibility comparator at head `f731e465bb5dc31cb1a8a88a82dafda1e3c38577`; replacement comparison and merge receipts pending |
+| Candidate integration state | PRs #62, #64, #80, #84, #85, #86, #87, #88, and #89 are merged; deterministic SBOM and provenance are present, while WP-03 comparison and frozen-candidate physical qualification remain open |
 | Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
 | SDK | ESP-IDF 5.5.4 |
-| Candidate host suite | 834 passing tests in exact merged-main Actions host job |
-| Candidate CI | run `29297516173` green; 3 emitted manifests / 39 checksum entries verified; exact-head RP2040 dispatch `29296995585` verified 9 / 81 |
+| Candidate host suite | 845 passing tests in exact merged-main Actions host job |
+| Candidate CI | run `29299321770` green; 3 emitted manifests / 41 checksum entries verified across 210 downloaded files; exact-head RP2040 dispatch `29296995585` verified 9 / 81 |
 | Conformance closure | false; `wire_envelope_only` |
-| Release status | not ready to tag; exact-main audit `29297516173` reports 31 P0 failures / 33 overall across the expanded gate set |
+| Release status | not ready to tag; exact-main audit `29299321770` reports 31 P0 failures / 33 overall across the expanded gate set |
 
 ## Live post-audit reconciliation
 
-- Live `main` is `14182d3f198b70ceb588d9d43312bf76d8745284`; PR #87 head `655ece5d5d33356937cad24f7e23fa58decf7ff5` merged after PRs #84, #85, and #86. Exact merged-main Actions `29297516173` passed 834 host tests plus 24 checksum-contract tests, and all five downloaded artifacts strict-verified across 3 manifests / 39 entries. Root hashes are firmware `e702d912a508ebccde5a5c426f0f31ab349e362175826b307dc4a3a491efe014`, build inputs `cf3c91f97d7bbd42ae1ee6c19f8d96934ea34a689308b4de05f9edbdd32bbdbe`, and release `0816f442bc9a6456009bc92dad0ee1528219eddb5c62eb6d65c8d21b34b54cc4`. RP2040 correctly skipped on merged main; exact-head dispatch `29296995585` executed the pinned Arduino action, built all three RP2040 variants, and strict-verified 9 manifests / 81 entries without device interaction.
+- Live `main` is `5a4e7f2777b306ad4d7b62311fd79296d7d45747`; PR #88 head `8f90ad74da443c79a79b458aac313955860f3bf5` merged as `b130eb1026e8d14e4e6878bd819b5ee7f0da2165`, then PR #89 head `de7eee7ecf8d29c110830f1ed813b71b4d770ebd` merged as live main. Exact merged-main Actions `29299321770` passed 845 host tests plus 25 checksum-contract tests, and all five downloaded artifacts strict-verified across 3 manifests / 41 entries and 210 files; canonical tree is `d192413aadb9ac6a1fb9f858c3071fa99178b20d0d51a40e2d0c382e9ca50ff1`. Root hashes are firmware `39c9c26811076f1564fbc880b180406578618c2138830a8213c233cd3ad89531`, build inputs `cf3c91f97d7bbd42ae1ee6c19f8d96934ea34a689308b4de05f9edbdd32bbdbe`, and release `92ed2ddd8d741eeadd1b37dd5790c179453a361ad97226fe16b3d503a75e2d6f`; package manifest is `68e714b5daf943cca8edb212cc9e2e8c71c0981531f5c865bb18a9c08c6cdc65`, application `63c25353ec028e03766c613a0167b81a1c145faf8c35a8d30a0338b1c230f5dc`, full flash `aa95367388ee5fc1ed7c2c0ed0d51f3204e0a25cd4a2f1c3741a6280eb8d4270`, SBOM `565e9144f038e07061d035fc51daf8ca80341d8dc248371a2e4369a8f7e2b065`, and provenance `b3763f05820d5ed361bb043f3eee7d9acc40200abfa6b6a0951127338b683d73`. RP2040 correctly skipped on merged main.
+- PR #90 exact-source rebuild comparison is not yet closure evidence. Preserved receipt `F:/SIGUI-evidence/actions/pr90-8b7b2c03-full-release-comparison-29299613481-29299614693.json` has SHA-256 `a03bdb8112bc309a64ea185d2d29e7a09a8e41a282dd8fc22e2b466c9218a31e` and records `invalid_sbom` for both full-release runs `29299613481` / `29299614693` at source `8b7b2c0368216bfe2f945d93323384ff6a10d7db`. Final records matched, but WindowsPath case ordering changed the SBOM fingerprint. Head `f731e465bb5dc31cb1a8a88a82dafda1e3c38577` canonicalizes relative POSIX ordering; replacement comparison and merge receipts remain pending, so WP-03 stays `in_progress` / `proof_banked=false`.
 - Exact merged-main run `29290978741` passed 795 host plus 24 checksum-contract tests and downloaded strict verification of 8 manifests / 78 entries. Root manifest is `22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64`; application is `44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a`; full flash is `ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd`. The earlier `29286754864` 7/8 failure remains preserved as a negative receipt, and the coverage blocker is closed.
 - WP-01 is `merged` with `proof_banked=true`; its physical evidence remains explicitly bound to exact source `092293f2311a24c9899bc9bf343ab014c4ba0411`.
 - Exact push/PR Actions runs `29272708844` / `29272709642` are green. The Actions host job reports 773 passed, and all 8 manifests / 78 checksum entries verify.
