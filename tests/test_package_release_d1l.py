@@ -155,6 +155,7 @@ def fake_source_identity(commit: str) -> dict:
 
 
 def install_fake_source_identity(monkeypatch, commit: str) -> None:
+    monkeypatch.setenv("GITHUB_SHA", commit)
     monkeypatch.setattr(
         package_release_d1l,
         "discover_source_identity",
