@@ -1,10 +1,10 @@
 # Source Audit and Attribution
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
-This project uses references for architecture and feature parity, but Phase 1 source is newly written except for git submodules.
+This project uses references for architecture and feature parity. Phase 1 source is newly written except for git submodules and the clearly attributed, plainly marked orlp Ed25519 defined-arithmetic overlay described below.
 
-Top-level project license: GPL-3.0-or-later. The public release package must include `LICENSE`, `THIRD_PARTY_NOTICES.md`, `docs/ATTRIBUTIONS.md`, and this source audit.
+Top-level project license: GPL-3.0-or-later. The public release package must include `LICENSE`, `THIRD_PARTY_NOTICES.md`, `docs/ATTRIBUTIONS.md`, this source audit, and the verbatim orlp Ed25519 zlib license.
 
 ## Included Submodules
 
@@ -16,9 +16,15 @@ Top-level project license: GPL-3.0-or-later. The public release package must inc
 - MeshCore upstream: https://github.com/meshcore-dev/MeshCore
   - License: MIT-style `license.txt` in the upstream repo, with bundled third-party notices.
   - Pinned gitlink reviewed for the issue #65 wire-envelope slice: `e8d3c53ba1ea863937081cd0caad759b832f3028`.
-  - Use: protocol reference plus the exact structural packet-envelope oracle and bounded advert/public-group/plain-DM/expected-ACK/ACK+PATH/general-PATH/route-code/ACK/TRACE golden-vector target for issue #65. The production service retains its original narrow C adapter rather than linking the upstream service/chat stack.
+  - Use: protocol reference plus the exact structural packet-envelope oracle and bounded advert/public-group/plain-DM/expected-ACK/ACK+PATH/general-PATH/route-code/ACK/TRACE golden-vector target for issue #65. The production service retains its original narrow C adapter rather than linking the upstream service/chat stack. Production and both host gates select the SIGUI-local defined-arithmetic copies of upstream `fe.c`, `ge.c`, and `sc.c`; the remaining Ed25519 sources stay at the unchanged gitlink.
   - Conformance boundary: the packet-envelope result remains `wire_envelope_only`; the separately versioned WP-04 oracle also pins advert fields, strict signed-advert verification, `BaseChatMesh` channel hashing, plain-DM attempt/text and expected-ACK layout, `mesh::Utils` public-group/DM/PATH AES-HMAC creation and authenticated parsing, caller-selected direct/flood transport-code preparation, ACK framing, and source TRACE framing. DM and PATH vectors use caller-supplied public-key/hash/shared-secret/RNG inputs; they do not claim key exchange, contacts, stored route selection, dispatch, reciprocal-path decisions, ACK correlation/delivery, forwarding, or retained state. Exact-block normal DMs pin the deterministic expected hash only because the pinned receive path reads the full ACK body's fifth byte beyond initialized decrypted/terminator bytes. The strict advert verifier uses the vendored C Ed25519 implementation with production canonical-scalar, canonical-point, and low-order-point checks. The upstream native-test AES/SHA mocks are excluded; bounded crypto uses the source-pinned Seeed/Brian Gladman AES implementation and a functional host SHA-256/HMAC adapter checked against FIPS/RFC known-answer vectors. Neither result proves full Mesh dispatch, delivery, retained state, real-peer interop, full conformance, or release readiness.
   - Risk: Upstream is Arduino/PlatformIO oriented in many paths; ESP-IDF integration may need an adapter layer rather than direct reuse. Optional web stack dependencies must be reviewed before Wi-Fi management is added.
+
+- orlp Ed25519 defined-arithmetic overlay: https://github.com/orlp/ed25519
+  - License: zlib (`Zlib` in SPDX), Copyright (c) 2015 Orson Peters.
+  - Source: `overlays/meshcore_ed25519_defined/fe.c`, `ge.c`, and `sc.c`, derived from the copies vendored at the MeshCore gitlink above. Each file records its exact upstream SHA-256 and is plainly marked as altered.
+  - Alteration: signed left shifts that can receive negative operands are replaced with mathematically equivalent multiplication by checked-in powers of two. The validator performs RFC 8032 vectors plus 256 deterministic baseline/overlay differential cases and requires a no-exception ASan/UBSan build in CI.
+  - Notice: `overlays/meshcore_ed25519_defined/license.txt` is the verbatim upstream license and is included separately in release packages.
 
 ## Reference Repositories
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import meshcore_signed_advert_runtime_d1l as signed_runtime
 from scripts import release_gate_audit_d1l as audit
 from scripts.release_gate_audit_d1l import build_audit, parse_args
 from tests.meshcore_conformance_fixture import completed_report
@@ -608,11 +609,85 @@ def meshcore_conformance_payload(
     return payload
 
 
+def meshcore_signed_advert_payload(
+    commit: str = COMMIT,
+    *,
+    generated_at: datetime | None = None,
+    **overrides: object,
+) -> dict:
+    manifest = signed_runtime.load_manifest()
+    dependency = manifest["external_dependency"]
+    repository_files = {
+        path: {
+            "expected_sha256": digest,
+            "actual_sha256": digest,
+            "matched": True,
+        }
+        for group in signed_runtime._source_groups(manifest)
+        for path, digest in group.items()
+    }
+    payload = {
+        "schema_version": 1,
+        "artifact_type": signed_runtime.SIGNED_ADVERT_ARTIFACT_TYPE,
+        "status": "pass",
+        "passed": True,
+        "execution_complete": True,
+        "generated_at": (generated_at or datetime.now(timezone.utc)).isoformat(),
+        "work_package": "WP-04",
+        "capability": manifest["capability"],
+        "coverage_boundary": manifest["coverage_boundary"],
+        "wp04_closure_eligible": False,
+        "closure_ready": False,
+        "repository": {
+            "verified": True,
+            "repository_commit": commit,
+            "expected_repository_commit": commit,
+            "upstream_commit": manifest["upstream"]["commit"],
+            "gitlink_commit": manifest["upstream"]["commit"],
+            "source_hash_mode": manifest["source_hash_mode"],
+            "files": repository_files,
+        },
+        "external_archive": {
+            "verified": True,
+            "source": dependency["archive_url"],
+            "url": dependency["archive_url"],
+            "size": dependency["archive_size"],
+            "sha256": dependency["archive_sha256"],
+            "version": dependency["version"],
+            "registry_version_id": dependency["registry_version_id"],
+            "release_commit": dependency["release_commit"],
+        },
+        "external_sources": {
+            "verified": True,
+            "files": {
+                path: {"sha256": digest, "size": 1}
+                for path, digest in dependency["sources"].items()
+            },
+        },
+        "sanitizers_enabled": True,
+        "sanitizer_policy": manifest["sanitizer_policy"],
+        "full_ubsan_clean": True,
+        "commands": signed_runtime.command_plan(
+            "clang-18",
+            "clang++-18",
+            "/tmp/signed-advert-crypto",
+            "/tmp/signed-advert-build",
+            sanitize=True,
+        ),
+        "result": manifest["expected_result"],
+        "assertions": manifest["assertions"],
+        "residual_gaps": manifest["residual_gaps"],
+    }
+    payload.update(overrides)
+    return payload
+
+
 def write_release_package(
     run_dir: Path,
     *,
     commit: str = COMMIT,
     conformance: dict | None = None,
+    signed_advert: dict | None = None,
     workflow_run_id: str = RUN_ID,
     git_dirty: bool = False,
     evidence_root: Path | None = None,
@@ -632,6 +707,7 @@ def write_release_package(
         "notices/THIRD_PARTY_NOTICES.md": b"third party",
         "notices/ATTRIBUTIONS.md": b"attributions",
         "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md": b"source audit",
+        "notices/ORLP_ED25519_ZLIB_LICENSE.txt": b"orlp zlib license",
     }
     for relative, payload in notices.items():
         target = package / relative
@@ -653,6 +729,32 @@ def write_release_package(
     evidence_path = package / evidence_relative
     write_json(evidence_path, audit.canonicalize_release_report(report))
     evidence_bytes = evidence_path.read_bytes()
+    signed_report = signed_advert or meshcore_signed_advert_payload(commit)
+    signed_generated_at = datetime.fromisoformat(
+        signed_report["generated_at"].replace("Z", "+00:00")
+    )
+    signed_expires_at = signed_generated_at + timedelta(
+        days=audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS
+    )
+    signed_receipt_relative = f"meshcore_signed_advert_runtime_{commit}.json"
+    signed_receipt_path = (
+        run_dir
+        / audit.MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT
+        / signed_receipt_relative
+    )
+    signed_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    signed_receipt_path.write_text(json.dumps(signed_report), encoding="utf-8")
+    signed_receipt_bytes = signed_receipt_path.read_bytes()
+    signed_evidence_relative = (
+        f"evidence/meshcore_signed_advert_runtime_{commit}.json"
+    )
+    signed_evidence_path = package / signed_evidence_relative
+    signed_evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    signed_evidence_path.write_text(
+        json.dumps(audit.canonicalize_signed_advert_report(signed_report, commit)),
+        encoding="utf-8",
+    )
+    signed_evidence_bytes = signed_evidence_path.read_bytes()
     write_json(
         package / "manifest.json",
         {
@@ -687,6 +789,33 @@ def write_release_package(
                 "coverage_level": audit.MESHCORE_CONFORMANCE_BOUNDARY,
                 "closure_ready": False,
                 "issue_65_closure_eligible": False,
+                "passed": True,
+                "execution_complete": True,
+            },
+            "meshcore_signed_advert_runtime": {
+                "artifact_type": audit.SIGNED_ADVERT_ARTIFACT_TYPE,
+                "path": signed_evidence_relative,
+                "size": len(signed_evidence_bytes),
+                "sha256": hashlib.sha256(signed_evidence_bytes).hexdigest(),
+                "source_commit": commit,
+                "evidence_profile": audit.SIGNED_ADVERT_EVIDENCE_PROFILE,
+                "run_receipt": {
+                    "artifact": audit.MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT,
+                    "path": signed_receipt_relative,
+                    "size": len(signed_receipt_bytes),
+                    "sha256": hashlib.sha256(signed_receipt_bytes).hexdigest(),
+                    "generated_at": signed_generated_at.astimezone(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    "expires_at": signed_expires_at.astimezone(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                },
+                "max_age_days": audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
+                "coverage_boundary": signed_report["coverage_boundary"],
+                "wp04_closure_eligible": False,
+                "closure_ready": False,
+                "full_ubsan_clean": True,
                 "passed": True,
                 "execution_complete": True,
             },
@@ -1663,8 +1792,8 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     gates = gate_by_id(report)
 
     assert report["schema"] == audit.RELEASE_GATE_AUDIT_SCHEMA == 2
-    assert report["gate_count"] == 35
-    assert report["p0_gate_count"] == 33
+    assert report["gate_count"] == 36
+    assert report["p0_gate_count"] == 34
     assert report["p1_gate_count"] == 2
     assert report["passed_count"] + report["failed_count"] == report["gate_count"]
     assert gates["supported_sdk_baseline"]["ok"] is True
@@ -1679,6 +1808,13 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["meshcore_wire_conformance_packaged"]["ok"] is True
     assert gates["meshcore_wire_conformance_packaged"]["details"]["closure_ready"] is False
     assert gates["meshcore_wire_conformance_packaged"]["details"]["issue_65_closure_eligible"] is False
+    assert gates["meshcore_signed_advert_runtime_packaged"]["ok"] is True
+    assert (
+        gates["meshcore_signed_advert_runtime_packaged"]["details"][
+            "full_ubsan_clean"
+        ]
+        is True
+    )
     assert gates["meshcore_full_conformance_complete"]["ok"] is False
     assert gates["meshcore_full_conformance_complete"]["severity"] == "P0"
     assert gates["meshcore_full_conformance_complete"]["details"][
@@ -2129,6 +2265,88 @@ def test_package_evidence_requires_explicit_expected_run_id(tmp_path: Path):
     assert gate["ok"] is False
     assert "expected_run_id_missing" in gate["details"]["failures"]
     assert "package_workflow_run_id" in gate["details"]["failures"]
+
+
+def test_signed_advert_packaged_evidence_rejects_expiry_and_tampering(
+    tmp_path: Path,
+):
+    valid_run = tmp_path / "signed-valid"
+    write_release_package(valid_run)
+    valid = audit.meshcore_signed_advert_evidence_gate(
+        valid_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+
+    assert valid["ok"] is True
+    assert valid["details"]["full_ubsan_clean"] is True
+    assert valid["details"]["closure_ready"] is False
+    assert "does not close WP-04 or issue #65" in valid["message"]
+
+    expired_run = tmp_path / "signed-expired"
+    expired_at = datetime.now(timezone.utc) - timedelta(
+        days=audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS + 1
+    )
+    write_release_package(
+        expired_run,
+        signed_advert=meshcore_signed_advert_payload(generated_at=expired_at),
+    )
+    expired = audit.meshcore_signed_advert_evidence_gate(
+        expired_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+    assert expired["ok"] is False
+    assert "evidence_not_expired" in expired["details"]["failures"]
+
+    receipt_tamper_run = tmp_path / "signed-receipt-tamper"
+    write_release_package(receipt_tamper_run)
+    raw_receipt = (
+        receipt_tamper_run
+        / audit.MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT
+        / f"meshcore_signed_advert_runtime_{COMMIT}.json"
+    )
+    raw_receipt.write_text(
+        raw_receipt.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+    )
+    receipt_tampered = audit.meshcore_signed_advert_evidence_gate(
+        receipt_tamper_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+    assert receipt_tampered["ok"] is False
+    assert "run_receipt_sha256_mismatch" in receipt_tampered["details"]["failures"]
+    assert "run_receipt_size_mismatch" in receipt_tampered["details"]["failures"]
+
+    semantic_run = tmp_path / "signed-semantic-tamper"
+    semantic_package = write_release_package(semantic_run)
+    canonical = (
+        semantic_package
+        / f"evidence/meshcore_signed_advert_runtime_{COMMIT}.json"
+    )
+    canonical_report = json.loads(canonical.read_text(encoding="utf-8"))
+    canonical_report["result"]["contact_name"] = "tampered-contact"
+    write_json(canonical, canonical_report)
+    manifest_path = semantic_package / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    metadata = manifest["meshcore_signed_advert_runtime"]
+    metadata["size"] = canonical.stat().st_size
+    metadata["sha256"] = hashlib.sha256(canonical.read_bytes()).hexdigest()
+    write_json(manifest_path, manifest)
+    semantic = audit.meshcore_signed_advert_evidence_gate(
+        semantic_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+    assert semantic["ok"] is False
+    assert "canonical_evidence_semantics_incomplete" in semantic["details"]["failures"]
+    assert "canonical_evidence_matches_run_receipt" in semantic["details"]["failures"]
+
+
+def test_release_notices_gate_requires_orlp_overlay_license(tmp_path: Path):
+    run_dir = tmp_path / "notices"
+    package = write_release_package(run_dir)
+    license_path = package / "notices/ORLP_ED25519_ZLIB_LICENSE.txt"
+    license_path.unlink()
+
+    gate = audit.notices_gate(run_dir, tmp_path).to_dict()
+
+    assert gate["ok"] is False
+    assert "notices/ORLP_ED25519_ZLIB_LICENSE.txt" in gate["details"][
+        "missing_files"
+    ]
 
 
 def test_host_checks_gate_rejects_missing_or_cross_run_marker(tmp_path: Path):

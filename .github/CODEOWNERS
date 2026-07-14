@@ -16,6 +16,7 @@
 /sdkconfig.defaults @n30nex
 /third_party/ @n30nex
 /patches/ @n30nex
+/overlays/meshcore_ed25519_defined/ @n30nex
 
 # Release lineage, provenance, SBOM, checksums, and reproducibility tooling.
 /docs/BUILD_PROVENANCE_D1L.md @n30nex
@@ -30,6 +31,8 @@
 /scripts/compare_release_reproducibility_d1l.py @n30nex
 /scripts/provenance_d1l.py @n30nex
 /scripts/sbom_d1l.py @n30nex
+/scripts/meshcore_signed_advert_runtime_d1l.py @n30nex
+/scripts/validate_ed25519_defined_overlay.py @n30nex
 
 # Reserved ownership boundaries for signed update and security code.
 /main/update/ @n30nex

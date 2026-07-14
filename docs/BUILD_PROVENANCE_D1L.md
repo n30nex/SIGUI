@@ -24,6 +24,11 @@ itself are excluded to prevent checksum cycles. Resolved dependencies include th
 root commit, both submodule gitlinks, the workflow, toolchain/configuration locks,
 partition layout, notices, and the release metadata generators.
 
+The source-input inventory includes the production-linked orlp Ed25519
+defined-arithmetic overlay, its verbatim zlib license, both host gate manifests,
+and the overlay validator. The SPDX file records `Zlib` for those altered
+sources and for the separately packaged license notice.
+
 The toolchain lock includes byte identities for the Ubuntu Clang package and
 resolved compiler executable used by the MeshCore sanitizer gate, plus the
 Arduino CLI Linux release archive and executable used by RP2040 Actions builds.
@@ -57,17 +62,17 @@ binding is a separate release requirement.
 
 ## Reproducibility comparison
 
-The MeshCore conformance job publishes a raw
-`d1l-meshcore-wire-conformance` Actions receipt containing its execution time,
-elapsed fuzz time, and run-local paths. Release packaging validates that fresh
-receipt, records its exact SHA-256 identity in `manifest.json`, and packages a
-canonical semantic projection under `evidence/`. The projection omits or
-normalizes only those volatile receipt fields. The release audit requires the
-raw receipt, its manifest binding, and the canonical projection to agree, so
-canonical packaging does not replace live-run freshness evidence.
-Both raw and canonical consumers validate the complete source, vector, fuzz,
-sanitizer, and tool-byte semantics rather than trusting only top-level pass
-flags.
+The MeshCore conformance job publishes raw `d1l-meshcore-wire-conformance`
+Actions receipts for the wire oracle and the signed-advert runtime. Each raw
+receipt contains execution time, commands, and other run-local data. Release
+packaging validates freshness, exact-commit source pins, the no-exception
+sanitizer policy, and the complete semantic result; records the raw file's
+exact SHA-256 identity in `manifest.json`; and packages a deterministic
+semantic projection under `evidence/`. The release audit requires each raw
+receipt, manifest binding, and canonical projection to agree, so canonical
+packaging never replaces live-run freshness evidence. Consumers validate the
+complete source, vector/runtime, sanitizer, and tool-byte semantics rather
+than trusting only top-level pass flags.
 
 Compare two independently downloaded packages with the fail-closed full release
 profile (also the CLI default):

@@ -1,10 +1,10 @@
 idf_component_register(
     SRCS
-        "../third_party/MeshCore/lib/ed25519/fe.c"
-        "../third_party/MeshCore/lib/ed25519/ge.c"
+        "../overlays/meshcore_ed25519_defined/fe.c"
+        "../overlays/meshcore_ed25519_defined/ge.c"
         "../third_party/MeshCore/lib/ed25519/key_exchange.c"
         "../third_party/MeshCore/lib/ed25519/keypair.c"
-        "../third_party/MeshCore/lib/ed25519/sc.c"
+        "../overlays/meshcore_ed25519_defined/sc.c"
         "../third_party/MeshCore/lib/ed25519/sha512.c"
         "../third_party/MeshCore/lib/ed25519/sign.c"
         "../third_party/MeshCore/lib/ed25519/verify.c"

@@ -29,6 +29,15 @@ MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must in
 - Pinned submodule: `third_party/sensecap_indicator_esp32` at commit `77edb8d2b9a92fc67965c1b2d4a838f0d09a1800` (`v1.1.0`)
 - Use in this project: tracked compatibility/BSP reference for board support, LCD/touch integration patterns, and D1L/GX display configuration. The WP-04 host-only public-group oracle also compiles `components/LoRaWAN/soft-se/aes.c`; that AES implementation carries the permissive Brian Gladman notice embedded in `aes.c` and `aes.h`. Its documented ESP-IDF v5.1.x baseline does not set the production SDK version; issue #63 separately selects v5.5.4 as the migration target and requires qualification before it becomes the production baseline.
 
+## orlp Ed25519
+
+- Project: orlp/ed25519
+- Repository: https://github.com/orlp/ed25519
+- Copyright: Copyright (c) 2015 Orson Peters <orsonpeters@gmail.com>
+- License: zlib (`Zlib` in SPDX)
+- Use in this project: MeshCore's pinned Ed25519 verifier remains the API and implementation base. Production and the WP-04 host gates replace only `fe.c`, `ge.c`, and `sc.c` with the plainly marked SIGUI defined-arithmetic overlay under `overlays/meshcore_ed25519_defined/`.
+- Notice: the overlay retains the verbatim upstream license at `overlays/meshcore_ed25519_defined/license.txt`; release packages copy it to `notices/ORLP_ED25519_ZLIB_LICENSE.txt`.
+
 ## SigurdOS-TDeck
 
 - Project: SigurdOS-TDeck

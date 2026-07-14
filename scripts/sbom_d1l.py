@@ -46,6 +46,7 @@ REQUIRED_NOTICE_SOURCES = (
     "THIRD_PARTY_NOTICES.md",
     "docs/ATTRIBUTIONS.md",
     "docs/SOURCE_AUDIT_AND_ATTRIBUTION.md",
+    "overlays/meshcore_ed25519_defined/license.txt",
 )
 
 REQUIRED_SOURCE_INPUTS = (
@@ -61,16 +62,26 @@ REQUIRED_SOURCE_INPUTS = (
     "docs/COMPLETION_LEDGER.yaml",
     "docs/SOURCE_AUDIT_AND_ATTRIBUTION.md",
     "main/CMakeLists.txt",
+    "overlays/meshcore_ed25519_defined/README.md",
+    "overlays/meshcore_ed25519_defined/fe.c",
+    "overlays/meshcore_ed25519_defined/ge.c",
+    "overlays/meshcore_ed25519_defined/license.txt",
+    "overlays/meshcore_ed25519_defined/sc.c",
     "partitions_d1l.csv",
     "patches/sensecap_indicator_idf55_compat.patch",
     "patches/sensecap_indicator_touch_fix.patch",
     "scripts/compare_release_reproducibility_d1l.py",
     "scripts/meshcore_conformance_d1l.py",
+    "scripts/meshcore_signed_advert_runtime_d1l.py",
     "scripts/package_release_d1l.py",
     "scripts/provenance_d1l.py",
     "scripts/sbom_d1l.py",
     "scripts/verify_arduino_build_inputs.py",
     "scripts/verify_ci_tool_inputs.py",
+    "scripts/validate_ed25519_defined_overlay.py",
+    "tests/ed25519_defined_overlay/driver.c",
+    "tests/meshcore_oracle/manifest.json",
+    "tests/meshcore_signed_advert_runtime/manifest.json",
     "requirements/ci-host-windows.txt",
     "sdkconfig.defaults",
 )
@@ -80,6 +91,14 @@ PACKAGE_VERIFICATION_EXCLUSIONS = (
     "./SHA256SUMS.txt",
     "./manifest.json",
 )
+
+ORLP_ED25519_SOURCE_INPUTS = {
+    "overlays/meshcore_ed25519_defined/fe.c",
+    "overlays/meshcore_ed25519_defined/ge.c",
+    "overlays/meshcore_ed25519_defined/license.txt",
+    "overlays/meshcore_ed25519_defined/sc.c",
+}
+ORLP_ED25519_PACKAGE_NOTICE = "notices/ORLP_ED25519_ZLIB_LICENSE.txt"
 
 
 def sha256_file(path: Path) -> str:
@@ -272,6 +291,9 @@ def file_record(path: Path, name: str, category: str) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"Missing required SBOM input {path}")
     normalized_name = name.replace("\\", "/")
+    is_orlp_ed25519 = normalized_name in ORLP_ED25519_SOURCE_INPUTS or (
+        category == "Package" and normalized_name == ORLP_ED25519_PACKAGE_NOTICE
+    )
     return {
         "SPDXID": file_id(category, normalized_name),
         "fileName": f"./{category.lower()}/{normalized_name}",
@@ -280,8 +302,13 @@ def file_record(path: Path, name: str, category: str) -> dict[str, Any]:
             {"algorithm": "SHA1", "checksumValue": sha1_file(path)},
             {"algorithm": "SHA256", "checksumValue": sha256_file(path)},
         ],
-        "licenseConcluded": "NOASSERTION",
-        "copyrightText": "NOASSERTION",
+        "licenseConcluded": "Zlib" if is_orlp_ed25519 else "NOASSERTION",
+        "licenseInfoInFiles": ["Zlib"] if is_orlp_ed25519 else ["NOASSERTION"],
+        "copyrightText": (
+            "Copyright (c) 2015 Orson Peters <orsonpeters@gmail.com>"
+            if is_orlp_ed25519
+            else "NOASSERTION"
+        ),
         "comment": f"Deterministically hashed {category.lower()} input: {normalized_name}",
     }
 
@@ -323,6 +350,7 @@ def manifest_claims(manifest: dict) -> dict[str, tuple[str, int | None]]:
         "update_image",
         "full_flash_image",
         "meshcore_conformance",
+        "meshcore_signed_advert_runtime",
         "build_inputs",
         "capability_manifest",
         "release_evidence_index",
@@ -542,7 +570,8 @@ def build_spdx_document(
         )
         release["attributionTexts"] = [
             "See notices/LICENSE, notices/THIRD_PARTY_NOTICES.md, "
-            "notices/ATTRIBUTIONS.md, and notices/SOURCE_AUDIT_AND_ATTRIBUTION.md."
+            "notices/ATTRIBUTIONS.md, notices/SOURCE_AUDIT_AND_ATTRIBUTION.md, "
+            "and notices/ORLP_ED25519_ZLIB_LICENSE.txt."
         ]
         packages.append(release)
         described.append(RELEASE_PACKAGE_ID)

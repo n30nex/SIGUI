@@ -71,6 +71,7 @@ def test_wp03_release_security_categories_have_dedicated_rules():
         "/sdkconfig.defaults",
         "/third_party/",
         "/patches/",
+        "/overlays/meshcore_ed25519_defined/",
         # Provenance, SBOM, checksum, package, and comparator surfaces.
         "/docs/BUILD_PROVENANCE_D1L.md",
         "/**/SHA256SUMS.txt",
@@ -82,6 +83,8 @@ def test_wp03_release_security_categories_have_dedicated_rules():
         "/scripts/compare_release_reproducibility_d1l.py",
         "/scripts/provenance_d1l.py",
         "/scripts/sbom_d1l.py",
+        "/scripts/meshcore_signed_advert_runtime_d1l.py",
+        "/scripts/validate_ed25519_defined_overlay.py",
         # Future update/security implementation boundaries.
         "/main/update/",
         "/main/security/",
@@ -107,6 +110,9 @@ def test_current_release_security_files_resolve_to_maintainer():
         "scripts/package_release_d1l.py",
         "scripts/release_gate_audit_d1l.py",
         "scripts/verify_checksums.py",
+        "scripts/meshcore_signed_advert_runtime_d1l.py",
+        "scripts/validate_ed25519_defined_overlay.py",
+        "overlays/meshcore_ed25519_defined/fe.c",
     ]
     for relative_path in current_paths:
         assert (ROOT / relative_path).is_file(), (
@@ -132,6 +138,9 @@ def test_planned_wp03_and_security_paths_are_already_covered():
         "reproducibility comparator": (
             "scripts/compare_release_reproducibility_d1l.py"
         ),
+        "signed-advert runtime gate": "scripts/meshcore_signed_advert_runtime_d1l.py",
+        "defined Ed25519 validator": "scripts/validate_ed25519_defined_overlay.py",
+        "defined Ed25519 production overlay": "overlays/meshcore_ed25519_defined/ge.c",
         "signed update implementation": "main/update/signed_manifest.c",
         "security implementation": "main/security/signature_policy.c",
         "RP2040 firmware": "firmware/rp2040_sd_bridge/deskos_sd_bridge.ino",

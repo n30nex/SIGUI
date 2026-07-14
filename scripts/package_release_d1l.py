@@ -25,6 +25,12 @@ if __package__:
         canonicalize_release_report,
         validate_completed_report,
     )
+    from .meshcore_signed_advert_runtime_d1l import (
+        SIGNED_ADVERT_ARTIFACT_TYPE,
+        SIGNED_ADVERT_EVIDENCE_PROFILE,
+        canonicalize_release_report as canonicalize_signed_advert_report,
+        validate_completed_report as validate_signed_advert_report,
+    )
     from .provenance_d1l import write_package_provenance
     from .sbom_d1l import (
         discover_source_identity,
@@ -36,6 +42,12 @@ else:
         CANONICAL_EVIDENCE_PROFILE,
         canonicalize_release_report,
         validate_completed_report,
+    )
+    from meshcore_signed_advert_runtime_d1l import (  # type: ignore[no-redef]
+        SIGNED_ADVERT_ARTIFACT_TYPE,
+        SIGNED_ADVERT_EVIDENCE_PROFILE,
+        canonicalize_release_report as canonicalize_signed_advert_report,
+        validate_completed_report as validate_signed_advert_report,
     )
     from provenance_d1l import write_package_provenance  # type: ignore[no-redef]
     from sbom_d1l import (  # type: ignore[no-redef]
@@ -87,6 +99,7 @@ MESHCORE_CONFORMANCE_BOUNDARY = "wire_envelope_only"
 MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
 MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
 MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
+MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT = MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
 
 
 def utc_stamp() -> str:
@@ -507,6 +520,90 @@ def copy_meshcore_conformance_evidence(
     }
 
 
+def copy_meshcore_signed_advert_evidence(
+    source: Path | None,
+    package_dir: Path,
+    expected_commit: str | None,
+) -> dict | None:
+    """Validate a raw Actions receipt and package its deterministic projection."""
+
+    if source is None:
+        return None
+    source = source.resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"Missing MeshCore signed-advert runtime JSON {source}")
+    if not expected_commit:
+        raise ValueError(
+            "Cannot verify MeshCore signed-advert runtime without an expected release commit"
+        )
+    try:
+        report = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"MeshCore signed-advert runtime JSON is unreadable: {source}"
+        ) from exc
+    validate_signed_advert_report(report, expected_commit)
+
+    generated_at = parse_utc_timestamp(report.get("generated_at"), "generated_at")
+    now = datetime.now(timezone.utc)
+    if generated_at > now + timedelta(minutes=MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES):
+        raise ValueError("MeshCore signed-advert runtime generated_at is in the future")
+    try:
+        expires_at = generated_at + timedelta(days=MESHCORE_CONFORMANCE_MAX_AGE_DAYS)
+    except OverflowError as exc:
+        raise ValueError(
+            "MeshCore signed-advert runtime generated_at is outside the supported range"
+        ) from exc
+    if now >= expires_at:
+        raise ValueError("MeshCore signed-advert runtime evidence is expired")
+
+    expected_name = f"meshcore_signed_advert_runtime_{expected_commit}.json"
+    if source.name != expected_name:
+        raise ValueError(
+            f"MeshCore signed-advert runtime filename must be {expected_name}, "
+            f"got {source.name}"
+        )
+    canonical_report = canonicalize_signed_advert_report(report, expected_commit)
+    if canonical_report.get("evidence_profile") != SIGNED_ADVERT_EVIDENCE_PROFILE:
+        raise ValueError("MeshCore signed-advert canonical evidence profile is invalid")
+
+    evidence_dir = package_dir / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    destination = evidence_dir / expected_name
+    destination.write_text(
+        json.dumps(canonical_report, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="ascii",
+    )
+    repository = report["repository"]
+    return {
+        "artifact_type": SIGNED_ADVERT_ARTIFACT_TYPE,
+        "path": destination.relative_to(package_dir).as_posix(),
+        "size": destination.stat().st_size,
+        "sha256": sha256_file(destination),
+        "source_commit": repository["repository_commit"],
+        "evidence_profile": SIGNED_ADVERT_EVIDENCE_PROFILE,
+        "run_receipt": {
+            "artifact": MESHCORE_SIGNED_ADVERT_ACTIONS_ARTIFACT,
+            "path": expected_name,
+            "size": source.stat().st_size,
+            "sha256": sha256_file(source),
+            "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
+            "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+        },
+        "max_age_days": MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
+        "coverage_boundary": report["coverage_boundary"],
+        "wp04_closure_eligible": False,
+        "closure_ready": False,
+        "full_ubsan_clean": True,
+        "passed": True,
+        "execution_complete": True,
+        "note": (
+            "Pinned signed-advert semantic runtime prerequisite only; broader "
+            "WP-04 protocol and physical closure remain open."
+        ),
+    }
+
+
 def git_value(root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
@@ -766,6 +863,10 @@ def copy_notice_files(root: Path, package_dir: Path) -> list[dict]:
         ("THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"),
         ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
         ("docs/SOURCE_AUDIT_AND_ATTRIBUTION.md", "SOURCE_AUDIT_AND_ATTRIBUTION.md"),
+        (
+            "overlays/meshcore_ed25519_defined/license.txt",
+            "ORLP_ED25519_ZLIB_LICENSE.txt",
+        ),
     ]
     notices_dir = package_dir / "notices"
     copied = []
@@ -1069,8 +1170,8 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 - `update/meshcore_deskos_d1l-app.bin` is the application image for future OTA/update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
 - `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.
-- `notices/` contains the project license, third-party notices, source audit notes, and attributions for public distribution.
-- `evidence/` contains current-commit MeshCore wire-envelope conformance JSON when supplied by CI. It is a structural prerequisite and does not close issue #65.
+- `notices/` contains the project license, third-party notices, source audit notes, attributions, and the verbatim orlp Ed25519 zlib license for public distribution.
+- `evidence/` contains deterministic projections of current-commit MeshCore wire-envelope and signed-advert runtime receipts when supplied by CI. Their manifest entries bind the raw Actions receipt hashes; neither projection alone closes WP-04 or issue #65.
 - `{manifest['build_inputs']['path']}` records the exact build-input lock copied into package metadata.
 - `{manifest['capability_manifest']['path']}` deterministically projects the completion-ledger capability matrix.
 - `{manifest['release_evidence_index']['path']}` indexes completion-ledger evidence and blockers. These three generated files are package metadata, not new release evidence or physical closure.
@@ -1121,6 +1222,7 @@ def create_release_package(
     full_size: int,
     rp2040_artifact_root: Path | None = None,
     meshcore_conformance_json: Path | None = None,
+    meshcore_signed_advert_runtime_json: Path | None = None,
 ) -> dict:
     flasher_args = load_flasher_args(build_dir)
     package_dir = out_dir / package_name
@@ -1144,6 +1246,11 @@ def create_release_package(
     meshcore_conformance = copy_meshcore_conformance_evidence(
         meshcore_conformance_json,
         root,
+        package_dir,
+        expected_commit,
+    )
+    meshcore_signed_advert_runtime = copy_meshcore_signed_advert_evidence(
+        meshcore_signed_advert_runtime_json,
         package_dir,
         expected_commit,
     )
@@ -1172,6 +1279,7 @@ def create_release_package(
         "flash_files": entries,
         "rp2040_artifacts": rp2040_artifacts,
         "meshcore_conformance": meshcore_conformance,
+        "meshcore_signed_advert_runtime": meshcore_signed_advert_runtime,
         "update_image": update_image,
         "full_flash_image": full_image,
         "debug_files": debug_files,
@@ -1214,6 +1322,7 @@ def main() -> int:
     parser.add_argument("--full-size", type=lambda value: int(value, 0), default=DEFAULT_FLASH_SIZE)
     parser.add_argument("--rp2040-artifact-root", default=None)
     parser.add_argument("--meshcore-conformance-json", default=None)
+    parser.add_argument("--meshcore-signed-advert-runtime-json", default=None)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -1239,6 +1348,19 @@ def main() -> int:
     if meshcore_conformance_json and not meshcore_conformance_json.is_absolute():
         meshcore_conformance_json = root / meshcore_conformance_json
 
+    meshcore_signed_advert_runtime_json = (
+        Path(args.meshcore_signed_advert_runtime_json)
+        if args.meshcore_signed_advert_runtime_json
+        else None
+    )
+    if (
+        meshcore_signed_advert_runtime_json
+        and not meshcore_signed_advert_runtime_json.is_absolute()
+    ):
+        meshcore_signed_advert_runtime_json = (
+            root / meshcore_signed_advert_runtime_json
+        )
+
     manifest = create_release_package(
         root,
         build_dir,
@@ -1247,6 +1369,7 @@ def main() -> int:
         args.full_size,
         rp2040_artifact_root=rp2040_artifact_root,
         meshcore_conformance_json=meshcore_conformance_json,
+        meshcore_signed_advert_runtime_json=meshcore_signed_advert_runtime_json,
     )
     print(json.dumps(manifest))
     return 0

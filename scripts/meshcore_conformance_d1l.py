@@ -68,10 +68,11 @@ ORACLE_VECTORS_PATH = (
     ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle_vectors.cpp"
 )
 ED25519_ROOT = ROOT / "third_party" / "MeshCore" / "lib" / "ed25519"
+ED25519_DEFINED_ROOT = ROOT / "overlays" / "meshcore_ed25519_defined"
 ED25519_VERIFY_SOURCES = [
-    ED25519_ROOT / "fe.c",
-    ED25519_ROOT / "ge.c",
-    ED25519_ROOT / "sc.c",
+    ED25519_DEFINED_ROOT / "fe.c",
+    ED25519_DEFINED_ROOT / "ge.c",
+    ED25519_DEFINED_ROOT / "sc.c",
     ED25519_ROOT / "sha512.c",
     ED25519_ROOT / "verify.c",
 ]
@@ -84,72 +85,19 @@ ED25519_ORACLE_SOURCES = [
     *ED25519_VERIFY_SOURCES,
     *ED25519_VECTOR_PROVENANCE_SOURCES,
 ]
-ED25519_SHIFT_BASE_EXCEPTION_SOURCES = (
-    ED25519_ROOT / "fe.c",
-    ED25519_ROOT / "ge.c",
-    ED25519_ROOT / "sc.c",
-)
-ED25519_SHIFT_BASE_EXCEPTION_FLAG = "-fno-sanitize=shift-base"
 ED25519_SANITIZER_POLICY = {
     "requested_sanitizers": ["address", "undefined"],
-    "full_ubsan_clean": False,
-    "exceptions": [
-        {
-            "source": "third_party/MeshCore/lib/ed25519/fe.c",
-            "source_sha256": (
-                "71082937da43def6ecaf7811c23410bd8ea763969dfec67383f8129b12b1926d"
-            ),
-            "disabled_check": "shift-base",
-            "compiler_flag": ED25519_SHIFT_BASE_EXCEPTION_FLAG,
-            "scope": "host_oracle_object_only",
-            "trigger_evidence": "CI: fe.c:714 carry0=-1 left shift 26",
-            "reason": (
-                "pinned source contains negative signed left shifts; keep the "
-                "upstream bytes unchanged and report that full UBSan is not clean"
-            ),
-        },
-        {
-            "source": "third_party/MeshCore/lib/ed25519/ge.c",
-            "source_sha256": (
-                "c3bb834817edea83d843828a75af19867b93144d15140eadfd9784d40cf11409"
-            ),
-            "disabled_check": "shift-base",
-            "compiler_flag": ED25519_SHIFT_BASE_EXCEPTION_FLAG,
-            "scope": "host_oracle_object_only",
-            "trigger_evidence": "CI: ge.c:359 b=-7 signed left shift 1",
-            "reason": (
-                "pinned source contains negative signed left shifts; keep the "
-                "upstream bytes unchanged and report that full UBSan is not clean"
-            ),
-        },
-        {
-            "source": "third_party/MeshCore/lib/ed25519/sc.c",
-            "source_sha256": (
-                "c1bdb840416b34e79ceb7472d1a4ac4b1407c47b4c982cad981c72142ef42407"
-            ),
-            "disabled_check": "shift-base",
-            "compiler_flag": ED25519_SHIFT_BASE_EXCEPTION_FLAG,
-            "scope": "host_oracle_object_only",
-            "trigger_evidence": (
-                "static: signed carry values are left-shifted by 21 starting "
-                "at sc.c:122"
-            ),
-            "reason": (
-                "pinned source contains the same negative signed-carry left-shift "
-                "family; keep the upstream bytes unchanged and expose the exact "
-                "exception instead of claiming full UBSan coverage"
-            ),
-        },
-    ],
+    "full_ubsan_clean": True,
+    "exceptions": [],
     "source_level_remediation": {
         "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
-        "status": "open",
+        "status": "resolved",
         "blocks_execution": False,
-        "blocks_release": True,
-        "required_closure": (
-            "defined-arithmetic source remediation with exact vector/KAT "
-            "equivalence and full enabled UBSan replay"
-        ),
+        "blocks_release": False,
+        "upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+        "overlay_path": "overlays/meshcore_ed25519_defined",
+        "validator": "scripts/validate_ed25519_defined_overlay.py",
+        "transformed_expressions": 215,
     },
 }
 DEFAULT_SEED = 0xD1C065
@@ -1037,6 +985,10 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/advert_data.h",
     "main/mesh/ed25519_canonical.h",
     "main/mesh/meshcore_service.c",
+    "overlays/meshcore_ed25519_defined/fe.c",
+    "overlays/meshcore_ed25519_defined/ge.c",
+    "overlays/meshcore_ed25519_defined/license.txt",
+    "overlays/meshcore_ed25519_defined/sc.c",
 }
 EXPECTED_ORACLE_VENDORED_CRYPTO_SOURCE_PATHS = {
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c",
@@ -1430,7 +1382,7 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "third_party/MeshCore/lib/ed25519/verify.c"
             ),
             "signed_advert_point_decoder": (
-                "third_party/MeshCore/lib/ed25519/ge.c"
+                "overlays/meshcore_ed25519_defined/ge.c"
             ),
                 "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
                 "anonymous_login_plaintext": (
@@ -2482,11 +2434,6 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-g",
             "-fno-omit-frame-pointer",
             common_sanitizers,
-            *(
-                [ED25519_SHIFT_BASE_EXCEPTION_FLAG]
-                if source in ED25519_SHIFT_BASE_EXCEPTION_SOURCES
-                else []
-            ),
             "-Wall",
             "-Wextra",
             "-Werror",
@@ -2510,7 +2457,7 @@ def _canonical_command_argument(value: str) -> str:
     if normalized == source_root or normalized.startswith(source_root + "/"):
         normalized = "$SOURCE_ROOT" + normalized[len(source_root) :]
     else:
-        for marker in ("/third_party/", "/tests/", "/main/"):
+        for marker in ("/third_party/", "/tests/", "/main/", "/overlays/"):
             marker_index = normalized.find(marker)
             if marker_index > 0:
                 normalized = "$SOURCE_ROOT" + normalized[marker_index:]
@@ -2671,12 +2618,6 @@ def validate_completed_report(
     command_plan_is_exact = (
         commands_are_argv and observed_command_plan == expected_command_plan
     )
-    exception_commands = [
-        command
-        for command in commands
-        if isinstance(command, list)
-        and ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
-    ]
     sanitizer_disable_flags = [
         argument
         for command in commands
@@ -2684,47 +2625,6 @@ def validate_completed_report(
         for argument in command
         if isinstance(argument, str) and argument.startswith("-fno-sanitize=")
     ]
-    observed_exception_commands = sorted(
-        json.dumps(
-            [
-                _canonical_command_argument(argument)
-                if isinstance(argument, str)
-                else argument
-                for argument in command
-            ],
-            ensure_ascii=True,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        for command in exception_commands
-    )
-    expected_exception_commands: list[str] = []
-    if isinstance(cc_command, str) and isinstance(cxx_command, str):
-        expected_exception_commands = sorted(
-            json.dumps(
-                [
-                    _canonical_command_argument(argument)
-                    if isinstance(argument, str)
-                    else argument
-                    for argument in command
-                ],
-                ensure_ascii=True,
-                separators=(",", ":"),
-                sort_keys=True,
-            )
-            for command in command_plan(cc_command, cxx_command, "$BUILD_DIR")
-            if ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
-        )
-    exception_command_is_scoped = (
-        len(exception_commands) == len(ED25519_SHIFT_BASE_EXCEPTION_SOURCES)
-        and observed_exception_commands == expected_exception_commands
-        and len(sanitizer_disable_flags)
-        == len(ED25519_SHIFT_BASE_EXCEPTION_SOURCES)
-        and all(
-            flag == ED25519_SHIFT_BASE_EXCEPTION_FLAG
-            for flag in sanitizer_disable_flags
-        )
-    )
     required = {
         "schema_version": report.get("schema_version") == 1,
         "artifact_type": report.get("artifact_type")
@@ -2782,10 +2682,10 @@ def validate_completed_report(
         ),
         "commands": command_plan_is_exact
         and isinstance(report.get("fuzz_command"), list),
-        "sanitizer_exception_command": exception_command_is_scoped,
+        "sanitizer_disable_flags_absent": sanitizer_disable_flags == [],
         "sanitizer_policy": report.get("sanitizer_policy")
         == ED25519_SANITIZER_POLICY,
-        "full_ubsan_clean_false": report.get("full_ubsan_clean") is False,
+        "full_ubsan_clean_true": report.get("full_ubsan_clean") is True,
         "sanitizer_policy_passed": report.get("sanitizer_policy_passed") is True,
         "enabled_sanitizers_clean": report.get("sanitizer_errors") == 0
         and report.get("memory_errors") == 0
@@ -2901,7 +2801,7 @@ def base_report(
             "sanitizers": ["address", "undefined"],
         },
         "sanitizer_policy": oracle_manifest["sanitizer_policy"],
-        "full_ubsan_clean": False,
+        "full_ubsan_clean": True,
         "sanitizer_policy_passed": None,
         "manifest": {
             "path": str(MANIFEST_PATH.relative_to(ROOT)).replace("\\", "/"),

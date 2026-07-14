@@ -9,6 +9,7 @@ import pytest
 from scripts import (
     compare_release_reproducibility_d1l,
     meshcore_conformance_d1l as conformance,
+    meshcore_signed_advert_runtime_d1l as signed_runtime,
     package_release_d1l,
     sbom_d1l,
 )
@@ -229,6 +230,81 @@ def write_conformance(
     return path
 
 
+def write_signed_advert_runtime(
+    root: Path,
+    run_index: int,
+    commit: str = COMMIT,
+) -> Path:
+    manifest = signed_runtime.load_manifest()
+    dependency = manifest["external_dependency"]
+    repository_files = {
+        path: {
+            "expected_sha256": digest,
+            "actual_sha256": digest,
+            "matched": True,
+        }
+        for group in signed_runtime._source_groups(manifest)
+        for path, digest in group.items()
+    }
+    report = {
+        "schema_version": 1,
+        "artifact_type": signed_runtime.SIGNED_ADVERT_ARTIFACT_TYPE,
+        "status": "pass",
+        "passed": True,
+        "execution_complete": True,
+        "generated_at": (
+            datetime.now(timezone.utc) - timedelta(seconds=run_index)
+        ).isoformat(),
+        "work_package": "WP-04",
+        "capability": manifest["capability"],
+        "coverage_boundary": manifest["coverage_boundary"],
+        "wp04_closure_eligible": False,
+        "closure_ready": False,
+        "repository": {
+            "verified": True,
+            "repository_commit": commit,
+            "expected_repository_commit": commit,
+            "upstream_commit": manifest["upstream"]["commit"],
+            "gitlink_commit": manifest["upstream"]["commit"],
+            "source_hash_mode": manifest["source_hash_mode"],
+            "files": repository_files,
+        },
+        "external_archive": {
+            "verified": True,
+            "source": dependency["archive_url"],
+            "url": dependency["archive_url"],
+            "size": dependency["archive_size"],
+            "sha256": dependency["archive_sha256"],
+            "version": dependency["version"],
+            "registry_version_id": dependency["registry_version_id"],
+            "release_commit": dependency["release_commit"],
+        },
+        "external_sources": {
+            "verified": True,
+            "files": {
+                path: {"sha256": digest, "size": 1}
+                for path, digest in dependency["sources"].items()
+            },
+        },
+        "sanitizers_enabled": True,
+        "sanitizer_policy": manifest["sanitizer_policy"],
+        "full_ubsan_clean": True,
+        "commands": signed_runtime.command_plan(
+            "clang-18",
+            "clang++-18",
+            f"/tmp/signed-advert-crypto-{run_index}",
+            f"/tmp/signed-advert-build-{run_index}",
+            sanitize=True,
+        ),
+        "result": manifest["expected_result"],
+        "assertions": manifest["assertions"],
+        "residual_gaps": manifest["residual_gaps"],
+    }
+    path = root / f"meshcore_signed_advert_runtime_{commit}.json"
+    path.write_text(json.dumps(report, sort_keys=True), encoding="ascii")
+    return path
+
+
 def write_rp2040_artifacts(root: Path, run_index: int) -> Path:
     artifact_root = root / "artifacts" / f"rp2040-build-{run_index}"
     for name in compare_release_reproducibility_d1l.RP2040_ARTIFACT_NAMES:
@@ -346,6 +422,7 @@ def build_pair(
         conformance = write_conformance(
             root, index, completed_runs=conformance_completed_runs[index - 1]
         )
+        signed_advert = write_signed_advert_runtime(root, index)
         rp2040_artifacts = (
             write_rp2040_artifacts(root, index) if include_rp2040 else None
         )
@@ -363,6 +440,7 @@ def build_pair(
             full_size=0x20000,
             rp2040_artifact_root=rp2040_artifacts,
             meshcore_conformance_json=conformance,
+            meshcore_signed_advert_runtime_json=signed_advert,
         )
         packages.append(root / "artifacts" / f"run-{index}" / package_name)
     return root, packages[0], packages[1], identity
@@ -414,6 +492,9 @@ def test_two_distinct_actions_packages_are_reproducible_and_receipt_is_determini
         "/meshcore_conformance/run_receipt/expires_at",
         "/meshcore_conformance/run_receipt/generated_at",
         "/meshcore_conformance/run_receipt/sha256",
+        "/meshcore_signed_advert_runtime/run_receipt/expires_at",
+        "/meshcore_signed_advert_runtime/run_receipt/generated_at",
+        "/meshcore_signed_advert_runtime/run_receipt/sha256",
         "/source_build_dir",
         "/workflow/run_id",
         "/workflow/run_url",
@@ -435,6 +516,21 @@ def test_two_distinct_actions_packages_are_reproducible_and_receipt_is_determini
     assert "artifact_prefix" not in first_evidence["fuzz_result"]
     assert "run-1" not in json.dumps(first_evidence)
     assert "run-2" not in json.dumps(second_evidence)
+    first_signed_evidence = json.loads(
+        (
+            first
+            / f"evidence/meshcore_signed_advert_runtime_{COMMIT}.json"
+        ).read_text(encoding="ascii")
+    )
+    second_signed_evidence = json.loads(
+        (
+            second
+            / f"evidence/meshcore_signed_advert_runtime_{COMMIT}.json"
+        ).read_text(encoding="ascii")
+    )
+    assert first_signed_evidence == second_signed_evidence
+    assert "generated_at" not in first_signed_evidence
+    assert "commands" not in first_signed_evidence
     serialized = compare_release_reproducibility_d1l.canonical_json(receipt)
     assert str(root) not in serialized
     assert serialized == compare_release_reproducibility_d1l.canonical_json(repeated)
@@ -499,6 +595,59 @@ def test_semantic_conformance_drift_is_not_hidden_by_volatile_normalization(
             monkeypatch,
             conformance_completed_runs=(100000, 99999),
         )
+
+
+def test_signed_advert_semantic_drift_is_rejected_after_rebinding_metadata(
+    tmp_path, monkeypatch
+):
+    root, first, _second, _identity = build_pair(tmp_path, monkeypatch)
+    manifest = json.loads((first / "manifest.json").read_text(encoding="ascii"))
+    evidence = (
+        first / f"evidence/meshcore_signed_advert_runtime_{COMMIT}.json"
+    )
+    report = json.loads(evidence.read_text(encoding="ascii"))
+    report["result"]["contact_name"] = "tampered-contact"
+    evidence.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    metadata = manifest["meshcore_signed_advert_runtime"]
+    metadata["size"] = evidence.stat().st_size
+    metadata["sha256"] = sbom_d1l.sha256_file(evidence)
+
+    with pytest.raises(
+        compare_release_reproducibility_d1l.ComparisonError
+    ) as failure:
+        compare_release_reproducibility_d1l.validate_manifest_shape(
+            root,
+            manifest,
+            first,
+            COMMIT,
+            compare_release_reproducibility_d1l.PROFILE_FULL_RELEASE,
+        )
+
+    assert failure.value.code == "invalid_signed_advert_semantics"
+
+
+def test_signed_advert_evidence_is_a_required_exact_sha_payload(
+    tmp_path, monkeypatch
+):
+    root, first, _second, _identity = build_pair(tmp_path, monkeypatch)
+    manifest = json.loads((first / "manifest.json").read_text(encoding="ascii"))
+    manifest.pop("meshcore_signed_advert_runtime")
+
+    with pytest.raises(
+        compare_release_reproducibility_d1l.ComparisonError
+    ) as failure:
+        compare_release_reproducibility_d1l.validate_manifest_shape(
+            root,
+            manifest,
+            first,
+            COMMIT,
+            compare_release_reproducibility_d1l.PROFILE_FULL_RELEASE,
+        )
+
+    assert failure.value.code == "missing_required_payload"
 
 
 def test_same_actions_run_is_rejected(tmp_path, monkeypatch):
