@@ -3,8 +3,8 @@ generated_at: '2026-07-13'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: 17a948cf1ad23a5d2a89419039897943028f9bce
-  integrated_candidate: 17a948cf1ad23a5d2a89419039897943028f9bce
+  merged_baseline: 14182d3f198b70ceb588d9d43312bf76d8745284
+  integrated_candidate: 14182d3f198b70ceb588d9d43312bf76d8745284
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
   proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
@@ -49,24 +49,40 @@ project:
     pr_run: 29294132563
     merged_main_actions_run: 29294553135
     merged_main_actions_status: success
+  pr86_merge:
+    head: 1c5e80be662ed64c1f97fc047d6dbfc995567d1c
+    pr_merge_test_commit: 9585c277ae90cee37672c982ffdb070e8c3e96e5
+    merge_commit: 9acb7d0cf498793dc0bed4854cc314a2eac2ea0c
+    merged_main_actions_run: 29296258019
+    merged_main_actions_status: success
+  pr87_merge:
+    head: 655ece5d5d33356937cad24f7e23fa58decf7ff5
+    pr_merge_test_commit: 74db31b1a778fc8af3b304f321f36748e85c60cf
+    merge_commit: 14182d3f198b70ceb588d9d43312bf76d8745284
+    push_run: 29296977946
+    pr_run: 29296979420
+    rp2040_dispatch_run: 29296995585
+    merged_main_actions_run: 29297516173
+    merged_main_actions_status: success
   live_main_artifact_integrity:
-    run: 29294553135
+    run: 29297516173
     status: success
-    host_tests_passed: 823
+    host_tests_passed: 834
     checksum_contract_tests_passed: 24
-    manifests_total: 2
-    manifests_verified: 2
-    checksum_entries_verified: 36
-    firmware_manifest_sha256: 67eab2f468d9484516ee3d15f769a99d538cf10350943dcf9828d7ce74eec1f8
-    release_manifest_sha256: 74779e8bf6bb1cb5043441600ee1849eba292918af348fd45774ec2c4cafad5a
-    release_package_manifest_json_sha256: 9acf685d42fad8b01968cbe9314d47fdc270dba6ea3c6661d78151aca3bc4140
-    application_sha256: fa3b6ac29f5fdc8beb604bccbc3abe19456543dbda1ae0563a3d5c98bfe3441c
-    full_flash_sha256: e787b63383af7b49da147a8d45bc8af54fa88801a1dd400ba45d8956ef128e1c
+    manifests_total: 3
+    manifests_verified: 3
+    checksum_entries_verified: 39
+    firmware_manifest_sha256: e702d912a508ebccde5a5c426f0f31ab349e362175826b307dc4a3a491efe014
+    build_inputs_manifest_sha256: cf3c91f97d7bbd42ae1ee6c19f8d96934ea34a689308b4de05f9edbdd32bbdbe
+    release_manifest_sha256: 0816f442bc9a6456009bc92dad0ee1528219eddb5c62eb6d65c8d21b34b54cc4
+    release_package_manifest_json_sha256: d6881087f1ea9cd289807340f13324a932cd230052c7383e61c57f84285b6193
+    application_sha256: bd3a071739f7773a92f3dd1869f8152c4091ff5457b50e79e66a792632cfcb64
+    full_flash_sha256: e3b82a8f65ee29b1914ff6ee69dd2d9bd677adbfbafabae1c0d74cf9ab328ad5
     rp2040_bridge_uf2_sha256: null
-    downloaded_tree_file_count: 203
-    downloaded_tree_sha256: ad70fab2b72bc79fb2f0031f850152836904347fa15500e11ba6bcf4e52f738f
-    host_success_marker_sha256: 8b794723852e571c55abea036c306e7630ffa6e70dc59f1b1e9200ec96c16dac
-    note: Exact merged-main Actions and downloaded recursive verification strict-passed both emitted manifests; RP2040 correctly skipped for the host/docs-only PR84 slice. The full integrated 8-manifest baseline remains bound to 4ee07caf.
+    downloaded_tree_file_count: 208
+    downloaded_tree_sha256: 78fa7f3b4a043e9deaff6ae9a23d69833fa227845964cee612a54027147dcc88
+    host_success_marker_sha256: 97dc40270aff68175d48a14cc347dd0fe1fd64bec2eca9a2df6ce848d8d82f0b
+    note: Exact merged-main Actions and downloaded recursive verification strict-passed all three emitted manifests. RP2040 correctly skipped on merged main; exact-head dispatch 29296995585 executed the pinned RP2040 path and strict-passed 9 manifests / 81 entries without device interaction.
     previous_failed_receipt:
       commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
       run: 29286754864
@@ -83,8 +99,10 @@ project:
     checksum_entries_verified: 78
   release_audit:
     ready_for_public_release: false
-    remaining_p0_failures: 15
-    failures_overall_including_p1: 16
+    exact_main_run: 29297516173
+    receipt_sha256: 2ccd2dd924256ac096ff596671d885ffa7fb0a8a6352f374852590cd845f2d5a
+    remaining_p0_failures: 31
+    failures_overall_including_p1: 33
   local_merge_rehearsals:
     pr62:
       commit: 7648611c412e7f4658f5d14b43ba530744d96160
@@ -111,7 +129,16 @@ project:
     full_tests_skipped: 3
     ruff_status: pass
     evidence_scope: tracked_4ee07caf_baseline_plus_exact_pr84_merged_main_actions_and_downloaded_artifacts
-  active_pr_stack: []
+  active_pr_stack:
+  - number: 88
+    pre_ledger_head: 2ab70b19b6e31542d9c379d151ebbc2a427badb0
+    purpose: deterministic SPDX release SBOM and current ledger receipt
+  - number: 89
+    pre_ledger_head: a21682ca24ef0778b9ff1dd915d92e52414ac98a
+    purpose: deterministic exact-source release provenance
+  - number: 90
+    pre_ledger_head: afe322f99373a086587783ed98cb0f42dbf997bf
+    purpose: independent release rebuild comparator; draft pending hardening
   pinned_meshcore: e8d3c53ba1ea863937081cd0caad759b832f3028
   esp_idf: 5.5.4
   target: seeed-sensecap-indicator-d1l
@@ -360,7 +387,7 @@ work_packages:
     predecessor_pr64: c5886de1e2988b2097034183d5e39bb3aec88344
     predecessor_pr80: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
     current_pr80_before_ledger: 18fa68c1eefc640c0b04ee3964fd3e34f3367875
-  evidence_scope: PR62, PR64, PR80, and PR84 are merged. Exact 17a948cf main Actions and both emitted checksum manifests are green; the tracked 4ee07caf integration baseline fails closed only because five physical role receipts are absent. Those roles are deferred to the frozen final candidate, and no predecessor evidence can close them.
+  evidence_scope: PR62, PR64, PR80, PR84, PR85, PR86, and PR87 are merged. Exact 14182d3f main Actions and all three emitted checksum manifests are green; the tracked 4ee07caf integration baseline still fails closed only because five physical role receipts are absent. Release-security commits do not close those roles. They remain deferred to the frozen final candidate, and no predecessor evidence can close them.
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-03
   title: Immutable CI and release inputs
@@ -370,7 +397,22 @@ work_packages:
   tracks:
   - 17
   - 71
-  status: open
+  status: in_progress
+  implementation_commit: 14182d3f198b70ceb588d9d43312bf76d8745284
+  merged_slices:
+  - pull_request: 86
+    merge_commit: 9acb7d0cf498793dc0bed4854cc314a2eac2ea0c
+    actions_run: 29296258019
+  - pull_request: 87
+    merge_commit: 14182d3f198b70ceb588d9d43312bf76d8745284
+    actions_run: 29297516173
+    checksum_manifests_verified: 3
+    checksum_entries_verified: 39
+  rp2040_toolchain_dispatch:
+    head: 655ece5d5d33356937cad24f7e23fa58decf7ff5
+    run: 29296995585
+    checksum_manifests_verified: 9
+    checksum_entries_verified: 81
   required_artifacts:
   - build_inputs_<sha>.json
   - sbom_<sha>.spdx.json
@@ -383,7 +425,7 @@ work_packages:
   - WP-02
   tracks:
   - 65
-  status: open
+  status: in_progress
   required_artifacts:
   - meshcore_oracle_manifest_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
