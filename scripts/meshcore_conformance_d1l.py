@@ -75,13 +75,14 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 18
+ORACLE_CORPUS_VERSION = 19
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
     "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
     "and_anonymous_login_request_and_regular_request_response_crypto_and_"
     "strict_identity_shared_secret_derivation_and_canonical_login_response_"
-    "packets_and_login_password_authorization_fixtures"
+    "packets_and_login_password_authorization_fixtures_and_existing_acl_"
+    "blank_login_reuse_fixtures"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -395,7 +396,8 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": (
-            "identity_signature_and_acl_replay_session_transition_fixtures"
+            "identity_signature_and_acl_mutation_replay_session_transition_"
+            "fixtures"
         ),
         "implemented_prerequisites": [
             "anonymous_login_request_packets",
@@ -403,6 +405,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "identity_shared_secret_derivation",
             "canonical_login_response_packets",
             "login_password_authorization_fixtures",
+            "existing_acl_blank_login_reuse_fixtures",
         ],
     },
     {
@@ -564,6 +567,31 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "vectors": {"valid": 16, "invalid": 17},
         },
     },
+    {
+        "id": "existing_acl_blank_login_reuse_fixtures",
+        "status": "implemented",
+        "owner": "pinned_clientacl_lookup_repeater_room_reuse_rules",
+        "semantic": True,
+        "scope": (
+            "canonical_repeater_room_blank_password_existing_acl_full_key_"
+            "first_match_reuse_response_secret_selection_and_client_out_path_"
+            "mutation_boundary_only_no_storage_load_save_insert_evict_"
+            "permission_secret_timestamp_activity_replay_session_response_"
+            "creation_dispatch_route_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-EXISTING-ACL-BLANK-LOGIN-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/helpers/ClientACL.cpp",
+                "third_party/MeshCore/src/helpers/ClientACL.h",
+                "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+                "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+            ],
+            "vectors": {"valid": 12, "invalid": 14},
+        },
+    },
 ]
 EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
@@ -624,6 +652,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
             "identity_shared_secret_derivation",
             "canonical_login_response_packets",
             "login_password_authorization_fixtures",
+            "existing_acl_blank_login_reuse_fixtures",
             "login_request_response_admin",
         ],
     },
@@ -709,6 +738,7 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
     "third_party/MeshCore/src/Utils.h",
     "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
     "third_party/MeshCore/src/helpers/BaseChatMesh.h",
+    "third_party/MeshCore/src/helpers/ClientACL.cpp",
     "third_party/MeshCore/src/helpers/ClientACL.h",
     "third_party/MeshCore/src/helpers/CommonCLI.h",
     "third_party/MeshCore/src/helpers/AdvertDataHelpers.cpp",
@@ -878,10 +908,10 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
         "roundtrip": 338,
-        "valid": 36,
-        "invalid": 351,
-        "semantic": 709,
-        "total": 725,
+        "valid": 48,
+        "invalid": 365,
+        "semantic": 735,
+        "total": 751,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -959,6 +989,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "invalid": 17,
             "semantic": 33,
             "total": 33,
+        },
+        "existing_acl_blank_login_reuse_fixtures": {
+            "valid": 12,
+            "invalid": 14,
+            "semantic": 26,
+            "total": 26,
         },
         "dm_encrypt_decrypt": {
             "roundtrip": 268,
@@ -1039,6 +1075,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("login_password_authorization_available") is not True
         or interface.get("login_password_authorization_scope")
         != "repeater_room_acl_miss_password_admin_guest_read_only_authorization_and_denial_only_no_existing_acl_contact_mutation_replay_secret_session_response_dispatch_route_or_rf"
+        or interface.get("existing_acl_blank_login_reuse_available") is not True
+        or interface.get("existing_acl_blank_login_reuse_scope")
+        != "repeater_room_blank_password_full_public_key_first_match_acl_reuse_response_secret_selection_and_client_out_path_mutation_boundary_only_no_storage_load_save_insert_evict_permissions_secret_timestamp_activity_replay_session_response_creation_dispatch_route_or_rf"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -1130,6 +1169,18 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "login_password_authorization_preferences": (
                     "third_party/MeshCore/src/helpers/CommonCLI.h"
                 ),
+                "existing_acl_lookup": (
+                    "third_party/MeshCore/src/helpers/ClientACL.cpp"
+                ),
+                "existing_acl_client_record": (
+                    "third_party/MeshCore/src/helpers/ClientACL.h"
+                ),
+                "existing_acl_repeater_reuse": (
+                    "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp"
+                ),
+                "existing_acl_room_reuse": (
+                    "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp"
+                ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
             ),
@@ -1175,7 +1226,8 @@ def load_oracle_manifest() -> dict[str, Any]:
     if determinism.get("current_vectors") != (
         "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_"
         "group_anonymous_login_regular_request_response_canonical_login_"
-        "response_login_password_authorization_dm_ack_path_and_"
+        "response_login_password_authorization_existing_acl_blank_login_"
+        "reuse_dm_ack_path_and_"
         "general_path_return_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
@@ -1237,6 +1289,16 @@ def load_oracle_manifest() -> dict[str, Any]:
         "sixteen_allow_deny_precedence_empty_maximum_and_role_cases"
     ):
         raise GateFailure("oracle login password authorization matrix drifted")
+    if determinism.get("existing_acl_blank_login_recipe") != (
+        "blank_password_full_public_key_first_match_then_server_secret_source_"
+        "and_flood_out_path_mutation_classification"
+    ):
+        raise GateFailure("oracle existing ACL blank-login recipe drifted")
+    if determinism.get("existing_acl_blank_login_matrix") != (
+        "twelve_empty_first_middle_last_duplicate_prefix_full_capacity_match_"
+        "miss_route_and_server_cases"
+    ):
+        raise GateFailure("oracle existing ACL blank-login matrix drifted")
     if determinism.get("independent_verifier_kat") != (
         "RFC 8032 section 7.1 TEST 1 empty message"
     ):
@@ -2231,6 +2293,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "regular_request_response_packets": True,
                     "canonical_login_response_packets": True,
                     "login_password_authorization_fixtures": True,
+                    "existing_acl_blank_login_reuse_fixtures": True,
                     "dm_encrypt_decrypt": True,
                     "expected_ack_hash_and_ack_path": True,
                     "path_return_route_codes": True,

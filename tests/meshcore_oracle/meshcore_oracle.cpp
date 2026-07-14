@@ -1169,6 +1169,57 @@ extern "C" bool d1l_meshcore_oracle_classify_unmatched_login_password(
     return true;
 }
 
+extern "C" bool d1l_meshcore_oracle_resolve_existing_acl_blank_login(
+    uint8_t server_advert_type,
+    uint8_t is_route_flood,
+    const uint8_t *blank_password,
+    size_t password_len,
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t *acl_public_keys,
+    size_t acl_entry_count,
+    uint8_t *out_found,
+    uint8_t *out_client_index,
+    uint8_t *out_response_secret_source,
+    uint8_t *out_client_mutation_mask)
+{
+    if ((server_advert_type != D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         server_advert_type != D1L_MESHCORE_ADVERT_TYPE_ROOM) ||
+        is_route_flood > 1U || blank_password == nullptr ||
+        password_len != 0U || blank_password[0] != 0U ||
+        sender_public_key == nullptr || acl_public_keys == nullptr ||
+        acl_entry_count > D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES ||
+        out_found == nullptr || out_client_index == nullptr ||
+        out_response_secret_source == nullptr ||
+        out_client_mutation_mask == nullptr) {
+        return false;
+    }
+
+    uint8_t client_index = D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND;
+    for (size_t index = 0U; index < acl_entry_count; ++index) {
+        const uint8_t *candidate =
+            acl_public_keys + index * D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES;
+        if (std::memcmp(sender_public_key, candidate,
+                        D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES) == 0) {
+            client_index = static_cast<uint8_t>(index);
+            break;
+        }
+    }
+
+    const bool found =
+        client_index != D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND;
+    *out_found = found ? 1U : 0U;
+    *out_client_index = client_index;
+    *out_response_secret_source = !found
+        ? D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE
+        : (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER
+               ? D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER
+               : D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL);
+    *out_client_mutation_mask = found && is_route_flood == 1U
+        ? D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH
+        : 0U;
+    return true;
+}
+
 extern "C" bool d1l_meshcore_oracle_group_channel_hash(
     const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
     uint8_t *out_hash)

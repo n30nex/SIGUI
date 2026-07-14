@@ -44,6 +44,8 @@ constexpr std::size_t kLoginResponseRoundtripVectors = 10U;
 constexpr std::size_t kLoginResponseInvalidVectors = 34U;
 constexpr std::size_t kLoginPasswordAuthorizationValidVectors = 16U;
 constexpr std::size_t kLoginPasswordAuthorizationInvalidVectors = 17U;
+constexpr std::size_t kExistingAclBlankLoginValidVectors = 12U;
+constexpr std::size_t kExistingAclBlankLoginInvalidVectors = 14U;
 constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
@@ -2927,6 +2929,249 @@ int main()
         auth_password.data(), auth_password.size(), auth_guest_password.data(),
         auth_guest_password.size());
 
+    using LoginAclKey =
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>;
+    using LoginAclTable = std::array<
+        uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES *
+                     D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>;
+    LoginAclKey acl_key_a{};
+    LoginAclKey acl_key_b{};
+    LoginAclKey acl_key_c{};
+    LoginAclKey acl_key_zero{};
+    LoginAclKey acl_key_ff{};
+    acl_key_a.fill(0x11U);
+    acl_key_b = acl_key_a;
+    acl_key_b.back() = 0x12U;
+    acl_key_c.fill(0x33U);
+    acl_key_ff.fill(0xFFU);
+    auto set_acl_entry = [](LoginAclTable &table, size_t index,
+                            const LoginAclKey &key) {
+        std::memcpy(table.data() +
+                        index * D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES,
+                    key.data(), key.size());
+    };
+    LoginAclTable acl_table{};
+    set_acl_entry(acl_table, 0U, acl_key_a);
+    set_acl_entry(acl_table, 1U, acl_key_b);
+    set_acl_entry(acl_table, 2U, acl_key_c);
+    LoginAclTable duplicate_acl_table{};
+    set_acl_entry(duplicate_acl_table, 0U, acl_key_b);
+    set_acl_entry(duplicate_acl_table, 1U, acl_key_b);
+    LoginAclTable zero_acl_table{};
+    set_acl_entry(zero_acl_table, 0U, acl_key_zero);
+    LoginAclTable ff_acl_table{};
+    set_acl_entry(ff_acl_table, 0U, acl_key_ff);
+    LoginAclTable maximum_acl_table{};
+    for (size_t index = 0U;
+         index < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES; ++index) {
+        LoginAclKey key{};
+        key.fill(static_cast<uint8_t>(index + 1U));
+        set_acl_entry(maximum_acl_table, index, key);
+    }
+    LoginAclKey maximum_last_key{};
+    maximum_last_key.fill(D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES);
+    LoginAclKey maximum_missing_key{};
+    maximum_missing_key.fill(0xFEU);
+    const std::array<uint8_t, 1U> canonical_blank_password = {0U};
+    size_t existing_acl_valid_vector_count = 0U;
+    auto expect_existing_acl_blank_login =
+        [&failures, &canonical_blank_password,
+         &existing_acl_valid_vector_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            const LoginAclKey &sender_key, const uint8_t *acl_keys,
+            size_t acl_count, uint8_t expected_found,
+            uint8_t expected_client_index, uint8_t expected_secret_source,
+            uint8_t expected_mutation_mask) {
+            uint8_t found = 0xAAU;
+            uint8_t client_index = 0xBBU;
+            uint8_t secret_source = 0xCCU;
+            uint8_t mutation_mask = 0xDDU;
+            ++existing_acl_valid_vector_count;
+            if (!d1l_meshcore_oracle_resolve_existing_acl_blank_login(
+                    server_type, is_route_flood,
+                    canonical_blank_password.data(), 0U, sender_key.data(),
+                    acl_keys, acl_count, &found, &client_index, &secret_source,
+                    &mutation_mask) ||
+                found != expected_found ||
+                client_index != expected_client_index ||
+                secret_source != expected_secret_source ||
+                mutation_mask != expected_mutation_mask) {
+                failures.push_back(std::string(name) +
+                                   " existing ACL resolution changed");
+            }
+        };
+    expect_existing_acl_blank_login(
+        "empty repeater ACL direct", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        acl_key_a, acl_table.data(), 0U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U);
+    expect_existing_acl_blank_login(
+        "empty room ACL flood", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, acl_key_a,
+        acl_table.data(), 0U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U);
+    expect_existing_acl_blank_login(
+        "repeater first match direct", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        acl_key_a, acl_table.data(), 3U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U);
+    expect_existing_acl_blank_login(
+        "repeater first match flood", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U,
+        acl_key_a, acl_table.data(), 3U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER,
+        D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH);
+    expect_existing_acl_blank_login(
+        "room middle match direct", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        acl_key_b, acl_table.data(), 3U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 0U);
+    expect_existing_acl_blank_login(
+        "room last match flood", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, acl_key_c,
+        acl_table.data(), 3U, 1U, 2U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL,
+        D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH);
+    expect_existing_acl_blank_login(
+        "full key distinguishes shared prefix", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        0U, acl_key_b, acl_table.data(), 2U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 0U);
+    expect_existing_acl_blank_login(
+        "duplicate returns first", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        acl_key_b, duplicate_acl_table.data(), 2U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U);
+    expect_existing_acl_blank_login(
+        "zero key exact match", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        acl_key_zero, zero_acl_table.data(), 1U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 0U);
+    expect_existing_acl_blank_login(
+        "ff key exact match", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U,
+        acl_key_ff, ff_acl_table.data(), 1U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER,
+        D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH);
+    expect_existing_acl_blank_login(
+        "maximum ACL last match", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        maximum_last_key, maximum_acl_table.data(),
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES, 1U,
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES - 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 0U);
+    expect_existing_acl_blank_login(
+        "maximum ACL miss", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        maximum_missing_key, maximum_acl_table.data(),
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U);
+    if (existing_acl_valid_vector_count !=
+        kExistingAclBlankLoginValidVectors) {
+        failures.push_back("existing ACL valid vector count drifted");
+    }
+
+    size_t existing_acl_invalid_vector_count = 0U;
+    auto expect_existing_acl_blank_login_reject =
+        [&failures, &existing_acl_invalid_vector_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            const uint8_t *password, size_t password_len,
+            const uint8_t *sender_key, const uint8_t *acl_keys,
+            size_t acl_count, uint8_t *found, uint8_t *client_index,
+            uint8_t *secret_source, uint8_t *mutation_mask) {
+            if (found != nullptr) *found = 0xAAU;
+            if (client_index != nullptr) *client_index = 0xBBU;
+            if (secret_source != nullptr) *secret_source = 0xCCU;
+            if (mutation_mask != nullptr) *mutation_mask = 0xDDU;
+            ++existing_acl_invalid_vector_count;
+            if (d1l_meshcore_oracle_resolve_existing_acl_blank_login(
+                    server_type, is_route_flood, password, password_len,
+                    sender_key, acl_keys, acl_count, found, client_index,
+                    secret_source, mutation_mask) ||
+                (found != nullptr && *found != 0xAAU) ||
+                (client_index != nullptr && *client_index != 0xBBU) ||
+                (secret_source != nullptr && *secret_source != 0xCCU) ||
+                (mutation_mask != nullptr && *mutation_mask != 0xDDU)) {
+                failures.push_back(std::string(name) +
+                                   " existing ACL reject changed output");
+            }
+        };
+    uint8_t rejected_acl_found = 0U;
+    uint8_t rejected_acl_client_index = 0U;
+    uint8_t rejected_acl_secret_source = 0U;
+    uint8_t rejected_acl_mutation_mask = 0U;
+    auto expect_standard_existing_acl_reject =
+        [&expect_existing_acl_blank_login_reject, &rejected_acl_found,
+         &rejected_acl_client_index, &rejected_acl_secret_source,
+         &rejected_acl_mutation_mask](const char *name, uint8_t server_type,
+                                     uint8_t is_route_flood,
+                                     const uint8_t *password,
+                                     size_t password_len,
+                                     const uint8_t *sender_key,
+                                     const uint8_t *acl_keys,
+                                     size_t acl_count) {
+            expect_existing_acl_blank_login_reject(
+                name, server_type, is_route_flood, password, password_len,
+                sender_key, acl_keys, acl_count,
+                &rejected_acl_found, &rejected_acl_client_index,
+                &rejected_acl_secret_source, &rejected_acl_mutation_mask);
+        };
+    expect_standard_existing_acl_reject(
+        "none ACL server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "chat ACL server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "sensor ACL server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "noncanonical flood flag", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 2U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "null blank password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        nullptr, 0U, acl_key_a.data(), acl_table.data(), 3U);
+    const std::array<uint8_t, 1U> nonblank_acl_password = {'x'};
+    expect_standard_existing_acl_reject(
+        "nonblank password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        nonblank_acl_password.data(), nonblank_acl_password.size(),
+        acl_key_a.data(), acl_table.data(), 3U);
+    const std::array<uint8_t, 1U> nonzero_blank_terminator = {1U};
+    expect_standard_existing_acl_reject(
+        "nonzero blank terminator", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        nonzero_blank_terminator.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "null ACL sender", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, nullptr, acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "null ACL table", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(), nullptr, 3U);
+    expect_standard_existing_acl_reject(
+        "overfull ACL table", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        maximum_acl_table.data(),
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES + 1U);
+    expect_existing_acl_blank_login_reject(
+        "null ACL found output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U, nullptr, &rejected_acl_client_index,
+        &rejected_acl_secret_source, &rejected_acl_mutation_mask);
+    expect_existing_acl_blank_login_reject(
+        "null ACL index output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U, &rejected_acl_found, nullptr,
+        &rejected_acl_secret_source, &rejected_acl_mutation_mask);
+    expect_existing_acl_blank_login_reject(
+        "null ACL secret output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U, &rejected_acl_found,
+        &rejected_acl_client_index, nullptr, &rejected_acl_mutation_mask);
+    expect_existing_acl_blank_login_reject(
+        "null ACL mutation output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U, &rejected_acl_found,
+        &rejected_acl_client_index, &rejected_acl_secret_source, nullptr);
+    if (existing_acl_invalid_vector_count !=
+        kExistingAclBlankLoginInvalidVectors) {
+        failures.push_back("existing ACL invalid vector count drifted");
+    }
+
     constexpr uint8_t dm_destination_hash = 0xA1U;
     constexpr uint8_t dm_source_hash = 0xB2U;
     const std::array<uint8_t, 2U> short_dm_text = {'d', 'm'};
@@ -5059,7 +5304,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures\""
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -5080,6 +5325,7 @@ int main()
                << (kSignedAdvertValidVectors + kVerifierKatValidVectors +
                    kPointValidationValidVectors + kCryptoAdapterKatValidVectors +
                    kLoginPasswordAuthorizationValidVectors +
+                   kExistingAclBlankLoginValidVectors +
                    kExpectedAckValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
@@ -5091,6 +5337,7 @@ int main()
                    kRequestResponseInvalidVectors +
                    kLoginResponseInvalidVectors +
                    kLoginPasswordAuthorizationInvalidVectors +
+                   kExistingAclBlankLoginInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
                   kPathReturnInvalidVectors +
@@ -5115,6 +5362,8 @@ int main()
                     kLoginResponseInvalidVectors +
                     kLoginPasswordAuthorizationValidVectors +
                     kLoginPasswordAuthorizationInvalidVectors +
+                    kExistingAclBlankLoginValidVectors +
+                    kExistingAclBlankLoginInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -5145,6 +5394,8 @@ int main()
                     kLoginResponseInvalidVectors +
                     kLoginPasswordAuthorizationValidVectors +
                     kLoginPasswordAuthorizationInvalidVectors +
+                    kExistingAclBlankLoginValidVectors +
+                    kExistingAclBlankLoginInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -5250,6 +5501,15 @@ int main()
                << (kLoginPasswordAuthorizationValidVectors +
                    kLoginPasswordAuthorizationInvalidVectors)
                << "}"
+               << ",\"existing_acl_blank_login_reuse_fixtures\":{\"valid\":"
+               << kExistingAclBlankLoginValidVectors << ",\"invalid\":"
+               << kExistingAclBlankLoginInvalidVectors << ",\"semantic\":"
+               << (kExistingAclBlankLoginValidVectors +
+                   kExistingAclBlankLoginInvalidVectors)
+               << ",\"total\":"
+               << (kExistingAclBlankLoginValidVectors +
+                   kExistingAclBlankLoginInvalidVectors)
+               << "}"
               << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
               << kDmRoundtripVectors << ",\"invalid\":"
               << kDmInvalidVectors << ",\"semantic\":"
@@ -5302,6 +5562,7 @@ int main()
                 << ",\"regular_request_response_packets\":true"
                 << ",\"canonical_login_response_packets\":true"
                 << ",\"login_password_authorization_fixtures\":true"
+                << ",\"existing_acl_blank_login_reuse_fixtures\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"path_return_route_codes\":true"

@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "work_package": "WP-04",
-  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures",
   "upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
-  "oracle_corpus_version": 18,
+  "oracle_corpus_version": 19,
   "oracle_abi_version": 2,
   "wp04_closure_eligible": false,
   "closure_ready": false,
@@ -79,6 +79,7 @@
         "identity_shared_secret_derivation",
         "canonical_login_response_packets",
         "login_password_authorization_fixtures",
+        "existing_acl_blank_login_reuse_fixtures",
         "login_request_response_admin"
       ]
     }
@@ -179,7 +180,7 @@
   },
   "submodule_update_policy": {
     "reviewed_upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
-    "reviewed_corpus_version": 18,
+    "reviewed_corpus_version": 19,
     "requires_vector_review": true,
     "requires_corpus_version_increment": true,
     "unreviewed_update_policy": "fail_closed"

@@ -18,6 +18,12 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES 32U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES 31U
 #define D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES 15U
+#define D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES 20U
+#define D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND 0xFFU
+#define D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE 0U
+#define D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER 1U
+#define D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL 2U
+#define D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH 0x01U
 #define D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES 167U
 #define D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES 13U
 #define D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES 4U
@@ -314,6 +320,35 @@ bool d1l_meshcore_oracle_classify_unmatched_login_password(
     size_t guest_password_len,
     uint8_t *out_authorized,
     uint8_t *out_permissions);
+
+/*
+ * Deterministic full-public-key lookup for the blank-password existing-ACL
+ * branch of the pinned repeater and room handlers. ACL keys are a contiguous
+ * entry_count by 32-byte immutable table. The first full-key match is reused.
+ * A match skips the new-client password, insertion/eviction, replay, timestamp,
+ * activity, permission and shared-secret mutation block. Flood receipt marks
+ * only the existing client's out-path as the permitted client-record mutation.
+ * Repeater replies keep using the caller-derived anonymous secret; room replies
+ * use the stored ACL secret. Missing keys return found=0, index=0xFF, no secret
+ * source and no client mutation so the caller can enter its separately bounded
+ * unmatched-client branch.
+ *
+ * This boundary does not instantiate ClientACL, load/save storage, mutate a
+ * contact, authorize nonblank passwords, derive secrets, apply replay/session
+ * transitions, create a response, dispatch, route, schedule, or claim RF.
+ */
+bool d1l_meshcore_oracle_resolve_existing_acl_blank_login(
+    uint8_t server_advert_type,
+    uint8_t is_route_flood,
+    const uint8_t *blank_password,
+    size_t password_len,
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t *acl_public_keys,
+    size_t acl_entry_count,
+    uint8_t *out_found,
+    uint8_t *out_client_index,
+    uint8_t *out_response_secret_source,
+    uint8_t *out_client_mutation_mask);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash
