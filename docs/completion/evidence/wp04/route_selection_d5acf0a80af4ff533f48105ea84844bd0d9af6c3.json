@@ -1,0 +1,286 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp04_route_selection_aggregate",
+  "generated_utc": "2026-07-14T08:26:28Z",
+  "claim_scope": "Portable exact-commit software evidence for fresh learned direct-message route selection, fail-closed flood fallback, immutable outbound route telemetry, and ACK planning integration.",
+  "exact_pair": {
+    "pull_request": 99,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/99",
+    "pull_request_base_sha": "76b07f28918b338bf896d5a1a8a0207b5a112677",
+    "pull_request_head_sha": "fbe85e8788f3af3b5fd4ec27cc7732e280bae168",
+    "pull_request_synthetic_merge_sha": "69bfcf6e91b84271476de6b9e40751faa30e71fb",
+    "merged_main_sha": "d5acf0a80af4ff533f48105ea84844bd0d9af6c3",
+    "verified_tree_sha": "ea929a620b1d094b75d033e147f15109d274150e",
+    "tree_identity": {
+      "pull_request_head_matches_synthetic_merge": true,
+      "pull_request_head_matches_merged_main": true
+    },
+    "github_signature_verification": {
+      "synthetic_merge_verified": true,
+      "merged_main_verified": true
+    }
+  },
+  "gate_receipts": {
+    "pull_request": {
+      "push_actions_run": 29316500932,
+      "pull_request_actions_run": 29316515879,
+      "receipt_filename": "pr99-gate-receipt.json",
+      "receipt_sha256": "aeb69ff6745e6e9e1396e5fdb21921b34ec6c5dbd60a4a87d314a204cc315b6f",
+      "verdict": "approve"
+    },
+    "merged_main": {
+      "actions_run": 29317376691,
+      "receipt_filename": "merged-main-gate-receipt.json",
+      "receipt_sha256": "db83f48167b57179d2ef0c0800898db51d7d24b3da4847df2af69a77344e7f61",
+      "verdict": "approve"
+    }
+  },
+  "route_selection_semantics": {
+    "direct_path_max_age_ms": 1800000,
+    "direct_path_eligibility": [
+      "The learned path is known and canonically encoded.",
+      "The path was authenticated during the current boot, so persisted uptime cannot alias into freshness after reboot.",
+      "The unsigned path age is at most 1800000 milliseconds.",
+      "A known zero-hop path is a valid direct route under the pinned MeshCore rule."
+    ],
+    "fail_closed_flood_reasons": [
+      "flood_no_path",
+      "flood_preboot_path",
+      "flood_stale_path",
+      "flood_bad_path"
+    ],
+    "guarantees_verified_by_source_and_host_tests": [
+      "Missing, preboot, stale, and malformed learned state produces a complete flood plan.",
+      "Invalid global flood-hash policy or a null output returns false without changing caller output.",
+      "The selected path is copied into one immutable result before transmission.",
+      "TRACE observation records the immutable actual-send route, path hash width, hop count, and raw length rather than re-reading mutable contact state.",
+      "Inbound DM ACK planning consumes the same freshness selector and chooses direct ACK only for a direct-proven result.",
+      "DM route status distinguishes direct and flood selections plus missing, preboot, stale, and malformed fallback counts and the last reason and age."
+    ],
+    "telemetry_fields": [
+      "dm_route_direct_selected",
+      "dm_route_flood_selected",
+      "dm_route_missing_fallback",
+      "dm_route_preboot_fallback",
+      "dm_route_stale_fallback",
+      "dm_route_malformed_fallback",
+      "dm_route_last_path_age_ms",
+      "dm_route_last_reason"
+    ]
+  },
+  "source_bindings_sha256": {
+    "main/mesh/meshcore_route_selection.h": "a6a340474e46f43ea844a236510b508ed0da524aa3ed7ecdd05b36cafde9cc5d",
+    "main/mesh/meshcore_service.c": "09dba4b8519e2cd9e1f0e5ca1304d51b85cae5f38e4c14d906820e707d2af86f",
+    "main/mesh/meshcore_service.h": "0059d0c9548d1c4684d3404736b8e6c5465d6e10c4dd4f9827afb5ddd9d8486c",
+    "main/comms/usb_console.c": "03c119ef3aa6b9e46aa0750fdbacb11092d7a9354e0a2ebe4436c1396f802931",
+    "tests/test_meshcore_route_selection_contract.py": "c699f85e81e8a27b61108ea0c43c26131f0f18112bd37b30f1b541f05aa62aa4",
+    "tests/test_meshcore_route_selection_native.py": "ee0f123f39cf35e0981140eadf24f0e976a1ca60c603b3b9c2ef372725c6d538",
+    "tests/native/meshcore_route_selection_test.c": "d12efc12b1498c1f3e1234bba028cc2e1b62b77be9f5f9de1c7c4b00e071f7f8"
+  },
+  "shared_source_pins": {
+    "meshcore_git_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+    "sensecap_indicator_git_commit": "77edb8d2b9a92fc67965c1b2d4a838f0d09a1800",
+    "route_selector_canonical_sha256": "a6a340474e46f43ea844a236510b508ed0da524aa3ed7ecdd05b36cafde9cc5d",
+    "meshcore_service_canonical_sha256": "09dba4b8519e2cd9e1f0e5ca1304d51b85cae5f38e4c14d906820e707d2af86f",
+    "source_tree_verified_for_all_three_checkouts": true
+  },
+  "verification": {
+    "focused_host_rerun": {
+      "command": "python -m pytest -q tests/test_meshcore_route_selection_contract.py tests/test_meshcore_route_selection_native.py",
+      "passed": 6,
+      "failed": 0,
+      "stdout_sha256": "dc7cbfcf7c363b799709bf93ff77593b767c1bcda77d4ad852197a2938b6d511"
+    },
+    "actions_runs": [
+      {
+        "run_id": 29316500932,
+        "event": "push",
+        "checkout_sha": "fbe85e8788f3af3b5fd4ec27cc7732e280bae168",
+        "conclusion": "success",
+        "host_tests_passed": 944,
+        "checksum_contract_tests_passed": 32,
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff",
+        "artifact_archives_sha256": {
+          "d1l-release-package": "398ca1a9ca1a70f3260b61ce9f44ec41b8e998729053d1b4da6b4614adda1dad",
+          "d1l-firmware-artifacts": "d7fe478f03c48e79c13b4551123e88adafb3e5885806b9144247b0a2c86fe3cf",
+          "d1l-idf55-migration-state": "3202cb91483c25428f23bfb1befb34f93a947c04ff0d6507e6eba6480481412a",
+          "d1l-host-artifacts": "8db50364c148e221b999ff41650d57a035086b44227c077d7d8450ffc8a8acdb",
+          "d1l-meshcore-wire-conformance": "0f123d0490ea5f6dd4f7f5fa6789aff752c0e2df4a91bc48f990dc7f652c6000"
+        },
+        "checksum_manifests_sha256": {
+          "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+          "firmware": "8d4e70d1ba38e0283c7cd7d46579f03350c7a4fd8c333c715105721415728368",
+          "release": "9cdda42601f8ab03c4432151986ec7f8c424447de2db40008f1fc11625643e83"
+        },
+        "checksum_entries_verified": 46,
+        "checksum_entries_total": 46,
+        "sbom_sha256": "b96c42b0c3a9845d98a2bebe3e803074782e7571b8d96e988625f87ef94833f8",
+        "provenance_sha256": "da27bd1c4c1f04f600f16372fc00e59ccc2ee3255c900017e785a4279b967574"
+      },
+      {
+        "run_id": 29316515879,
+        "event": "pull_request",
+        "checkout_sha": "69bfcf6e91b84271476de6b9e40751faa30e71fb",
+        "conclusion": "success",
+        "host_tests_passed": 944,
+        "checksum_contract_tests_passed": 32,
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff",
+        "artifact_archives_sha256": {
+          "d1l-release-package": "661df4aa0d3d0fe158c97a2387914fa6f1530966e418a15b1f0153af4c40be3a",
+          "d1l-firmware-artifacts": "bb93064ea2911d1df504f3fbbc2c9919cdaf381380e1659d0203d0677741dca9",
+          "d1l-idf55-migration-state": "e950e025a1b3fc735885d1688a9287562ac80ed3dce0818106c41406f050875f",
+          "d1l-host-artifacts": "b3f1a0f1e30f8ed57c7861e403f992c2257e32fe5a2d4ab2d2d45759176914d6",
+          "d1l-meshcore-wire-conformance": "a6df38d57d8f0abb172fd17ca755c3d37e9c875eda23a53b5d5bd2ddea292788"
+        },
+        "checksum_manifests_sha256": {
+          "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+          "firmware": "9cb3bd74cf545fdac9942d02846344e67487632360a18e6c3a109f114799d914",
+          "release": "a2d34e86e65f3dc924b1543f71bd6014362b7a5b267077314b07df9c2a0c9c37"
+        },
+        "checksum_entries_verified": 46,
+        "checksum_entries_total": 46,
+        "sbom_sha256": "8aadda44f4db130792d8daa722e18c5936e501183223f789c928ae77acf791bf",
+        "provenance_sha256": "29449c42250c1b4a1b768760e087be5b25c5746da928cfb19e35cf45845e09c4"
+      },
+      {
+        "run_id": 29317376691,
+        "event": "push_main",
+        "checkout_sha": "d5acf0a80af4ff533f48105ea84844bd0d9af6c3",
+        "conclusion": "success",
+        "host_tests_passed": 944,
+        "checksum_contract_tests_passed": 32,
+        "host_success_receipt_sha256": "4ab1c986d7aa728ea827d5f8fe911fb91dd3869e3cf134d7c9f37ab0c1f15eb6",
+        "host_log_sha256": "b89d5d7c17745c83f312909def33fe697058f30c02436a8ec2c0815b11fe5723",
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff",
+        "artifact_archives_sha256": {
+          "d1l-release-package": "720a64792e431148ac9ca5b267af21381425f130a778d1fbc7eea6964094739d",
+          "d1l-firmware-artifacts": "46a971d75315f62c36b9f4247121def4de362aeb5225cd7f3c50c843671ce332",
+          "d1l-idf55-migration-state": "aba9bb4a9d95d3b0c1faf031fb91ffbb31b1e6aae26de06f32223ed766af2cd8",
+          "d1l-host-artifacts": "be80db381af216f770f71fc22628b3530f0bb36fad808eb1f8eec9691e594c98",
+          "d1l-meshcore-wire-conformance": "fe3cbad748e8f4e5abf6d0f2608eb952239fed878dd368a35f3457a18e8a600e"
+        },
+        "checksum_manifests_sha256": {
+          "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+          "firmware": "452923d7233e5ef5962c36493c1a97dc3d4268f99fbd41cfe91574400d9252c6",
+          "release": "a0609ae54c2867c295f9082857c7babd62349ba021be1a27e881e874ad334d41"
+        },
+        "checksum_entries_verified": 46,
+        "checksum_entries_total": 46,
+        "sbom_sha256": "31914e8a6772cad70a50a5a09561cfdd5bae554ed58d2cb9262abb62c3da928a",
+        "provenance_sha256": "1d75cc8b6e9a0bf88150800c83623281682e3eee12ade1a6061232f2b52b3115"
+      }
+    ],
+    "conformance_per_run": {
+      "wire_vectors": 864,
+      "wire_failures": 0,
+      "oracle_vectors": 931,
+      "oracle_failures": 0,
+      "fuzz_cases": 100000,
+      "fuzz_findings": 0,
+      "ubsan_clean": true,
+      "defined_arithmetic_transforms": 215,
+      "defined_arithmetic_differential_cases": 256,
+      "defined_arithmetic_mismatches": 0
+    },
+    "firmware_payloads": {
+      "pull_request_push": {
+        "application_sha256": "310c97cdf6e211c132163430996e5db53266a6c21398cff026e8e6d4ec347c70",
+        "full_flash_sha256": "eb7db21aa7dd778c0733f8df77248f2b550f19f4eded8362b4c3be181a14af11",
+        "package_manifest_sha256": "10ae1c45827df68437ff30b5f474f75886e5dfb7062f5fef528d3697c32ca74f"
+      },
+      "pull_request_synthetic_merge": {
+        "application_sha256": "2cea78d676be951ecc6ec815092617fcb95449752593e740180a3426a6b52b37",
+        "full_flash_sha256": "f08b52fc80b1c026d12d775055302079593197a0df7e5e4125cc4d572d792fed",
+        "package_manifest_sha256": "20920806acdae3ec0609a7b5b5bfb3ca21e81bafbb134e580d6475912c3b7007"
+      },
+      "merged_main": {
+        "application_sha256": "148abf81f82d1ba756988bd83635617744cf26ff2af95c88c9ef697f47f5897e",
+        "full_flash_sha256": "18878501cbb1434e58a59e4ab3f8c369aa463e63dff878f6093ae3849cea8e25",
+        "package_manifest_sha256": "47e8b3593fa60e9484a6f119123c322f024d722057dac39241a58a2e4ae477af",
+        "flash_size_bytes": 8388608,
+        "unmapped_full_flash_non_ff_bytes": 0,
+        "update_image_matches_application": true,
+        "rp2040_artifact_count": 0
+      }
+    },
+    "idf_build_context_all_runs": {
+      "version_text": "ESP-IDF v5.5.4\n",
+      "version_sha256": "b0481060ce29846f2d489adc6179cec007b75a203ca89ea63c3f84c774e340ea",
+      "idf_git_commit": "735507283d5b2f9fb363a1901172dbd9e847945d",
+      "container": "espressif/idf:v5.5.4@sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b",
+      "dependencies_lock_sha256": "04440fb1df8a5824d474ff3731a39c4b157419db02b4d4006ee28ea21a4cd19f",
+      "build_inputs_sha256": "4a2af7413c465ffdff9c2e7e0eb1a2a00115c56fdb17d184e1959ad66dd144d1"
+    },
+    "sbom_common_verification": {
+      "spdx_version": "SPDX-2.3",
+      "packages": 5,
+      "files": 59,
+      "relationships": 65,
+      "package_files_verified": 25,
+      "source_files_verified": 34
+    },
+    "provenance_common_verification": {
+      "statement_type": "https://in-toto.io/Statement/v1",
+      "predicate_type": "https://slsa.dev/provenance/v1",
+      "subjects_verified": 26,
+      "subjects_total": 26,
+      "materials_verified": 37,
+      "materials_total": 37,
+      "sha256_materials": 34,
+      "git_materials": 3,
+      "authenticated": false,
+      "slsa_build_level": "not-claimed"
+    },
+    "aggregate": {
+      "actions_run_count": 3,
+      "api_artifact_zip_count": 15,
+      "api_artifact_digest_matches": 15,
+      "checksum_manifest_count": 9,
+      "checksum_manifest_entries": 138,
+      "checksum_manifest_hash_matches": 138,
+      "all_checks_passed": true
+    }
+  },
+  "residual_release_gates": {
+    "trace": {
+      "closed": false,
+      "remaining": "Canonical multi-hop TRACE response and session behavior plus exact-candidate controlled-peer RF evidence remain open; this slice proves only that an outbound probe records the immutable route actually sent."
+    },
+    "admin": {
+      "closed": false,
+      "remaining": "Authenticated repeater and room administration, persisted admin session behavior, negative authorization cases, and exact-candidate RF interoperability remain open."
+    },
+    "identity": {
+      "closed": false,
+      "remaining": "Persisted private-key and public-identity consistency across reboot and power loss, contact and advert reconciliation, and dispatcher-wide identity binding remain open."
+    },
+    "rf": {
+      "closed": false,
+      "remaining": "Controlled official-peer matrices must prove fresh direct selection, missing, preboot, stale, and malformed flood fallback, direct ACK, flood ACK plus PATH, correlation, delivery, retry budget, and duplicate suppression on the exact release candidate."
+    },
+    "physical": {
+      "closed": false,
+      "remaining": "Exact-candidate D1L reboot, power-loss, retained-route invalidation, truthful GUI and console outcomes, frozen-candidate regression, and required hardware soak evidence remain open."
+    }
+  },
+  "release_truth": {
+    "gate_count": 36,
+    "passed_count": 1,
+    "failed_count": 35,
+    "p0_failed_count": 33,
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "audit_sha256": "83223d50b78044b497e5db43f4dba00353b535c43a978613318de73c23fdeca8"
+  },
+  "claims": {
+    "software_route_selection_evidence_banked": true,
+    "pull_request_and_merged_main_software_gates_green": true,
+    "trace_end_to_end_closure_claimed": false,
+    "admin_closure_claimed": false,
+    "identity_closure_claimed": false,
+    "physical_or_rf_closure_claimed": false,
+    "wp04_closure_eligible": false,
+    "release_ready": false,
+    "valid": true
+  }
+}

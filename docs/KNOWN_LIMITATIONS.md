@@ -1,8 +1,8 @@
 # Known Limitations
 
-As of the 2026-07-14 merged PR #97 exact-input checkpoint:
+As of the 2026-07-14 merged PR #99 exact-input checkpoint:
 
-- Live `main` is `ee520984d2209ae7419c02bb46d57c1549eeb56c` after PR #97 closed the noisy/non-fail-closed ESP-IDF receipt defect on top of PR #96's reviewed production/oracle/runtime Ed25519 integration. Exact merged-main Actions `29313013731` passed 935 host tests plus 32 checksum-contract tests and the Actions-only ESP32 build. All five API ZIPs and 46 nested checksum entries passed across 219 files / 72,428,299 bytes; the 15-byte IDF receipt is exactly `ESP-IDF v5.5.4` plus LF, nonzero capture mutations remain audit-invalid, `full_ubsan_clean=true`, and zero sanitizer exceptions/errors remain. Portable aggregates are `docs/completion/evidence/wp04/production_oracle_ed25519_integration_83a811247aa79a379ee810da7489c90c62112fee.json` (SHA-256 `d75c1f948784faecb07b49ed423732542e91bc3947f68e76f831dad0413521f2`) and `docs/completion/evidence/wp24/idf_version_receipt_ee520984d2209ae7419c02bb46d57c1549eeb56c.json` (SHA-256 `f21abb17403f432c17bf19cc052cd185b05a39c705a3a984e73f5fcb6a547fa5`). These are host/build proofs, not physical closure. WP-01 remains banked on predecessor source `092293f2311a24c9899bc9bf343ab014c4ba0411`; WP-02 software integration is complete but its final-candidate board, UI, SD, reboot, and Map-open roles remain deferred.
+- Live `main` is `d5acf0a80af4ff533f48105ea84844bd0d9af6c3` after PR #98 merged schema-v5 durable inbound-DM ACK handling and PR #99 merged fresh learned-route selection on top of the reviewed production/oracle/runtime Ed25519 integration and exact ESP-IDF receipt. Exact merged-main Actions `29317376691` passed 944 host tests plus 32 checksum-contract tests and the Actions-only ESP32 build. All five API ZIPs and 46 nested checksum entries passed across 219 files / 72,613,846 bytes; the independent gate receipt SHA-256 is `db83f48167b57179d2ef0c0800898db51d7d24b3da4847df2af69a77344e7f61`. Portable software aggregates are ACK durability `docs/completion/evidence/wp04/ack_durability_76b07f28918b338bf896d5a1a8a0207b5a112677.json` (SHA-256 `351433586b62cdb4761d41a0dee146c8af4f0edd3c3b6e6e897228ea22e00f3c`) and route selection `docs/completion/evidence/wp04/route_selection_d5acf0a80af4ff533f48105ea84844bd0d9af6c3.json` (SHA-256 `e38a442100cf27f433777eaf6d293b40c44e08a555e406fd7b5d0bb79f9459ac`). These are host/build proofs, not physical or RF closure. WP-01 remains banked on predecessor source `092293f2311a24c9899bc9bf343ab014c4ba0411`; WP-02 software integration is complete but its final-candidate board, UI, SD, reboot, and Map-open roles remain deferred.
 
 - ESP-IDF v5.1.x is end of life and is no longer the selected production target. Standalone migration commit `39a043c` uses version-pinned `espressif/idf:v5.5.4`, commits the exact Actions-generated `dependencies.lock`, applies the tracked Seeed BSP compatibility patch, and passes host, firmware, package, checksum, release, and effective-config checks. That evidence does not yet qualify the combined Map/Wi-Fi candidate: exact COM12 must still report `"idf":"v5.5.4"` and pass board/display/touch/Wi-Fi/RF/RP2040-SD/Map/health/reboot/power-cycle smoke with refreshed commit-matched release evidence. No supported-SDK waiver or hardware qualification is implied by the standalone green build.
 - Manual visual confirmation of display bars and touch target movement is still pending; the serial `display test` and `touch test` commands return OK on hardware. The COM12 hardware pixel-capture path reconstructed the current PR #56 hierarchy from `51258ba` / Actions `29060900359` with matching firmware/host CRC `E72745BA`, a passing simulator diff, `public_rf_tx=false`, and `formats_sd=false`; a three-round all-tab health probe also passed cleanly. PR #51, PR #40, and PR #33 captures remain history for superseded layouts. Physical photos/manual review and final-release-SHA evidence are still pending.
@@ -36,18 +36,22 @@ As of the 2026-07-14 merged PR #97 exact-input checkpoint:
   differential/RFC 8032 behavior under pinned Clang 18 ASan/UBSan with zero
   exceptions. `BLK-WP04-ED25519-SHIFT-UB-20260714` is closed. This does not
   close ACK, route, TRACE, admin, retained-state, RF, or physical behavior.
-- Reliable inbound DM ACK remains incomplete as a release claim. Draft PR #98
-  exact head `d44e9c95f8e2b5a03366ab905782e6170057d606` now implements the
-  schema-v5 full 32-byte identity digest, per-row durable reservation/state/error,
-  no-RF partial-backend failure, zero boot-time RF, direct then flood fallback,
-  full-digest callback correlation across SD/NVS resequencing, TxDone/timeout
-  projection, and a maximum two-dispatch budget. It passed 935 host tests with
-  three intentional skips and 27 independent focused/contract checks, but is
-  not merged or release-qualified until exact Actions artifacts pass. Even
-  after merge, compatible-peer RF, controlled power-loss, reboot, and frozen-
-  candidate hardware evidence remain mandatory. Valid v1-v4 rows are preserved
-  as `legacy_unverified` and intentionally do not hydrate collision-safe ACK
-  identity state.
+- Reliable inbound DM ACK remains incomplete as a release claim even though its
+  software boundary is merged. PR #98 banks the schema-v5 full 32-byte identity
+  digest, per-row durable reservation/state/error, no-RF partial-backend failure,
+  zero boot-time RF, direct then flood fallback, full-digest callback correlation
+  across SD/NVS resequencing, retained TxDone/timeout outcomes, and a maximum
+  two-dispatch budget. Valid v1-v4 rows remain `legacy_unverified` and do not
+  hydrate collision-safe ACK identity state. Compatible-peer RF, controlled
+  power-loss, reboot, and frozen-candidate hardware evidence remain mandatory.
+- PR #99 banks only the learned-route software boundary: a known canonical path
+  authenticated during the current boot is eligible while fresh, including a
+  known zero-hop path; missing, preboot, stale, and malformed paths fall back to
+  flood. ACK planning uses the same selector, and telemetry reports the immutable
+  route actually sent instead of rereading mutable contact state. Exact-candidate
+  RF must still prove direct and fallback delivery, correlation, and retry behavior.
+  `codex/wp04-trace-discovery` is local implementation with no pull request yet;
+  no TRACE, admin, persisted-identity, RF, or physical closure is claimed.
 - Settings are implemented as an NVS-backed firmware model and have passed reboot persistence smoke on real D1L flash. The persisted radio profile is exposed through `settings get`, serial radio setters, and a touch Radio Settings sheet; the user-facing More page groups tools, connections, storage/maps, device, support, and advanced functions behind disclosure rows instead of a flat settings grid. PR #56 proves the collapsed hierarchy and all-tab navigation on COM12; expanded category touch behavior and the remaining system-page redesigns still need physical touch review.
 - First-boot onboarding now persists a setup-complete flag, collects the node name, confirms Canada/USA defaults, keeps Wi-Fi/BLE/observer disabled, and generates/retains the local MeshCore identity. Optional-radio choices in onboarding remain limited until live Wi-Fi/BLE runtime support is enabled.
 - `identity status` now generates and reports an NVS-retained Ed25519 local identity fingerprint. This is a minimal firmware identity model, not the final full MeshCore C++ store integration.
