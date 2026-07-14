@@ -46,6 +46,7 @@ idf_component_register(
         "storage/retained_blob_store.c"
         "storage/export_store.c"
         "storage/map_tile_store.c"
+        "storage/retained_store_scheduler.c"
         "storage/storage_status.c"
         "storage/storage_status_policy.c"
         "ui/ui_chrome.c"

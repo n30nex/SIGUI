@@ -247,6 +247,69 @@ static void print_retained_sd_store_json(const d1l_retained_blob_store_sd_stats_
            esp_err_to_name(stats->nvs_mirror_last_error));
 }
 
+static void print_retained_scheduler_json(
+    const d1l_retained_store_worker_status_t *status)
+{
+    const d1l_retained_store_pass_t *pass = &status->last_pass;
+    printf("{\"running\":%s,\"active\":{\"force\":%s,"
+           "\"deadline_us\":%" PRId64 ",\"store_active\":%s,"
+           "\"store_index\":%u,\"store_started_us\":%" PRId64
+           ",\"store\":",
+           bool_json(status->running), bool_json(status->active_force),
+           status->active_deadline_us,
+           bool_json(status->active_store_name[0] != '\0'),
+           (unsigned)status->active_store_index,
+           status->active_store_started_us);
+    print_json_string(status->active_store_name);
+    printf("},\"passes\":%lu,\"forced_passes\":%lu,"
+           "\"background_passes\":%lu,\"deadline_exhaustions\":%lu,"
+           "\"quiesce_cancellations\":%lu,\"last_pass\":{\"force\":%s,"
+           "\"deadline_us\":%" PRId64 ",\"started_us\":%" PRId64 ","
+           "\"finished_us\":%" PRId64 ",\"result\":\"%s\","
+           "\"deadline_exhausted\":%s,\"quiesce_cancelled\":%s,"
+           "\"attempted\":%u,\"committed\":%u,\"coalesced\":%u,"
+           "\"skipped_clean\":%u,\"failed\":%u,\"stores\":[",
+           (unsigned long)status->pass_count,
+           (unsigned long)status->forced_pass_count,
+           (unsigned long)status->background_pass_count,
+           (unsigned long)status->deadline_exhausted_count,
+           (unsigned long)status->quiesce_cancelled_count,
+           bool_json(pass->force), pass->deadline_us, pass->started_us,
+           pass->finished_us, esp_err_to_name(pass->result),
+           bool_json(pass->deadline_exhausted),
+           bool_json(pass->quiesce_cancelled),
+           (unsigned)pass->attempted_count,
+           (unsigned)pass->committed_count,
+           (unsigned)pass->coalesced_count,
+           (unsigned)pass->skipped_clean_count,
+           (unsigned)pass->failed_count);
+    for (size_t i = 0; i < pass->store_count; ++i) {
+        const d1l_retained_store_result_t *store = &pass->stores[i];
+        if (i > 0U) {
+            printf(",");
+        }
+        printf("{\"name\":");
+        print_json_string(store->name);
+        printf(",\"outcome\":");
+        print_json_string(d1l_retained_store_outcome_name(store->outcome));
+        printf(",\"result\":\"%s\",\"before\":{\"revision\":%" PRIu64
+               ",\"dirty\":%s,\"reconcile_pending\":%s,\"commits\":%lu,"
+               "\"failures\":%lu},\"after\":{\"revision\":%" PRIu64
+               ",\"dirty\":%s,\"reconcile_pending\":%s,\"commits\":%lu,"
+               "\"failures\":%lu}}",
+               esp_err_to_name(store->result),
+               store->before.revision, bool_json(store->before.dirty),
+               bool_json(store->before.reconcile_pending),
+               (unsigned long)store->before.commit_count,
+               (unsigned long)store->before.failure_count,
+               store->after.revision, bool_json(store->after.dirty),
+               bool_json(store->after.reconcile_pending),
+               (unsigned long)store->after.commit_count,
+               (unsigned long)store->after.failure_count);
+    }
+    printf("]}}");
+}
+
 static bool parse_fingerprint_token(const char *src, char *dest, size_t dest_size)
 {
     if (!src || !dest || dest_size < D1L_NODE_FINGERPRINT_LEN) {
@@ -1480,6 +1543,8 @@ static void cmd_storage_status(void)
     d1l_storage_status(&status);
     d1l_connectivity_status_t connectivity = {0};
     d1l_connectivity_status(&connectivity);
+    d1l_retained_store_worker_status_t retained_scheduler = {0};
+    d1l_retained_store_worker_status(&retained_scheduler);
     ok_begin("storage status");
     printf(",\"manager\":{\"running\":%s,\"state\":",
            bool_json(status.manager_running));
@@ -1573,6 +1638,8 @@ static void cmd_storage_status(void)
            esp_err_to_name(d1l_retained_blob_store_nvs_error()),
            (unsigned long)d1l_retained_blob_store_nvs_migrated_keys(),
            esp_err_to_name(d1l_retained_blob_store_nvs_migration_error()));
+    printf(",\"retained_scheduler\":");
+    print_retained_scheduler_json(&retained_scheduler);
     printf(",\"retained_sd\":{\"degraded\":%s,\"backup_degraded\":%s,\"note\":",
            bool_json(status.retained_sd_degraded),
            bool_json(status.retained_backup_degraded));

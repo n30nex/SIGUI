@@ -33,7 +33,9 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_route_store_flush()" in worker
     assert "request_id" in worker
     assert "s_result_request_id" in worker
-    assert "elapsed_us >= (int64_t)timeout_ms * 1000LL" in worker
+    assert "deadline_us" in worker
+    assert "absolute_deadline_remaining_ticks(deadline_us)" in worker
+    assert ".deadline_us = deadline_us" in worker
     assert "xQueueSend(s_request_queue, &request, 0)" in worker
     assert "s_worker_starting" in worker
     assert "already_starting" in worker
@@ -198,16 +200,23 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     assert "s_flush_mutex" in worker
     assert "s_quiesce_requester" in worker
     assert "worker_quiesce_requested" in worker
+    assert "scheduler_cancel_requested" in worker
     assert "current != requester && current != owner" in worker.replace("\n", " ")
-    assert "flush_retained_stores_locked(true)" in worker
-    assert "flush_retained_stores_locked(false)" in worker
+    assert "flush_retained_stores_locked(true, request.deadline_us)" in worker.replace(
+        "\n", " "
+    )
+    assert "flush_retained_stores_locked(false, 0)" in worker
 
     flush = worker.split(
-        "static esp_err_t flush_retained_stores(bool force)", 1
-    )[1].split("static esp_err_t flush_retained_stores_locked", 1)[0]
-    assert flush.count("worker_quiesce_requested()") == 4
-    assert flush.count("quiesce_yield_result(force, first_error)") == 4
-    assert "return force ? ESP_ERR_TIMEOUT : ESP_OK" in worker
+        "static esp_err_t flush_retained_stores_locked", 1
+    )[1].split("static TickType_t quiesce_remaining_ticks", 1)[0]
+    assert "d1l_retained_store_scheduler_run" in flush
+    assert "absolute_deadline_remaining_ticks(deadline_us)" in flush
+    run_index = flush.index("d1l_retained_store_scheduler_run")
+    release_index = flush.index("xSemaphoreGive(s_flush_mutex)", run_index)
+    publish_index = flush.index("publish_pass(&pass)", release_index)
+    assert run_index < release_index < publish_index
+    assert "pass.deadline_exhausted = true" in flush
 
     begin = worker.split(
         "static esp_err_t route_store_worker_quiesce_begin", 1
