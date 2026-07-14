@@ -164,7 +164,7 @@ def test_meshcore_status_getter_is_passive_and_radio_owned_by_service_task():
     assert "meshcore_service_task" in source
     assert "meshcore_service_handle_start_rx" in source
     assert "meshcore_service_handle_send_raw" in source
-    assert "meshcore_service_request_rx_async" in source
+    assert "meshcore_service_request_rx_async" not in source
     assert "SemaphoreHandle_t s_status_mutex" in source
     assert "status_lock()" in status_body
     assert "d1l_meshcore_service_status_t snapshot = s_status" in status_body

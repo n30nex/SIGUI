@@ -1162,6 +1162,16 @@ static void cmd_mesh_status(void)
            d1l_meshcore_route_selection_reason_name(
                (d1l_meshcore_route_selection_reason_t)status.dm_route_last_reason),
            (unsigned long)status.dm_route_last_path_age_ms);
+    printf(",\"runtime\":{\"owner\":\"meshcore_service\",\"callback_boundary\":\"copy_timestamp_enqueue\",\"command_queue_depth\":%lu,\"command_queue_high_water\":%lu,\"event_queue_depth\":%lu,\"event_queue_high_water\":%lu,\"queue_drops\":%lu,\"callback_event_drops\":%lu,\"heartbeat\":%lu,\"stack_free_words\":%lu,\"last_event_monotonic_us\":%llu}",
+           (unsigned long)status.runtime_command_queue_depth,
+           (unsigned long)status.runtime_command_queue_high_water,
+           (unsigned long)status.runtime_event_queue_depth,
+           (unsigned long)status.runtime_event_queue_high_water,
+           (unsigned long)status.runtime_queue_drops,
+           (unsigned long)status.runtime_callback_event_drops,
+           (unsigned long)status.runtime_task_heartbeat,
+           (unsigned long)status.runtime_task_stack_free_words,
+           (unsigned long long)status.runtime_last_event_monotonic_us);
     printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"flags_zero_direct_only\":true,\"requires_explicit_loop\":true,\"contact_trace_supported\":false,\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to host-verified explicit-loop source, terminal parsing, and correlation\"}\n",
            (unsigned long)status.trace_tx_queued,
            (unsigned long)status.trace_rx_matched,

@@ -72,7 +72,7 @@
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/ed25519_canonical.h": "52a30b40ea99f25f0d19d991929e167035828a3a2d7479ef6d1dda9ca94a57f5",
     "main/mesh/meshcore_route_selection.h": "a6a340474e46f43ea844a236510b508ed0da524aa3ed7ecdd05b36cafde9cc5d",
-    "main/mesh/meshcore_service.c": "d37567555933a9a73218f0a3d154b8ab0a7b0523f5821593872a5ba019fd33f0",
+    "main/mesh/meshcore_service.c": "bae8fd1e91ba8d958e945a7b546efa1969d4db5da1375fdd8242a05ab3211dc7",
     "main/mesh/meshcore_trace.h": "efc3a08ffb6adda5310ca57eef31535fe7dadeb993aedda9fdb2814b891d41f7",
     "overlays/meshcore_ed25519_defined/fe.c": "1d5040487ff44538e9a03164e8bbe3a9d3446d0efc9669578f20ba4a8751bdfc",
     "overlays/meshcore_ed25519_defined/ge.c": "b17611fd0b5d8bb3bae2dca3926150a6a2f9f579a7357dcf7feb296779d9d653",

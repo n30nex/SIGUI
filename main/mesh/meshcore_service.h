@@ -47,6 +47,15 @@ typedef struct {
     uint32_t trace_rx_source_ignored;
     uint32_t trace_rx_in_flight_ignored;
     uint32_t trace_rx_unsupported;
+    uint32_t runtime_command_queue_depth;
+    uint32_t runtime_command_queue_high_water;
+    uint32_t runtime_event_queue_depth;
+    uint32_t runtime_event_queue_high_water;
+    uint32_t runtime_queue_drops;
+    uint32_t runtime_callback_event_drops;
+    uint32_t runtime_task_heartbeat;
+    uint32_t runtime_task_stack_free_words;
+    uint64_t runtime_last_event_monotonic_us;
     uint8_t path_hash_bytes;
     bool identity_ready;
     bool radio_ready;
