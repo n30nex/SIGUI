@@ -40,8 +40,10 @@ def test_retained_store_diagnostics_report_target_truth_and_reboot_is_combined()
     assert r'\"journal\":{\"dirty\":%s' in packets
     assert "sd_primary_reconcile_pending" in packets
 
-    assert "flush_retained_stores_locked(true)" in worker
-    assert "flush_retained_stores_locked(false)" in worker
+    assert "flush_retained_stores_locked(true, request.deadline_us)" in worker.replace(
+        "\n", " "
+    )
+    assert "flush_retained_stores_locked(false, 0)" in worker
     for store in ("message_store", "dm_store", "packet_log", "route_store"):
         assert f"d1l_{store}_flush()" in worker
         assert f"d1l_{store}_flush_if_due()" in worker
