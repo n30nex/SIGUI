@@ -49,8 +49,13 @@
 #define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
 #define D1L_MESHCORE_TXT_TYPE_PLAIN 0U
 #define D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS 30000U
-#define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 4096U
+#define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 8192U
 #define D1L_MESHCORE_SERVICE_QUEUE_LEN 6U
+#define D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN 8U
+#define D1L_MESHCORE_MAX_EVENT_BURST 4U
+#define D1L_MESHCORE_RECOVERY_TX_DONE (1U << 0)
+#define D1L_MESHCORE_RECOVERY_TX_TIMEOUT (1U << 1)
+#define D1L_MESHCORE_RECOVERY_RX_RESTART (1U << 2)
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ chars");
@@ -71,6 +76,7 @@ static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
 static SemaphoreHandle_t s_status_mutex;
 static QueueHandle_t s_service_queue;
+static QueueHandle_t s_radio_event_queue;
 static TaskHandle_t s_service_task;
 static bool s_service_initialized;
 static bool s_radio_started;
@@ -89,6 +95,11 @@ static bool s_trace_last_retention_attempted;
 static bool s_trace_last_route_summary_accepted;
 static bool s_trace_last_packet_preview_retained;
 static d1l_store_lock_t s_trace_lock = D1L_STORE_LOCK_INITIALIZER;
+static uint32_t s_runtime_command_queue_high_water;
+static uint32_t s_runtime_event_queue_high_water;
+static uint32_t s_runtime_queue_drops;
+static uint32_t s_runtime_callback_event_drops;
+static uint32_t s_pending_radio_recovery_flags;
 
 typedef struct {
     bool active;
@@ -146,6 +157,11 @@ extern SX126x_t SX126x;
 typedef enum {
     D1L_MESHCORE_SERVICE_CMD_START_RX,
     D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+    D1L_MESHCORE_SERVICE_EVENT_TX_DONE,
+    D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT,
+    D1L_MESHCORE_SERVICE_EVENT_RX_DONE,
+    D1L_MESHCORE_SERVICE_EVENT_RX_TIMEOUT,
+    D1L_MESHCORE_SERVICE_EVENT_RX_ERROR,
 } d1l_meshcore_service_cmd_type_t;
 
 typedef struct {
@@ -154,6 +170,9 @@ typedef struct {
     uint8_t raw_len;
     uint16_t delay_ms;
     bool ack_response;
+    int16_t rssi;
+    int8_t snr;
+    uint64_t monotonic_us;
     TaskHandle_t reply_task;
 } d1l_meshcore_service_cmd_t;
 
@@ -168,7 +187,6 @@ static uint8_t s_public_channel_hash;
 
 static void d1l_meshcore_start_rx(void);
 static esp_err_t meshcore_service_start_task(void);
-static void meshcore_service_request_rx_async(void);
 static esp_err_t meshcore_service_send_ack_async(
     const d1l_contact_entry_t *contact,
     uint32_t ack_hash,
@@ -177,6 +195,65 @@ static esp_err_t meshcore_service_send_ack_async(
     const d1l_meshcore_ack_dispatch_plan_t *plan,
     const uint8_t *raw,
     uint8_t raw_len);
+
+static void runtime_note_queue_drop(bool callback_event)
+{
+    (void)__atomic_add_fetch(&s_runtime_queue_drops, 1U, __ATOMIC_RELAXED);
+    if (callback_event) {
+        (void)__atomic_add_fetch(&s_runtime_callback_event_drops, 1U,
+                                 __ATOMIC_RELAXED);
+    }
+}
+
+static void runtime_note_queue_depth(QueueHandle_t queue,
+                                     uint32_t *high_water)
+{
+    if (!queue || !high_water) {
+        return;
+    }
+    const uint32_t depth = (uint32_t)uxQueueMessagesWaiting(queue);
+    uint32_t observed = __atomic_load_n(high_water, __ATOMIC_RELAXED);
+    while (depth > observed &&
+           !__atomic_compare_exchange_n(high_water, &observed, depth, false,
+                                        __ATOMIC_RELAXED,
+                                        __ATOMIC_RELAXED)) {
+    }
+}
+
+static void meshcore_service_wake(void)
+{
+    if (s_service_task) {
+        xTaskNotifyGive(s_service_task);
+    }
+}
+
+static uint32_t meshcore_service_recovery_flag(
+    d1l_meshcore_service_cmd_type_t type)
+{
+    switch (type) {
+    case D1L_MESHCORE_SERVICE_EVENT_TX_DONE:
+        return D1L_MESHCORE_RECOVERY_TX_DONE;
+    case D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT:
+        return D1L_MESHCORE_RECOVERY_TX_TIMEOUT;
+    case D1L_MESHCORE_SERVICE_EVENT_RX_DONE:
+    case D1L_MESHCORE_SERVICE_EVENT_RX_TIMEOUT:
+    case D1L_MESHCORE_SERVICE_EVENT_RX_ERROR:
+        return D1L_MESHCORE_RECOVERY_RX_RESTART;
+    default:
+        return 0U;
+    }
+}
+
+static void meshcore_service_latch_radio_recovery(
+    d1l_meshcore_service_cmd_type_t type)
+{
+    const uint32_t flag = meshcore_service_recovery_flag(type);
+    if (flag != 0U) {
+        (void)__atomic_fetch_or(&s_pending_radio_recovery_flags, flag,
+                                __ATOMIC_RELEASE);
+        meshcore_service_wake();
+    }
+}
 
 static void status_lock(void)
 {
@@ -1293,7 +1370,8 @@ static bool dispatch_bounded_dm_ack(
     return true;
 }
 
-static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+static void parse_rx_public_packet(const uint8_t *payload, uint16_t size,
+                                   int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
     if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
@@ -1326,7 +1404,8 @@ static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi
     append_public_message_store_rx(message, rssi, snr, packet.path_hash_bytes, packet.path_hops);
 }
 
-static bool parse_rx_dm_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
+                               int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
     if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
@@ -1528,7 +1607,8 @@ static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *p
     }
 }
 
-static void parse_rx_ack_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+static void parse_rx_ack_packet(const uint8_t *payload, uint16_t size,
+                                int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
     if (!d1l_meshcore_wire_decode_v1(payload, size, &packet)) {
@@ -1552,7 +1632,8 @@ static void parse_rx_ack_packet(uint8_t *payload, uint16_t size, int16_t rssi, i
     record_dm_ack(ack_hash, &packet, rssi, snr, size, payload, size, source);
 }
 
-static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
+                                 int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
     if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
@@ -1632,7 +1713,7 @@ static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, 
     }
 }
 
-static void parse_rx_trace_packet(uint8_t *payload, uint16_t size,
+static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
                                   int16_t rssi, int8_t snr)
 {
     if (!payload || size == 0U ||
@@ -1893,7 +1974,8 @@ static bool retry_verified_contact_promotion(
     return true;
 }
 
-static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
+                                   int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
     if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
@@ -2045,7 +2127,7 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
                       packet.path_hops, size, payload, size, note);
 }
 
-static void on_tx_done(void)
+static void meshcore_service_handle_radio_tx_done(void)
 {
     if (s_active_tx_ack_response) {
         complete_pending_ack_tx(true, ESP_OK);
@@ -2056,10 +2138,10 @@ static void on_tx_done(void)
     s_tx_busy = false;
     s_status.tx_packets++;
     s_status.state = D1L_MESHCORE_SERVICE_READY;
-    meshcore_service_request_rx_async();
+    d1l_meshcore_start_rx();
 }
 
-static void on_tx_timeout(void)
+static void meshcore_service_handle_radio_tx_timeout(void)
 {
     if (s_active_tx_ack_response) {
         complete_pending_ack_tx(false, ESP_ERR_TIMEOUT);
@@ -2071,10 +2153,11 @@ static void on_tx_timeout(void)
     s_active_tx_ack_response = false;
     s_tx_busy = false;
     s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
-    meshcore_service_request_rx_async();
+    d1l_meshcore_start_rx();
 }
 
-static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+static void meshcore_service_handle_radio_rx_done(
+    const uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     parse_rx_public_packet(payload, size, rssi, snr);
     const bool ack_queued = parse_rx_dm_packet(payload, size, rssi, snr);
@@ -2083,18 +2166,96 @@ static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr
     parse_rx_trace_packet(payload, size, rssi, snr);
     parse_rx_advert_packet(payload, size, rssi, snr);
     if (!ack_queued) {
-        meshcore_service_request_rx_async();
+        d1l_meshcore_start_rx();
     }
+}
+
+static void meshcore_service_handle_radio_rx_timeout(void)
+{
+    d1l_meshcore_start_rx();
+}
+
+static void meshcore_service_handle_radio_rx_error(void)
+{
+    d1l_meshcore_start_rx();
+}
+
+static void meshcore_service_handle_latched_radio_recovery(uint32_t flags)
+{
+    bool tx_terminal_recovered = false;
+    if ((flags & D1L_MESHCORE_RECOVERY_TX_TIMEOUT) != 0U) {
+        meshcore_service_handle_radio_tx_timeout();
+        tx_terminal_recovered = true;
+    } else if ((flags & D1L_MESHCORE_RECOVERY_TX_DONE) != 0U) {
+        meshcore_service_handle_radio_tx_done();
+        tx_terminal_recovered = true;
+    }
+    if (!tx_terminal_recovered && !s_tx_busy &&
+        (flags & D1L_MESHCORE_RECOVERY_RX_RESTART) != 0U) {
+        meshcore_service_handle_radio_rx_error();
+    }
+}
+
+static void enqueue_radio_event(d1l_meshcore_service_cmd_type_t type,
+                                const uint8_t *payload, uint16_t size,
+                                int16_t rssi, int8_t snr)
+{
+    if (!s_radio_event_queue ||
+        (type == D1L_MESHCORE_SERVICE_EVENT_RX_DONE &&
+         (!payload || size == 0U || size > D1L_MESHCORE_MAX_RAW_PACKET))) {
+        runtime_note_queue_drop(true);
+        meshcore_service_latch_radio_recovery(type);
+        return;
+    }
+
+    d1l_meshcore_service_cmd_t event = {
+        .type = type,
+        .rssi = rssi,
+        .snr = snr,
+        .monotonic_us = (uint64_t)esp_timer_get_time(),
+    };
+    if (type == D1L_MESHCORE_SERVICE_EVENT_RX_DONE) {
+        event.raw_len = (uint8_t)size;
+        memcpy(event.raw, payload, size);
+    }
+    if (xQueueSend(s_radio_event_queue, &event, 0) != pdTRUE) {
+        runtime_note_queue_drop(true);
+        meshcore_service_latch_radio_recovery(type);
+        return;
+    }
+    runtime_note_queue_depth(s_radio_event_queue,
+                             &s_runtime_event_queue_high_water);
+    meshcore_service_wake();
+}
+
+/* SX1262 callbacks are deliberately bounded: copy immutable metadata/raw
+ * bytes into the event queue, timestamp from the monotonic clock, and return.
+ * Protocol parsing, retained writes, status transitions, and RX restarts are
+ * owned by meshcore_service_task. */
+static void on_tx_done(void)
+{
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_TX_DONE, NULL, 0U, 0, 0);
+}
+
+static void on_tx_timeout(void)
+{
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT, NULL, 0U, 0, 0);
+}
+
+static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+{
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_DONE, payload, size,
+                        rssi, snr);
 }
 
 static void on_rx_timeout(void)
 {
-    meshcore_service_request_rx_async();
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_TIMEOUT, NULL, 0U, 0, 0);
 }
 
 static void on_rx_error(void)
 {
-    meshcore_service_request_rx_async();
+    enqueue_radio_event(D1L_MESHCORE_SERVICE_EVENT_RX_ERROR, NULL, 0U, 0, 0);
 }
 
 static RadioEvents_t s_radio_events = {
@@ -2237,10 +2398,55 @@ static void meshcore_service_task(void *arg)
 {
     (void)arg;
     d1l_meshcore_service_cmd_t cmd = {0};
+    uint8_t radio_event_burst = 0U;
     for (;;) {
-        if (xQueueReceive(s_service_queue, &cmd, portMAX_DELAY) != pdTRUE) {
+        const uint32_t recovery_flags = __atomic_exchange_n(
+            &s_pending_radio_recovery_flags, 0U, __ATOMIC_ACQ_REL);
+        if (recovery_flags != 0U) {
+            status_lock();
+            s_status.runtime_task_heartbeat++;
+            s_status.runtime_task_stack_free_words =
+                (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+            status_unlock();
+            meshcore_service_handle_latched_radio_recovery(recovery_flags);
+        }
+
+        bool radio_event = false;
+        bool received = false;
+        if (radio_event_burst < D1L_MESHCORE_MAX_EVENT_BURST) {
+            radio_event =
+                xQueueReceive(s_radio_event_queue, &cmd, 0) == pdTRUE;
+            received = radio_event;
+        }
+        if (!received && xQueueReceive(s_service_queue, &cmd, 0) == pdTRUE) {
+            received = true;
+            radio_event = false;
+        }
+        if (!received) {
+            radio_event =
+                xQueueReceive(s_radio_event_queue, &cmd, 0) == pdTRUE;
+            received = radio_event;
+        }
+        if (!received) {
+            (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             continue;
         }
+        if (radio_event) {
+            if (radio_event_burst < D1L_MESHCORE_MAX_EVENT_BURST) {
+                radio_event_burst++;
+            }
+        } else {
+            radio_event_burst = 0U;
+        }
+
+        status_lock();
+        s_status.runtime_task_heartbeat++;
+        s_status.runtime_task_stack_free_words =
+            (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+        if (radio_event) {
+            s_status.runtime_last_event_monotonic_us = cmd.monotonic_us;
+        }
+        status_unlock();
 
         esp_err_t ret = ESP_ERR_INVALID_ARG;
         switch (cmd.type) {
@@ -2249,6 +2455,27 @@ static void meshcore_service_task(void *arg)
             break;
         case D1L_MESHCORE_SERVICE_CMD_SEND_RAW:
             ret = meshcore_service_handle_send_raw(&cmd);
+            break;
+        case D1L_MESHCORE_SERVICE_EVENT_TX_DONE:
+            meshcore_service_handle_radio_tx_done();
+            ret = ESP_OK;
+            break;
+        case D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT:
+            meshcore_service_handle_radio_tx_timeout();
+            ret = ESP_OK;
+            break;
+        case D1L_MESHCORE_SERVICE_EVENT_RX_DONE:
+            meshcore_service_handle_radio_rx_done(
+                cmd.raw, cmd.raw_len, cmd.rssi, cmd.snr);
+            ret = ESP_OK;
+            break;
+        case D1L_MESHCORE_SERVICE_EVENT_RX_TIMEOUT:
+            meshcore_service_handle_radio_rx_timeout();
+            ret = ESP_OK;
+            break;
+        case D1L_MESHCORE_SERVICE_EVENT_RX_ERROR:
+            meshcore_service_handle_radio_rx_error();
+            ret = ESP_OK;
             break;
         default:
             ret = ESP_ERR_INVALID_ARG;
@@ -2261,7 +2488,7 @@ static void meshcore_service_task(void *arg)
         if (cmd.type == D1L_MESHCORE_SERVICE_CMD_SEND_RAW &&
             cmd.ack_response && ret != ESP_OK) {
             complete_pending_ack_tx(false, ret);
-            meshcore_service_request_rx_async();
+            d1l_meshcore_start_rx();
         }
         meshcore_service_reply(&cmd, ret);
     }
@@ -2279,6 +2506,14 @@ static esp_err_t meshcore_service_start_task(void)
         s_service_queue =
             xQueueCreate(D1L_MESHCORE_SERVICE_QUEUE_LEN, sizeof(d1l_meshcore_service_cmd_t));
         if (!s_service_queue) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_radio_event_queue) {
+        s_radio_event_queue = xQueueCreate(
+            D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN,
+            sizeof(d1l_meshcore_service_cmd_t));
+        if (!s_radio_event_queue) {
             return ESP_ERR_NO_MEM;
         }
     }
@@ -2313,8 +2548,12 @@ static esp_err_t meshcore_service_send_command(d1l_meshcore_service_cmd_t *cmd,
     const TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
     if (xQueueSend(s_service_queue, cmd, timeout_ticks) != pdTRUE) {
         cmd->reply_task = NULL;
+        runtime_note_queue_drop(false);
         return ESP_ERR_TIMEOUT;
     }
+    runtime_note_queue_depth(s_service_queue,
+                             &s_runtime_command_queue_high_water);
+    meshcore_service_wake();
     uint32_t notify_value = (uint32_t)ESP_ERR_TIMEOUT;
     if (xTaskNotifyWait(0, UINT32_MAX, &notify_value, timeout_ticks) == pdTRUE) {
         ret = (esp_err_t)notify_value;
@@ -2323,17 +2562,6 @@ static esp_err_t meshcore_service_send_command(d1l_meshcore_service_cmd_t *cmd,
     }
     cmd->reply_task = NULL;
     return ret;
-}
-
-static void meshcore_service_request_rx_async(void)
-{
-    if (!s_service_queue) {
-        return;
-    }
-    d1l_meshcore_service_cmd_t cmd = {
-        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
-    };
-    (void)xQueueSend(s_service_queue, &cmd, 0);
 }
 
 esp_err_t d1l_meshcore_service_start_rx_async(void)
@@ -2345,7 +2573,14 @@ esp_err_t d1l_meshcore_service_start_rx_async(void)
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
     };
-    return xQueueSend(s_service_queue, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+    if (xQueueSend(s_service_queue, &cmd, 0) != pdTRUE) {
+        runtime_note_queue_drop(false);
+        return ESP_ERR_TIMEOUT;
+    }
+    runtime_note_queue_depth(s_service_queue,
+                             &s_runtime_command_queue_high_water);
+    meshcore_service_wake();
+    return ESP_OK;
 }
 
 static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
@@ -2403,9 +2638,13 @@ static esp_err_t meshcore_service_send_ack_async(
     };
     memcpy(cmd.raw, raw, raw_len);
     if (xQueueSendToFront(s_service_queue, &cmd, 0) != pdTRUE) {
+        runtime_note_queue_drop(false);
         complete_pending_ack_tx(false, ESP_ERR_TIMEOUT);
         return ESP_ERR_TIMEOUT;
     }
+    runtime_note_queue_depth(s_service_queue,
+                             &s_runtime_command_queue_high_water);
+    meshcore_service_wake();
     s_status.ack_tx_queued++;
     return ESP_OK;
 }
@@ -2521,6 +2760,20 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
                              snapshot.radio_apply_error == ESP_OK &&
                              radio_profiles_match(&applied_profile, &current_profile);
     snapshot.radio_apply_pending = !snapshot.radio_applied;
+    snapshot.runtime_command_queue_depth = s_service_queue
+        ? (uint32_t)uxQueueMessagesWaiting(s_service_queue)
+        : 0U;
+    snapshot.runtime_event_queue_depth = s_radio_event_queue
+        ? (uint32_t)uxQueueMessagesWaiting(s_radio_event_queue)
+        : 0U;
+    snapshot.runtime_command_queue_high_water = __atomic_load_n(
+        &s_runtime_command_queue_high_water, __ATOMIC_RELAXED);
+    snapshot.runtime_event_queue_high_water = __atomic_load_n(
+        &s_runtime_event_queue_high_water, __ATOMIC_RELAXED);
+    snapshot.runtime_queue_drops = __atomic_load_n(
+        &s_runtime_queue_drops, __ATOMIC_RELAXED);
+    snapshot.runtime_callback_event_drops = __atomic_load_n(
+        &s_runtime_callback_event_drops, __ATOMIC_RELAXED);
     return snapshot;
 }
 

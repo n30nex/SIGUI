@@ -39,7 +39,9 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "already_starting" in worker
     assert '"mesh/route_store_worker.c"' in cmake
     assert "d1l_route_store_worker_start()" in app
-    assert "xQueueReceive(s_service_queue, &cmd, portMAX_DELAY)" in service
+    assert "xQueueReceive(s_service_queue, &cmd, 0)" in service
+    assert "xQueueReceive(s_radio_event_queue, &cmd, 0)" in service
+    assert "ulTaskNotifyTake(pdTRUE, portMAX_DELAY)" in service
     assert "d1l_route_store_flush_if_due()" not in service
     assert "d1l_route_store_worker_force_flush(" in console
     assert "D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U" in console

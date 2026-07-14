@@ -119,7 +119,9 @@ def test_meshcore_public_and_advert_paths_feed_routes():
     assert '"path_%08lX"' in source
     assert '"path_probe"' in source
     assert "route store path probe tx failed" in source
-    assert "xQueueReceive(s_service_queue, &cmd, portMAX_DELAY)" in source
+    assert "xQueueReceive(s_service_queue, &cmd, 0)" in source
+    assert "xQueueReceive(s_radio_event_queue, &cmd, 0)" in source
+    assert "ulTaskNotifyTake(pdTRUE, portMAX_DELAY)" in source
     assert "d1l_route_store_flush_if_due()" not in source
 
 
