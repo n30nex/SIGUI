@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp04_authenticated_admin_host_fixture_aggregate",
+  "generated_utc": "2026-07-14T15:45:14Z",
+  "claim_scope": "Portable exact-pair software evidence for a host-only authenticated-admin MeshCore transcript fixture with pinned upstream schemas, complete identities, exact request tags, direct and flood PATH-return routing, fail-closed negatives, and session-state zeroization. This is not production admin dispatch, RF, hardware, WP-18, WP-04, or release closure.",
+  "exact_pair": {
+    "pull_request": 102,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/102",
+    "pull_request_base_sha": "afaa02a48e6a76d99630da81bac80d16e209e212",
+    "pull_request_head_sha": "844489a5b4ba05bed914e02ca74519683d19243e",
+    "pull_request_synthetic_merge_sha": "96fb49a88c628d93e912490931988d9a49848f81",
+    "merged_main_sha": "6c096afbb5c791bf661ff146c6fbcb1f4852d2da",
+    "verified_tree_sha": "dcec8d1ff0835a3dfc585d50b36393ea0d94dff9",
+    "tree_identity": {
+      "pull_request_head_matches_synthetic_merge": true,
+      "pull_request_head_matches_merged_main": true
+    },
+    "github_signature_verification": {
+      "merged_main_verified": true
+    }
+  },
+  "gate_receipts": {
+    "pull_request": {
+      "push_actions_run": 29344396606,
+      "pull_request_actions_run": 29344401273,
+      "receipt_filename": "pr102_strict_gate_844489a5b4ba05bed914e02ca74519683d19243e.json",
+      "receipt_sha256": "9b4db26a9ffa8ccdc9685dd8ce7feed747e1e3b2b62c4f11fd4a3a3210b51f14",
+      "verdict": "pass"
+    },
+    "merged_main": {
+      "actions_run": 29345953951,
+      "receipt_filename": "merged-main-gate-receipt.json",
+      "receipt_sha256": "a6181ad69187ea9893e85f322411411ea94b95926e0ccac6cc2412666166a317",
+      "verdict": "approve"
+    }
+  },
+  "host_admin_semantics": {
+    "receipt_id": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
+    "identity_width_bytes": 32,
+    "request_tag_matching": "exact",
+    "get_status_response": {
+      "total_bytes": 60,
+      "reflected_tag_bytes": 4,
+      "repeater_stats_bytes": 56,
+      "encoding": "explicit_little_endian",
+      "upstream_schema_source": "third_party/MeshCore/examples/simple_repeater/MyMesh.h",
+      "upstream_schema_canonical_lf_sha256": "a48c6c0827687d18472c3652401a2a2a9d544f2b884f1518e52812dfd78a22f6"
+    },
+    "routing_cases": [
+      "direct",
+      "flood_with_path_return"
+    ],
+    "positive_checks": 6,
+    "fail_closed_negative_checks": 16,
+    "zeroized_state": [
+      "pending_login",
+      "pending_request",
+      "explicit_logout"
+    ],
+    "source_integrity": {
+      "allowlisted_source_files_verified_per_run": 60,
+      "mymesh_header_expected_hash_matches_actual": true
+    },
+    "production_boundary": "The fixture does not implement or prove production admin runtime, concrete packet-pool dispatch, UI, RF, hardware behavior, or authenticated admin acceptance with a real peer."
+  },
+  "source_bindings_sha256": {
+    "scripts/meshcore_conformance_d1l.py": "de4e5c0a85a843c16721d81cc0d5754b24f247fa4c502296b42bf67c0ae2d3b1",
+    "tests/meshcore_oracle/coverage_manifest.json": "4fab5283f63930d754a44b3d27e76cf4dd983583a2bc557a68df954e2659943b",
+    "tests/meshcore_oracle/manifest.json": "198e8803da70f6e4963448d48424d59b1f5233ab7d447a6bb1cd74089d24df30",
+    "tests/meshcore_oracle/meshcore_admin_session_fixture.cpp": "0ccc70a6a0d8d0e6cea62f6a9da38e3513f1947d098a71718c9d6e419b5608d6",
+    "tests/meshcore_oracle/meshcore_admin_session_fixture.h": "4ca2ffdb4598af5c30f4eaa5af5555545b1eee4afd4a231309ad52ce1c640688",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
+    "tests/test_meshcore_oracle_contract.py": "36f620820e4eb5e1401003753512640ed4dbacbcf309ba4c3845e96285b6b038"
+  },
+  "verification": {
+    "focused_host_rerun": {
+      "command": "python -m pytest --cache-clear -q tests/test_meshcore_oracle_contract.py",
+      "passed": 15,
+      "failed": 0
+    },
+    "actions_runs": [
+      {
+        "run_id": 29344396606,
+        "event": "push",
+        "checkout_sha": "844489a5b4ba05bed914e02ca74519683d19243e",
+        "conclusion": "success",
+        "host_tests_passed": 958,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "519897a058849374e9e82e292768a18a1ee48a3d415e325a511c187a41f95cb6",
+          "d1l-firmware-artifacts": "797cb0738db04a1d7ac98c3fb5b38d112ca814d96587f0f5ccd5281473ed26a4",
+          "d1l-idf55-migration-state": "21a594c128364d290cb004f70ff00c9247cc14125e343aabe0731808bbbd31d2",
+          "d1l-host-artifacts": "a0176fecf5552c8a037dd6998819bf2591a2075cf045741b55ac3dc611d890fe",
+          "d1l-meshcore-wire-conformance": "f2439fcb55c21279cdcaf715b7357718b0f88d25219f8ea2a046183640a897e1"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "rp2040_build": "skipped_appropriately_for_host_only_esp32_diff"
+      },
+      {
+        "run_id": 29344401273,
+        "event": "pull_request",
+        "checkout_sha": "96fb49a88c628d93e912490931988d9a49848f81",
+        "conclusion": "success",
+        "host_tests_passed": 958,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "5f9e43f242a9db3498737a8b9ae1ac0c18de8b36c3682dd9b9f5b6f3cff65d1c",
+          "d1l-firmware-artifacts": "6598553db8b4d20db8b1ae32954a1f9292a6d09ce59665be2769cf08c54399b3",
+          "d1l-idf55-migration-state": "d886ed45829b0cc3e58cf8edf298acf5d50fc7bd9dd21039062cce1246ee0b32",
+          "d1l-host-artifacts": "5906ae4bd9d21eaeb47a840407032d883f2beb31dc714c97c8da19a33358a3f9",
+          "d1l-meshcore-wire-conformance": "57582d79598e94050133fa7d4c30563918abdaff9170073ce41f8047e2f34735"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "rp2040_build": "skipped_appropriately_for_host_only_esp32_diff"
+      },
+      {
+        "run_id": 29345953951,
+        "event": "push_main",
+        "checkout_sha": "6c096afbb5c791bf661ff146c6fbcb1f4852d2da",
+        "conclusion": "success",
+        "host_tests_passed": 958,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "55b3f14f708ca19a9480b82f70d35e4299bb5a85a9b9a0a3579785aae84f3232",
+          "d1l-firmware-artifacts": "e5c178edf89498a2540a59ae2b62d368e1e363aaa6cdbfbb286eb4963737716c",
+          "d1l-idf55-migration-state": "384cdc37b6e6fd6fb892f1eae1ef2068d5878f6465ae61529feaa37bddd7ae78",
+          "d1l-host-artifacts": "4396a0d32d92645101dcb17823887dc2f99699d7b9fe52b55190871c2156a73e",
+          "d1l-meshcore-wire-conformance": "573b620e474662fdfbf0e32d9890aa1b316044c57e5235a68b40b168454291d6"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "downloaded_tree_file_count": 219,
+        "downloaded_tree_total_bytes": 72769016,
+        "downloaded_tree_sha256": "8cc52eddb6a234cbae0e7b9d7d77e925bb628d5773e83f74cbf6615aeae0d6a7",
+        "application_sha256": "4809451d52c798d815dc63d24a8e45a3fad9e5cce3b00ef0c3fb8beb679ebc3d",
+        "full_flash_sha256": "aa6ef4fa4fd84ee790849bed10dede40b4bfd3b59bb644719ab2bee5d530666b",
+        "sbom_sha256": "3976c6ea5d2f3adbcc81d06951cc771a3925eaed4f56256f9a11c22c39a3dd1a",
+        "provenance_sha256": "4439d36c9249c9398b035af5d9f1f7adb0c697028b3aa826279581824301f9d0",
+        "rp2040_build": "skipped_appropriately_for_host_only_esp32_diff"
+      }
+    ],
+    "conformance_per_run": {
+      "wire_vectors": 1008,
+      "wire_failures": 0,
+      "oracle_vectors": 931,
+      "oracle_failures": 0,
+      "fuzz_cases": 100000,
+      "fuzz_findings": 0,
+      "ubsan_clean": true,
+      "sanitizer_exceptions": 0,
+      "defined_arithmetic_transforms": 215,
+      "defined_arithmetic_differential_cases": 256,
+      "defined_arithmetic_mismatches": 0
+    },
+    "toolchain_and_dependencies": {
+      "esp_idf": "ESP-IDF v5.5.4",
+      "meshcore_gitlink": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+      "sensecap_gitlink": "77edb8d2b9a92fc67965c1b2d4a838f0d09a1800"
+    },
+    "aggregate": {
+      "actions_run_count": 3,
+      "api_artifact_zip_count": 15,
+      "api_artifact_digest_matches": 15,
+      "checksum_manifest_count": 9,
+      "checksum_manifest_entries": 138,
+      "checksum_manifest_hash_matches": 138,
+      "all_checks_passed": true
+    }
+  },
+  "residual_release_gates": {
+    "production_admin_runtime": {
+      "closed": false,
+      "remaining": "Bind the authenticated login/request/response/session semantics through the production packet-pool dispatcher and prove fail-closed authorization and lifecycle behavior."
+    },
+    "wp18_admin_acceptance": {
+      "closed": false,
+      "remaining": "Collect exact frozen-candidate admin_session_acceptance evidence with a controlled compatible peer; host fixtures cannot close WP-18."
+    },
+    "identity_contacts_and_trace": {
+      "closed": false,
+      "remaining": "Production identity/contact binding plus generic contact and multi-hop TRACE remain separate open WP-04 work."
+    },
+    "rf": {
+      "closed": false,
+      "remaining": "Controlled official-peer authenticated-admin interoperability remains open and requires explicit RF authorization."
+    },
+    "physical": {
+      "closed": false,
+      "remaining": "Frozen exact-candidate D1L reboot, UI truth, power-loss, and final soak evidence remain open."
+    }
+  },
+  "release_truth": {
+    "gate_count": 36,
+    "passed_count": 1,
+    "failed_count": 35,
+    "p0_failed_count": 33,
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "audit_sha256": "43b4d8f07416e7aa2225e73ee6baa31b47ba95b6a0160df5d3d8a6a810f5ed35"
+  },
+  "claims": {
+    "host_authenticated_admin_fixture_banked": true,
+    "pull_request_and_merged_main_software_gates_green": true,
+    "production_admin_runtime_closure_claimed": false,
+    "wp18_admin_acceptance_claimed": false,
+    "identity_contact_or_trace_closure_claimed": false,
+    "physical_or_rf_closure_claimed": false,
+    "wp04_closure_eligible": false,
+    "release_ready": false,
+    "valid": true
+  }
+}

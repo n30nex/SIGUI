@@ -12,6 +12,8 @@
 
 > This document supersedes the older broad roadmap as the execution source of truth. It does not erase the detailed evidence already recorded in `docs/ROADMAP.md`, `docs/KRABSTHOUGHTS.MD`, issue threads, CI artifacts, or hardware receipts. It converts that evidence into a dependency-ordered completion program with explicit stop conditions.
 
+**Live reconciliation, 2026-07-14:** the audited stack is merged through PR #112. Live `main` is `10d85ee3a0941aff23f455047358805a861b571e`; exact-main Actions `29359402515` passed 977 host, 32 checksum, 1,008 wire-vector, 931 oracle, 100,000 wire-fuzz, and 100,000 advert-fuzz checks with zero findings. All five ZIPs / 46 nested entries verified across 219 files / 73,155,041 bytes with valid provenance and SPDX; strict receipt SHA-256 is `53e07c470b01a46ffcc2414c4e5b9867da9932b11203259a3d0e4e48cd3f78dc`. PR #106 banks callback copy/timestamp/enqueue and runtime recovery/telemetry; PR #107 banks the first advert semantic-fuzz slice; PRs #108/#110 bank Messages/Nodes extraction; PR #109 banks runtime-owned advert admission; PR #111 banks only the first persisted DM delivery-state slice; PR #112 banks the first canonical contact URI/provenance/DM-authorization/USB-JSON slice. Complete WP-05 semantics, WP-06 ownership/recovery, WP-07 runtime/RF behavior, WP-08 BLE/on-device QR/official-client/reboot/physical acceptance, WP-14 extraction, admin dispatch, generic TRACE, official-peer RF, physical qualification, and 33 P0 / 35 total release-audit failures remain open.
+
 ---
 
 ## 1. Executive verdict
@@ -864,6 +866,8 @@ Each work package is deliberately narrow enough for one primary PR. A work packa
 
 **Artifact:** `meshcore_oracle_manifest_<sha>.json`
 
+**Live partial evidence:** PR #101 merged bounded explicit-loop TRACE request/correlation/retention software evidence as `trace_discovery_4a85e827c251c6d1d22d276c7a40d71571b23563.json`. PR #102 merged `admin_host_fixture_6c096afbb5c791bf661ff146c6fbcb1f4852d2da.json`, covering a pinned host-only authenticated transcript with six positive and sixteen fail-closed negative checks. PR #104 merged fail-closed production identity startup as `production_identity_binding_16db6055f47541756f79edd06530d0cd1a6c878b.json`. Corrected PR #105 merged exact-full-key verified-advert contact promotion as `verified_advert_contact_binding_e7ddb265a0a84e7ecc3860bebf959d9551fdb00a.json`; exact-main receipt SHA-256 `d9b2dc5efbcddd787260cc6a6e11cd90e3433fcbd3f7ec971f7a498b7b79eab7` banks the software/artifact gate. These receipts explicitly do not satisfy full retained contact lifecycle/recovery, concrete packet-pool admin dispatch, generic contact TRACE, multi-hop/official-peer RF, physical, WP-18, or WP-04 closure.
+
 ---
 
 ### WP-05 — Complete semantic conformance and fuzzing
@@ -966,6 +970,8 @@ Use sanitizer builds in normal CI with a bounded deterministic corpus and a long
 - no UI or console code accesses mutable service internals.
 
 **Artifact:** `mesh_runtime_ownership_<sha>.json`
+
+**Live partial evidence:** PR #106 head `7a86e15b8584b76fd9f0ae86f6bbabdcde6930e6` merged as `db58229aaec8cc5649b94aeb3cefe6af598203a8`; exact-main callback aggregate `radio_callback_queue_db58229aaec8cc5649b94aeb3cefe6af598203a8.json` has SHA-256 `94fb099b83cd69c8101561c13dcdb76af9cd3e3c944199e4dd3afc2753ff2d85`. PR #109 then merged runtime-owned identity/readiness/timestamp/advert/RF admission and zero-wait deferred packet-log admission on predecessor main `bf9ba087e1d863a2596561cb6b3de015c606c598`; aggregate `advert_dispatch_owner_bf9ba087e1d863a2596561cb6b3de015c606c598.json` has SHA-256 `3705fc71ef9d3cc210a91c08a78f90c1a60959491eef1aad61171b71a0ccfea7`. Exact-main strict acceptance for that slice is banked through run `29352766306`; current live main has advanced, while all remaining command/event paths, saturation/fairness, watchdog/reboot/power-loss, UI ownership, hardware, RF, and WP-06 closure remain open.
 
 ---
 
@@ -1084,6 +1090,8 @@ Store:
 - contact deletion is scoped and confirmed.
 
 **Artifact:** `contact_lifecycle_<sha>.json`
+
+**Live partial evidence:** PR #112 head `79e1e7d8c06917ce011f32ee8e345fef40731e0e` merged as `10d85ee3a0941aff23f455047358805a861b571e`, sharing tree `4368725b7abbde0d40b1886ba24a9e376cd30674`. Exact-main Actions `29359402515` and strict receipt `53e07c470b01a46ffcc2414c4e5b9867da9932b11203259a3d0e4e48cd3f78dc` bank strict bounded MeshCore URI import/export, exact-key provenance, heard-only/collision/capacity fail-closed behavior, favourite/alias preservation, canonical DM authorization, and injection-safe USB contact JSON. Portable aggregate `contact_lifecycle_10d85ee3a0941aff23f455047358805a861b571e.json` has SHA-256 `30604a5d185c3aaec607e13db9e98dc5b2303f1e7b9ccc7373a6495bd5b8b7c4`. BLE and remaining on-device QR/share surfaces, official-client bidirectional interoperability, retained reboot/advert-refresh proof, paging/search completion, physical/RF evidence, downstream channel integration, and WP-08 closure remain open.
 
 ---
 

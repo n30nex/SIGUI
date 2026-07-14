@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp14_nodes_viewmodel_exact_main_aggregate",
+  "generated_utc": "2026-07-14T17:49:35.365Z",
+  "claim_scope": "Portable merged-tree and exact-main Actions checkpoint for the second WP-14 slice. The Nodes root moves into a bounded controller-owned view model with lifecycle-safe bindings, truthful DM actions, role badges, and isolated Map scratch state. Exact merged-main software and artifact acceptance is banked, but this aggregate does not close WP-14, UI hardware, physical, or release gates.",
+  "exact_pair": {
+    "pull_request": 110,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/110",
+    "base_sha": "bf9ba087e1d863a2596561cb6b3de015c606c598",
+    "head_sha": "e3273bb338afffa36d62e2211a3a2ef7c42f3688",
+    "synthetic_merge_sha": "44b0a59ee96c24f3e851dfb3a5bab25f60865ba6",
+    "merged_main_sha": "69e42510bfbc9779876ade052608c63634bc867d",
+    "head_synthetic_and_main_tree_sha": "29e17c4310f626390a65e061fa0b380a1297dbba",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29353590089,
+    "actions_event": "pull_request",
+    "checkout_sha": "44b0a59ee96c24f3e851dfb3a5bab25f60865ba6",
+    "conclusion": "success",
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 72979293,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "independent_review_remaining_p0_p1_p2": 0,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr110-e3273bb338afffa36d62e2211a3a2ef7c42f3688/pr110_strict_gate_e3273bb338afffa36d62e2211a3a2ef7c42f3688.json",
+    "strict_receipt_sha256": "80baa86a58965c8e6cc914bb518b2233d8f58d2fcf746ed454aa39f93c1cf5db"
+  },
+  "artifact_zip_sha256": {
+    "d1l-firmware-artifacts": "3465882e0870754e83d17fb6786ddbe0dc8a9487c9a51daef6bb78d9521953ba",
+    "d1l-host-artifacts": "ab2f0b282cd265f3816c935831db936b24b978b8e620df75cf03d90d99c9f2a8",
+    "d1l-idf55-migration-state": "d7fccf3f5ef96a2da9f75c0a500457e072fac7f375e4727c8dd4b3963ca88071",
+    "d1l-meshcore-wire-conformance": "d184b290fd81236ac14c044cf7eb08fab7accfd688c69baa484fe236256200fb",
+    "d1l-release-package": "5da746ec7d073705a3accd3d5a62f8dfd8f2ea981e47266a9d7006f19dabd4ec"
+  },
+  "implementation_boundary": {
+    "new_module": [
+      "main/ui/ui_nodes.c",
+      "main/ui/ui_nodes.h"
+    ],
+    "integration_files": [
+      "main/CMakeLists.txt",
+      "main/ui/ui_phase1.c"
+    ],
+    "contract_test": "tests/test_ui_nodes_contract.py",
+    "controller_owned_bounded_snapshot": true,
+    "lifecycle_safe_bindings": true,
+    "truthful_dm_actions": true,
+    "map_scratch_isolated": true,
+    "focused_host_tests_reported": 57
+  },
+  "exact_main_gate": {
+    "actions_run": 29354386883,
+    "validated_main_sha": "69e42510bfbc9779876ade052608c63634bc867d",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 969,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 72979299,
+    "downloaded_tree_sha256": "f02c9b33959aef71d9d05dafa98586125f8aa6896cda011a793cbd9c946bd351",
+    "host_success_marker_sha256": "e104315ce2a5e882a9c75698d179592b0c3ba69deddc8ad257c22ac8b349b215",
+    "release_audit_sha256": "26946955af0b159f6d8e691224dc657a24955b08d682be56f5020cd8c6c1af5c",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "release_manifest_sha256": "9d560507246f75ed1c567e858978ec7b6c45e46c0d69295a4094f9886f19fa17",
+    "application_sha256": "96076cba7f12bfc8889b7bd55d6f7fc91abc567195fd1fee46411c14876a3140",
+    "full_flash_sha256": "b730ffa3b9a1fdd2908ae6c681cfaa4c937b49d810d92ae2021a4e95e21e1f32",
+    "provenance_sha256": "76de5c2ac43e44a70699d4eb70d59969aacbe46ce32471d62a8644d3c1a0cb05",
+    "sbom_sha256": "454188a1f3a68f3761a7160f9f29a737cc5d2044316ff56e59fea5bc8c8ca7b9",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-69e42510-qa/main_strict_gate_69e42510bfbc9779876ade052608c63634bc867d.json",
+    "receipt_sha256": "8454df6382f2b654b08d60a87680e393a20750a86c499e58aecebd0161f694b5",
+    "verdict": "exact_merged_main_software_and_artifact_gate_banked"
+  },
+  "residual_wp14_gates": {
+    "closed": false,
+    "remaining": "Complete UI ownership and modular extraction across remaining screens and shared state, prove bounded event and redraw ownership, run exact-candidate hardware UI capture and corruption/scroll/keyboard acceptance, and satisfy downstream integration."
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "ui_hardware_closure_claimed": false,
+    "wp14_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "second_wp14_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp14_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}

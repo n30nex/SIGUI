@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp04_identity_contact_truth_primitives_aggregate",
+  "generated_utc": "2026-07-14T15:28:48Z",
+  "claim_scope": "Portable exact-pair software evidence for fail-closed classification of persisted Ed25519 identity material and full-public-key-authoritative verified-contact storage primitives. This is a component boundary, not end-to-end signed-advert RX, RF, hardware, WP-04, or release closure.",
+  "exact_pair": {
+    "pull_request": 103,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/103",
+    "pull_request_base_sha": "4a85e827c251c6d1d22d276c7a40d71571b23563",
+    "pull_request_head_sha": "55b168871c1bbc20b5632f68d31cb35b0c68ff41",
+    "pull_request_synthetic_merge_sha": "2e861b2bfc5c18fea26f2368d027f3bcd2d77aa8",
+    "merged_main_sha": "afaa02a48e6a76d99630da81bac80d16e209e212",
+    "verified_tree_sha": "1866d68023c8e5fb9969595a5fb47ba7c24b4ca3",
+    "tree_identity": {
+      "pull_request_head_matches_synthetic_merge": true,
+      "pull_request_head_matches_merged_main": true
+    },
+    "github_signature_verification": {
+      "merged_main_verified": true
+    }
+  },
+  "gate_receipts": {
+    "pull_request": {
+      "push_actions_run": 29341936653,
+      "pull_request_actions_run": 29341936551,
+      "receipt_filename": "pr103_strict_gate_55b168871c1bbc20b5632f68d31cb35b0c68ff41.json",
+      "receipt_sha256": "fe915dc1efa4890db98a304ec1d322e41c603af18ffa9695f1b6270cd89a0207",
+      "verdict": "pass"
+    },
+    "merged_main": {
+      "actions_run": 29343533444,
+      "receipt_filename": "merged-main-gate-receipt.json",
+      "receipt_sha256": "735fd26385af77d3fb4a2eb3e830e9caff993fde97db500ee5bc55cccb72f257",
+      "verdict": "approve"
+    }
+  },
+  "identity_semantics": {
+    "states": [
+      "absent",
+      "consistent",
+      "inconsistent"
+    ],
+    "consistent_requires": [
+      "identity_ready_is_true",
+      "public_and_private_material_are_nonzero",
+      "stored_scalar_already_satisfies_meshcore_clamping",
+      "private_nonce_prefix_is_not_uniform",
+      "stored_public_key_equals_all_32_bytes_derived_from_stored_private_key"
+    ],
+    "fail_closed_cases": [
+      "null_material",
+      "ready_false_with_residual_key_bytes",
+      "ready_true_with_partial_or_zero_key_material",
+      "unclamped_stored_scalar",
+      "uniform_private_nonce_prefix",
+      "derived_public_key_mismatch"
+    ],
+    "sanitization_boundary": "Loading inconsistent state clears identity_ready without erasing the preserved inconsistent key bytes; the existing later identity service may generate and save a replacement. This slice does not claim forensic recovery or end-to-end signing dispatch closure."
+  },
+  "contact_semantics": {
+    "authoritative_identity": "exact_64_hex_public_key",
+    "fingerprint_role": "matching_16_hex_prefix_hint_only",
+    "verified_advert_results": [
+      "created",
+      "updated",
+      "promoted_placeholder",
+      "collision",
+      "full"
+    ],
+    "preserved_on_verified_update": [
+      "alias",
+      "favorite",
+      "muted",
+      "learned_out_path"
+    ],
+    "fail_closed_guarantees": [
+      "invalid_or_mismatched_full_key_input_is_rejected",
+      "full_key_or_fingerprint_ambiguity_is_rejected_without_mutation",
+      "capacity_failure_never_evicts_an_existing_contact",
+      "NVS_write_failure_rolls_back_entries_count_and_counters",
+      "reloaded_exact_key_contact_remains_authoritative"
+    ],
+    "production_binding": "The production mesh service does not yet call d1l_contact_store_upsert_verified_advert; signed-advert RX binding and dispatcher-wide identity/contact integration remain open."
+  },
+  "source_bindings_sha256": {
+    "main/app/identity_state.h": "2bdd654902a4d656ad5cb293d0c26f70d6d10dfb8893764b6732027742a8e03b",
+    "main/app/settings_model.c": "060fe102b52cf30c14e2c7b26a7949d84ae61416c337d96e39d09a1e5dee86cd",
+    "main/app/settings_model.h": "04b63e16dea6fce56398883b418acdc3df5adf78b21550fa6e34082d668345da",
+    "main/mesh/contact_store.c": "6efa02ab4ab09070fff262542f3a8e10f39270d69370f42930544fb94360796a",
+    "main/mesh/contact_store.h": "4d3a9583eb4101d633120ed5e98b6ad34068a270af54a44b795dc2a38ade5246",
+    "tests/native/esp_nvs_stubs.c": "6af194c0fb47812ee6bec0b04e22f02d1ee28d196e8c9f620550d7f562ca540b",
+    "tests/native/identity_state_test.c": "ab90ad6f92f5ad9b69f28145c1c700c0b587cdfc2d114a292ce615103d7fd4ed",
+    "tests/native/store_behavior_test.c": "d0dbe30e1efae33fb5abe75a989658a2c96455a246d495cae3fc5c4412d48954",
+    "tests/native/stubs/esp_err.h": "658995af2fd580d37a0198f559e9b8152c592bb0c13c2a140e007ad385e96efd",
+    "tests/native/stubs/nvs.h": "576680af2fe0ec22365c75e74f7cd261a66f5d2177ede2e7895ae3facc8fa82c",
+    "tests/test_identity_state_contract.py": "00bf9015da3926075b48fad436bcf6a52f7b221d1cbb8b57ec4c085bf215d9c6",
+    "tests/test_identity_state_native.py": "e9c31ae6173d19de287fd841f4db992c27cfd85abc5369c6bf4992ddaa4bb9a1",
+    "tests/test_verified_contact_contract.py": "6f817c221adadbcbaaaee3b96cdda45413bdb4e03660c80ba5b417fd049e185b"
+  },
+  "verification": {
+    "focused_host_rerun": {
+      "command": "python -m pytest --cache-clear -q tests/test_identity_state_contract.py tests/test_identity_state_native.py tests/test_verified_contact_contract.py tests/test_contact_store_contract.py",
+      "passed": 8,
+      "failed": 0
+    },
+    "actions_runs": [
+      {
+        "run_id": 29341936551,
+        "event": "pull_request",
+        "checkout_sha": "2e861b2bfc5c18fea26f2368d027f3bcd2d77aa8",
+        "conclusion": "success",
+        "host_tests_passed": 958,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "7ed02ce71b7733ee1fc26d546299e60c0f4cc2a176491d03fda72e7875e0cfe3",
+          "d1l-firmware-artifacts": "926bbf31987599cec336d8f248821f6d0d580b2b5ae2a980f21c0661279a3387",
+          "d1l-idf55-migration-state": "1b6c7db2cd13a77abf2f2c987cffbdf116c167c08cc242a6782a25ce35155df6",
+          "d1l-host-artifacts": "2dc25f934604ea575dc1377dc3cfd93a861891e56debfd0b0525b8b95e856500",
+          "d1l-meshcore-wire-conformance": "f17e6aede4aa0ea8287964bc18a93134e8318b42ce5f041d181cdb33079c8bc6"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff"
+      },
+      {
+        "run_id": 29341936653,
+        "event": "push",
+        "checkout_sha": "55b168871c1bbc20b5632f68d31cb35b0c68ff41",
+        "conclusion": "success",
+        "host_tests_passed": 958,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "b7dd703dd611a40fa3cf39010842447bf76b78b6f1d52abfd493751a85f7f378",
+          "d1l-firmware-artifacts": "e26411f1797dd24d47e161e2b6e3c8ede61362ae5a9e02b43b6c44a6d07184c7",
+          "d1l-idf55-migration-state": "862c91b5dabb7cb4fbde8f1c99c594ab8f4cd34e3bd0e545cb6cce292799dd6f",
+          "d1l-host-artifacts": "941136c4ab9c4b32f3cf3edb8d9ed08f5ce4a33d6d09c01f322509a414553f47",
+          "d1l-meshcore-wire-conformance": "d516aa351f2b925d5bd9759f44f0623644f59dfb32d431b440e93439746ed724"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff"
+      },
+      {
+        "run_id": 29343533444,
+        "event": "push_main",
+        "checkout_sha": "afaa02a48e6a76d99630da81bac80d16e209e212",
+        "conclusion": "success",
+        "host_tests_passed": 958,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "8e3607cbf46a85b8e126d51d66ffc13205991c270ecfd6bbf64836f18a164cfc",
+          "d1l-firmware-artifacts": "0cb7072e4ec6c039de9b4023bf1d90ec57a594de12adb8ee07a82d891f73e4f1",
+          "d1l-idf55-migration-state": "773991b76a4b6f6b5a3b2b5826030612901e7993127e91b93f24b544094eb2bf",
+          "d1l-host-artifacts": "e9673e7313dbcf94fb28d202e3c6deef913495e8970cc6e582acb139ac540949",
+          "d1l-meshcore-wire-conformance": "8c0c7f8d92ddecb96b9a71cdfc7a53a59fa133ea5ad0e9e26c16c63ef43e086b"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "downloaded_tree_file_count": 219,
+        "downloaded_tree_total_bytes": 72746030,
+        "downloaded_tree_sha256": "f50401d7cdc89e221fd7b7ddf64b58e92157f1f641d34776153d88c05f9d3413",
+        "application_sha256": "f323cc0e5792090217da10995cbd4644e7b5a22f53cd2898e3879caa537dbe8f",
+        "full_flash_sha256": "fd2d1359f86b860067efee552692a7f93b05050c396e1088ea8d3f89490eb040",
+        "sbom_sha256": "9c86dce7965c4ab24811b611f996f8247004ba67554a9dcd370b952db8db9d6b",
+        "provenance_sha256": "151b5dd04dab0c1f051491444b1d26d7cc765863ca6c5c56d8ea4592e6406ab2",
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff"
+      }
+    ],
+    "conformance_per_run": {
+      "wire_vectors": 1008,
+      "wire_failures": 0,
+      "oracle_vectors": 931,
+      "oracle_failures": 0,
+      "fuzz_cases": 100000,
+      "fuzz_findings": 0,
+      "ubsan_clean": true,
+      "sanitizer_exceptions": 0,
+      "defined_arithmetic_transforms": 215,
+      "defined_arithmetic_differential_cases": 256,
+      "defined_arithmetic_mismatches": 0
+    },
+    "toolchain_and_dependencies": {
+      "esp_idf": "ESP-IDF v5.5.4",
+      "meshcore_gitlink": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+      "sensecap_gitlink": "77edb8d2b9a92fc67965c1b2d4a838f0d09a1800"
+    },
+    "aggregate": {
+      "actions_run_count": 3,
+      "api_artifact_zip_count": 15,
+      "api_artifact_digest_matches": 15,
+      "checksum_manifest_count": 9,
+      "checksum_manifest_entries": 138,
+      "checksum_manifest_hash_matches": 138,
+      "all_checks_passed": true
+    }
+  },
+  "residual_release_gates": {
+    "identity_end_to_end": {
+      "closed": false,
+      "remaining": "Bind the persisted identity classifier through the production signing/dispatcher lifecycle and prove retained/recovery behavior on the exact frozen candidate."
+    },
+    "signed_advert_contact_rx": {
+      "closed": false,
+      "remaining": "Call the verified-contact primitive only after production signed-advert verification, reconcile exact-key contacts, and prove reload, UI, and sendability truth end to end."
+    },
+    "trace_and_admin": {
+      "closed": false,
+      "remaining": "Generic contact and multi-hop TRACE plus authenticated admin dispatch remain separate open WP-04 work."
+    },
+    "rf": {
+      "closed": false,
+      "remaining": "Controlled official-peer identity/contact/TRACE/admin interoperability evidence remains open and requires explicit RF authorization."
+    },
+    "physical": {
+      "closed": false,
+      "remaining": "Frozen exact-candidate D1L reboot, power-loss, UI truth, and final soak evidence remain open."
+    }
+  },
+  "release_truth": {
+    "gate_count": 36,
+    "passed_count": 1,
+    "failed_count": 35,
+    "p0_failed_count": 33,
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "audit_sha256": "7b0fa8d141f62c89035bebfe4a9938fd4c0fae8ebb15ce84659046b3f85f83c2"
+  },
+  "claims": {
+    "persisted_identity_classifier_primitive_banked": true,
+    "verified_contact_store_primitive_banked": true,
+    "pull_request_and_merged_main_software_gates_green": true,
+    "production_signed_advert_rx_binding_claimed": false,
+    "identity_or_contact_end_to_end_closure_claimed": false,
+    "generic_contact_or_multi_hop_trace_closure_claimed": false,
+    "admin_closure_claimed": false,
+    "physical_or_rf_closure_claimed": false,
+    "wp04_closure_eligible": false,
+    "release_ready": false,
+    "valid": true
+  }
+}

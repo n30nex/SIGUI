@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp04_production_identity_binding_aggregate",
+  "generated_utc": "2026-07-14T16:13:23Z",
+  "claim_scope": "Portable exact-main software evidence that production identity startup fails closed when settings cannot be loaded or persisted Ed25519 material is inconsistent, preserves inconsistent material for recovery, and generates a new identity only from a successfully loaded absent state that passes the complete classifier. This is not RF, hardware, recovery, power-loss, WP-04, or release closure.",
+  "exact_pair": {
+    "pull_request": 104,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/104",
+    "pull_request_base_sha": "6c096afbb5c791bf661ff146c6fbcb1f4852d2da",
+    "pull_request_head_sha": "37a9f973f411ab7aa2fcc80cfafc16dc701bf30a",
+    "merged_main_sha": "16db6055f47541756f79edd06530d0cd1a6c878b",
+    "verified_tree_sha": "bc11317a114cad25ca9b3b380582d7e1031aaf2f",
+    "tree_identity": {
+      "pull_request_head_matches_merged_main": true
+    },
+    "github_signature_verification": {
+      "merged_main_verified": true
+    }
+  },
+  "gate_receipts": {
+    "pull_request": {
+      "push_actions_run": 29346015037,
+      "pull_request_actions_run": 29346017979,
+      "github_conclusion": "success"
+    },
+    "merged_main": {
+      "actions_run": 29347026872,
+      "receipt_path": "F:/SIGUI-evidence/actions/main-16db6055-qa/main_strict_gate_16db6055f47541756f79edd06530d0cd1a6c878b.json",
+      "receipt_sha256": "5ed14d0efa4fab21f81642c18a799caa838872933fd7fdd37e852ff82d5b3096",
+      "verdict": "pass"
+    }
+  },
+  "production_identity_semantics": {
+    "settings_load_gate": "d1l_settings_load_status must be ESP_OK before current RAM defaults can be treated as a proven absent persisted identity",
+    "unreadable_settings": "return the exact load error with identity_ready false; do not generate or save replacement identity material",
+    "consistent_identity": "accept only the complete persisted identity classifier, including exact derived 32-byte public-key equality",
+    "inconsistent_identity": "return ESP_ERR_INVALID_STATE with identity_ready false and preserve invalid persisted material for recovery and diagnostics",
+    "absent_identity": "generate at most eight candidates and accept only a candidate classified consistent; the former public-key first-byte heuristic is removed",
+    "generation_failure": "zeroize the seed and fail without claiming identity readiness"
+  },
+  "source_bindings_git_blob_sha1": {
+    "main/app/settings_model.c": "c07d0df016bbd8a1a321320a323e80728e0258dd",
+    "main/app/settings_model.h": "105e7869beb506d8b82a86cc012a01d2f8fd7990",
+    "main/mesh/meshcore_service.c": "d500ccfbd7b3e9a72fdb033e0247d92bfa0d5dd5",
+    "tests/native/esp_nvs_stubs.c": "64b63f2c5278c4feb22d2a48aa6a5a88a1b7d4a3",
+    "tests/native/identity_state_test.c": "238bb9d25087807b487782a514fdabba433a3f89",
+    "tests/native/mock_esp_nvs.h": "943d8782aa2eafe65d8b401824b126b5cdca8cb8",
+    "tests/test_meshcore_public_rf_contract.py": "7bc85c115adfb4894693ab350b09267f038267e6",
+    "tests/test_settings_contract.py": "fa4b1b702386ed381e804789d00b7ce91938d39b"
+  },
+  "verification": {
+    "exact_main_actions": {
+      "run_id": 29347026872,
+      "checkout_sha": "16db6055f47541756f79edd06530d0cd1a6c878b",
+      "conclusion": "success",
+      "host_tests_passed": 959,
+      "checksum_contract_tests_passed": 32,
+      "api_artifact_zip_count": 5,
+      "api_artifact_digest_matches": 5,
+      "checksum_manifest_count": 3,
+      "checksum_manifest_entries": 46,
+      "checksum_manifest_hash_matches": 46,
+      "downloaded_tree_file_count": 219,
+      "downloaded_tree_total_bytes": 72773592,
+      "downloaded_tree_sha256": "a1cd09d150ff47c3ad4b7c0460188975ec62fa1aa64bc0a43db244f555462db5",
+      "firmware_manifest_sha256": "355cc2569d7b27a7fa8c75a67a3fe8828dcb1e25d19c89dcbb8c6505b3cff135",
+      "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release_manifest_sha256": "da92b3cdfc044c118463553b75c5850d9d3e9c0c7455be535ad39ad7eadc4331",
+      "application_sha256": "b03fad2e130713ac44e10c42189c81aefb58c265254f5f5884d076a0f0579cee",
+      "full_flash_sha256": "0d448286d5c33cc74be26e6d390b6bf679ee96fabeed5ee6bad8517cb4967231",
+      "sbom_sha256": "5272435cff60bae17cb60316c4e00b4aba584cd26a230d99a27a2261c702cf0a",
+      "provenance_sha256": "b0a4305eb2f6a16a427348871422584c079d83347164b29726863a5d0e53b8dc",
+      "rp2040_build": "skipped_appropriately_for_esp32_only_diff"
+    },
+    "conformance": {
+      "wire_vectors": 1008,
+      "oracle_vectors": 931,
+      "oracle_failures": 0,
+      "fuzz_cases": 100000,
+      "fuzz_findings": 0,
+      "full_ubsan_clean": true,
+      "source_files_matched": 60,
+      "source_files_expected": 60
+    }
+  },
+  "residual_release_gates": {
+    "identity_recovery": {
+      "closed": false,
+      "remaining": "Prove retained upgrade, reboot, power-loss, corrupt-state recovery, and user-visible identity truth on the frozen exact candidate."
+    },
+    "signed_advert_contact_rx": {
+      "closed": false,
+      "remaining": "Bind verified signed adverts to exact-key contacts and prove truthful retry/collision behavior."
+    },
+    "protocol": {
+      "closed": false,
+      "remaining": "Generic contact and multi-hop TRACE plus concrete authenticated-admin dispatch remain open."
+    },
+    "rf_and_physical": {
+      "closed": false,
+      "remaining": "Controlled official-peer interoperability and frozen-candidate hardware evidence remain open."
+    }
+  },
+  "release_truth": {
+    "gate_count": 36,
+    "passed_count": 1,
+    "failed_count": 35,
+    "p0_failed_count": 33,
+    "ready_for_public_release": false,
+    "release_audit_sha256": "50a67e09bef4222d497c0f49d7adb81052656d1021e1884a3789a87138479c90",
+    "physical_closure_claimed": false
+  },
+  "claims": {
+    "production_identity_fail_closed_binding_banked": true,
+    "exact_merged_main_software_gate_green": true,
+    "signed_advert_contact_binding_claimed": false,
+    "identity_end_to_end_closure_claimed": false,
+    "physical_or_rf_closure_claimed": false,
+    "wp04_closure_eligible": false,
+    "release_ready": false,
+    "valid": true
+  }
+}

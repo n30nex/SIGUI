@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp08_contact_lifecycle_exact_main_aggregate",
+  "generated_utc": "2026-07-14T19:03:00Z",
+  "claim_scope": "Portable merged-tree and exact-main Actions checkpoint for the first WP-08 slice. The bounded contact store now separates heard observations from canonical contacts, retains exact-key provenance, supports strict MeshCore URI import/export, rejects collision/capacity/role errors before mutation, preserves non-evictable favourites and aliases, gates DM authorization through canonical provenance, and emits injection-safe USB JSON. Exact merged-main software and artifact acceptance is banked, while BLE and remaining UI QR surfaces, official-client interoperability, reboot/refresh acceptance, physical evidence, and WP-08 closure remain open.",
+  "exact_pair": {
+    "pull_request": 112,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/112",
+    "base_sha": "5e507401be2397fc2e89caed271fc7e8c5ef9720",
+    "head_sha": "79e1e7d8c06917ce011f32ee8e345fef40731e0e",
+    "synthetic_merge_sha": "601b0b214121fa1009b22183528107e7ea185893",
+    "merged_main_sha": "10d85ee3a0941aff23f455047358805a861b571e",
+    "head_synthetic_and_main_tree_sha": "4368725b7abbde0d40b1886ba24a9e376cd30674",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29358342805,
+    "actions_event": "pull_request",
+    "checkout_sha": "601b0b214121fa1009b22183528107e7ea185893",
+    "conclusion": "success",
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73155035,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "independent_review_remaining_p0_p1_p2": 0,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr112-79e1e7d8c06917ce011f32ee8e345fef40731e0e/pr112_strict_gate_79e1e7d8c06917ce011f32ee8e345fef40731e0e.json",
+    "strict_receipt_sha256": "8969c94c3d2f8691ca5c1d5a23df2ba6beed8efa910be4481a030cb28d5c88df"
+  },
+  "artifact_zip_sha256": {
+    "d1l-firmware-artifacts": "8ed73b35e2edd5032d3aa9376ad03672210f565b9d289359f5eafb33ed53c8b7",
+    "d1l-host-artifacts": "163a26abb9da087e8aeaa149ede0b2c4dca40243e4a64944e62cfc1ebec23598",
+    "d1l-idf55-migration-state": "9416c70bca6e97db5fb527e8ef5d7c4948d523066438c3b3c1dccf76376439f0",
+    "d1l-meshcore-wire-conformance": "a65ffb890de30c6a3318dc39018f71fbf11737fd9be77a8da5b6ea4d886e2937",
+    "d1l-release-package": "b989873963da2dca640bee899b47a1e68c91ae89fc78e6d5493fe818db5ae20c"
+  },
+  "implementation_boundary": {
+    "new_modules": [
+      "main/mesh/contact_uri.c",
+      "main/mesh/contact_uri.h"
+    ],
+    "integration_files": [
+      "main/CMakeLists.txt",
+      "main/comms/usb_console.c",
+      "main/mesh/contact_store.c",
+      "main/mesh/contact_store.h",
+      "main/mesh/meshcore_service.c",
+      "main/ui/ui_phase1.c"
+    ],
+    "native_contract_tests": [
+      "tests/native/contact_uri_test.c",
+      "tests/native/store_behavior_test.c",
+      "tests/test_contact_store_contract.py",
+      "tests/test_contact_uri.py",
+      "tests/test_map_viewport_ui_contract.py"
+    ],
+    "schema_version": 6,
+    "full_key_provenance": true,
+    "heard_nodes_cannot_fabricate_contacts": true,
+    "canonical_dm_authorization": true,
+    "collision_and_capacity_fail_closed": true,
+    "favourite_and_alias_preservation": true,
+    "meshcore_uri_round_trip": true,
+    "usb_json_injection_safe": true
+  },
+  "exact_main_gate": {
+    "actions_run": 29359402515,
+    "validated_main_sha": "10d85ee3a0941aff23f455047358805a861b571e",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 977,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73155041,
+    "downloaded_tree_sha256": "998c660d801093f21d7202f10605afdf5164f6c30e18c88e41132705334ff202",
+    "host_success_marker_sha256": "468721344a5436da8004548880b1941d014d006687ead4c91ff3948b7d83b543",
+    "release_audit_sha256": "fb963403f7c853210c9ae0d81dbdd840c7c5c17d62a9fe15cd571433de1e8f3e",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "release_manifest_sha256": "dbb3ca3b4789a041acdcd369f7c71ffefa6a86f2ad11541c710dae6e73426a71",
+    "application_sha256": "09360352831f383b45b097384e5c7df07e9602c625155588a35d8f4eac00c153",
+    "full_flash_sha256": "28caa93dba521a50aed0ca493fdccb12688431a122c356ae1f590aefc9001320",
+    "provenance_sha256": "a2c730a20afc996f019dbef45b875ed0db2ba50e78ed32439c109873af4c437e",
+    "sbom_sha256": "fd4c06e5cb15801a7040f3ee3eb226d514a303de1166f0d169aaca503fd5561d",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-10d85ee-qa/main_strict_gate_10d85ee3a0941aff23f455047358805a861b571e.json",
+    "receipt_sha256": "53e07c470b01a46ffcc2414c4e5b9867da9932b11203259a3d0e4e48cd3f78dc",
+    "verdict": "exact_merged_main_software_and_artifact_gate_banked"
+  },
+  "residual_wp08_gates": {
+    "closed": false,
+    "remaining": "Complete BLE and on-device QR/share surfaces, pinned official-client bidirectional import/export proof, retained reboot and advert-refresh acceptance, exact-candidate physical UI and RF evidence, and downstream channel/runtime integration."
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp08_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "first_wp08_contact_lifecycle_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp08_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}

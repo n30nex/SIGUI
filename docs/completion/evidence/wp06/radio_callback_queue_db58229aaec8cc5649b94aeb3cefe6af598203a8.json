@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp06_radio_callback_queue_exact_main_aggregate",
+  "generated_utc": "2026-07-14T17:04:32.629Z",
+  "claim_scope": "Portable exact-merged-main software evidence for the first WP-06 slice. SX1262 callbacks copy, timestamp, enqueue, and return; the meshcore service task owns radio-event processing, bounded recovery, and runtime telemetry. Exact-main Actions and downloaded artifacts are verified, but this aggregate does not close WP-06, RF, hardware, physical, or release gates.",
+  "exact_pair": {
+    "pull_request": 106,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/106",
+    "base_sha": "e7ddb265a0a84e7ecc3860bebf959d9551fdb00a",
+    "head_sha": "7a86e15b8584b76fd9f0ae86f6bbabdcde6930e6",
+    "pull_request_checkout_sha": "34bdcf22b2db55589a66978ca6528eecbfe664a0",
+    "merged_main_sha": "db58229aaec8cc5649b94aeb3cefe6af598203a8",
+    "head_and_main_tree_sha": "9ae687b8b71cb1eabb35429c15833cc818bc3786",
+    "tree_identity": {
+      "head_matches_merged_main": true,
+      "pull_request_checkout_tree_independently_banked": false
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29349396406,
+    "actions_event": "pull_request",
+    "checkout_sha": "34bdcf22b2db55589a66978ca6528eecbfe664a0",
+    "conclusion": "success",
+    "host_tests_passed": 965,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 72833482,
+    "artifact_root": "F:/SIGUI-artifact-gates/pr106-7a86e15b8584b76fd9f0ae86f6bbabdcde6930e6"
+  },
+  "premerge_artifact_verification": {
+    "artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "edebcc32ab6b585b307378da4b4804b686912b071b7cfc4237510baab38ee284",
+      "d1l-host-artifacts": "c60d53a55fefa49dbda1ae3ba1beb1c974424f00dde5e85016faff524412ccc4",
+      "d1l-idf55-migration-state": "35ed5277fac7ce4c6c8b7a34504b45e35790ca4d6f63e09185dd08a909f7521c",
+      "d1l-meshcore-wire-conformance": "1aa57bb839afb593cf80cc1135d082b1eee2474328a032214084239913acec46",
+      "d1l-release-package": "2ebe869d06beaabeae61ac8c29b47da9f50d4d4b5698c6bcd88efe5dc2306507"
+    },
+    "nested_manifests_sha256": {
+      "firmware": "94097f987094bec7ecc43486f0be3475a38b87e8a417f1f833973e3cc36eae09",
+      "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release": "92708f7edf807d84037852e04efdcb5ac48146d2c8bb77da0c816f6b3e57ee92"
+    },
+    "release_package": {
+      "manifest_sha256": "f2201ff3a4e5fd408ff320febf458401e94cef26afce5315b8d7bb11e79975d3",
+      "provenance_sha256": "ecb590d8ecd04adc26c940e137837e652c894837452e4023e9a445eb40fbd9f2",
+      "sbom_sha256": "be1e28f7fc395c074e6d2f7874667df543588a2ad80dbc4377edba23dfc3007b",
+      "provenance_valid": true,
+      "spdx_valid": true
+    },
+    "host_success_marker_sha256": "f830d634666ec48e5795295350bcc757f56c88fc057927224ad2fa4602c6b329",
+    "release_audit_sha256": "e1e2d65e6a5cf19ad08840eb3a7b9e36a05369d4f1c112e2eb4d5e56c818213e"
+  },
+  "exact_main_artifact_verification": {
+    "actions_run": 29350272871,
+    "actions_conclusion": "success",
+    "host_tests_passed": 965,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "all_zip_entries_path_confined": true,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "all_checksum_paths_confined": true,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 72833488,
+    "downloaded_tree_sha256": "0cc55308eea7869d21386a2f006cf8b06787fd83175592a46dbf12bc548c8ccc",
+    "artifact_root": "F:/SIGUI-evidence/actions/main-db58229-qa/29350272871",
+    "artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "b610d873308d3bb6787cffde907af3d847332cb98763044a182e32980350ac69",
+      "d1l-host-artifacts": "f5c98c478d4d8607bea8ec6faab31e6402f1821c88912e42c1e05847dabdba9b",
+      "d1l-idf55-migration-state": "28bc4450c8cb19377543ca4be83ad6f8f556ff2fc35d1e84dd8121e56318a203",
+      "d1l-meshcore-wire-conformance": "c746f721fcfc8ad2851a9f9b0940a778316daac8a71fb2189f3a623f175abf45",
+      "d1l-release-package": "1da7236f65fcec8258cf13f8b906ee9a9611433e253e2670a2c87f3667289e28"
+    },
+    "nested_manifests_sha256": {
+      "firmware": "384cb5ac403c2a87b906d00cd790f214b7df956febda010c261a94e4b206b431",
+      "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release": "d65e389df97db63dd59937dd2318f1c930737916b9147e6f27dbedf19c526aa0"
+    },
+    "release_package": {
+      "manifest_sha256": "2f4b944b9b09caf2551be95b535e174264a8253c00bc15f19cdecc014057ce53",
+      "provenance_sha256": "c929a7ac86ba9a8c41aee20aa2edbfcd2ff53e10c79f315ca4eccc43e2362d87",
+      "sbom_sha256": "efea56ae0e9924cb00e50be00490bd71b9ed7890598e1c6d3654c4adfa2e8577",
+      "provenance_valid": true,
+      "spdx_valid": true,
+      "deterministic_validation_worktree": "F:/SIGUI-worktrees/qa-db58229-exact",
+      "deterministic_validation_source_clean": true
+    },
+    "host_success_marker_sha256": "f4de6da0b214f0b2a0f0853dbbb3680c9d3a51decc7921576a2da6371f359cd2",
+    "release_audit_sha256": "f74a49b5153e7c8729f8923f04a03ecd45265af922c17aab71ad213ddd77af97",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "strict_receipt_path": "F:/SIGUI-evidence/actions/main-db58229-qa/main_strict_gate_db58229aaec8cc5649b94aeb3cefe6af598203a8.json",
+    "strict_receipt_sha256": "d1fd3de8e15099b39779da62bc5436327db090325706fd4b633d652b252a0ebc"
+  },
+  "runtime_boundary": {
+    "callback_boundary": "copy_timestamp_enqueue",
+    "radio_event_queue_length": 8,
+    "maximum_event_burst": 4,
+    "runtime_task_stack_bytes": 8192,
+    "owner": "meshcore_service_task",
+    "callback_forbidden_work": [
+      "packet_parsing",
+      "retained_store_mutation",
+      "packet_logging",
+      "radio_restart"
+    ],
+    "owner_task_work": [
+      "tx_done",
+      "tx_timeout",
+      "rx_done",
+      "rx_timeout",
+      "rx_error",
+      "latched_terminal_recovery"
+    ],
+    "recovery": "Full queues latch terminal TX and RX-restart recovery for coalesced execution on the sole runtime owner.",
+    "telemetry": [
+      "command_queue_depth",
+      "command_queue_high_water",
+      "event_queue_depth",
+      "event_queue_high_water",
+      "queue_drops",
+      "callback_event_drops",
+      "runtime_task_heartbeat",
+      "runtime_task_stack_free_words",
+      "runtime_last_event_monotonic_us"
+    ]
+  },
+  "source_bindings_sha256": {
+    "main/mesh/meshcore_service.c": "bae8fd1e91ba8d958e945a7b546efa1969d4db5da1375fdd8242a05ab3211dc7",
+    "main/mesh/meshcore_service.h": "9f192d3adbf3fe6529ecba7eef638524078da007305e68f637bde2fc53def621",
+    "main/comms/usb_console.c": "dbaeac1029ac7e9b8f84cf7e31152709575fe443065924e91a07d897a6eaa89e",
+    "tests/test_mesh_runtime_callback_boundary.py": "138271af3494ca0bf513fefd0d334ea50b0f6cc537414409365b431750ac6dcc"
+  },
+  "exact_main_gate": {
+    "actions_run": 29350272871,
+    "status_at_checkpoint": "completed_success",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-db58229-qa/main_strict_gate_db58229aaec8cc5649b94aeb3cefe6af598203a8.json",
+    "receipt_sha256": "d1fd3de8e15099b39779da62bc5436327db090325706fd4b633d652b252a0ebc",
+    "verdict": "exact_main_strict_gate_pass"
+  },
+  "residual_wp06_gates": {
+    "closed": false,
+    "remaining": "Prove the complete single-owner runtime boundary across all radio and command paths, queue saturation, fairness, watchdog and stack margins, reboot/power-loss recovery, exact-candidate hardware behavior, and downstream integration."
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp06_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "first_wp06_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp06_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}

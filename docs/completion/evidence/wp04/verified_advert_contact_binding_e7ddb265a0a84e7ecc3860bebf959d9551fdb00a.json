@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp04_verified_advert_contact_binding_exact_main_aggregate",
+  "generated_utc": "2026-07-14T16:18:32Z",
+  "claim_scope": "Portable exact-merged-main software evidence for production signed-advert receive binding to retained exact-full-key contacts. Corrected-head push and pull-request Actions plus exact-main Actions and downloaded artifacts are verified. This aggregate does not close contact lifecycle, generic TRACE, production admin dispatch, RF, hardware, WP-04, or release gates.",
+  "exact_pair": {
+    "pull_request": 105,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/105",
+    "pull_request_base_sha": "16db6055f47541756f79edd06530d0cd1a6c878b",
+    "initial_head_sha": "200f265d2f5eebbb2db86b5a09ca4a00ef5ccc8f",
+    "corrected_head_sha": "2a3ab3ef21624854abd190bbfb0521dfef079c3d",
+    "pull_request_checkout_sha": "034b274aad14390a2464819cd15a7d684172b25f",
+    "merged_main_sha": "e7ddb265a0a84e7ecc3860bebf959d9551fdb00a",
+    "verified_head_and_main_tree_sha": "396147a1614e88356b34af10e1647bd6ee2f7646",
+    "tree_identity": {
+      "corrected_head_matches_merged_main": true,
+      "pull_request_checkout_tree_independently_banked": false
+    },
+    "github_signature_verification": {
+      "merged_main_verified": true
+    }
+  },
+  "review_correction": {
+    "finding": "The initial binding could retain the node replay watermark before a transient contact-store failure, so an equal signed advert was then treated only as replay and could not repair the missing contact. A different full public key sharing the same fingerprint prefix also required an explicit reject-before-replay-or-mutation guard.",
+    "corrective_commit": "2a3ab3ef21624854abd190bbfb0521dfef079c3d",
+    "correction": "Retry promotion only from the retained node when timestamp and all 64 public-key hex characters match and that exact key is still absent from contacts; reject prefix-colliding full keys before replay classification or node mutation.",
+    "regression_evidence": [
+      "equal_timestamp_exact_key_retry_after_contact_nvs_failure",
+      "no_retry_when_exact_key_contact_already_exists",
+      "prefix_collision_preserves_node_bytes_and_counters",
+      "distinct_packet_log_outcomes_for_retry_retry_error_and_key_collision"
+    ]
+  },
+  "gate_receipts": {
+    "push": {
+      "actions_run": 29347538584,
+      "checkout_sha": "2a3ab3ef21624854abd190bbfb0521dfef079c3d",
+      "conclusion": "success",
+      "host_tests_passed": 961,
+      "checksum_contract_tests_passed": 32,
+      "api_zip_digest_matches": 5,
+      "api_zip_count": 5,
+      "checksum_manifest_count": 3,
+      "checksum_manifest_entries_verified": 46,
+      "extracted_file_count": 219,
+      "extracted_total_bytes": 72792825,
+      "release_audit_sha256": "c86ac5cd9541baf9d885c5fa878abcef2fd2fa71556246b0a4640cbdb42761ae"
+    },
+    "pull_request": {
+      "actions_run": 29347541085,
+      "checkout_sha": "034b274aad14390a2464819cd15a7d684172b25f",
+      "conclusion": "success",
+      "host_tests_passed": 961,
+      "checksum_contract_tests_passed": 32,
+      "api_zip_digest_matches": 5,
+      "api_zip_count": 5,
+      "checksum_manifest_count": 3,
+      "checksum_manifest_entries_verified": 46,
+      "extracted_file_count": 219,
+      "extracted_total_bytes": 72792558,
+      "release_audit_sha256": "3f11f701a3d0d9d654833b97961ff462fb8182b21de7b6a8211a58515bdc5f50"
+    },
+    "merged_main": {
+      "actions_run": 29348320732,
+      "actions_status_at_checkpoint": "completed",
+      "conclusion": "success",
+      "receipt_path": "F:/SIGUI-evidence/actions/main-e7ddb265-qa/main_strict_gate_e7ddb265a0a84e7ecc3860bebf959d9551fdb00a.json",
+      "receipt_sha256": "d9b2dc5efbcddd787260cc6a6e11cd90e3433fcbd3f7ec971f7a498b7b79eab7",
+      "host_tests_passed": 961,
+      "checksum_contract_tests_passed": 32,
+      "wire_vectors": 1008,
+      "oracle_checks": 931,
+      "fuzz_runs_completed": 100000,
+      "fuzz_findings": 0,
+      "api_zip_digest_matches": 5,
+      "api_zip_count": 5,
+      "checksum_manifest_count": 3,
+      "checksum_manifest_entries_verified": 46,
+      "extracted_file_count": 219,
+      "extracted_total_bytes": 72792564,
+      "canonical_inventory_sha256": "85612578e3166aa2595bb90248c5c3d9c2b775fcd48947b8fdd3c13e7be47ea9",
+      "verdict": "strict_pass_after_download"
+    }
+  },
+  "downloaded_artifact_verification": {
+    "root": "F:/SIGUI-artifact-gates/pr105-2a3ab3ef21624854abd190bbfb0521dfef079c3d",
+    "aggregate": {
+      "actions_run_count": 2,
+      "api_artifact_zip_count": 10,
+      "api_artifact_digest_matches": 10,
+      "checksum_manifest_count": 6,
+      "checksum_manifest_entries": 92,
+      "checksum_manifest_hash_matches": 92,
+      "all_head_and_pr_checks_passed": true
+    },
+    "push_artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "62eef9be894c85af1fb8c459c2ca564ce1882a1b3657382ba833147cd319b40e",
+      "d1l-host-artifacts": "22995f9ebba18f1e7de9a80e82bab45dc2bfcb59b21991e0b620fd8e925583ee",
+      "d1l-idf55-migration-state": "9faaadbdf88629d4b14400171c9e123937aa95000f4d0c7cc98dee64c3a3e5ff",
+      "d1l-meshcore-wire-conformance": "d54bd4425eb57112b1823545290f650b54f4dd618319c8f049c02608c9fa9e55",
+      "d1l-release-package": "11c8c3bbfa611e0dc32b9b83f69c8d0d281837732beb59230f0bcd619063d303"
+    },
+    "pull_request_artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "475177275eabc9baa56def850b8743b1312a9de325056beba303f75f77f47b14",
+      "d1l-host-artifacts": "3c11589bd3116ab8cb94d4a93e293bb8b0d71d4e5b6d8c8b6a0a0560eec2e681",
+      "d1l-idf55-migration-state": "595895b8ddc75f544de4a0696298c333a2ce3055e713b26f72317dafa473693c",
+      "d1l-meshcore-wire-conformance": "338270804ca4340f0143ce07e676a067a8906f401af8969baef166e07238e5b6",
+      "d1l-release-package": "3db81451d8f685db2dce396993d19c1fa2df89fd2024ab191241b3425ba76377"
+    },
+    "push_manifests_sha256": {
+      "firmware": "9a8aed8e0f2cda3040fe265d09643178fc5a41be6d14ae7dd9a3cd084751f6c4",
+      "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release": "acfe10043dcd741adbb2cbd852ef51da4d4e3fb5a1fd280ffbbd0f000b3ef559"
+    },
+    "pull_request_manifests_sha256": {
+      "firmware": "94809eda24b9bed3e17dec1d7762899c6bbc73586be99cbf862ae2f31d04351c",
+      "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release": "bc2c99f1964140d64c49d0b6483a7b722784ca849aab01915ada3f7c754397c8"
+    }
+  },
+  "exact_main_artifact_verification": {
+    "actions_run": 29348320732,
+    "receipt_sha256": "d9b2dc5efbcddd787260cc6a6e11cd90e3433fcbd3f7ec971f7a498b7b79eab7",
+    "artifact_zip_sha256": {
+      "d1l-release-package": "3c981f62ada31ec50592f059c611021e8d45ceac3ceaddfda035b2f471ba87cd",
+      "d1l-firmware-artifacts": "acb71ef3d6582097a3318bd8c704d4b76643a93bceb26a4e9bb385346c1fcc44",
+      "d1l-idf55-migration-state": "dc4af3b8a342c402e3c55fac229df37da2cb56583805e03b7d6d5a5b751d7eec",
+      "d1l-host-artifacts": "6638818711b7b881533f32fae978ee617999e039b52118a2b7502c753690f470",
+      "d1l-meshcore-wire-conformance": "6cf665a8e1f71c1ce27afc03f9a1325166db6cfcd2386e505e63d936d90f0624"
+    },
+    "nested_manifests_sha256": {
+      "firmware": "3ff4ea47487e8253eff7ed06de2ee807d40d5b8a44822bb756f519bf269d5be3",
+      "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release": "25c93d95514d84c18279299f9bf400b875d5c68cf7234af5f4968aaa6a906745"
+    },
+    "release_package": {
+      "manifest_sha256": "e48a07e7cf82fc4f5b75f8817317daf5a2a2a88185693cc79b4b10e7f1fff1f5",
+      "update_image_sha256": "be7533ca146b1f12d93c18709fff4477f7be772d1cb38efdd4ac5be579f4119c",
+      "full_flash_image_sha256": "3765c9e35878f6581eda6dd7553a029a7450886672a078e42a70ec9541b49420",
+      "provenance_sha256": "6af897cd3fe285991529c7bab3ea4d009d8a3dbb457ee92f6b0722512f988898",
+      "sbom_sha256": "d7ea67baf0a5840aefc4e025a99a2d05020c10304ee098404f8a0be27a8c3892",
+      "deterministic_provenance_and_spdx_validation": true
+    }
+  },
+  "production_contact_semantics": {
+    "acceptance_order": [
+      "verify_signed_advert",
+      "reject_self",
+      "upsert_exact_full_key_heard_node",
+      "classify_replay_or_collision",
+      "read_back_retained_node",
+      "require_all_64_public_key_hex_characters_match",
+      "upsert_verified_contact",
+      "increment_accepted_advert_counter"
+    ],
+    "retained_contact_results": [
+      "created",
+      "updated",
+      "promoted_placeholder",
+      "collision",
+      "full"
+    ],
+    "recovery": "An exact equal-timestamp signed advert may retry missing contact promotion only from the retained exact-key node after a prior transient write failure.",
+    "collision_boundary": "A different full public key sharing the fingerprint prefix is rejected before replay classification or node mutation.",
+    "truthful_logging": [
+      "advert_contact_retry",
+      "advert_contact_retry_error",
+      "advert_key_collision",
+      "advert_contact_error"
+    ]
+  },
+  "source_bindings_sha256": {
+    "main/mesh/meshcore_service.c": "d37567555933a9a73218f0a3d154b8ab0a7b0523f5821593872a5ba019fd33f0",
+    "main/mesh/node_store.c": "45620dde94b8172e631ea778188ea5fdc9d77f2257fe3e573a959361d85b29b5",
+    "main/mesh/node_store.h": "4f14283e4647ca0dd43ff015be1891ff9bfc6d2c5f3a6b7368f865357c353909",
+    "tests/native/store_behavior_test.c": "b8404ab6330ae1f17b3d01319b9f2a2ae6f86694feaa636f1a60e43994eeed93",
+    "tests/test_verified_contact_contract.py": "225b829bf2ad020ee2d38bfe7e30dd9682289454cf184e9b1a3acc73efc4530f"
+  },
+  "residual_release_gates": {
+    "exact_main_gate": {
+      "closed": true,
+      "resolution": "Actions run 29348320732 and strict receipt SHA-256 d9b2dc5efbcddd787260cc6a6e11cd90e3433fcbd3f7ec971f7a498b7b79eab7 bank exact merged main e7ddb265a0a84e7ecc3860bebf959d9551fdb00a."
+    },
+    "contact_lifecycle": {
+      "closed": false,
+      "remaining": "Prove exact-candidate reload, UI, sendability, deletion/export, capacity, reboot, and power-loss behavior."
+    },
+    "trace_and_admin": {
+      "closed": false,
+      "remaining": "Generic contact and multi-hop TRACE plus concrete authenticated-admin dispatch remain open."
+    },
+    "rf_and_physical": {
+      "closed": false,
+      "remaining": "Controlled official-peer contact interoperability and frozen-candidate hardware evidence remain open."
+    }
+  },
+  "release_truth": {
+    "gate_count": 36,
+    "passed_count": 1,
+    "failed_count": 35,
+    "p0_failed_count": 33,
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "corrected_head_review_finding_closed": true,
+    "production_signed_advert_contact_binding_present_in_merged_tree": true,
+    "push_and_pull_request_software_gates_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "contact_lifecycle_end_to_end_closure_claimed": false,
+    "physical_or_rf_closure_claimed": false,
+    "wp04_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}

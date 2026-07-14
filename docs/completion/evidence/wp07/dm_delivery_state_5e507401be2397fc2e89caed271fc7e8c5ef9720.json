@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp07_dm_delivery_state_exact_main_aggregate",
+  "generated_utc": "2026-07-14T18:08:48Z",
+  "claim_scope": "Portable merged-tree and exact-main Actions checkpoint for the first WP-07 slice. Schema-v6 outbound DM delivery state uses immutable session IDs, revision CAS, deterministic legacy migration, reboot interruption, retry-attempt persistence, and strict delivered/ACK truth. Exact merged-main software and artifact acceptance is banked, while runtime scheduling, RF acceptance, and WP-07 closure remain open.",
+  "exact_pair": {
+    "pull_request": 111,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/111",
+    "base_sha": "69e42510bfbc9779876ade052608c63634bc867d",
+    "head_sha": "4788b4f63263198a1337c8d806fb5e4bf4916fae",
+    "synthetic_merge_sha": "0d068c829c7878cc74de3a8b3317a9f843071942",
+    "merged_main_sha": "5e507401be2397fc2e89caed271fc7e8c5ef9720",
+    "head_synthetic_and_main_tree_sha": "6c34d777eecd15938f9544cd44dd4fd12bffc173",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29354761646,
+    "actions_event": "pull_request",
+    "checkout_sha": "0d068c829c7878cc74de3a8b3317a9f843071942",
+    "conclusion": "success",
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73072553,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "independent_review_remaining_p0_p1_p2": 0,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr111-4788b4f63263198a1337c8d806fb5e4bf4916fae/pr111_strict_gate_4788b4f63263198a1337c8d806fb5e4bf4916fae.json",
+    "strict_receipt_sha256": "090d0deb90e09796afb99a58143866a4bfccd1b3902ac4aabac8b0cc38f1e751"
+  },
+  "artifact_zip_sha256": {
+    "d1l-firmware-artifacts": "39df27d0cd2adf33db4f620c7ac029ffee5a0d1d9584d8eca4defefa48cf8bdf",
+    "d1l-host-artifacts": "04b795dee511740b193e90c41e757d21d87a66463c376518eccdc682deeb9b77",
+    "d1l-idf55-migration-state": "350dfb997e2280574a5c0a3f1827d7925f817840406430284bf9dcc53c981eb4",
+    "d1l-meshcore-wire-conformance": "c6f3dcce033789d01d7143d069936c5d3a7730b6c3f1e16ac5cbeb95493365f7",
+    "d1l-release-package": "b97b8a65da7d048b338a30c7833eec7054dbd68caa634ce069ce44e72e07d4df"
+  },
+  "implementation_boundary": {
+    "new_modules": [
+      "main/mesh/dm_delivery_state.c",
+      "main/mesh/dm_delivery_state.h"
+    ],
+    "integration_files": [
+      "main/CMakeLists.txt",
+      "main/mesh/dm_store.c",
+      "main/mesh/dm_store.h"
+    ],
+    "native_contract_tests": [
+      "tests/native/dm_delivery_state_test.c",
+      "tests/native/dm_store_behavior_test.c",
+      "tests/test_dm_delivery_state_native.py",
+      "tests/test_dm_store_contract.py"
+    ],
+    "schema_version": 6,
+    "immutable_session_ids": true,
+    "state_revision_cas": true,
+    "deterministic_legacy_migration": true,
+    "reboot_interruption_state": true,
+    "strict_delivered_ack_truth": true,
+    "focused_host_tests_reported": 14
+  },
+  "exact_main_gate": {
+    "actions_run": 29355712370,
+    "validated_main_sha": "5e507401be2397fc2e89caed271fc7e8c5ef9720",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 969,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73072559,
+    "downloaded_tree_sha256": "640757a4347db8a7553b472a661fcdca9e1517f170018e2c7fd0abb742ffa694",
+    "host_success_marker_sha256": "21eafd9431bfa99e063d92c90a2db7b2a65dd276e9d685a2ae0e234e810a23af",
+    "release_audit_sha256": "7d7b6c8828144a84fc7c9a0c37d1232645bf6d69387e60445bc19eef320a2857",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "release_manifest_sha256": "0140e206c96210a641244c1cf2e44e4c8514e5db9882a21a459c560266d82cf3",
+    "application_sha256": "69234ff185d7f55cb959f0795084761ccb74dd68b6a5c4a1160ef65d8f01704f",
+    "full_flash_sha256": "ce096389e157571d54d2b17d323670c6b84e03ad5186667e8382817ba107a518",
+    "provenance_sha256": "ab96979c3d31e58eb5637db520af36b8f17862ccdf8d18fd2fea656820b5bd72",
+    "sbom_sha256": "bb836d2e8490c941bd81dbae04f12fa5c155c4a9b58cdfa787a3b4ed9dc622e8",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-5e507401-qa/main_strict_gate_5e507401be2397fc2e89caed271fc7e8c5ef9720.json",
+    "receipt_sha256": "93f9717801ac7ca01a48d66d9a7c3de7acfe0cb86b0f1f5cfe78e738ed339f49",
+    "verdict": "exact_merged_main_software_and_artifact_gate_banked"
+  },
+  "residual_wp07_gates": {
+    "closed": false,
+    "remaining": "Complete runtime scheduling, retry and timeout behavior, recovery integration, exact-candidate RF/DM acceptance, and downstream UI integration."
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp07_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "first_wp07_persisted_state_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp07_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}

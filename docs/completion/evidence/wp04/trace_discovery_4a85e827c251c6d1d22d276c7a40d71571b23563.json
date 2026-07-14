@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp04_bounded_trace_discovery_aggregate",
+  "generated_utc": "2026-07-14T14:44:00Z",
+  "claim_scope": "Portable exact-pair software evidence for one bounded flags-zero TRACE request on an explicit immutable loop path, authenticated response correlation, terminal classification, timeout and duplicate handling, and fixed retained summary storage.",
+  "exact_pair": {
+    "pull_request": 101,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/101",
+    "pull_request_base_sha": "184ef74a77202ce1a673a8a7abe10f616c7d79ab",
+    "pull_request_head_sha": "db56604b52aa4f40606ad9e2d5d1ecd516cd9818",
+    "pull_request_synthetic_merge_sha": "f93734aedc2a866abe727340582310fadacfbad0",
+    "merged_main_sha": "4a85e827c251c6d1d22d276c7a40d71571b23563",
+    "verified_tree_sha": "bfb5627fc2b241756c68b276eec7892fafcb6f3c",
+    "tree_identity": {
+      "pull_request_head_matches_synthetic_merge": true,
+      "pull_request_head_matches_merged_main": true
+    },
+    "github_signature_verification": {
+      "synthetic_merge_verified": true,
+      "merged_main_verified": true
+    }
+  },
+  "gate_receipts": {
+    "pull_request": {
+      "push_actions_run": 29339731042,
+      "pull_request_actions_run": 29339752145,
+      "receipt_filename": "pr101-gate-receipt.json",
+      "receipt_sha256": "6a5c4a634f553d19ad748c581fe546eed39aaf9069e2305778966627894796db",
+      "verdict": "approve"
+    },
+    "merged_main": {
+      "actions_run": 29340630481,
+      "receipt_filename": "merged-main-gate-receipt.json",
+      "receipt_sha256": "d536696756731652139908781cc287e4253b0fc9ba09a3705e2242ea798971fb",
+      "verdict": "approve"
+    }
+  },
+  "trace_semantics": {
+    "request_flags": 0,
+    "request_scope": "explicit_loop_path_only",
+    "pending_request_limit": 1,
+    "timeout_ms": 30000,
+    "duplicate_window_ms": 60000,
+    "retained_summary_target": "trace_last",
+    "terminal_classifications": [
+      "source",
+      "in_flight",
+      "unsupported",
+      "malformed",
+      "timeout"
+    ],
+    "correlation_requires": [
+      "matching_request_tag",
+      "authenticated_response",
+      "exact_immutable_loop_path"
+    ],
+    "guarantees_verified_by_source_and_host_tests": [
+      "Only an explicit loop path may queue the bounded flags-zero TRACE request.",
+      "A request is rejected while another request is pending.",
+      "Responses correlate on the generated tag, authenticated packet state, and the exact immutable path selected for the request.",
+      "Malformed, unsupported, source, in-flight, duplicate, late, and timeout outcomes are classified without claiming a successful path.",
+      "The request tag uses volatile route state and the terminal summary overwrites fixed trace_last storage, so repeated TRACE tags cannot consume the bounded durable route ring.",
+      "Console, app snapshot, retained summary, and touch status surfaces expose the same bounded state without exposing authentication material."
+    ]
+  },
+  "source_bindings_sha256": {
+    "main/mesh/meshcore_trace.h": "efc3a08ffb6adda5310ca57eef31535fe7dadeb993aedda9fdb2814b891d41f7",
+    "main/mesh/meshcore_service.c": "04e8db82e66d6ca22bf49ebdbf848d26760fcdc25d64523cd4d40e3b6679c4b1",
+    "main/mesh/meshcore_service.h": "44a5e3b50758a501d1724d73d59cde241ad641f8d35cf3337be5ab1ea998f488",
+    "main/comms/usb_console.c": "5e82acb8e8bee90e5778ee8c8ff6bdab865cc328445d3b851adc3c7a77dbcca1",
+    "main/app/app_model.c": "3cec213da77d34adae813d7c56eb3b07bc7cd470fd91276d9b18ae2da39b2a8f",
+    "main/ui/ui_phase1.c": "bb82094f0cf7c2a867bd4d26fd8224d52cfec59ad42bb90f42ed741d0b10d173",
+    "tests/native/meshcore_trace_test.c": "51fd2ef6b7fba865dc0e02e98d4c97322545696c6f1347a43cb105216f888c60",
+    "tests/test_meshcore_trace_contract.py": "1ec1ce316698333b042400d00b9dac129c5649a26122a6c822bcc214f68ba44c",
+    "tests/test_meshcore_trace_native.py": "86e6083e5b1a204e6d6d6fa01f335fd775e677be05806fd21d582bbe11ebc73f"
+  },
+  "verification": {
+    "focused_host_rerun": {
+      "command": "python -m pytest --cache-clear -q tests/test_meshcore_trace_contract.py tests/test_meshcore_trace_native.py tests/test_meshcore_conformance_contract.py tests/test_meshcore_oracle_contract.py tests/test_meshcore_route_selection_contract.py tests/test_mesh_inspector_contract.py tests/test_route_store_contract.py tests/test_ui_shell_contract.py tests/test_ui_simulator.py",
+      "passed": 102,
+      "failed": 0,
+      "stdout_sha256": "5c8f167ae9aa103c01e028a7994d5962585ae64438c6cfa1774daadb2f2fc32f"
+    },
+    "actions_runs": [
+      {
+        "run_id": 29339731042,
+        "event": "push",
+        "checkout_sha": "db56604b52aa4f40606ad9e2d5d1ecd516cd9818",
+        "conclusion": "success",
+        "host_tests_passed": 953,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "531891cdd1d21897cb7abb311e8c5f48e309022b56b797319b1367ed7683f88a",
+          "d1l-firmware-artifacts": "b2e0e720a38fadc59cb413068b45c8172aba2b52b157ec35872dc82029faaefe",
+          "d1l-idf55-migration-state": "de1e3ec8682ef54e87cee4968f5ea8b4effab17be0134533e4f2ca5d1ad4dd12",
+          "d1l-host-artifacts": "d7c3aacba61fedd058b8cca4c4ea97f21e35704c77d4121d5b76485c38cdf953",
+          "d1l-meshcore-wire-conformance": "16738b5bd6fcbee87653ebbddb22514461b10e6fdb8a818e079d0d814e4798de"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff"
+      },
+      {
+        "run_id": 29339752145,
+        "event": "pull_request",
+        "checkout_sha": "f93734aedc2a866abe727340582310fadacfbad0",
+        "conclusion": "success",
+        "host_tests_passed": 953,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "6eafee15851bff3d0750ac459fcf8e7d9a6bdb5a53f1fb1c97e12842d00c4e2e",
+          "d1l-firmware-artifacts": "edabb3c86bec370825c7754f30dbcd4f0a94ec34ac73bd4a9102ddba07aaf0a2",
+          "d1l-idf55-migration-state": "ff09008d6e18a7687833d609860f109e7b94a3c5557ddefee1eb82b5a5766f3d",
+          "d1l-host-artifacts": "8384b459216b40f6aae8e2f355c56400345f3cb052d586ea7fa4767e8e15c0d3",
+          "d1l-meshcore-wire-conformance": "53bab6af08c56be1a044a65a733d53eb1a79e9fdc2981f370de7bbb327988e14"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff"
+      },
+      {
+        "run_id": 29340630481,
+        "event": "push_main",
+        "checkout_sha": "4a85e827c251c6d1d22d276c7a40d71571b23563",
+        "conclusion": "success",
+        "host_tests_passed": 953,
+        "checksum_contract_tests_passed": 32,
+        "artifact_archives_sha256": {
+          "d1l-release-package": "e0cb40f9abd835e0ca26a9e1488f1691aec35ad0a3462db72f2edb172c6aedbe",
+          "d1l-firmware-artifacts": "36e122d2424e3fc0758178d16940bb56747e3d8f5c0fd1a70013b5b089fd781f",
+          "d1l-idf55-migration-state": "87caed18980c0367b7cc0b44f91b5a1b813cd2c839c573da709221067c05ba73",
+          "d1l-host-artifacts": "6bad80111ae01db0d74a42f27658cdf18f77ba44292b5a2ddc3916c67c51a21a",
+          "d1l-meshcore-wire-conformance": "c418a4316e8637745bfa6095020405eb11416119449b7347f2f541afe07d6d30"
+        },
+        "checksum_manifest_entries_verified": 46,
+        "downloaded_tree_file_count": 219,
+        "downloaded_tree_total_bytes": 72714136,
+        "downloaded_tree_sha256": "4bb03919e29c5a1f1cb329a39dceeae81700a7b745fb302631f2b75351eba660",
+        "application_sha256": "2690ad9a7f136e71d18fda39d5c95acdc6cac6e17fe65d8efcfc811d4e6ab60a",
+        "full_flash_sha256": "065b7bca0427794b2a88ba699b304135079abcad901ce782014cd6dda28aa7a6",
+        "sbom_sha256": "e4c6ea35ab08818eca0865ab2ece821fa533e3c46507e570b50397dfd3607f0e",
+        "provenance_sha256": "f39e64499283c0152ba4dd52d94b60fb1f3b86aeb0f66232b0436e6d72cc5b84",
+        "rp2040_build": "skipped_appropriately_for_esp32_only_diff"
+      }
+    ],
+    "conformance_per_run": {
+      "wire_vectors": 1008,
+      "wire_failures": 0,
+      "oracle_vectors": 931,
+      "oracle_failures": 0,
+      "fuzz_cases": 100000,
+      "fuzz_findings": 0,
+      "ubsan_clean": true,
+      "sanitizer_exceptions": 0,
+      "defined_arithmetic_transforms": 215,
+      "defined_arithmetic_differential_cases": 256,
+      "defined_arithmetic_mismatches": 0
+    },
+    "aggregate": {
+      "actions_run_count": 3,
+      "api_artifact_zip_count": 15,
+      "api_artifact_digest_matches": 15,
+      "checksum_manifest_count": 9,
+      "checksum_manifest_entries": 138,
+      "checksum_manifest_hash_matches": 138,
+      "all_checks_passed": true
+    }
+  },
+  "residual_release_gates": {
+    "generic_contact_trace": {
+      "closed": false,
+      "remaining": "Bind canonical exact-key contacts to TRACE request construction and prove multi-hop path behavior; this slice accepts only an explicit immutable loop path."
+    },
+    "admin": {
+      "closed": false,
+      "remaining": "Authenticated login/request/response/admin session integration and negative authorization cases remain open."
+    },
+    "identity_and_contacts": {
+      "closed": false,
+      "remaining": "Persisted keypair consistency, full-key contact reconciliation, signed-advert promotion, and dispatcher-wide identity binding remain open."
+    },
+    "rf": {
+      "closed": false,
+      "remaining": "Controlled official-peer TRACE/PATH interoperability and privacy/correlation evidence remain open and require explicit RF authorization."
+    },
+    "physical": {
+      "closed": false,
+      "remaining": "Frozen exact-candidate D1L behavior, reboot/power-loss handling, UI truth, and final soak evidence remain open."
+    }
+  },
+  "release_truth": {
+    "gate_count": 36,
+    "passed_count": 1,
+    "failed_count": 35,
+    "p0_failed_count": 33,
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "audit_sha256": "097925c2528fc5b8c68166e7ba8da1f5462c7cdd28595fda785709b86fc2dd9e"
+  },
+  "claims": {
+    "bounded_explicit_loop_trace_software_evidence_banked": true,
+    "pull_request_and_merged_main_software_gates_green": true,
+    "generic_contact_trace_closure_claimed": false,
+    "admin_closure_claimed": false,
+    "identity_or_contact_closure_claimed": false,
+    "physical_or_rf_closure_claimed": false,
+    "wp04_closure_eligible": false,
+    "release_ready": false,
+    "valid": true
+  }
+}
