@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp12_truthful_time_foundation_exact_main_aggregate",
+  "generated_utc": "2026-07-14T23:01:10Z",
+  "claim_scope": "Portable premerge and exact-main software/artifact evidence for the first WP-12 truthful-time foundation. The merged slice centralizes monotonic, wall, certificate-validity, and MeshCore protocol clocks; makes the protocol high-water reserve-before-use; fails closed on the ambiguous legacy mesh_ts key; bounds SNTP waits; and delegates Map TLS readiness to the time service. It is not WP-12 closure. Trusted SNTP adoption before operating-system mutation, retained wall recovery, legacy migration, recovery UI, protocol-forward-jump protection, exact-candidate hardware behavior, and release qualification remain open.",
+  "exact_pair": {
+    "pull_request": 120,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/120",
+    "base_sha": "7a31bf845f86a5764d6e0bfc8aae3eb04bd83714",
+    "head_sha": "c70783e2d20b3429be73a2305af3c945f6d9ba7f",
+    "synthetic_merge_sha": "53142fc7eb3f924fb89998f3b5ecea3470b34604",
+    "merged_main_sha": "5e83b17efebad8d2e5e689292b57d87070893f02",
+    "head_synthetic_and_main_tree_sha": "fc0c007fabcf9a556a09982ffc59c001c327d2a2",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29372586537,
+    "actions_event": "pull_request",
+    "checkout_sha": "53142fc7eb3f924fb89998f3b5ecea3470b34604",
+    "conclusion": "success",
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73767449,
+    "downloaded_tree_sha256": "56920617fd58fb3dcedf9072324c6239514145ae4c9637ea1b099d05d3d22d83",
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr120-c70783e/pr120_strict_gate_c70783e2d20b3429be73a2305af3c945f6d9ba7f.json",
+    "strict_receipt_sha256": "fed8fa6ebb64f7bd15cbfa9d20790984d9bb3227203ff70a3b353f55a440097a"
+  },
+  "implementation_boundary": {
+    "service_files": [
+      "main/platform/time_service.c",
+      "main/platform/time_service.h",
+      "main/platform/time_service_core.c",
+      "main/platform/time_service_core.h"
+    ],
+    "monotonic_clock_centralized": true,
+    "wall_clock_source_and_validity_exposed": true,
+    "certificate_validity_fail_closed": true,
+    "map_tls_delegates_to_time_service": true,
+    "protocol_high_water_reserve_before_use": true,
+    "protocol_generation_saturates_fail_closed": true,
+    "legacy_mesh_ts_auto_migration": false,
+    "legacy_mesh_ts_preserved_and_tx_paused": true,
+    "bounded_cancellable_sntp_wait": true,
+    "retained_wall_recovery_complete": false,
+    "trusted_sntp_adoption_complete": false,
+    "physical_time_acceptance": false
+  },
+  "exact_main_gate": {
+    "actions_run": 29373261893,
+    "validated_main_sha": "5e83b17efebad8d2e5e689292b57d87070893f02",
+    "validated_tree_sha": "fc0c007fabcf9a556a09982ffc59c001c327d2a2",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 1024,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "artifact_zip_total_bytes": 23012162,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73767455,
+    "downloaded_tree_sha256": "b4da992038c4909fd0f3fe1864423f7a4342913d7d4287a7a4143adcfbe3ff80",
+    "firmware_manifest_sha256": "fcc0bed540d69f62d3574090ececbbd1d1ef8180d1c5223ce4aec768e41acd11",
+    "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+    "release_manifest_sha256": "600ff65731bd16aeaa6778a6fb793927d55d6d906fde074ff6fc363505be6d2d",
+    "release_package_manifest_json_sha256": "727883d73e87c6ed58ff9cba5347c82e0a645ca150e8235da0639f52b070689a",
+    "provenance_sha256": "ad31f5ff9caa8da14cb1008b97a73c7c854af4d5c7f300765577f738d53b7e14",
+    "sbom_sha256": "4cd88314d5d6d24a853fac0e9be66d1b2d94c20bc772b1c4f73d9f4a62425628",
+    "release_audit_sha256": "9ffa004286f345ae0cc161c4c2a66042e1e046e523ef99ad5c9e3a9d11808b4d",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "receipt_path": "F:/SIGUI-evidence/actions/main-5e83b17-qa/main_strict_gate_5e83b17efebad8d2e5e689292b57d87070893f02.json",
+    "receipt_sha256": "960baf354a9010b710b4777563f96c6e35baeac7860fc969ee27b5f4fb55bd22",
+    "verdict": "exact_merged_main_foundation_software_and_artifact_gate_banked"
+  },
+  "residual_wp12_gates": {
+    "closed": false,
+    "remaining": [
+      "trusted_sntp_sample_ownership_before_settimeofday",
+      "bounded_protocol_forward_jump_policy",
+      "retained_wall_checkpoint_and_async_persistence",
+      "legacy_mesh_ts_explicit_migration_receipt",
+      "timezone_and_recovery_ui",
+      "exact_candidate_time_tls_reboot_and_power_acceptance"
+    ]
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp12_closure_claimed": false,
+    "exact_main_foundation_gate_banked": true
+  },
+  "claims": {
+    "first_wp12_truthful_time_foundation_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp12_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp14_connectivity_viewmodel_exact_main_aggregate",
+  "generated_utc": "2026-07-14T23:03:00Z",
+  "claim_scope": "Portable premerge and exact-main software/artifact evidence for the fourth bounded WP-14 extraction slice. Wi-Fi and BLE build/runtime/phase truth is computed by a pure connectivity view model; build-disabled or transport-unsupported controls are not created; unavailable enabled state remains visibly truthful; and Phase 1 consumes the model without adding transport, storage, RF, or RP2040 side effects. Remaining UI ownership extraction, complete lifecycle/generation/redraw invariants, live Wi-Fi/BLE integration, exact-candidate physical UI behavior, and WP-14 closure remain open.",
+  "exact_pair": {
+    "pull_request": 121,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/121",
+    "base_sha": "5e83b17efebad8d2e5e689292b57d87070893f02",
+    "head_sha": "5d38727948130f64d6f78393659a9947679dbb12",
+    "synthetic_merge_sha": "2fcac5448e27f9c4bb9a19f130266e1694aacbe3",
+    "merged_main_sha": "bd201a1fa561d67082012c6ebec0e0e554e60e58",
+    "head_synthetic_and_main_tree_sha": "344d1c24f485955cfc3904367f4767fe52019614",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29373741102,
+    "actions_event": "pull_request",
+    "checkout_sha": "2fcac5448e27f9c4bb9a19f130266e1694aacbe3",
+    "conclusion": "success",
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73786401,
+    "downloaded_tree_sha256": "168789de1583adcb0b4261e8f3929b473354751640dbfa196a44a0deda39c642",
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "focused_connectivity_tests_reported": 67,
+    "independent_review_remaining_p0_p1": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr121-5d38727/pr121_strict_gate_5d38727948130f64d6f78393659a9947679dbb12.json",
+    "strict_receipt_sha256": "3fc9a51ef3e7101b86e52b12e2ea363d792a444c7a45b5f1d952074d00a3e7ce"
+  },
+  "implementation_boundary": {
+    "view_model_files": [
+      "main/ui/ui_connectivity.c",
+      "main/ui/ui_connectivity.h"
+    ],
+    "integration_file": "main/ui/ui_phase1.c",
+    "wifi_build_runtime_and_phase_truth": true,
+    "ble_build_transport_and_enabled_truth": true,
+    "build_disabled_controls_omitted": true,
+    "unsupported_transport_controls_omitted": true,
+    "enabled_but_unavailable_state_visible": true,
+    "pure_model_has_no_lvgl_storage_rf_or_rp2040_side_effects": true,
+    "live_wifi_reconnect_acceptance": false,
+    "live_ble_transport_acceptance": false,
+    "physical_ui_acceptance": false
+  },
+  "exact_main_gate": {
+    "actions_run": 29374390847,
+    "validated_main_sha": "bd201a1fa561d67082012c6ebec0e0e554e60e58",
+    "validated_tree_sha": "344d1c24f485955cfc3904367f4767fe52019614",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 1026,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "artifact_zip_total_bytes": 23018777,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73786407,
+    "downloaded_tree_sha256": "ebe1779ca587a784fd126d5b2b094a84e7ada728622dd6416944fb0089b80022",
+    "firmware_manifest_sha256": "d28aa434a68a43f387b1277e79aff5b0361f22719d481924c609812752ccf850",
+    "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+    "release_manifest_sha256": "9067db97381bce5b1ae89af9edbfda2b20047dc1131060bf42e5d6ee36df5f09",
+    "release_package_manifest_json_sha256": "4721572d004620d556067a1b3f281682a4233fe05ca4d3f29d023cbd8bb86e55",
+    "provenance_sha256": "7d76200d65ed65b19ce1002c897143b3db2b4d4802c905bd0181948aad97a160",
+    "sbom_sha256": "bd268ad56155192deca5e983098843dd54473a560ef1b389063d92323f5ad956",
+    "release_audit_sha256": "c06fff49430e2d08f83c30a90f17e1ea3ec545dfdd22c7c25dadca2401a0b7f9",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "receipt_path": "F:/SIGUI-evidence/actions/main-bd201a1-qa/main_strict_gate_bd201a1fa561d67082012c6ebec0e0e554e60e58.json",
+    "receipt_sha256": "3d06276cbfca0566e0625baaa1189406f3c6cae45b50d2a50477486143ec0733",
+    "verdict": "exact_merged_main_connectivity_view_software_and_artifact_gate_banked"
+  },
+  "residual_wp14_gates": {
+    "closed": false,
+    "remaining": [
+      "complete_ui_runtime_owner_extraction",
+      "lifecycle_generation_and_redraw_invariants",
+      "live_wifi_and_ble_integration",
+      "exact_candidate_physical_ui_qualification"
+    ]
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp14_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "fourth_wp14_connectivity_view_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp14_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
