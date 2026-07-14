@@ -67,6 +67,9 @@ ORACLE_ADAPTER_PATH = ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle.cpp"
 ORACLE_VECTORS_PATH = (
     ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle_vectors.cpp"
 )
+ORACLE_ADMIN_SESSION_FIXTURE_PATH = (
+    ROOT / "tests" / "meshcore_oracle" / "meshcore_admin_session_fixture.cpp"
+)
 ED25519_ROOT = ROOT / "third_party" / "MeshCore" / "lib" / "ed25519"
 ED25519_DEFINED_ROOT = ROOT / "overlays" / "meshcore_ed25519_defined"
 ED25519_VERIFY_SOURCES = [
@@ -448,8 +451,8 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": (
-            "request_schema_tags_and_concrete_packet_pool_dispatch_"
-            "execution_fixtures"
+            "concrete_packet_pool_dispatch_runtime_and_physical_delivery_"
+            "evidence"
         ),
         "implemented_prerequisites": [
             "anonymous_login_request_packets",
@@ -462,7 +465,9 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "authenticated_request_replay_transition_fixtures",
             "authenticated_text_replay_response_session_fixtures",
             "login_response_creation_dispatch_orchestration_fixtures",
+            "host_authenticated_admin_session_fixture",
         ],
+        "host_only_receipt": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
     },
     {
         "id": "signed_advert_packet_creation",
@@ -954,6 +959,7 @@ EXPECTED_ORACLE_PACKET_TYPES = [
 ]
 EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
     "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+    "third_party/MeshCore/examples/simple_repeater/MyMesh.h",
     "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
     "third_party/MeshCore/src/Dispatcher.cpp",
     "third_party/MeshCore/src/Dispatcher.h",
@@ -1006,6 +1012,134 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
 EXPECTED_ORACLE_VENDORED_CRYPTO_SOURCE_PATHS = {
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c",
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h",
+}
+HOST_ADMIN_NEGATIVE_MATRIX = [
+    "wrong_password",
+    "wrong_full_key_colliding_prefix",
+    "wrong_secret_mac",
+    "malformed_payload",
+    "truncated_payload",
+    "extra_payload",
+    "unsolicited_response",
+    "wrong_tag_response",
+    "duplicate_response",
+    "late_response",
+    "replayed_response",
+    "replayed_request",
+    "stale_replayed_login_timestamp",
+    "permission_failure",
+    "response_from_another_full_identity",
+    "request_from_another_full_identity",
+]
+HOST_ADMIN_REPEATER_STATS_FIELD_ORDER = [
+    "batt_milli_volts",
+    "curr_tx_queue_len",
+    "noise_floor",
+    "last_rssi",
+    "n_packets_recv",
+    "n_packets_sent",
+    "total_air_time_secs",
+    "total_up_time_secs",
+    "n_sent_flood",
+    "n_sent_direct",
+    "n_recv_flood",
+    "n_recv_direct",
+    "err_events",
+    "last_snr",
+    "n_direct_dups",
+    "n_flood_dups",
+    "total_rx_air_time_secs",
+    "n_recv_errors",
+]
+EXPECTED_HOST_ADMIN_REPEATER_STATS = {
+    "batt_milli_volts": 3700,
+    "curr_tx_queue_len": 7,
+    "noise_floor": -117,
+    "last_rssi": -83,
+    "n_packets_recv": 0x01020304,
+    "n_packets_sent": 0x11121314,
+    "total_air_time_secs": 0x21222324,
+    "total_up_time_secs": 0x31323334,
+    "n_sent_flood": 0x41424344,
+    "n_sent_direct": 0x51525354,
+    "n_recv_flood": 0x61626364,
+    "n_recv_direct": 0x71727374,
+    "err_events": 0x8182,
+    "last_snr": -20,
+    "n_direct_dups": 0x9192,
+    "n_flood_dups": 0xA1A2,
+    "total_rx_air_time_secs": 0xB1B2B3B4,
+    "n_recv_errors": 0xC1C2C3C4,
+}
+HOST_ADMIN_GET_STATUS_RESPONSE_HEX = (
+    "05030201740e07008bffadff0403020114131211242322213433323144434241"
+    "5453525164636261747372718281ecff9291a2a1b4b3b2b1c4c3c2c1"
+)
+EXPECTED_HOST_ADMIN_SESSION_FIXTURE = {
+    "schema_version": 1,
+    "receipt_id": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
+    "status": "implemented",
+    "host_only": True,
+    "production_runtime_proven": False,
+    "wp18_closure_eligible": False,
+    "rf_closure_eligible": False,
+    "ui_closure_eligible": False,
+    "hardware_closure_eligible": False,
+    "source": "tests/meshcore_oracle/meshcore_admin_session_fixture.cpp",
+    "receipt_field": "admin_session_fixture",
+    "identity_bytes": 32,
+    "login_payload_type": "ANON_REQ",
+    "login_response_bytes": 13,
+    "request_schema": (
+        "LE32 unique tag, GET_STATUS 0x01, four reserved zero bytes, four "
+        "deterministic uniqueness bytes"
+    ),
+    "response_schema": (
+        "LE32 reflected request tag followed by the explicit little-endian "
+        "56-byte RepeaterStats fields in simple_repeater/MyMesh.h order"
+    ),
+    "get_status_response_bytes": 60,
+    "repeater_stats_bytes": 56,
+    "repeater_stats_field_order": HOST_ADMIN_REPEATER_STATS_FIELD_ORDER,
+    "response_correlation": "exact LE32 tag and complete 32-byte server identity",
+    "routes": ["direct", "flood_path_return"],
+    "lifecycle": [
+        "timeout_pending_login_state_zeroization",
+        "timeout_pending_request_state_zeroization",
+        "explicit_logout_client_server_session_zeroization",
+    ],
+    "positive_checks": 6,
+    "negative_checks": 16,
+    "negative_matrix": HOST_ADMIN_NEGATIVE_MATRIX,
+    "pinned_upstream_sources": [
+        "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+        "third_party/MeshCore/src/helpers/ClientACL.cpp",
+        "third_party/MeshCore/src/helpers/ClientACL.h",
+        "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+        "third_party/MeshCore/examples/simple_repeater/MyMesh.h",
+        "third_party/MeshCore/src/Mesh.cpp",
+        "third_party/MeshCore/src/Packet.cpp",
+        "third_party/MeshCore/src/Utils.cpp",
+    ],
+}
+EXPECTED_HOST_ONLY_EVIDENCE = {
+    "id": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
+    "status": "implemented",
+    "receipt_field": "admin_session_fixture",
+    "host_only": True,
+    "production_runtime_proven": False,
+    "wp18_closure_eligible": False,
+    "rf_closure_eligible": False,
+    "ui_closure_eligible": False,
+    "hardware_closure_eligible": False,
+    "full_identity_bytes": 32,
+    "prefix_authorization": False,
+    "positive_checks": 6,
+    "negative_checks": 16,
+    "remaining_surface_status": (
+        "partial_until_concrete_packet_pool_dispatch_runtime_and_physical_"
+        "delivery_evidence"
+    ),
 }
 
 
@@ -1145,6 +1279,10 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle vendored-crypto source allowlist drifted")
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
+    if manifest.get("host_admin_session_fixture") != (
+        EXPECTED_HOST_ADMIN_SESSION_FIXTURE
+    ):
+        raise GateFailure("host admin-session fixture contract drifted")
     if manifest.get("vectors") != {
         "roundtrip": 338,
         "valid": 144,
@@ -1809,6 +1947,8 @@ def load_oracle_manifest() -> dict[str, Any]:
         "tests/meshcore_oracle/coverage_manifest.json",
         "tests/meshcore_oracle/meshcore_oracle.cpp",
         "tests/meshcore_oracle/meshcore_oracle.h",
+        "tests/meshcore_oracle/meshcore_admin_session_fixture.cpp",
+        "tests/meshcore_oracle/meshcore_admin_session_fixture.h",
         "tests/meshcore_oracle/meshcore_oracle_vectors.cpp",
         "tests/meshcore_oracle/stubs/AES.h",
         "tests/meshcore_oracle/stubs/Arduino.h",
@@ -1888,6 +2028,8 @@ def load_oracle_coverage_manifest(
         raise GateFailure("oracle coverage manifest must reject WP-04 closure")
     if coverage.get("closure_ready") is not False:
         raise GateFailure("oracle coverage manifest must remain fail closed")
+    if coverage.get("host_only_evidence") != EXPECTED_HOST_ONLY_EVIDENCE:
+        raise GateFailure("oracle host-only evidence contract drifted")
 
     capabilities = oracle_manifest["capabilities"]
     capability_by_id = {entry["id"]: entry for entry in capabilities}
@@ -2382,12 +2524,32 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
         ],
         [
             cxx,
+            "-std=c++17",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            common_sanitizers,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(ORACLE_ADAPTER_PATH.parent),
+            "-isystem",
+            str(ROOT / "third_party" / "MeshCore" / "src"),
+            "-c",
+            str(ORACLE_ADMIN_SESSION_FIXTURE_PATH),
+            "-o",
+            str(Path(build_dir) / "meshcore_admin_session_fixture.o"),
+        ],
+        [
+            cxx,
             common_sanitizers,
             str(Path(build_dir) / "meshcore_oracle_packet.o"),
             str(Path(build_dir) / "meshcore_advert_data.o"),
             str(Path(build_dir) / "meshcore_oracle_aes.o"),
             str(Path(build_dir) / "meshcore_oracle_utils.o"),
             str(Path(build_dir) / "meshcore_oracle_adapter.o"),
+            str(Path(build_dir) / "meshcore_admin_session_fixture.o"),
             str(Path(build_dir) / "meshcore_oracle_vectors.o"),
             *[
                 str(Path(build_dir) / f"meshcore_ed25519_{source.stem}.o")
@@ -2760,6 +2922,93 @@ def parse_oracle_output(stdout: str) -> dict[str, Any]:
     raise GateFailure("MeshCore oracle did not emit its JSON result")
 
 
+def validate_host_admin_session_receipt(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise GateFailure("host admin-session receipt is missing")
+    required = {
+        "schema_version": value.get("schema_version") == 1,
+        "artifact_type": value.get("artifact_type")
+        == "meshcore_host_admin_session_fixture",
+        "receipt_id": value.get("receipt_id")
+        == EXPECTED_HOST_ADMIN_SESSION_FIXTURE["receipt_id"],
+        "status": value.get("status") == "pass",
+        "host_only": value.get("host_only") is True,
+        "production_runtime": value.get("production_runtime_proven") is False,
+        "wp18": value.get("wp18_closure_eligible") is False,
+        "rf": value.get("rf_closure_eligible") is False,
+        "ui": value.get("ui_closure_eligible") is False,
+        "hardware": value.get("hardware_closure_eligible") is False,
+        "upstream": value.get("upstream_commit") == EXPECTED_UPSTREAM["commit"],
+        "positive": value.get("positive_checks") == 6,
+        "negative": value.get("negative_checks") == 16,
+        "source_contract": value.get("source_contract")
+        == {
+            "login_request": (
+                "BaseChatMesh::sendLogin plus Mesh::createAnonDatagram"
+            ),
+            "login_server": (
+                "simple_repeater::handleLoginReq and ClientACL full-key rules"
+            ),
+            "request": "BaseChatMesh::sendRequest(uint8_t) exact 13-byte schema",
+            "response": (
+                "simple_repeater::handleRequest reflected LE32 tag plus explicit "
+                "little-endian 56-byte RepeaterStats in MyMesh.h order"
+            ),
+            "direct_and_flood_return": (
+                "simple_repeater::onAnonDataRecv and onPeerDataRecv"
+            ),
+        },
+        "transcript": isinstance(value.get("transcript"), list)
+        and all(isinstance(entry, dict) for entry in value["transcript"])
+        and [entry.get("seq") for entry in value["transcript"]]
+        == list(range(1, 12)),
+        "invariants": value.get("invariants")
+        == {
+            "identity_bytes": 32,
+            "prefix_authorization": False,
+            "login_payload_type": 7,
+            "request_payload_type": 0,
+            "response_payload_type": 1,
+            "admin_permissions": 3,
+            "login_response_bytes": 13,
+            "get_status_request_bytes": 13,
+            "repeater_stats_bytes": 56,
+            "repeater_stats_fields": 18,
+            "get_status_response_bytes": 60,
+            "get_status_type": 1,
+            "login_timestamp": 0x01020304,
+            "request_tag": 0x01020305,
+        },
+        "canonical_bytes": value.get("canonical_bytes")
+        == {
+            "get_status_request_hex": "050302010100000000a1b2c3d4",
+            "login_response_hex": "88776655000001031020304002",
+            "get_status_response_hex": HOST_ADMIN_GET_STATUS_RESPONSE_HEX,
+        },
+        "repeater_stats": value.get("repeater_stats")
+        == EXPECTED_HOST_ADMIN_REPEATER_STATS,
+        "zeroization": value.get("zeroization")
+        == {
+            "timeout_pending_state": True,
+            "timeout_pending_login_state": True,
+            "explicit_logout_client_server_session": True,
+        },
+    }
+    negative = value.get("negative_matrix")
+    required["negative_matrix"] = (
+        isinstance(negative, list)
+        and all(isinstance(entry, dict) for entry in negative)
+        and [entry.get("id") for entry in negative]
+        == HOST_ADMIN_NEGATIVE_MATRIX
+        and all(entry.get("rejected") is True for entry in negative)
+    )
+    failed = [name for name, passed in required.items() if not passed]
+    if failed:
+        raise GateFailure(
+            "host admin-session receipt drifted: " + ", ".join(failed)
+        )
+
+
 def completed_fuzz_runs(stderr: str, requested: int) -> int | None:
     final_stats = re.findall(r"stat::number_of_executed_units:\s*(\d+)", stderr)
     if final_stats:
@@ -2985,6 +3234,9 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             )
             oracle_result = parse_oracle_output(oracle.stdout)
             report["oracle"]["result"] = oracle_result
+            validate_host_admin_session_receipt(
+                oracle_result.get("admin_session_fixture")
+            )
             if (
                 oracle_result.get("passed") is not True
                 or oracle_result.get("coverage_boundary")
