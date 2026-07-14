@@ -19,6 +19,8 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES 31U
 #define D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES 15U
 #define D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES 167U
+#define D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES 13U
+#define D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES 4U
 #define D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES 32U
 #define D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES 32U
 #define D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES 4U
@@ -253,6 +255,40 @@ bool d1l_meshcore_oracle_parse_request_response_packet(
     size_t expected_plaintext_len,
     uint8_t *out_plaintext,
     size_t plaintext_capacity);
+
+/*
+ * Canonical successful login RESPONSE schema emitted by the pinned
+ * simple_repeater and simple_room_server implementations. The 13 plaintext
+ * bytes are server timestamp (little-endian), response code zero, legacy
+ * keep-alive zero, the server-specific role indicator, permissions, four
+ * caller-supplied uniqueness bytes, and the server-specific firmware level.
+ * server_advert_type accepts only REPEATER or ROOM. Creation and parsing use
+ * the authenticated regular RESPONSE datagram boundary above and publish no
+ * output until the complete schema is authenticated and canonical.
+ *
+ * This deterministic fixture does not compare passwords, look up or mutate an
+ * ACL/contact, enforce replay/timestamps, derive a secret, establish retained
+ * session state, dispatch/schedule a packet, choose a route, or claim RF.
+ */
+bool d1l_meshcore_oracle_create_login_response_packet(
+    uint8_t server_advert_type,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t server_timestamp,
+    uint8_t permissions,
+    const uint8_t uniqueness[D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES],
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_login_response_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t server_advert_type,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t *out_server_timestamp,
+    uint8_t *out_permissions,
+    uint8_t out_uniqueness[D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES]);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash

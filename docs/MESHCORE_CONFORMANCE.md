@@ -39,8 +39,9 @@ known-answer vectors before it is allowed to exercise pinned `mesh::Utils`.
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 2 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
 `AdvertDataBuilder`/`AdvertDataParser` app-data helpers and bounded
-public-group, anonymous-login, regular REQ/RESPONSE, plain-DM, DM ACK+PATH,
-and general PATH-return operations. Its version 16 static
+public-group, anonymous-login, regular REQ/RESPONSE, canonical repeater/room
+login-response, plain-DM, DM ACK+PATH, and general PATH-return operations. Its
+version 17 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -135,8 +136,9 @@ paths, nonzero padding, and redundant blocks. Because the wire carries no
 logical plaintext length, parsing requires a caller-supplied schema length and
 accepts only its minimal AES block count with zero padding. Empty datagrams are
 excluded because the pinned receive path rejects their MAC-only form. Request
-tags/types, response schemas, identity or secret derivation, authorization,
-replay/session/admin state, dispatch, route choice, and RF remain excluded.
+tags/types, response schemas beyond the canonical login success schema,
+identity or secret derivation, authorization, replay/session/admin state,
+dispatch, route choice, and RF remain excluded.
 The identity shared-secret capability adds five symmetric valid-input round
 trips and nine rejects. Fixed seed pairs, including an all-zero seed, pin the
 seed-to-keypair step and the vendored Edwards-y-to-Montgomery ladder. Every
@@ -152,6 +154,22 @@ valid-input `LocalIdentity::calcSharedSecret` parity; upstream itself accepts
 unchecked peer bytes. Persisted-private-key loading, contact lookup,
 authorization, signature handling, session/admin state, dispatch, routing,
 local production-call-site hardening, and RF remain excluded.
+The canonical login-response capability adds ten authenticated round trips and
+thirty-four rejects. Repeater and room guest, read-only, read-write, admin, and
+flagged-role permissions pin the shared 13-byte success schema: little-endian
+server timestamp, zero response code and legacy keep-alive, server-specific
+role indicator, full permissions, four uniqueness bytes, and the pinned
+server-specific firmware level. Independently generated repeater-admin and
+room-guest exact payloads plus a ten-payload SHA-256 matrix pin the one-byte
+destination/source hashes, AES-128 ECB ciphertext, and two-byte HMAC. Every
+accepted packet receives a flood or direct wire round trip before parsing.
+Rejects cover unsupported server types, nulls, wrong hashes or secret,
+type/version/envelope errors, MAC/ciphertext tampering, authenticated schema
+and role mismatches, wrong firmware, nonzero padding, legacy `OK`, and output
+preservation. This deterministic server-emitted response fixture does not
+compare passwords, reuse or mutate an ACL/contact, enforce replay timestamps,
+assign a shared secret, transition retained session/push/path state, correlate
+the companion pending login, dispatch, route, schedule, or claim RF.
 The DM capability adds 268 authenticated round trips: every attempt value from
 0 through 255, the normal 160-byte and extended-attempt 158-byte text
 boundaries, and all ten normal text lengths from 11 through 155 whose complete
@@ -200,7 +218,8 @@ signatures on every vector run. The source hashes pin the verifier's transitive
 C headers and sources, the keypair/signer/shared-secret recipe, `key_exchange.c`,
 `advert_data.h`, the shared
 canonical scalar/point guard, the D1L CMake/service binding, pinned
-`BaseChatMesh`/`Utils` source, and the vendored AES source. The functional host
+`BaseChatMesh`/`Utils` source, the repeater/room response-schema sources, and the
+vendored AES source. The functional host
 SHA/HMAC adapter is source-pinned and independently checked; no upstream crypto
 mock is accepted. The job emits
 `meshcore_oracle_manifest_<full-commit>.json` beside the existing conformance
@@ -225,7 +244,7 @@ The exact packet registry and blocker receipts are copied into
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
 capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
@@ -243,7 +262,8 @@ closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public/DM dispatch, delivery,
 session state, ACK correlation/delivery state, PATH dispatch/route selection,
-TRACE forwarding/path discovery, and login response/authorization/replay/session/admin flows also remain pending, so
+TRACE forwarding/path discovery, and login authorization/ACL/replay/session/admin
+transition flows also remain pending, so
 both `wp04_closure_eligible` and `closure_ready` remain false. Expected-ACK
 derivation and the ACK-specific encrypted PATH body are now deterministic with
 caller-supplied identity/hash/secret/RNG inputs; that bounded primitive must not
@@ -271,9 +291,11 @@ Anonymous login-request framing is implemented with caller-supplied outer
 identity, secret, time, and room mode. Regular REQ/RESPONSE datagram crypto is
 also implemented with caller-supplied type, hashes, secret, and logical length,
 and deterministic valid-input identity shared-secret derivation is pinned to
-the vendored ladder. Login response schemas, request tags/types, authorization,
-replay, session, and admin behavior still require identity signature handling
-plus deterministic admin-session fixtures. These receipts describe missing
+the vendored ladder. The canonical repeater/room login-success response schema
+is implemented, but request tags/types, password authorization, blank-password
+ACL reuse, contact mutation/eviction, replay, session transitions, and admin
+behavior still require identity signature handling plus deterministic state
+fixtures. These receipts describe missing
 oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
@@ -332,7 +354,8 @@ This bounded gate makes no claim about:
   and the D1L signed-advert message layout and pinned C Ed25519 verifier plus
   valid-input identity shared-secret derivation; it does not cover persisted
   key loading/management, DM sessions,
-  request/response schemas or tags, dispatch, ACK correlation/delivery, or
+  request/response schemas or tags beyond the bounded canonical login-success
+  response, dispatch, ACK correlation/delivery, or
   retained state;
 - semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
   traffic. Public-group payload creation/parsing, plain-DM layout/crypto,

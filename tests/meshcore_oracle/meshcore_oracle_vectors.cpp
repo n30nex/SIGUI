@@ -40,6 +40,8 @@ constexpr std::size_t kLoginRequestRoundtripVectors = 6U;
 constexpr std::size_t kLoginRequestInvalidVectors = 35U;
 constexpr std::size_t kRequestResponseRoundtripVectors = 6U;
 constexpr std::size_t kRequestResponseInvalidVectors = 30U;
+constexpr std::size_t kLoginResponseRoundtripVectors = 10U;
+constexpr std::size_t kLoginResponseInvalidVectors = 34U;
 constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
@@ -2321,6 +2323,396 @@ int main()
         full_secret.data(), 1U, rejected_request_response_plaintext.data(),
         rejected_request_response_plaintext.size());
 
+    struct LoginResponseVector {
+        const char *name;
+        uint8_t server_type;
+        uint32_t timestamp;
+        uint8_t permissions;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES> uniqueness;
+    };
+    constexpr uint8_t login_response_destination_hash = 0x03U;
+    constexpr uint8_t login_response_source_hash = 0xA1U;
+    const std::array<LoginResponseVector, kLoginResponseRoundtripVectors>
+        login_response_vectors = {{
+            {"repeater guest", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0x00000000U, 0x00U, {0x00U, 0x00U, 0x00U, 0x00U}},
+            {"repeater read-only", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0x11111111U, 0x01U, {0x01U, 0x02U, 0x03U, 0x04U}},
+            {"repeater read-write", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0x22222222U, 0x02U, {0x05U, 0x06U, 0x07U, 0x08U}},
+            {"repeater admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0x12345678U, 0x03U, {0x01U, 0x02U, 0x03U, 0x04U}},
+            {"repeater flagged admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0xFFFFFFFFU, 0x83U, {0xFFU, 0x00U, 0xAAU, 0x55U}},
+            {"room exact guest", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0x01020304U, 0x00U, {0x10U, 0x20U, 0x30U, 0x40U}},
+            {"room read-only", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0x33333333U, 0x01U, {0x09U, 0x0AU, 0x0BU, 0x0CU}},
+            {"room read-write", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0x44444444U, 0x02U, {0x0DU, 0x0EU, 0x0FU, 0x10U}},
+            {"room admin", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0x55555555U, 0x03U, {0x11U, 0x12U, 0x13U, 0x14U}},
+            {"room flagged guest", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0xABCDEF01U, 0x80U, {0x21U, 0x43U, 0x65U, 0x87U}},
+        }};
+    const std::array<uint8_t, 20U> expected_repeater_admin_payload = {
+        0x03U, 0xA1U, 0xFCU, 0xD0U, 0xB3U, 0x4CU, 0xA0U, 0xF5U, 0xD6U,
+        0xD4U, 0x59U, 0xF6U, 0x0AU, 0x59U, 0x4AU, 0x5CU, 0x80U, 0x96U,
+        0xD7U, 0xE4U};
+    const std::array<uint8_t, 20U> expected_room_guest_payload = {
+        0x03U, 0xA1U, 0xACU, 0x7FU, 0x42U, 0xB2U, 0x77U, 0x61U, 0xA5U,
+        0x1AU, 0xEEU, 0x3CU, 0x1EU, 0xFDU, 0x2BU, 0x7FU, 0xDAU, 0x8BU,
+        0x5EU, 0x39U};
+    const std::array<uint8_t, 32U> expected_login_response_matrix_sha256 = {
+        0x80U, 0xE9U, 0x78U, 0xC0U, 0xFEU, 0x08U, 0x14U, 0xE4U,
+        0xB3U, 0xB3U, 0x06U, 0xEEU, 0xB7U, 0x73U, 0x75U, 0x5BU,
+        0xAFU, 0x8AU, 0x67U, 0x9DU, 0xAFU, 0xDFU, 0xE2U, 0x6AU,
+        0x90U, 0x7AU, 0x51U, 0x75U, 0x4FU, 0x79U, 0x87U, 0xF4U};
+    constexpr std::array<uint8_t, 2U> login_response_direct_path = {
+        0x21U, 0x43U};
+    SHA256 login_response_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_repeater_guest_response{};
+    for (std::size_t index = 0U; index < login_response_vectors.size();
+         ++index) {
+        const LoginResponseVector &vector = login_response_vectors[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        if (!d1l_meshcore_oracle_create_login_response_packet(
+                vector.server_type, login_response_destination_hash,
+                login_response_source_hash, full_secret.data(),
+                vector.timestamp, vector.permissions, vector.uniqueness.data(),
+                &packet) ||
+            packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_RESPONSE << PH_TYPE_SHIFT) ||
+            packet.path_len != 0U || packet.payload_len != 20U) {
+            failures.push_back(std::string(vector.name) +
+                               " login response creation changed");
+            continue;
+        }
+        if ((index == 3U &&
+             std::memcmp(packet.payload, expected_repeater_admin_payload.data(),
+                         expected_repeater_admin_payload.size()) != 0) ||
+            (index == 5U &&
+             std::memcmp(packet.payload, expected_room_guest_payload.data(),
+                         expected_room_guest_payload.size()) != 0)) {
+            failures.push_back(std::string(vector.name) +
+                               " login response golden payload changed");
+        }
+        login_response_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 0U) valid_repeater_guest_response = packet;
+
+        d1l_meshcore_oracle_packet_t routed = packet;
+        uint8_t priority = 0U;
+        const bool route_ok = (index & 1U) == 0U
+            ? d1l_meshcore_oracle_prepare_flood(
+                  &routed, static_cast<uint8_t>((index % 3U) + 1U), 0U,
+                  nullptr, &priority)
+            : d1l_meshcore_oracle_prepare_direct(
+                  &routed, login_response_direct_path.data(), 0x02U,
+                  &priority);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> wire{};
+        size_t wire_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        uint32_t parsed_timestamp = 0U;
+        uint8_t parsed_permissions = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES>
+            parsed_uniqueness{};
+        const uint8_t expected_priority = (index & 1U) == 0U ? 1U : 0U;
+        if (!route_ok || priority != expected_priority ||
+            !d1l_meshcore_oracle_packet_encode(
+                &routed, wire.data(), wire.size(), &wire_len) ||
+            !d1l_meshcore_oracle_packet_decode(wire.data(), wire_len,
+                                               &decoded) ||
+            !d1l_meshcore_oracle_parse_login_response_packet(
+                &decoded, vector.server_type, login_response_destination_hash,
+                login_response_source_hash, full_secret.data(),
+                &parsed_timestamp, &parsed_permissions,
+                parsed_uniqueness.data()) ||
+            parsed_timestamp != vector.timestamp ||
+            parsed_permissions != vector.permissions ||
+            parsed_uniqueness != vector.uniqueness) {
+            failures.push_back(std::string(vector.name) +
+                               " login response authenticated wire roundtrip changed");
+        }
+    }
+    std::array<uint8_t, 32U> login_response_matrix_digest{};
+    login_response_matrix_sha.finalize(login_response_matrix_digest.data(),
+                                       login_response_matrix_digest.size());
+    if (login_response_matrix_digest != expected_login_response_matrix_sha256) {
+        failures.push_back("login response payload matrix digest changed");
+    }
+
+    auto expect_login_response_create_reject =
+        [&failures, &full_secret](const char *name, uint8_t server_type,
+                                  const uint8_t *secret,
+                                  const uint8_t *uniqueness,
+                                  d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA7, sizeof(*output));
+                before = *output;
+            }
+            if (d1l_meshcore_oracle_create_login_response_packet(
+                    server_type, login_response_destination_hash,
+                    login_response_source_hash, secret, 0x12345678U, 0x03U,
+                    uniqueness, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(before)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " login response create reject changed output");
+            }
+            (void)full_secret;
+        };
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES>
+        login_response_uniqueness = {0x01U, 0x02U, 0x03U, 0x04U};
+    d1l_meshcore_oracle_packet_t rejected_login_response{};
+    expect_login_response_create_reject(
+        "none server", D1L_MESHCORE_ADVERT_TYPE_NONE, full_secret.data(),
+        login_response_uniqueness.data(), &rejected_login_response);
+    expect_login_response_create_reject(
+        "chat server", D1L_MESHCORE_ADVERT_TYPE_CHAT, full_secret.data(),
+        login_response_uniqueness.data(), &rejected_login_response);
+    expect_login_response_create_reject(
+        "sensor server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, full_secret.data(),
+        login_response_uniqueness.data(), &rejected_login_response);
+    expect_login_response_create_reject(
+        "null secret", D1L_MESHCORE_ADVERT_TYPE_REPEATER, nullptr,
+        login_response_uniqueness.data(), &rejected_login_response);
+    expect_login_response_create_reject(
+        "null uniqueness", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        full_secret.data(), nullptr, &rejected_login_response);
+    expect_login_response_create_reject(
+        "null output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, full_secret.data(),
+        login_response_uniqueness.data(), nullptr);
+
+    auto expect_login_response_parse_reject =
+        [&failures, &full_secret](
+            const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t server_type, uint8_t destination_hash, uint8_t source_hash,
+            const uint8_t *secret, uint32_t *timestamp, uint8_t *permissions,
+            uint8_t *uniqueness) {
+            if (timestamp != nullptr) *timestamp = 0xAAAAAAAAU;
+            if (permissions != nullptr) *permissions = 0xBBU;
+            if (uniqueness != nullptr) {
+                std::memset(uniqueness, 0xCC,
+                            D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES);
+            }
+            if (d1l_meshcore_oracle_parse_login_response_packet(
+                    packet, server_type, destination_hash, source_hash, secret,
+                    timestamp, permissions, uniqueness) ||
+                (timestamp != nullptr && *timestamp != 0xAAAAAAAAU) ||
+                (permissions != nullptr && *permissions != 0xBBU) ||
+                (uniqueness != nullptr &&
+                 !std::all_of(
+                     uniqueness,
+                     uniqueness + D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES,
+                     [](uint8_t value) { return value == 0xCCU; }))) {
+                failures.push_back(std::string(name) +
+                                   " login response parse reject changed output");
+            }
+            (void)full_secret;
+        };
+    auto expect_standard_login_response_parse_reject =
+        [&expect_login_response_parse_reject, &full_secret](
+            const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t server_type = D1L_MESHCORE_ADVERT_TYPE_REPEATER) {
+            uint32_t timestamp = 0U;
+            uint8_t permissions = 0U;
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES>
+                uniqueness{};
+            expect_login_response_parse_reject(
+                name, packet, server_type, login_response_destination_hash,
+                login_response_source_hash, full_secret.data(), &timestamp,
+                &permissions, uniqueness.data());
+        };
+    uint32_t rejected_login_response_timestamp = 0U;
+    uint8_t rejected_login_response_permissions = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES>
+        rejected_login_response_uniqueness{};
+    expect_login_response_parse_reject(
+        "null packet", nullptr, D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        login_response_destination_hash, login_response_source_hash,
+        full_secret.data(), &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "none server", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_NONE, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "sensor server", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_SENSOR, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "null secret", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, nullptr,
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "null timestamp", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(), nullptr,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "null permissions", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp, nullptr,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "null uniqueness", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions, nullptr);
+    expect_login_response_parse_reject(
+        "wrong destination", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        static_cast<uint8_t>(login_response_destination_hash ^ 1U),
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "wrong source", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        static_cast<uint8_t>(login_response_source_hash ^ 1U),
+        full_secret.data(), &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "wrong secret", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, public_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+
+    d1l_meshcore_oracle_packet_t malformed_login_response =
+        valid_repeater_guest_response;
+    malformed_login_response.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_standard_login_response_parse_reject("future version",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_REQ << PH_TYPE_SHIFT);
+    expect_standard_login_response_parse_reject("request packet",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.payload_len -= 1U;
+    expect_standard_login_response_parse_reject("truncated payload",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.payload_len += 1U;
+    expect_standard_login_response_parse_reject("extra payload byte",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.payload[2] ^= 0x01U;
+    expect_standard_login_response_parse_reject("tampered MAC",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.payload[4] ^= 0x01U;
+    expect_standard_login_response_parse_reject("tampered ciphertext",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.path_len = 0xFFU;
+    expect_standard_login_response_parse_reject("invalid path length",
+                                                &malformed_login_response);
+
+    auto make_raw_login_response_packet =
+        [&full_secret](const uint8_t *plaintext, std::size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_RESPONSE << PH_TYPE_SHIFT);
+            packet.payload[0] = login_response_destination_hash;
+            packet.payload[1] = login_response_source_hash;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[2], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+            return packet;
+        };
+    auto authenticated_schema_reject =
+        [&make_raw_login_response_packet,
+         &expect_standard_login_response_parse_reject](
+            const char *name, std::array<uint8_t, 16U> plaintext,
+            uint8_t server_type) {
+            const d1l_meshcore_oracle_packet_t packet =
+                make_raw_login_response_packet(plaintext.data(),
+                                               plaintext.size());
+            expect_standard_login_response_parse_reject(name, &packet,
+                                                        server_type);
+        };
+    const std::array<uint8_t, 16U> repeater_guest_plaintext = {
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x02U, 0x00U, 0x00U, 0x00U};
+    const std::array<uint8_t, 16U> repeater_admin_plaintext = {
+        0x78U, 0x56U, 0x34U, 0x12U, 0x00U, 0x00U, 0x01U, 0x03U,
+        0x01U, 0x02U, 0x03U, 0x04U, 0x02U, 0x00U, 0x00U, 0x00U};
+    const std::array<uint8_t, 16U> room_guest_plaintext = {
+        0x04U, 0x03U, 0x02U, 0x01U, 0x00U, 0x00U, 0x02U, 0x00U,
+        0x10U, 0x20U, 0x30U, 0x40U, 0x01U, 0x00U, 0x00U, 0x00U};
+    const std::array<uint8_t, 16U> room_flagged_guest_plaintext = {
+        0x01U, 0xEFU, 0xCDU, 0xABU, 0x00U, 0x00U, 0x00U, 0x80U,
+        0x21U, 0x43U, 0x65U, 0x87U, 0x01U, 0x00U, 0x00U, 0x00U};
+    const std::array<uint8_t, 16U> room_admin_plaintext = {
+        0x55U, 0x55U, 0x55U, 0x55U, 0x00U, 0x00U, 0x01U, 0x03U,
+        0x11U, 0x12U, 0x13U, 0x14U, 0x01U, 0x00U, 0x00U, 0x00U};
+    auto invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[4] = 1U;
+    authenticated_schema_reject("nonzero response code", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[5] = 1U;
+    authenticated_schema_reject("nonzero legacy keepalive", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[6] = 1U;
+    authenticated_schema_reject("repeater guest admin marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = repeater_admin_plaintext;
+    invalid_plaintext[6] = 0U;
+    authenticated_schema_reject("repeater admin guest marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = room_guest_plaintext;
+    invalid_plaintext[6] = 0U;
+    authenticated_schema_reject("room exact guest marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_ROOM);
+    invalid_plaintext = room_flagged_guest_plaintext;
+    invalid_plaintext[6] = 2U;
+    authenticated_schema_reject("room flagged guest marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_ROOM);
+    invalid_plaintext = room_admin_plaintext;
+    invalid_plaintext[6] = 0U;
+    authenticated_schema_reject("room admin guest marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_ROOM);
+    invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[12] = 1U;
+    authenticated_schema_reject("room firmware on repeater", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = room_guest_plaintext;
+    invalid_plaintext[12] = 2U;
+    authenticated_schema_reject("repeater firmware on room", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_ROOM);
+    invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[13] = 1U;
+    authenticated_schema_reject("nonzero canonical padding", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    const std::array<uint8_t, 4U> legacy_ok_plaintext = {'O', 'K', 0U, 0U};
+    malformed_login_response = make_raw_login_response_packet(
+        legacy_ok_plaintext.data(), legacy_ok_plaintext.size());
+    expect_standard_login_response_parse_reject("legacy OK response",
+                                                &malformed_login_response);
+
     constexpr uint8_t dm_destination_hash = 0xA1U;
     constexpr uint8_t dm_source_hash = 0xB2U;
     const std::array<uint8_t, 2U> short_dm_text = {'d', 'm'};
@@ -4453,7 +4845,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation\""
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -4464,6 +4856,7 @@ int main()
                    kIdentityExchangeRoundtripVectors +
                    kGroupRoundtripVectors + kLoginRequestRoundtripVectors +
                    kRequestResponseRoundtripVectors +
+                   kLoginResponseRoundtripVectors +
                   kDmRoundtripVectors +
                   kExpectedAckPathRoundtripVectors +
                   kPathReturnRoundtripVectors +
@@ -4481,6 +4874,7 @@ int main()
                    kIdentityExchangeInvalidVectors +
                    kGroupInvalidVectors + kLoginRequestInvalidVectors +
                    kRequestResponseInvalidVectors +
+                   kLoginResponseInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
                   kPathReturnInvalidVectors +
@@ -4499,8 +4893,10 @@ int main()
                   kGroupRoundtripVectors + kGroupInvalidVectors +
                    kLoginRequestRoundtripVectors +
                    kLoginRequestInvalidVectors +
-                   kRequestResponseRoundtripVectors +
-                   kRequestResponseInvalidVectors +
+                    kRequestResponseRoundtripVectors +
+                    kRequestResponseInvalidVectors +
+                    kLoginResponseRoundtripVectors +
+                    kLoginResponseInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -4525,8 +4921,10 @@ int main()
                   kGroupRoundtripVectors + kGroupInvalidVectors +
                    kLoginRequestRoundtripVectors +
                    kLoginRequestInvalidVectors +
-                   kRequestResponseRoundtripVectors +
-                   kRequestResponseInvalidVectors +
+                    kRequestResponseRoundtripVectors +
+                    kRequestResponseInvalidVectors +
+                    kLoginResponseRoundtripVectors +
+                    kLoginResponseInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -4610,8 +5008,17 @@ int main()
                << (kRequestResponseRoundtripVectors +
                    kRequestResponseInvalidVectors)
                << ",\"total\":"
-               << (kRequestResponseRoundtripVectors +
-                   kRequestResponseInvalidVectors)
+                << (kRequestResponseRoundtripVectors +
+                    kRequestResponseInvalidVectors)
+                << "}"
+               << ",\"canonical_login_response_packets\":{\"roundtrip\":"
+               << kLoginResponseRoundtripVectors << ",\"invalid\":"
+               << kLoginResponseInvalidVectors << ",\"semantic\":"
+               << (kLoginResponseRoundtripVectors +
+                   kLoginResponseInvalidVectors)
+               << ",\"total\":"
+               << (kLoginResponseRoundtripVectors +
+                   kLoginResponseInvalidVectors)
                << "}"
               << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
               << kDmRoundtripVectors << ",\"invalid\":"
@@ -4662,7 +5069,8 @@ int main()
                << ",\"identity_shared_secret_derivation\":true"
               << ",\"public_group_packets\":true"
                << ",\"anonymous_login_request_packets\":true"
-               << ",\"regular_request_response_packets\":true"
+                << ",\"regular_request_response_packets\":true"
+                << ",\"canonical_login_response_packets\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"path_return_route_codes\":true"

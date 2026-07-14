@@ -1,14 +1,16 @@
 {
   "schema_version": 1,
-  "corpus_version": 16,
+  "corpus_version": 17,
   "abi_version": 2,
-  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
     "path": "third_party/MeshCore",
     "commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "sources": {
+      "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp": "4e7ff8473e00260d4938d58fcf3192946be96dd2e490ab5252c1adec510fe526",
+      "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp": "efcaedf703aafd754b2a1ffbe01d31f780dd12fc9ae59fe1bf0e04f352dbd09d",
       "third_party/MeshCore/src/Dispatcher.cpp": "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e",
       "third_party/MeshCore/src/Dispatcher.h": "70eef11430c3aebb86e4e329978744bf20e8138ac27053045ad11aa7fc2a47bf",
       "third_party/MeshCore/src/Identity.cpp": "21e7b533928f2d7dd5b016c048b5c4971db6d475077c793947c17574dd057bd0",
@@ -24,6 +26,7 @@
       "third_party/MeshCore/src/helpers/AdvertDataHelpers.h": "c871a8e7e0e366c357da52e2994e009d4e7c14cd714b06ea5632b82bccf6dc0c",
       "third_party/MeshCore/src/helpers/BaseChatMesh.cpp": "1d18079bfd44ce4e341203497eb95fa4fd252391220535e808962d5c3d106c3c",
       "third_party/MeshCore/src/helpers/BaseChatMesh.h": "c111654035f27d805e9a3c5714a9f6e214ca226bb8f2a6d822dedc736ab0e7fc",
+      "third_party/MeshCore/src/helpers/ClientACL.h": "7e4e49b7e2992a97a08673dacd66089d7b31477b9f6f271dc5327db4c2104d15",
       "third_party/MeshCore/lib/ed25519/ed_25519.h": "9022487fe9120bbd4dc35dc717efc2177d22222c275ef46c9463653bf03026b2",
       "third_party/MeshCore/lib/ed25519/fe.c": "71082937da43def6ecaf7811c23410bd8ea763969dfec67383f8129b12b1926d",
       "third_party/MeshCore/lib/ed25519/fe.h": "0476ae2ebb86978d1e0b9fbeb63dcddd7566d6b74806db47dda7688df74aaafb",
@@ -53,10 +56,10 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "7257a78543750bb7d60118149d0c42ed99425d85216bea24286125c8ee260b48",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "ace88355955c3191466abb8680e27fb8be661631e3adb13ebb8616f8402f9807",
-    "tests/meshcore_oracle/meshcore_oracle.h": "5267badfe66d0a161aaaba5daf233301803b7e164b1bcc4f96c7f0575ff13fcf",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "1ed356841f90f2e643186674b5a885ac47660a6000d080f1ef8f1df27d7e6a7a",
+    "tests/meshcore_oracle/coverage_manifest.json": "e138877ef3ea2ecabd1ab4b507ca05b966b2fc776dbc351c58d8ef7e4b2a2208",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "3dd34b35f7eb9bb0a5b333116642b130c4365437fa35c36edd4c083b870a8ce6",
+    "tests/meshcore_oracle/meshcore_oracle.h": "8f35b4603cb5683abbd14579a10403db75206bafc6c3d1bd72b1c925cb82c24d",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "b4c07ef196eb6e54871b5ba90c0a35de69c6979b4f8d04dada876df4ee2f0e93",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -92,6 +95,8 @@
     "regular_request_response_scope": "authenticated_nonempty_req_response_create_parse_with_caller_supplied_type_hashes_secret_and_logical_length_only_no_schema_tag_authorization_replay_session_dispatch_route_or_rf",
     "identity_shared_secret_derivation_available": true,
     "identity_shared_secret_derivation_scope": "valid_input_seed_keypair_strict_peer_edwards_to_montgomery_shared_secret_with_zero_rejection_only_no_persisted_key_contact_auth_session_dispatch_route_production_integration_or_rf",
+    "canonical_login_response_available": true,
+    "canonical_login_response_scope": "repeater_room_success_response_schema_authenticated_packet_with_caller_supplied_hashes_secret_time_permissions_and_uniqueness_only_no_password_acl_replay_session_transition_dispatch_route_or_rf",
     "canonical_advert_data": true,
     "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
     "ack_frame_scope": "simple_and_multipart_payload_framing_only",
@@ -117,6 +122,12 @@
       "identity_exchange_ladder": "third_party/MeshCore/lib/ed25519/key_exchange.c",
       "identity_exchange_strict_peer_guard": "main/mesh/ed25519_canonical.h",
       "identity_exchange_independent_golden": "five symmetric public-key and shared-secret vectors independently generated through libsodium Ed25519-to-Curve25519 conversion and scalar multiplication",
+      "canonical_login_response_repeater_schema": "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+      "canonical_login_response_room_schema": "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+      "canonical_login_response_datagram": "third_party/MeshCore/src/Mesh.cpp",
+      "canonical_login_response_crypto": "third_party/MeshCore/src/Utils.cpp",
+      "canonical_login_response_permissions": "third_party/MeshCore/src/helpers/ClientACL.h",
+      "canonical_login_response_independent_golden": "two exact payloads and ten-vector matrix SHA-256 from independent AES-128 ECB and HMAC-SHA-256 generation",
       "public_group_channel_hash": "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
       "public_group_datagram": "third_party/MeshCore/src/Mesh.cpp",
       "public_group_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
@@ -138,7 +149,7 @@
     }
   },
   "determinism": {
-    "current_vectors": "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_group_anonymous_login_regular_request_response_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
+    "current_vectors": "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_group_anonymous_login_regular_request_response_canonical_login_response_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
     "signed_advert_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "signed_advert_generation_recipe": "ed25519_create_keypair_seed_then_ed25519_sign_public_key_timestamp_wire_bytes_app_data",
     "anonymous_login_recipe": "basechatmesh_timestamp_optional_room_sync_password_then_mesh_anonymous_datagram_aes128_hmac_with_caller_supplied_outer_and_secret",
@@ -147,6 +158,8 @@
     "regular_request_response_matrix": "request_lengths_1_15_16_17_and_response_lengths_16_167",
     "identity_exchange_recipe": "ed25519_seed_keypair_strict_peer_y_to_montgomery_ladder_zero_secret_reject_and_temp_wipe",
     "identity_exchange_matrix": "five_symmetric_seed_pairs_including_all_zero_seed_independently_generated_with_libsodium",
+    "canonical_login_response_recipe": "repeater_or_room_success_schema_then_mesh_response_datagram_aes128_hmac_with_caller_supplied_hashes_secret_time_permissions_and_uniqueness",
+    "canonical_login_response_matrix": "repeater_and_room_guest_read_only_read_write_admin_and_flagged_role_permissions",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
     "canonical_s_regression": "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L",
     "identity_point_forgery_regression": "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation",
@@ -183,11 +196,11 @@
     ]
   },
   "vectors": {
-    "roundtrip": 328,
+    "roundtrip": 338,
     "valid": 20,
-    "invalid": 300,
-    "semantic": 632,
-    "total": 648,
+    "invalid": 334,
+    "semantic": 676,
+    "total": 692,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -253,6 +266,12 @@
       "invalid": 30,
       "semantic": 36,
       "total": 36
+    },
+    "canonical_login_response_packets": {
+      "roundtrip": 10,
+      "invalid": 34,
+      "semantic": 44,
+      "total": 44
     },
     "dm_encrypt_decrypt": {
       "roundtrip": 268,
@@ -501,11 +520,12 @@
       "id": "login_request_response_admin",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "identity_signature_and_deterministic_admin_session_fixtures",
+      "blocked_by": "identity_signature_and_password_authorization_acl_replay_session_transition_fixtures",
       "implemented_prerequisites": [
         "anonymous_login_request_packets",
         "regular_request_response_packets",
-        "identity_shared_secret_derivation"
+        "identity_shared_secret_derivation",
+        "canonical_login_response_packets"
       ]
     },
     {
@@ -595,6 +615,30 @@
           "invalid": 9
         }
       }
+    },
+    {
+      "id": "canonical_login_response_packets",
+      "status": "implemented",
+      "owner": "pinned_repeater_room_response_schema_vendored_crypto",
+      "semantic": true,
+      "scope": "canonical_repeater_room_success_response_schema_authenticated_create_parse_with_caller_supplied_hashes_secret_time_permissions_uniqueness_no_password_acl_replay_session_transition_dispatch_route_or_rf",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-CANONICAL-LOGIN-RESPONSE-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+          "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+          "third_party/MeshCore/src/Mesh.cpp",
+          "third_party/MeshCore/src/Utils.cpp",
+          "third_party/MeshCore/src/helpers/ClientACL.h"
+        ],
+        "independent_golden": "repeater_admin_and_room_guest_exact_payloads_plus_ten_case_payload_matrix_sha256_from_independent_aes128_ecb_hmac_sha256_generation",
+        "vectors": {
+          "roundtrip": 10,
+          "invalid": 34
+        }
+      }
     }
   ],
   "production_boundary": {
@@ -609,6 +653,7 @@
       "canonical anonymous login-request creation and authenticated parsing through BaseChatMesh layout, Mesh anonymous datagram framing, and mesh::Utils crypto with caller-supplied outer identity and secret",
       "regular REQ/RESPONSE pre-route datagram creation and authenticated parsing through Mesh framing and mesh::Utils crypto with caller-supplied hashes, secret, and logical length",
       "valid-input identity shared-secret derivation through the pinned Ed25519 seed keypair and Edwards-to-Montgomery ladder with strict peer-point and zero-secret guards",
+      "canonical repeater/room login-success response schema creation and authenticated parsing through Mesh RESPONSE framing and mesh::Utils crypto with caller-supplied hashes, secret, time, permissions, and uniqueness",
       "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation",
       "D1L production rejection of non-canonical and low-order advert public keys and signature R points through the pinned MeshCore group decoder"
     ],
@@ -623,7 +668,8 @@
       "Mesh signed-advert empty, named, and maximum app-data exact payloads plus flood wire roundtrip without RTC/RNG ownership, dispatch, replay policy, contact mutation, or RF",
       "BaseChatMesh room/non-room login plaintext and Mesh ANON_REQ exact payload matrix without key exchange, authorization, replay, response, session, dispatch, route selection, or RF",
       "Mesh regular REQ/RESPONSE exact payloads, maximum payload digest, and boundary matrix without request/response schema, tags, authorization, replay, session, dispatch, route selection, or RF",
-      "five symmetric identity public-key/shared-secret vectors independently generated with libsodium, without persisted-key loading, contact lookup, authorization, session/admin state, production integration, dispatch, routing, or RF"
+      "five symmetric identity public-key/shared-secret vectors independently generated with libsodium, without persisted-key loading, contact lookup, authorization, session/admin state, production integration, dispatch, routing, or RF",
+      "repeater/room canonical login-success response role, permissions, uniqueness, and firmware schemas with exact payloads and matrix digest, without password authorization, ACL mutation, replay, retained session transition, dispatch, routing, or RF"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",

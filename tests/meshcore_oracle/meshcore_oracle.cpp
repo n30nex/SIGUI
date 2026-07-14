@@ -1020,6 +1020,98 @@ extern "C" bool d1l_meshcore_oracle_parse_request_response_packet(
     return true;
 }
 
+extern "C" bool d1l_meshcore_oracle_create_login_response_packet(
+    uint8_t server_advert_type,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t server_timestamp,
+    uint8_t permissions,
+    const uint8_t uniqueness[D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES],
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if ((server_advert_type != D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         server_advert_type != D1L_MESHCORE_ADVERT_TYPE_ROOM) ||
+        secret == nullptr || uniqueness == nullptr || out_packet == nullptr) {
+        return false;
+    }
+
+    const bool is_admin = (permissions & 0x03U) == 0x03U;
+    const uint8_t role = server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER
+        ? static_cast<uint8_t>(is_admin ? 1U : 0U)
+        : static_cast<uint8_t>(is_admin ? 1U : (permissions == 0U ? 2U : 0U));
+    const uint8_t firmware_version =
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER ? 2U : 1U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES>
+        plaintext{};
+    plaintext[0] = static_cast<uint8_t>(server_timestamp);
+    plaintext[1] = static_cast<uint8_t>(server_timestamp >> 8U);
+    plaintext[2] = static_cast<uint8_t>(server_timestamp >> 16U);
+    plaintext[3] = static_cast<uint8_t>(server_timestamp >> 24U);
+    plaintext[4] = 0U;
+    plaintext[5] = 0U;
+    plaintext[6] = role;
+    plaintext[7] = permissions;
+    std::memcpy(&plaintext[8], uniqueness,
+                D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES);
+    plaintext[12] = firmware_version;
+    return d1l_meshcore_oracle_create_request_response_packet(
+        PAYLOAD_TYPE_RESPONSE, destination_hash, source_hash, secret,
+        plaintext.data(), plaintext.size(), out_packet);
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_login_response_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t server_advert_type,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t *out_server_timestamp,
+    uint8_t *out_permissions,
+    uint8_t out_uniqueness[D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES])
+{
+    if (packet == nullptr ||
+        (server_advert_type != D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         server_advert_type != D1L_MESHCORE_ADVERT_TYPE_ROOM) ||
+        secret == nullptr || out_server_timestamp == nullptr ||
+        out_permissions == nullptr || out_uniqueness == nullptr) {
+        return false;
+    }
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES>
+        plaintext{};
+    if (!d1l_meshcore_oracle_parse_request_response_packet(
+            packet, PAYLOAD_TYPE_RESPONSE, destination_hash, source_hash,
+            secret, plaintext.size(), plaintext.data(), plaintext.size()) ||
+        plaintext[4] != 0U || plaintext[5] != 0U) {
+        return false;
+    }
+
+    const uint8_t permissions = plaintext[7];
+    const bool is_admin = (permissions & 0x03U) == 0x03U;
+    const uint8_t expected_role =
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER
+        ? static_cast<uint8_t>(is_admin ? 1U : 0U)
+        : static_cast<uint8_t>(is_admin ? 1U : (permissions == 0U ? 2U : 0U));
+    const uint8_t expected_firmware =
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER ? 2U : 1U;
+    if (plaintext[6] != expected_role ||
+        plaintext[12] != expected_firmware) {
+        return false;
+    }
+
+    const uint32_t server_timestamp =
+        static_cast<uint32_t>(plaintext[0]) |
+        (static_cast<uint32_t>(plaintext[1]) << 8U) |
+        (static_cast<uint32_t>(plaintext[2]) << 16U) |
+        (static_cast<uint32_t>(plaintext[3]) << 24U);
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES> uniqueness{};
+    std::memcpy(uniqueness.data(), &plaintext[8], uniqueness.size());
+    *out_server_timestamp = server_timestamp;
+    *out_permissions = permissions;
+    std::memcpy(out_uniqueness, uniqueness.data(), uniqueness.size());
+    return true;
+}
+
 extern "C" bool d1l_meshcore_oracle_group_channel_hash(
     const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
     uint8_t *out_hash)
