@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstring>
+#include <limits>
 
 static_assert(MAX_PATH_SIZE == D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
               "Pinned MeshCore path limit changed");
@@ -1217,6 +1218,114 @@ extern "C" bool d1l_meshcore_oracle_resolve_existing_acl_blank_login(
     *out_client_mutation_mask = found && is_route_flood == 1U
         ? D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH
         : 0U;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_apply_authorized_login_acl_transition(
+    uint8_t server_advert_type,
+    uint8_t is_route_flood,
+    uint8_t authorized_permissions,
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t shared_secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t sender_timestamp,
+    uint32_t current_time,
+    uint32_t room_sync_since,
+    const d1l_meshcore_oracle_login_acl_record_t *records,
+    size_t record_count,
+    d1l_meshcore_oracle_login_acl_transition_t *out_transition)
+{
+    const bool repeater_permissions = authorized_permissions == 0U ||
+        authorized_permissions == 3U;
+    const bool room_permissions = authorized_permissions == 0U ||
+        authorized_permissions == 2U || authorized_permissions == 3U;
+    if ((server_advert_type != D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         server_advert_type != D1L_MESHCORE_ADVERT_TYPE_ROOM) ||
+        is_route_flood > 1U ||
+        (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         !repeater_permissions) ||
+        (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_ROOM &&
+         !room_permissions) ||
+        sender_public_key == nullptr || shared_secret == nullptr ||
+        records == nullptr ||
+        record_count > D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES ||
+        out_transition == nullptr) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_login_acl_transition_t transition{};
+    transition.record_count = static_cast<uint8_t>(record_count);
+    transition.client_index = D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND;
+    if (record_count > 0U) {
+        std::memcpy(transition.records, records,
+                    record_count * sizeof(transition.records[0]));
+    }
+
+    size_t selected_index = record_count;
+    for (size_t index = 0U; index < record_count; ++index) {
+        if (std::memcmp(sender_public_key,
+                        transition.records[index].public_key,
+                        D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES) == 0) {
+            selected_index = index;
+            break;
+        }
+    }
+
+    if (selected_index == record_count) {
+        transition.inserted = 1U;
+        if (record_count < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES) {
+            ++transition.record_count;
+        } else {
+            transition.evicted = 1U;
+            selected_index = D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES - 1U;
+            uint32_t minimum_activity = std::numeric_limits<uint32_t>::max();
+            for (size_t index = 0U; index < record_count; ++index) {
+                const d1l_meshcore_oracle_login_acl_record_t &candidate =
+                    transition.records[index];
+                if ((candidate.permissions & 0x03U) != 0x03U &&
+                    candidate.last_activity < minimum_activity) {
+                    selected_index = index;
+                    minimum_activity = candidate.last_activity;
+                }
+            }
+        }
+        d1l_meshcore_oracle_login_acl_record_t &inserted =
+            transition.records[selected_index];
+        inserted = {};
+        std::memcpy(inserted.public_key, sender_public_key,
+                    D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES);
+        inserted.out_path_len = 0xFFU;
+    }
+
+    transition.client_index = static_cast<uint8_t>(selected_index);
+    d1l_meshcore_oracle_login_acl_record_t &selected =
+        transition.records[selected_index];
+    if (sender_timestamp <= selected.last_timestamp) {
+        *out_transition = transition;
+        return true;
+    }
+
+    selected.last_timestamp = sender_timestamp;
+    selected.last_activity = current_time;
+    selected.permissions = static_cast<uint8_t>(
+        (selected.permissions & static_cast<uint8_t>(~0x03U)) |
+        authorized_permissions);
+    std::memcpy(selected.shared_secret, shared_secret,
+                D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES);
+    if (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_ROOM) {
+        selected.room_sync_since = room_sync_since;
+        selected.room_pending_ack = 0U;
+        selected.room_push_failures = 0U;
+    }
+    if (is_route_flood == 1U) {
+        selected.out_path_len = 0xFFU;
+    }
+    transition.accepted = 1U;
+    transition.contacts_dirty =
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_ROOM ||
+                authorized_permissions != 0U
+            ? 1U
+            : 0U;
+    *out_transition = transition;
     return true;
 }
 

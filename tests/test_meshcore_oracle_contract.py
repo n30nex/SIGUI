@@ -23,7 +23,7 @@ BOUNDARY = (
     "and_anonymous_login_request_and_regular_request_response_crypto_and_"
     "strict_identity_shared_secret_derivation_and_canonical_login_response_"
     "packets_and_login_password_authorization_fixtures_and_existing_acl_"
-    "blank_login_reuse_fixtures"
+    "blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures"
 )
 
 
@@ -45,7 +45,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 19
+    assert manifest["corpus_version"] == 20
     assert manifest["abi_version"] == 2
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -131,6 +131,14 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "boundary_only_no_storage_load_save_insert_evict_permissions_"
             "secret_timestamp_activity_replay_session_response_creation_"
             "dispatch_route_or_rf"
+        ),
+        "authorized_login_acl_transition_available": True,
+        "authorized_login_acl_transition_scope": (
+            "clientacl_putclient_full_key_reuse_append_least_active_non_admin_"
+            "evict_and_repeater_room_authorized_login_record_transition_"
+            "projection_only_no_filesystem_full_path_bytes_unmodified_room_"
+            "scheduling_identity_signature_secret_derivation_password_"
+            "response_dispatch_route_or_rf"
         ),
         "canonical_advert_data": True,
         "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
@@ -233,6 +241,18 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "existing_acl_room_reuse": (
                 "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp"
             ),
+            "authorized_login_acl_put_client": (
+                "third_party/MeshCore/src/helpers/ClientACL.cpp"
+            ),
+            "authorized_login_acl_record": (
+                "third_party/MeshCore/src/helpers/ClientACL.h"
+            ),
+            "authorized_login_acl_repeater_transition": (
+                "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp"
+            ),
+            "authorized_login_acl_room_transition": (
+                "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp"
+            ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
             ),
@@ -329,6 +349,14 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "twelve_empty_first_middle_last_duplicate_prefix_full_capacity_match_"
         "miss_route_and_server_cases"
     )
+    assert manifest["determinism"]["authorized_login_acl_transition_recipe"] == (
+        "clientacl_putclient_full_key_reuse_append_or_strict_least_active_non_"
+        "admin_evict_then_replay_gate_and_server_record_field_updates"
+    )
+    assert manifest["determinism"]["authorized_login_acl_transition_matrix"] == (
+        "sixteen_append_existing_replay_capacity_eviction_tie_all_admin_role_"
+        "secret_time_room_state_dirty_and_flood_cases"
+    )
     assert manifest["determinism"]["independent_verifier_kat"] == (
         "RFC 8032 section 7.1 TEST 1 empty message"
     )
@@ -382,10 +410,10 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     )
     assert manifest["vectors"] == {
         "roundtrip": 338,
-        "valid": 48,
-        "invalid": 365,
-        "semantic": 735,
-        "total": 751,
+        "valid": 64,
+        "invalid": 378,
+        "semantic": 764,
+        "total": 780,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -469,6 +497,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "invalid": 14,
             "semantic": 26,
             "total": 26,
+        },
+        "authorized_login_acl_transition_fixtures": {
+            "valid": 16,
+            "invalid": 13,
+            "semantic": 29,
+            "total": 29,
         },
         "dm_encrypt_decrypt": {
             "roundtrip": 268,
@@ -684,6 +718,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "canonical_login_response_packets",
             "login_password_authorization_fixtures",
             "existing_acl_blank_login_reuse_fixtures",
+            "authorized_login_acl_transition_fixtures",
         }
     )
     assert [
@@ -705,8 +740,9 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "canonical_login_response_packets",
         "login_password_authorization_fixtures",
         "existing_acl_blank_login_reuse_fixtures",
+        "authorized_login_acl_transition_fixtures",
     ]
-    signed_advert_packets = manifest["capabilities"][-7]
+    signed_advert_packets = manifest["capabilities"][-8]
     assert signed_advert_packets["id"] == "signed_advert_packet_creation"
     assert signed_advert_packets["status"] == "implemented"
     assert signed_advert_packets["owner"] == (
@@ -716,7 +752,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "roundtrip": 3,
         "invalid": 23,
     }
-    anonymous_login = manifest["capabilities"][-6]
+    anonymous_login = manifest["capabilities"][-7]
     assert anonymous_login["id"] == "anonymous_login_request_packets"
     assert anonymous_login["status"] == "implemented"
     assert anonymous_login["owner"] == (
@@ -726,7 +762,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "roundtrip": 6,
         "invalid": 35,
     }
-    regular_request_response = manifest["capabilities"][-5]
+    regular_request_response = manifest["capabilities"][-6]
     assert regular_request_response["id"] == "regular_request_response_packets"
     assert regular_request_response["status"] == "implemented"
     assert regular_request_response["owner"] == (
@@ -736,7 +772,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "roundtrip": 6,
         "invalid": 30,
     }
-    identity_exchange = manifest["capabilities"][-4]
+    identity_exchange = manifest["capabilities"][-5]
     assert identity_exchange["id"] == "identity_shared_secret_derivation"
     assert identity_exchange["status"] == "implemented"
     assert identity_exchange["owner"] == (
@@ -746,7 +782,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "roundtrip": 5,
         "invalid": 9,
     }
-    canonical_login_response = manifest["capabilities"][-3]
+    canonical_login_response = manifest["capabilities"][-4]
     assert canonical_login_response["id"] == "canonical_login_response_packets"
     assert canonical_login_response["status"] == "implemented"
     assert canonical_login_response["owner"] == (
@@ -756,7 +792,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "roundtrip": 10,
         "invalid": 34,
     }
-    login_password_authorization = manifest["capabilities"][-2]
+    login_password_authorization = manifest["capabilities"][-3]
     assert login_password_authorization["id"] == (
         "login_password_authorization_fixtures"
     )
@@ -768,7 +804,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "valid": 16,
         "invalid": 17,
     }
-    existing_acl_blank_login = manifest["capabilities"][-1]
+    existing_acl_blank_login = manifest["capabilities"][-2]
     assert existing_acl_blank_login["id"] == (
         "existing_acl_blank_login_reuse_fixtures"
     )
@@ -780,6 +816,17 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "valid": 12,
         "invalid": 14,
     }
+    authorized_login_acl_transition = manifest["capabilities"][-1]
+    assert authorized_login_acl_transition["id"] == (
+        "authorized_login_acl_transition_fixtures"
+    )
+    assert authorized_login_acl_transition["status"] == "implemented"
+    assert authorized_login_acl_transition["owner"] == (
+        "pinned_clientacl_putclient_repeater_room_login_mutation_rules"
+    )
+    assert authorized_login_acl_transition["implementation_receipt"][
+        "vectors"
+    ] == {"valid": 16, "invalid": 13}
     pending = {
         capability["id"]: capability
         for capability in manifest["capabilities"]
@@ -795,8 +842,8 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
     )
     assert pending["login_request_response_admin"]["blocked_by"] == (
-        "identity_signature_and_acl_mutation_replay_session_transition_"
-        "fixtures"
+        "identity_signature_and_authenticated_request_replay_retained_"
+        "session_response_dispatch_fixtures"
     )
     assert pending["login_request_response_admin"]["implemented_prerequisites"] == [
         "anonymous_login_request_packets",
@@ -805,6 +852,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "canonical_login_response_packets",
         "login_password_authorization_fixtures",
         "existing_acl_blank_login_reuse_fixtures",
+        "authorized_login_acl_transition_fixtures",
     ]
 
     for relative, expected in {
@@ -1138,7 +1186,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["wp04_closure_eligible"] is False
     assert artifact["closure_ready"] is False
     assert artifact["wp04_acceptance_ready"] is False
-    assert artifact["corpus_version"] == 19
+    assert artifact["corpus_version"] == 20
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
     assert artifact["coverage_policy"]["local_packet_type_count"] == 6
@@ -1159,6 +1207,10 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     )
     assert (
         "existing_acl_blank_login_reuse_fixtures"
+        not in artifact["pending_capabilities"]
+    )
+    assert (
+        "authorized_login_acl_transition_fixtures"
         not in artifact["pending_capabilities"]
     )
     assert "signed_advert_verification" not in artifact["pending_capabilities"]
@@ -1315,10 +1367,10 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
             "roundtrip": 338,
-            "valid": 48,
-            "invalid": 365,
-            "semantic": 735,
-            "total": 751,
+            "valid": 64,
+            "invalid": 378,
+            "semantic": 764,
+            "total": 780,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -1403,6 +1455,12 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
                 "semantic": 26,
                 "total": 26,
             },
+            "authorized_login_acl_transition_fixtures": {
+                "valid": 16,
+                "invalid": 13,
+                "semantic": 29,
+                "total": 29,
+            },
             "dm_encrypt_decrypt": {
                 "roundtrip": 268,
                 "invalid": 29,
@@ -1454,6 +1512,7 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             "canonical_login_response_packets": True,
             "login_password_authorization_fixtures": True,
             "existing_acl_blank_login_reuse_fixtures": True,
+            "authorized_login_acl_transition_fixtures": True,
             "dm_encrypt_decrypt": True,
             "expected_ack_hash_and_ack_path": True,
             "path_return_route_codes": True,

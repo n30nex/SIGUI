@@ -46,6 +46,8 @@ constexpr std::size_t kLoginPasswordAuthorizationValidVectors = 16U;
 constexpr std::size_t kLoginPasswordAuthorizationInvalidVectors = 17U;
 constexpr std::size_t kExistingAclBlankLoginValidVectors = 12U;
 constexpr std::size_t kExistingAclBlankLoginInvalidVectors = 14U;
+constexpr std::size_t kLoginAclTransitionValidVectors = 16U;
+constexpr std::size_t kLoginAclTransitionInvalidVectors = 13U;
 constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
@@ -3172,6 +3174,361 @@ int main()
         failures.push_back("existing ACL invalid vector count drifted");
     }
 
+    using LoginAclRecord = d1l_meshcore_oracle_login_acl_record_t;
+    using LoginAclRecords = std::array<
+        LoginAclRecord, D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES>;
+    using LoginAclTransition = d1l_meshcore_oracle_login_acl_transition_t;
+    auto make_login_acl_record = [](uint8_t key_byte, uint8_t permissions,
+                                    uint8_t out_path_len,
+                                    uint8_t secret_byte,
+                                    uint32_t last_timestamp,
+                                    uint32_t last_activity,
+                                    uint32_t room_sync_since,
+                                    uint32_t room_pending_ack,
+                                    uint8_t room_push_failures) {
+        LoginAclRecord record{};
+        std::memset(record.public_key, key_byte, sizeof(record.public_key));
+        record.permissions = permissions;
+        record.out_path_len = out_path_len;
+        std::memset(record.shared_secret, secret_byte,
+                    sizeof(record.shared_secret));
+        record.last_timestamp = last_timestamp;
+        record.last_activity = last_activity;
+        record.room_sync_since = room_sync_since;
+        record.room_pending_ack = room_pending_ack;
+        record.room_push_failures = room_push_failures;
+        return record;
+    };
+    auto login_acl_record_matches = [](const LoginAclRecord &left,
+                                       const LoginAclRecord &right) {
+        return std::memcmp(left.public_key, right.public_key,
+                           sizeof(left.public_key)) == 0 &&
+            left.permissions == right.permissions &&
+            left.out_path_len == right.out_path_len &&
+            std::memcmp(left.shared_secret, right.shared_secret,
+                        sizeof(left.shared_secret)) == 0 &&
+            left.last_timestamp == right.last_timestamp &&
+            left.last_activity == right.last_activity &&
+            left.room_sync_since == right.room_sync_since &&
+            left.room_pending_ack == right.room_pending_ack &&
+            left.room_push_failures == right.room_push_failures;
+    };
+    const LoginAclKey transition_key_a = [] {
+        LoginAclKey key{};
+        key.fill(0x41U);
+        return key;
+    }();
+    const LoginAclKey transition_key_b = [] {
+        LoginAclKey key{};
+        key.fill(0x42U);
+        return key;
+    }();
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES>
+        transition_secret = [] {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES>
+                secret{};
+            secret.fill(0xA5U);
+            return secret;
+        }();
+    size_t login_acl_transition_valid_count = 0U;
+    auto expect_login_acl_transition =
+        [&failures, &login_acl_record_matches,
+         &login_acl_transition_valid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            uint8_t permissions, const LoginAclKey &sender_key,
+            const std::array<uint8_t,
+                             D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES> &secret,
+            uint32_t sender_timestamp, uint32_t current_time,
+            uint32_t room_sync_since, const LoginAclRecords &input,
+            size_t input_count, const LoginAclRecords &expected_records,
+            uint8_t expected_count, uint8_t expected_index,
+            uint8_t expected_accepted, uint8_t expected_inserted,
+            uint8_t expected_evicted, uint8_t expected_dirty) {
+            LoginAclTransition transition{};
+            ++login_acl_transition_valid_count;
+            bool records_match = true;
+            if (!d1l_meshcore_oracle_apply_authorized_login_acl_transition(
+                    server_type, is_route_flood, permissions,
+                    sender_key.data(), secret.data(), sender_timestamp,
+                    current_time, room_sync_since, input.data(), input_count,
+                    &transition)) {
+                records_match = false;
+            } else {
+                for (size_t index = 0U;
+                     index < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES;
+                     ++index) {
+                    if (!login_acl_record_matches(
+                            transition.records[index],
+                            expected_records[index])) {
+                        records_match = false;
+                        break;
+                    }
+                }
+            }
+            if (!records_match || transition.record_count != expected_count ||
+                transition.client_index != expected_index ||
+                transition.accepted != expected_accepted ||
+                transition.inserted != expected_inserted ||
+                transition.evicted != expected_evicted ||
+                transition.contacts_dirty != expected_dirty) {
+                failures.push_back(std::string(name) +
+                                   " login ACL transition changed");
+            }
+        };
+
+    LoginAclRecords transition_input{};
+    LoginAclRecords transition_expected{};
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0x03U, 0xFFU, 0xA5U, 10U, 20U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "repeater admin append", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x03U, transition_key_a, transition_secret, 10U, 20U, 30U,
+        transition_input, 0U, transition_expected, 1U, 0U, 1U, 1U, 0U, 1U);
+
+    transition_expected = {};
+    transition_expected[0] = make_login_acl_record(
+        0x42U, 0x00U, 0xFFU, 0xA5U, 11U, 21U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "repeater guest append", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x00U, transition_key_b, transition_secret, 11U, 21U, 31U,
+        transition_input, 0U, transition_expected, 1U, 0U, 1U, 1U, 0U, 0U);
+
+    transition_expected = {};
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0x02U, 0xFFU, 0xA5U, 12U, 22U, 32U, 0U, 0U);
+    expect_login_acl_transition(
+        "room read-write append", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        0x02U, transition_key_a, transition_secret, 12U, 22U, 32U,
+        transition_input, 0U, transition_expected, 1U, 0U, 1U, 1U, 0U, 1U);
+
+    transition_expected = {};
+    transition_expected[0] = make_login_acl_record(
+        0x42U, 0x00U, 0xFFU, 0xA5U, 13U, 23U, 33U, 0U, 0U);
+    expect_login_acl_transition(
+        "room read-only guest append", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        0x00U, transition_key_b, transition_secret, 13U, 23U, 33U,
+        transition_input, 0U, transition_expected, 1U, 0U, 1U, 1U, 0U, 1U);
+
+    transition_input = {};
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xA2U, 5U, 0x44U, 5U, 6U, 7U, 8U, 9U);
+    transition_expected = transition_input;
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0xA3U, 5U, 0xA5U, 6U, 77U, 7U, 8U, 9U);
+    expect_login_acl_transition(
+        "existing repeater role replace", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 0x03U, transition_key_a, transition_secret, 6U, 77U, 88U,
+        transition_input, 1U, transition_expected, 1U, 0U, 1U, 0U, 0U, 1U);
+
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xF3U, 4U, 0x44U, 5U, 6U, 7U, 8U, 9U);
+    transition_expected = transition_input;
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0xF2U, 4U, 0xA5U, 10U, 11U, 12U, 0U, 0U);
+    expect_login_acl_transition(
+        "existing room state replace", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        0x02U, transition_key_a, transition_secret, 10U, 11U, 12U,
+        transition_input, 1U, transition_expected, 1U, 0U, 1U, 0U, 0U, 1U);
+
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xA2U, 5U, 0x44U, 10U, 6U, 7U, 8U, 9U);
+    transition_expected = transition_input;
+    expect_login_acl_transition(
+        "existing equal timestamp replay", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        1U, 0x03U, transition_key_a, transition_secret, 10U, 99U, 100U,
+        transition_input, 1U, transition_expected, 1U, 0U, 0U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "existing older timestamp replay", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        0x02U, transition_key_a, transition_secret, 9U, 99U, 100U,
+        transition_input, 1U, transition_expected, 1U, 0U, 0U, 0U, 0U, 0U);
+
+    transition_input = {};
+    transition_input[0] = make_login_acl_record(
+        0x30U, 0x03U, 2U, 0x30U, 1U, 2U, 3U, 4U, 5U);
+    transition_expected = transition_input;
+    transition_expected[1] = make_login_acl_record(
+        0x41U, 0U, 0xFFU, 0U, 0U, 0U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "zero timestamp append replay", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        1U, 0x03U, transition_key_a, transition_secret, 0U, 99U, 100U,
+        transition_input, 1U, transition_expected, 2U, 1U, 0U, 1U, 0U, 0U);
+
+    transition_input = {};
+    for (size_t index = 0U; index < 19U; ++index) {
+        transition_input[index] = make_login_acl_record(
+            static_cast<uint8_t>(index + 1U), 0U,
+            static_cast<uint8_t>(index), static_cast<uint8_t>(index + 1U),
+            1U, static_cast<uint32_t>(100U + index), 0U, 0U, 0U);
+    }
+    transition_expected = transition_input;
+    transition_expected[19] = make_login_acl_record(
+        0x41U, 0x03U, 0xFFU, 0xA5U, 1U, 2U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "append into final ACL slot", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x03U, transition_key_a, transition_secret, 1U, 2U, 0U,
+        transition_input, 19U, transition_expected, 20U, 19U, 1U, 1U, 0U,
+        1U);
+
+    LoginAclRecords full_acl{};
+    for (size_t index = 0U;
+         index < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES; ++index) {
+        full_acl[index] = make_login_acl_record(
+            static_cast<uint8_t>(index + 1U), 0U,
+            static_cast<uint8_t>(index), static_cast<uint8_t>(index + 1U),
+            1U, static_cast<uint32_t>(100U + index), 0U, 0U, 0U);
+    }
+    full_acl[7].last_activity = 1U;
+    transition_expected = full_acl;
+    transition_expected[7] = make_login_acl_record(
+        0x41U, 0x03U, 0xFFU, 0xA5U, 2U, 3U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "evict least-active non-admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 0x03U, transition_key_a, transition_secret, 2U, 3U, 0U,
+        full_acl, 20U, transition_expected, 20U, 7U, 1U, 1U, 1U, 1U);
+
+    full_acl[2].last_activity = 1U;
+    full_acl[7].last_activity = 1U;
+    transition_expected = full_acl;
+    transition_expected[2] = make_login_acl_record(
+        0x41U, 0x03U, 0xFFU, 0xA5U, 2U, 3U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "eviction tie keeps first", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x03U, transition_key_a, transition_secret, 2U, 3U, 0U,
+        full_acl, 20U, transition_expected, 20U, 2U, 1U, 1U, 1U, 1U);
+
+    for (size_t index = 0U;
+         index < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES; ++index) {
+        full_acl[index].permissions = 0xF3U;
+    }
+    transition_expected = full_acl;
+    transition_expected[19] = make_login_acl_record(
+        0x42U, 0x02U, 0xFFU, 0xA5U, 2U, 3U, 4U, 0U, 0U);
+    expect_login_acl_transition(
+        "full all-admin fallback evicts last", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        0U, 0x02U, transition_key_b, transition_secret, 2U, 3U, 4U,
+        full_acl, 20U, transition_expected, 20U, 19U, 1U, 1U, 1U, 1U);
+
+    full_acl[8] = make_login_acl_record(
+        0x41U, 0xA0U, 6U, 0x44U, 1U, 2U, 3U, 4U, 5U);
+    transition_expected = full_acl;
+    transition_expected[8] = make_login_acl_record(
+        0x41U, 0xA3U, 6U, 0xA5U, 2U, 3U, 3U, 4U, 5U);
+    expect_login_acl_transition(
+        "full ACL existing key reuse", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 0x03U, transition_key_a, transition_secret, 2U, 3U, 4U,
+        full_acl, 20U, transition_expected, 20U, 8U, 1U, 0U, 0U, 1U);
+
+    transition_input = {};
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xA0U, 6U, 0x44U, 1U, 2U, 3U, 4U, 5U);
+    transition_expected = transition_input;
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0xA3U, 0xFFU, 0xA5U, 2U, 3U, 3U, 4U, 5U);
+    expect_login_acl_transition(
+        "existing repeater flood invalidates path",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 0x03U, transition_key_a,
+        transition_secret, 2U, 3U, 4U, transition_input, 1U,
+        transition_expected, 1U, 0U, 1U, 0U, 0U, 1U);
+
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xA3U, 6U, 0x44U, 1U, 2U, 3U, 4U, 5U);
+    transition_expected = transition_input;
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0xA0U, 0xFFU, 0xA5U, 2U, 3U, 9U, 0U, 0U);
+    expect_login_acl_transition(
+        "existing room flood resets session fields",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, 0x00U, transition_key_a,
+        transition_secret, 2U, 3U, 9U, transition_input, 1U,
+        transition_expected, 1U, 0U, 1U, 0U, 0U, 1U);
+
+    if (login_acl_transition_valid_count !=
+        kLoginAclTransitionValidVectors) {
+        failures.push_back("login ACL transition valid vector count drifted");
+    }
+
+    size_t login_acl_transition_invalid_count = 0U;
+    auto expect_login_acl_transition_reject =
+        [&failures, &login_acl_transition_invalid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            uint8_t permissions, const uint8_t *sender_key,
+            const uint8_t *secret, const LoginAclRecord *input,
+            size_t input_count, LoginAclTransition *output) {
+            LoginAclTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++login_acl_transition_invalid_count;
+            if (d1l_meshcore_oracle_apply_authorized_login_acl_transition(
+                    server_type, is_route_flood, permissions, sender_key,
+                    secret, 1U, 2U, 3U, input, input_count, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " login ACL reject changed output");
+            }
+        };
+    transition_input = {};
+    LoginAclTransition transition_reject_output{};
+    expect_login_acl_transition_reject(
+        "none transition server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "chat transition server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "sensor transition server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "noncanonical transition flood", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        2U, 0U, transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "repeater read-only transition", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 1U, transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "repeater read-write transition", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 2U, transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "room read-only transition", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "room over-role transition", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 4U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "null transition sender", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0U,
+        nullptr, transition_secret.data(), transition_input.data(), 0U,
+        &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "null transition secret", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0U,
+        transition_key_a.data(), nullptr, transition_input.data(), 0U,
+        &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "null transition records", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(), nullptr, 0U,
+        &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "overfull transition records", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0U, transition_key_a.data(), transition_secret.data(),
+        transition_input.data(),
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES + 1U,
+        &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "null transition output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, nullptr);
+    if (login_acl_transition_invalid_count !=
+        kLoginAclTransitionInvalidVectors) {
+        failures.push_back("login ACL transition invalid vector count drifted");
+    }
+
     constexpr uint8_t dm_destination_hash = 0xA1U;
     constexpr uint8_t dm_source_hash = 0xB2U;
     const std::array<uint8_t, 2U> short_dm_text = {'d', 'm'};
@@ -5304,7 +5661,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures\""
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -5326,6 +5683,7 @@ int main()
                    kPointValidationValidVectors + kCryptoAdapterKatValidVectors +
                    kLoginPasswordAuthorizationValidVectors +
                    kExistingAclBlankLoginValidVectors +
+                   kLoginAclTransitionValidVectors +
                    kExpectedAckValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
@@ -5338,6 +5696,7 @@ int main()
                    kLoginResponseInvalidVectors +
                    kLoginPasswordAuthorizationInvalidVectors +
                    kExistingAclBlankLoginInvalidVectors +
+                   kLoginAclTransitionInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
                   kPathReturnInvalidVectors +
@@ -5364,6 +5723,8 @@ int main()
                     kLoginPasswordAuthorizationInvalidVectors +
                     kExistingAclBlankLoginValidVectors +
                     kExistingAclBlankLoginInvalidVectors +
+                    kLoginAclTransitionValidVectors +
+                    kLoginAclTransitionInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -5396,6 +5757,8 @@ int main()
                     kLoginPasswordAuthorizationInvalidVectors +
                     kExistingAclBlankLoginValidVectors +
                     kExistingAclBlankLoginInvalidVectors +
+                    kLoginAclTransitionValidVectors +
+                    kLoginAclTransitionInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -5510,6 +5873,15 @@ int main()
                << (kExistingAclBlankLoginValidVectors +
                    kExistingAclBlankLoginInvalidVectors)
                << "}"
+               << ",\"authorized_login_acl_transition_fixtures\":{\"valid\":"
+               << kLoginAclTransitionValidVectors << ",\"invalid\":"
+               << kLoginAclTransitionInvalidVectors << ",\"semantic\":"
+               << (kLoginAclTransitionValidVectors +
+                   kLoginAclTransitionInvalidVectors)
+               << ",\"total\":"
+               << (kLoginAclTransitionValidVectors +
+                   kLoginAclTransitionInvalidVectors)
+               << "}"
               << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
               << kDmRoundtripVectors << ",\"invalid\":"
               << kDmInvalidVectors << ",\"semantic\":"
@@ -5563,6 +5935,7 @@ int main()
                 << ",\"canonical_login_response_packets\":true"
                 << ",\"login_password_authorization_fixtures\":true"
                 << ",\"existing_acl_blank_login_reuse_fixtures\":true"
+                << ",\"authorized_login_acl_transition_fixtures\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"path_return_route_codes\":true"

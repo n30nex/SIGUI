@@ -75,6 +75,29 @@ typedef struct {
     uint8_t payload[D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES];
 } d1l_meshcore_oracle_packet_t;
 
+typedef struct {
+    uint8_t public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES];
+    uint8_t permissions;
+    uint8_t out_path_len;
+    uint8_t shared_secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES];
+    uint32_t last_timestamp;
+    uint32_t last_activity;
+    uint32_t room_sync_since;
+    uint32_t room_pending_ack;
+    uint8_t room_push_failures;
+} d1l_meshcore_oracle_login_acl_record_t;
+
+typedef struct {
+    d1l_meshcore_oracle_login_acl_record_t
+        records[D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES];
+    uint8_t record_count;
+    uint8_t client_index;
+    uint8_t accepted;
+    uint8_t inserted;
+    uint8_t evicted;
+    uint8_t contacts_dirty;
+} d1l_meshcore_oracle_login_acl_transition_t;
+
 /*
  * Canonical field representation for upstream AdvertDataBuilder/Parser.
  * Feature/name presence is explicit so zero-valued or empty non-canonical
@@ -349,6 +372,36 @@ bool d1l_meshcore_oracle_resolve_existing_acl_blank_login(
     uint8_t *out_client_index,
     uint8_t *out_response_secret_source,
     uint8_t *out_client_mutation_mask);
+
+/*
+ * Deterministic projection of ClientACL::putClient plus the post-password
+ * mutation block shared by the pinned repeater and room login handlers. It
+ * models the exact fields changed by those sources: full-key reuse or append,
+ * least-active non-admin eviction (including the pinned last-slot fallback),
+ * replay rejection, role-bit replacement, shared secret, sender timestamp,
+ * local activity time, room sync/pending/push-failure fields, flood out-path
+ * invalidation and the contacts-dirty decision. A structurally valid replay
+ * denial returns true with accepted=0; insertion/eviction that occurred before
+ * the replay check remains visible exactly as upstream leaves it.
+ *
+ * Input records are immutable and the result is published only after complete
+ * validation. This projection excludes filesystem load/save, full ClientInfo
+ * path bytes and unmodified room scheduling fields, identity signature/secret
+ * derivation, password comparison, response creation, dispatch, routing,
+ * scheduling, persistence execution, or RF.
+ */
+bool d1l_meshcore_oracle_apply_authorized_login_acl_transition(
+    uint8_t server_advert_type,
+    uint8_t is_route_flood,
+    uint8_t authorized_permissions,
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t shared_secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t sender_timestamp,
+    uint32_t current_time,
+    uint32_t room_sync_since,
+    const d1l_meshcore_oracle_login_acl_record_t *records,
+    size_t record_count,
+    d1l_meshcore_oracle_login_acl_transition_t *out_transition);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash

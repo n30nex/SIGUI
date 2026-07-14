@@ -41,8 +41,8 @@ around the pinned upstream `mesh::Packet` envelope reader/writer and the
 `AdvertDataBuilder`/`AdvertDataParser` app-data helpers and bounded
 public-group, anonymous-login, regular REQ/RESPONSE, canonical repeater/room
 login-response, repeater/room ACL-miss password authorization, blank-password
-existing-ACL reuse, plain-DM, DM ACK+PATH, and general PATH-return operations.
-Its version 19 static
+existing-ACL reuse, authorized-login ACL record transitions, plain-DM, DM
+ACK+PATH, and general PATH-return operations. Its version 20 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -198,6 +198,24 @@ null pointers, over-capacity tables, all output pointers, and output
 preservation. This immutable table fixture does not instantiate or mutate
 `ClientACL`, load/save contacts, prove insertion/eviction, apply replay/session
 transitions, create a response, dispatch, route, schedule, or claim RF.
+The authorized-login ACL transition capability adds sixteen accepted state
+fixtures and thirteen structural rejects. It models the exact pinned projection
+of `ClientACL::putClient` followed by the repeater/room mutation block: full-key
+reuse, append, strict least-active non-admin eviction, first-wins activity ties,
+and the source's last-slot fallback when a full table has no selectable
+non-admin. Equal or older timestamps reject before field updates. A timestamp-
+zero new login still leaves the just-appended reset record, matching the source
+ordering. Accepted transitions replace only the role bits, shared secret,
+sender timestamp, local activity time, room sync/pending/push-failure fields,
+and flood out-path length; they also pin repeater guest versus non-guest and
+room dirty-contact policy. The matrix covers upper permission-bit preservation,
+full-table existing-key reuse, direct/flood routes, and every password-produced
+role. Structural rejects cover server/route/role canonicality, null pointers,
+capacity, and output preservation. This is an immutable input-to-output
+`ClientInfo` projection, not filesystem-backed `ClientACL` execution; full path
+bytes, unchanged room scheduling fields, identity signatures, secret derivation,
+password comparison, response creation, persistence execution, dispatch,
+routing, scheduling, and RF remain excluded.
 The DM capability adds 268 authenticated round trips: every attempt value from
 0 through 255, the normal 160-byte and extended-attempt 158-byte text
 boundaries, and all ten normal text lengths from 11 through 155 whose complete
@@ -272,7 +290,7 @@ The exact packet registry and blocker receipts are copied into
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
 capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
@@ -290,8 +308,9 @@ closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public/DM dispatch, delivery,
 session state, ACK correlation/delivery state, PATH dispatch/route selection,
-TRACE forwarding/path discovery, and login identity-signature, ACL mutation,
-replay, session, and admin transition flows also remain pending, so
+TRACE forwarding/path discovery, and login identity-signature, authenticated
+request replay, retained session, response, and admin dispatch flows also remain
+pending, so
 both `wp04_closure_eligible` and `closure_ready` remain false. Expected-ACK
 derivation and the ACK-specific encrypted PATH body are now deterministic with
 caller-supplied identity/hash/secret/RNG inputs; that bounded primitive must not
@@ -321,10 +340,11 @@ also implemented with caller-supplied type, hashes, secret, and logical length,
 and deterministic valid-input identity shared-secret derivation is pinned to
 the vendored ladder. The canonical repeater/room login-success response schema,
 ACL-miss password authorization/denial rules, and blank-password existing-ACL
-reuse boundary are implemented, but request tags/types and contact
-insertion/eviction, replay, session transitions, and admin behavior still
-require identity signature handling plus deterministic state fixtures. These
-receipts describe missing
+reuse boundary are implemented. Authorized-login reuse, insertion/eviction,
+replay gating, and modeled record-field transitions are also pinned, but
+request tags/types, authenticated-request replay, retained session/response
+orchestration, and admin dispatch still require identity signature handling
+plus deterministic state fixtures. These receipts describe missing
 oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
@@ -384,8 +404,8 @@ This bounded gate makes no claim about:
   valid-input identity shared-secret derivation; it does not cover persisted
   key loading/management, DM sessions,
   request/response schemas or tags beyond the bounded canonical login-success
-  response, ACL-miss password decision, and blank-password existing-ACL reuse
-  fixtures, dispatch, ACK
+  response, ACL-miss password decision, blank-password existing-ACL reuse, and
+  authorized-login ACL transition fixtures, dispatch, ACK
   correlation/delivery, or
   retained state;
 - semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
