@@ -206,7 +206,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
                 "third_party/MeshCore/lib/ed25519/verify.c"
             ),
             "signed_advert_point_decoder": (
-                "third_party/MeshCore/lib/ed25519/ge.c"
+                "overlays/meshcore_ed25519_defined/ge.c"
             ),
             "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
             "anonymous_login_plaintext": (
@@ -1400,27 +1400,8 @@ def test_conformance_plan_builds_the_oracle_as_a_separate_target():
         assert len(source_commands) == 1
         assert "-fsanitize=address,undefined" in source_commands[0]
         assert f"meshcore_ed25519_{source.stem}.o" in source_commands[0]
-        if source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES:
-            assert conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG in source_commands[0]
-        else:
-            assert conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG not in source_commands[0]
-    exception_commands = [
-        command
-        for command in flattened
-        if conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
-    ]
-    assert len(exception_commands) == len(
-        conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES
-    )
-    matched_exception_sources = {
-        str(source)
-        for command in exception_commands
-        for source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES
-        if str(source) in command
-    }
-    assert matched_exception_sources == {
-        str(source) for source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES
-    }
+        assert "-fno-sanitize=" not in source_commands[0]
+    assert not any("-fno-sanitize=" in command for command in flattened)
     oracle_link = next(
         command
         for command in flattened
@@ -1467,7 +1448,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert report["oracle"]["source_verification"]["verified"] is True
     assert report["oracle"]["result"] is None
     assert report["sanitizer_policy"] == conformance.ED25519_SANITIZER_POLICY
-    assert report["full_ubsan_clean"] is False
+    assert report["full_ubsan_clean"] is True
     assert report["sanitizer_policy_passed"] is None
     assert artifact["artifact_type"] == "meshcore_oracle_manifest"
     assert artifact["status"] == "dry_run"
@@ -1478,7 +1459,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["closure_ready"] is False
     assert artifact["wp04_acceptance_ready"] is False
     assert artifact["sanitizer_policy"] == conformance.ED25519_SANITIZER_POLICY
-    assert artifact["full_ubsan_clean"] is False
+    assert artifact["full_ubsan_clean"] is True
     assert artifact["sanitizer_policy_passed"] is None
     assert artifact["corpus_version"] == 23
     assert artifact["coverage_policy"]["validated"] is True

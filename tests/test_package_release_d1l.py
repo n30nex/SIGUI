@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import meshcore_signed_advert_runtime_d1l as signed_runtime
 from scripts import package_release_d1l
 from scripts.verify_checksums import verify_sha256_manifest
 from tests.meshcore_conformance_fixture import completed_report
@@ -115,6 +116,9 @@ def write_fake_notices(root: Path) -> None:
     (root / "docs" / "DEVELOPER_GUIDE_D1L.md").write_text("developer guide\n", encoding="ascii")
     (root / "docs" / "FLASH_RECOVERY_D1L.md").write_text("flash recovery\n", encoding="ascii")
     (root / "docs" / "RP2040_SD_BRIDGE_FLASH_D1L.md").write_text("rp2040 guide\n", encoding="ascii")
+    overlay = root / "overlays" / "meshcore_ed25519_defined"
+    overlay.mkdir(parents=True, exist_ok=True)
+    (overlay / "license.txt").write_text("orlp zlib license\n", encoding="ascii")
     source_inputs = {
         ".gitmodules": "[submodule \"MeshCore\"]\n\tpath = third_party/MeshCore\n\turl = https://github.com/meshcore-dev/MeshCore.git\n",
         ".github/workflows/d1l-ci.yml": "name: d1l-ci\n",
@@ -122,16 +126,25 @@ def write_fake_notices(root: Path) -> None:
         "dependencies.lock": "dependencies: []\n",
         "docs/BUILD_PROVENANCE_D1L.md": "# fixture build type\n",
         "main/CMakeLists.txt": "idf_component_register(SRCS main.c)\n",
+        "overlays/meshcore_ed25519_defined/README.md": "# overlay fixture\n",
+        "overlays/meshcore_ed25519_defined/fe.c": "/* altered fe fixture */\n",
+        "overlays/meshcore_ed25519_defined/ge.c": "/* altered ge fixture */\n",
+        "overlays/meshcore_ed25519_defined/sc.c": "/* altered sc fixture */\n",
         "partitions_d1l.csv": "nvs,data,nvs,0x9000,0x6000\n",
         "patches/sensecap_indicator_idf55_compat.patch": "compat patch\n",
         "patches/sensecap_indicator_touch_fix.patch": "touch patch\n",
         "scripts/compare_release_reproducibility_d1l.py": "# comparator fixture\n",
         "scripts/meshcore_conformance_d1l.py": "# conformance fixture\n",
+        "scripts/meshcore_signed_advert_runtime_d1l.py": "# signed runtime fixture\n",
         "scripts/package_release_d1l.py": "# package fixture\n",
         "scripts/provenance_d1l.py": "# provenance fixture\n",
         "scripts/sbom_d1l.py": "# sbom fixture\n",
         "scripts/verify_arduino_build_inputs.py": "# Arduino input verifier fixture\n",
         "scripts/verify_ci_tool_inputs.py": "# CI tool input verifier fixture\n",
+        "scripts/validate_ed25519_defined_overlay.py": "# overlay validator fixture\n",
+        "tests/ed25519_defined_overlay/driver.c": "/* overlay driver fixture */\n",
+        "tests/meshcore_oracle/manifest.json": "{}\n",
+        "tests/meshcore_signed_advert_runtime/manifest.json": "{}\n",
         "sdkconfig.defaults": "CONFIG_IDF_TARGET=\"esp32s3\"\n",
     }
     for relative, contents in source_inputs.items():
@@ -271,6 +284,78 @@ def write_meshcore_conformance(
     return path
 
 
+def write_meshcore_signed_advert_runtime(
+    root: Path,
+    commit: str,
+    *,
+    generated_at: datetime | None = None,
+    **overrides: object,
+) -> Path:
+    manifest = signed_runtime.load_manifest()
+    dependency = manifest["external_dependency"]
+    repository_files = {
+        path: {
+            "expected_sha256": digest,
+            "actual_sha256": digest,
+            "matched": True,
+        }
+        for group in signed_runtime._source_groups(manifest)
+        for path, digest in group.items()
+    }
+    payload = {
+        "schema_version": 1,
+        "artifact_type": signed_runtime.SIGNED_ADVERT_ARTIFACT_TYPE,
+        "status": "pass",
+        "passed": True,
+        "execution_complete": True,
+        "generated_at": (generated_at or datetime.now(timezone.utc)).isoformat(),
+        "work_package": "WP-04",
+        "capability": manifest["capability"],
+        "coverage_boundary": manifest["coverage_boundary"],
+        "wp04_closure_eligible": False,
+        "closure_ready": False,
+        "repository": {
+            "verified": True,
+            "repository_commit": commit,
+            "expected_repository_commit": commit,
+            "upstream_commit": manifest["upstream"]["commit"],
+            "gitlink_commit": manifest["upstream"]["commit"],
+            "source_hash_mode": manifest["source_hash_mode"],
+            "files": repository_files,
+        },
+        "external_archive": {
+            "verified": True,
+            "source": dependency["archive_url"],
+            "url": dependency["archive_url"],
+            "size": dependency["archive_size"],
+            "sha256": dependency["archive_sha256"],
+            "version": dependency["version"],
+            "registry_version_id": dependency["registry_version_id"],
+            "release_commit": dependency["release_commit"],
+        },
+        "external_sources": {
+            "verified": True,
+            "files": {
+                path: {"sha256": digest, "size": 1}
+                for path, digest in dependency["sources"].items()
+            },
+        },
+        "sanitizers_enabled": True,
+        "sanitizer_policy": manifest["sanitizer_policy"],
+        "full_ubsan_clean": True,
+        "commands": signed_runtime.command_plan(
+            "clang-18", "clang++-18", "/tmp/crypto", "/tmp/build", sanitize=True
+        ),
+        "result": manifest["expected_result"],
+        "assertions": manifest["assertions"],
+        "residual_gaps": manifest["residual_gaps"],
+    }
+    payload.update(overrides)
+    path = root / f"meshcore_signed_advert_runtime_{commit}.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monkeypatch):
     root = tmp_path
     build = root / "build"
@@ -281,6 +366,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     rp2040_artifacts = write_fake_rp2040_artifacts(root)
     commit = "a" * 40
     conformance = write_meshcore_conformance(root, commit)
+    signed_advert = write_meshcore_signed_advert_runtime(root, commit)
     monkeypatch.setenv("GITHUB_SHA", commit)
     install_fake_source_identity(monkeypatch, commit)
 
@@ -292,6 +378,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         full_size=0x20000,
         rp2040_artifact_root=rp2040_artifacts,
         meshcore_conformance_json=conformance,
+        meshcore_signed_advert_runtime_json=signed_advert,
     )
 
     package_dir = out / "d1l-test"
@@ -309,11 +396,15 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert (
         package_dir / "notices" / "SOURCE_AUDIT_AND_ATTRIBUTION.md"
     ).read_text(encoding="ascii") == "source audit\n"
+    assert (
+        package_dir / "notices" / "ORLP_ED25519_ZLIB_LICENSE.txt"
+    ).read_text(encoding="ascii") == "orlp zlib license\n"
     assert [item["path"] for item in manifest["notice_files"]] == [
         "notices/LICENSE",
         "notices/THIRD_PARTY_NOTICES.md",
         "notices/ATTRIBUTIONS.md",
         "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
+        "notices/ORLP_ED25519_ZLIB_LICENSE.txt",
     ]
     assert [item["path"] for item in manifest["release_docs"]] == [
         "docs/USER_GUIDE_D1L.md",
@@ -360,6 +451,25 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert conformance_metadata["issue_65_closure_eligible"] is False
     assert conformance_metadata["sha256"] == package_release_d1l.sha256_file(packaged_conformance)
 
+    signed_metadata = manifest["meshcore_signed_advert_runtime"]
+    packaged_signed = package_dir / signed_metadata["path"]
+    packaged_signed_report = json.loads(packaged_signed.read_text(encoding="ascii"))
+    raw_signed_report = json.loads(signed_advert.read_text(encoding="utf-8"))
+    assert packaged_signed_report == signed_runtime.canonicalize_release_report(
+        raw_signed_report, commit
+    )
+    assert "generated_at" not in packaged_signed_report
+    assert "commands" not in packaged_signed_report
+    assert "source" not in packaged_signed_report["external_archive"]
+    assert signed_metadata["source_commit"] == commit
+    assert signed_metadata["full_ubsan_clean"] is True
+    assert signed_metadata["closure_ready"] is False
+    assert signed_metadata["wp04_closure_eligible"] is False
+    assert signed_metadata["run_receipt"]["path"] == signed_advert.name
+    assert signed_metadata["run_receipt"]["sha256"] == (
+        package_release_d1l.sha256_file(signed_advert)
+    )
+
     full = package_dir / manifest["full_flash_image"]["path"]
     image = full.read_bytes()
     assert len(image) == 0x20000
@@ -380,7 +490,9 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert "./docs/USER_GUIDE_D1L.md" in sha_text
     assert "./notices/LICENSE" in sha_text
     assert "./notices/THIRD_PARTY_NOTICES.md" in sha_text
+    assert "./notices/ORLP_ED25519_ZLIB_LICENSE.txt" in sha_text
     assert f"./evidence/meshcore_conformance_{commit}.json" in sha_text
+    assert f"./evidence/meshcore_signed_advert_runtime_{commit}.json" in sha_text
     assert f"./build_inputs_{commit}.json" in sha_text
     assert f"./capability_manifest_{commit}.json" in sha_text
     assert f"./release_evidence_index_{commit}.json" in sha_text
@@ -397,6 +509,19 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert any(item["versionInfo"] == "2" * 40 for item in sbom["packages"])
     assert any(item["fileName"] == "./package/firmware/meshcore_deskos_d1l.bin" for item in sbom["files"])
     assert any(item["fileName"] == "./source/THIRD_PARTY_NOTICES.md" for item in sbom["files"])
+    overlay_sbom = next(
+        item
+        for item in sbom["files"]
+        if item["fileName"] == "./source/overlays/meshcore_ed25519_defined/fe.c"
+    )
+    assert overlay_sbom["licenseConcluded"] == "Zlib"
+    assert overlay_sbom["licenseInfoInFiles"] == ["Zlib"]
+    packaged_license_sbom = next(
+        item
+        for item in sbom["files"]
+        if item["fileName"] == "./package/notices/ORLP_ED25519_ZLIB_LICENSE.txt"
+    )
+    assert packaged_license_sbom["licenseConcluded"] == "Zlib"
     for source_name in (
         ".github/d1l-build-inputs.json",
         "requirements/ci-host-windows.txt",
@@ -473,7 +598,31 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert f"`sbom_{commit}.spdx.json` is the deterministic SPDX 2.3 SBOM" in readme
     assert f"`provenance_{commit}.json` is deterministic unsigned SLSA v1 provenance" in readme
     assert "package metadata, not new release evidence or physical closure" in readme
-    assert "structural prerequisite and does not close issue #65" in readme
+    assert "neither projection alone closes WP-04 or issue #65" in readme
+
+
+def test_release_package_rejects_signed_advert_receipt_from_other_commit(
+    tmp_path, monkeypatch
+):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    commit = "b" * 40
+    install_fake_source_identity(monkeypatch, commit)
+    signed_advert = write_meshcore_signed_advert_runtime(tmp_path, commit)
+    report = json.loads(signed_advert.read_text(encoding="utf-8"))
+    report["repository"]["repository_commit"] = "c" * 40
+    signed_advert.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="repository_commit"):
+        package_release_d1l.create_release_package(
+            root=tmp_path,
+            build_dir=build,
+            out_dir=tmp_path / "artifacts" / "release",
+            package_name="signed-advert-wrong-commit",
+            full_size=0x20000,
+            meshcore_signed_advert_runtime_json=signed_advert,
+        )
 
 
 def test_exact_sha_package_metadata_contract_rejects_missing_stale_and_mismatched(

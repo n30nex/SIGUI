@@ -68,7 +68,12 @@ def write_package_inputs(root: Path, commit: str = COMMIT) -> tuple[Path, dict]:
 
     notice_files = []
     for source in sbom_d1l.REQUIRED_NOTICE_SOURCES:
-        path = notices / Path(source).name
+        destination = (
+            "ORLP_ED25519_ZLIB_LICENSE.txt"
+            if source == "overlays/meshcore_ed25519_defined/license.txt"
+            else Path(source).name
+        )
+        path = notices / destination
         path.write_text(f"packaged {source}\n", encoding="utf-8")
         notice_files.append(package_claim(path, package_dir, source=source))
 
@@ -106,7 +111,17 @@ def test_source_sbom_is_deterministic_and_bound_to_exact_identities(tmp_path):
         "./source/.github/d1l-build-inputs.json",
         "./source/requirements/ci-host-windows.txt",
         "./source/docs/COMPLETION_LEDGER.yaml",
+        "./source/overlays/meshcore_ed25519_defined/fe.c",
+        "./source/scripts/validate_ed25519_defined_overlay.py",
+        "./source/tests/meshcore_signed_advert_runtime/manifest.json",
     }.issubset(names)
+    overlay = next(
+        item
+        for item in first["files"]
+        if item["fileName"] == "./source/overlays/meshcore_ed25519_defined/ge.c"
+    )
+    assert overlay["licenseConcluded"] == "Zlib"
+    assert overlay["licenseInfoInFiles"] == ["Zlib"]
 
 
 @pytest.mark.parametrize(
@@ -116,6 +131,8 @@ def test_source_sbom_is_deterministic_and_bound_to_exact_identities(tmp_path):
         "requirements/ci-host-windows.txt",
         "dependencies.lock",
         "docs/COMPLETION_LEDGER.yaml",
+        "overlays/meshcore_ed25519_defined/license.txt",
+        "scripts/validate_ed25519_defined_overlay.py",
     ),
 )
 def test_source_sbom_requires_every_release_inventory_lock(tmp_path, relative):
@@ -154,6 +171,19 @@ def test_package_sbom_round_trips_and_detects_input_tampering(tmp_path):
     package_names = {item["fileName"] for item in loaded["files"]}
     assert "./package/firmware/meshcore_deskos_d1l.bin" in package_names
     assert "./package/notices/THIRD_PARTY_NOTICES.md" in package_names
+    assert "./package/notices/ORLP_ED25519_ZLIB_LICENSE.txt" in package_names
+    packaged_license = next(
+        item
+        for item in loaded["files"]
+        if item["fileName"] == "./package/notices/ORLP_ED25519_ZLIB_LICENSE.txt"
+    )
+    assert packaged_license["licenseConcluded"] == "Zlib"
+    release = next(
+        item
+        for item in loaded["packages"]
+        if item["SPDXID"] == sbom_d1l.RELEASE_PACKAGE_ID
+    )
+    assert "notices/ORLP_ED25519_ZLIB_LICENSE.txt" in release["attributionTexts"][0]
 
     sbom_d1l.write_package_sbom(
         tmp_path,

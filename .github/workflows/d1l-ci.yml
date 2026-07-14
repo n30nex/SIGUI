@@ -237,6 +237,18 @@ jobs:
             --cxx "$(command -v clang++-18)" \
             --out artifacts/meshcore-conformance/toolchain-inputs.json
 
+      - name: Validate Ed25519 defined-arithmetic overlay
+        shell: bash
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          python ./scripts/validate_ed25519_defined_overlay.py \
+            --cc clang-18 \
+            --sanitizers required \
+            --out "artifacts/meshcore-conformance/ed25519_defined_overlay_${GITHUB_SHA}.json"
+
       - name: Run MeshCore wire-envelope conformance and RX fuzzing
         shell: bash
         env:
@@ -439,19 +451,34 @@ jobs:
             exit 1
           fi
           conformance_json="${conformance_files[0]}"
-          python - "$conformance_json" <<'PY'
+          mapfile -t signed_runtime_files < <(
+            find artifacts/meshcore-conformance-input -type f \
+              -name "meshcore_signed_advert_runtime_${GITHUB_SHA}.json" -print
+          )
+          if [[ "${#signed_runtime_files[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one current-commit signed-advert runtime JSON, found %s\n' \
+              "${#signed_runtime_files[@]}" >&2
+            exit 1
+          fi
+          signed_runtime_json="${signed_runtime_files[0]}"
+          python - "$conformance_json" "$signed_runtime_json" <<'PY'
           import json
           import os
           import sys
 
           from scripts.meshcore_conformance_d1l import validate_completed_report
+          from scripts.meshcore_signed_advert_runtime_d1l import (
+              validate_completed_report as validate_signed_runtime,
+          )
 
-          path = sys.argv[1]
-          with open(path, encoding="utf-8") as stream:
+          with open(sys.argv[1], encoding="utf-8") as stream:
               report = json.load(stream)
           validate_completed_report(report, os.environ["GITHUB_SHA"])
+          with open(sys.argv[2], encoding="utf-8") as stream:
+              validate_signed_runtime(json.load(stream), os.environ["GITHUB_SHA"])
           PY
           printf 'D1L_MESHCORE_CONFORMANCE_JSON=%s\n' "$conformance_json" >> "$GITHUB_ENV"
+          printf 'D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON=%s\n' "$signed_runtime_json" >> "$GITHUB_ENV"
 
       - name: Build D1L firmware
         shell: bash
@@ -514,7 +541,7 @@ jobs:
       - name: Package D1L release
         shell: bash
         run: |
-          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON")
+          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON" --meshcore-signed-advert-runtime-json "$D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON")
           if [[ "${{ needs.change-filter.outputs.include_sd_bridge }}" == "true" ]]; then
             package_args+=(--rp2040-artifact-root artifacts/rp2040-release-inputs)
           fi

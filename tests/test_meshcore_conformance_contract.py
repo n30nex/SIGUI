@@ -310,34 +310,20 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     unverified_compiler["toolchain"]["clang"]["bytes_verified"] = False
     mutations.append((unverified_compiler, "toolchain_bytes"))
     hidden_sanitizer_exception = copy.deepcopy(report)
-    hidden_sanitizer_exception["sanitizer_policy"]["exceptions"] = []
+    hidden_sanitizer_exception["sanitizer_policy"]["exceptions"] = [
+        {"source": "hidden.c", "compiler_flag": "-fno-sanitize=undefined"}
+    ]
     mutations.append((hidden_sanitizer_exception, "sanitizer_policy"))
     false_full_ubsan_claim = copy.deepcopy(report)
-    false_full_ubsan_claim["full_ubsan_clean"] = True
-    mutations.append((false_full_ubsan_claim, "full_ubsan_clean_false"))
+    false_full_ubsan_claim["full_ubsan_clean"] = False
+    mutations.append((false_full_ubsan_claim, "full_ubsan_clean_true"))
     unverified_sanitizer_policy = copy.deepcopy(report)
     unverified_sanitizer_policy["sanitizer_policy_passed"] = False
     mutations.append((unverified_sanitizer_policy, "sanitizer_policy_passed"))
-    unscoped_sanitizer_exception = copy.deepcopy(report)
-    unscoped_sanitizer_exception["commands"][6] = ["clang-18", "step-6"]
+    sanitizer_suppression = copy.deepcopy(report)
+    sanitizer_suppression["commands"][5].insert(1, "-fno-sanitize=shift-base")
     mutations.append(
-        (unscoped_sanitizer_exception, "sanitizer_exception_command")
-    )
-    bundled_sanitizer_exceptions = copy.deepcopy(report)
-    bundled_sanitizer_exceptions["commands"][5].extend(
-        str(source)
-        for source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES[1:]
-    )
-    bundled_sanitizer_exceptions["commands"][6] = [
-        "clang-18",
-        conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
-    ]
-    bundled_sanitizer_exceptions["commands"][7] = [
-        "clang-18",
-        conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
-    ]
-    mutations.append(
-        (bundled_sanitizer_exceptions, "sanitizer_exception_command")
+        (sanitizer_suppression, "sanitizer_disable_flags_absent")
     )
     unrelated_sanitizer_suppression = copy.deepcopy(report)
     unrelated_sanitizer_suppression["commands"][5].insert(
@@ -345,7 +331,7 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
         "-fno-sanitize=undefined",
     )
     mutations.append(
-        (unrelated_sanitizer_suppression, "sanitizer_exception_command")
+        (unrelated_sanitizer_suppression, "sanitizer_disable_flags_absent")
     )
     string_form_sanitizer_suppression = copy.deepcopy(report)
     string_form_sanitizer_suppression["commands"][0] = (

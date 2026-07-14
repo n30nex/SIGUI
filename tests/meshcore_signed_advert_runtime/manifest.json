@@ -69,7 +69,10 @@
     "third_party/MeshCore/lib/ed25519/verify.c": "18c43d45e99ec4a922f3ed3b13eeb0309df62324c7ee9ca707eb5d65d8b66ad7",
     "third_party/MeshCore/lib/ed25519/key_exchange.c": "885157d0d3a635e405669f621a2c6ee24d48d8ee2b39f097f9a642681fe164a4",
     "third_party/MeshCore/lib/ed25519/keypair.c": "9639f460c01191b738a4e3e206c5ee6bd232591b68f920ba3b097de7b80bbf77",
-    "third_party/MeshCore/lib/ed25519/sign.c": "1f28f5864ee084c9d624d73f00f45b2b82c093c1e775306ffe43671e3b76d425"
+    "third_party/MeshCore/lib/ed25519/sign.c": "1f28f5864ee084c9d624d73f00f45b2b82c093c1e775306ffe43671e3b76d425",
+    "overlays/meshcore_ed25519_defined/fe.c": "1d5040487ff44538e9a03164e8bbe3a9d3446d0efc9669578f20ba4a8751bdfc",
+    "overlays/meshcore_ed25519_defined/ge.c": "b17611fd0b5d8bb3bae2dca3926150a6a2f9f579a7357dcf7feb296779d9d653",
+    "overlays/meshcore_ed25519_defined/sc.c": "4a955511f222bf501b16220ad077b4fc5c668bb8c66c82bc51deff1f850754ae"
   },
   "host_sources": {
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
@@ -86,14 +89,16 @@
       "address",
       "undefined"
     ],
-    "full_ubsan_clean": false,
-    "shift_base_exceptions": [
-      "third_party/MeshCore/lib/ed25519/fe.c",
-      "third_party/MeshCore/lib/ed25519/ge.c",
-      "third_party/MeshCore/lib/ed25519/sc.c"
-    ],
-    "exception_flag": "-fno-sanitize=shift-base",
-    "release_blocker": "BLK-WP04-ED25519-SHIFT-UB-20260714"
+    "full_ubsan_clean": true,
+    "exceptions": [],
+    "source_level_remediation": {
+      "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
+      "status": "resolved",
+      "upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+      "overlay_path": "overlays/meshcore_ed25519_defined",
+      "validator": "scripts/validate_ed25519_defined_overlay.py",
+      "transformed_expressions": 215
+    }
   },
   "assertions": [
     "real_BaseChatMesh_createSelfAdvert_Mesh_createAdvert_and_LocalIdentity_sign",
@@ -134,7 +139,6 @@
     "trace_forwarding_and_path_discovery",
     "login_request_response_admin",
     "retained_contact_recovery_and_hardware_RF_evidence",
-    "pinned_BaseChatMesh_reports_is_new_false_for_a_new_auto_added_contact",
-    "defined_arithmetic_remediation_for_the_vendored_ed25519_shift_UB_family"
+    "pinned_BaseChatMesh_reports_is_new_false_for_a_new_auto_added_contact"
   ]
 }

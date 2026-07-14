@@ -49,9 +49,10 @@ def test_signed_advert_runtime_manifest_is_bounded_and_pinned():
     assert dependency["release_commit"] == (
         "61e84b220fc8dfe83c2e04716d0fa88cfaddadf6"
     )
-    assert manifest["sanitizer_policy"]["full_ubsan_clean"] is False
-    assert manifest["sanitizer_policy"]["release_blocker"] == (
-        "BLK-WP04-ED25519-SHIFT-UB-20260714"
+    assert manifest["sanitizer_policy"]["full_ubsan_clean"] is True
+    assert manifest["sanitizer_policy"]["exceptions"] == []
+    assert manifest["sanitizer_policy"]["source_level_remediation"]["status"] == (
+        "resolved"
     )
     assert "firmware_runtime_binding_and_real_peer_interoperability" in manifest[
         "residual_gaps"
@@ -68,7 +69,7 @@ def test_signed_advert_runtime_repository_sources_match_exact_pins():
     assert receipt["upstream_commit"] == manifest["upstream"]["commit"]
     assert receipt["gitlink_commit"] == manifest["upstream"]["commit"]
     assert receipt["source_hash_mode"] == "canonical_lf_text_sha256"
-    assert len(receipt["files"]) == 35
+    assert len(receipt["files"]) == 38
     assert all(item["matched"] for item in receipt["files"].values())
 
 
@@ -142,26 +143,19 @@ def test_signed_advert_runtime_command_plan_compiles_real_sources():
         "/tmp/crypto/Crypto.cpp",
     ):
         assert sum(source in command for command in flattened) == 1
-    exception_commands = [
-        command for command in flattened if "-fno-sanitize=shift-base" in command
-    ]
-    assert len(exception_commands) == 3
-    assert {
-        next(
-            source
-            for source in (
-                "third_party/MeshCore/lib/ed25519/fe.c",
-                "third_party/MeshCore/lib/ed25519/ge.c",
-                "third_party/MeshCore/lib/ed25519/sc.c",
-            )
-            if source in command
-        )
-        for command in exception_commands
-    } == {
+    assert not any("-fno-sanitize=" in command for command in flattened)
+    for source in (
+        "overlays/meshcore_ed25519_defined/fe.c",
+        "overlays/meshcore_ed25519_defined/ge.c",
+        "overlays/meshcore_ed25519_defined/sc.c",
+    ):
+        assert sum(source in command for command in flattened) == 1
+    for source in (
         "third_party/MeshCore/lib/ed25519/fe.c",
         "third_party/MeshCore/lib/ed25519/ge.c",
         "third_party/MeshCore/lib/ed25519/sc.c",
-    }
+    ):
+        assert not any(source in command for command in flattened)
     assert not any("meshcore_oracle.cpp" in command for command in flattened)
     assert flattened[-1] in {
         "/tmp/build/meshcore_signed_advert_runtime",

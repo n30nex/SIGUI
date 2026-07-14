@@ -509,17 +509,19 @@ unchanged. Any libFuzzer crash/timeout input is written beside the JSON under
 the uploaded `artifacts/meshcore-conformance` tree rather than discarded with
 the temporary build directory.
 
-The unchanged pinned Ed25519 ref10 arithmetic sources `fe.c`, `ge.c`, and
-`sc.c` contain negative signed left shifts. CI observed `fe.c:714` with
-`carry0 == -1` and `ge.c:359` with `b == -7`; static inspection also finds the
-same signed-carry family in `sc.c`, starting at line 122. Clang UBSan correctly
-reports these as `shift-base` undefined behavior. The host oracle disables only
-the `shift-base` check for those three exact source hashes while retaining
-ASan, the rest of UBSan (including shift-count checks), source pins, and the
-Ed25519 KAT/vector matrix. Every receipt exposes all three exceptions and sets
-`full_ubsan_clean` to false. These are declared vendored-source exceptions,
-not source-level fixes or an unqualified sanitizer-clean claim; source-level
-defined-arithmetic remediation remains open and release-blocking.
+The pinned upstream Ed25519 ref10 arithmetic sources `fe.c`, `ge.c`, and
+`sc.c` contain negative signed left shifts that Clang UBSan correctly reports
+as `shift-base` undefined behavior. Production and both host gates now select
+the plainly marked SIGUI defined-arithmetic overlay under
+`overlays/meshcore_ed25519_defined/` for those three files, while retaining the
+unchanged MeshCore gitlink and all other pinned Ed25519 sources. The overlay
+uses multiplication by checked-in powers of two, passes RFC 8032 vectors and
+256 deterministic baseline/overlay differential cases, and is compiled under
+ASan plus the full configured UBSan group without source exceptions. Receipts
+must expose an empty exception list and `full_ubsan_clean=true`; any
+`-fno-sanitize=` flag is a gate failure. This resolves the arithmetic UB
+prerequisite but does not expand the oracle's bounded semantic or hardware
+coverage.
 
 ## Explicit Non-Coverage
 

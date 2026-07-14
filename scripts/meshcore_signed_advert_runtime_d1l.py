@@ -58,20 +58,36 @@ MESH_CPP_SOURCES = (
     / "BaseChatMesh.cpp",
 )
 ED25519_ROOT = ROOT / "third_party" / "MeshCore" / "lib" / "ed25519"
+ED25519_DEFINED_ROOT = ROOT / "overlays" / "meshcore_ed25519_defined"
 ED25519_C_SOURCES = tuple(
-    ED25519_ROOT / name
-    for name in (
-        "fe.c",
-        "ge.c",
-        "sc.c",
-        "sha512.c",
-        "verify.c",
-        "key_exchange.c",
-        "keypair.c",
-        "sign.c",
+    (
+        *(ED25519_DEFINED_ROOT / name for name in ("fe.c", "ge.c", "sc.c")),
+        *(ED25519_ROOT / name for name in (
+            "sha512.c",
+            "verify.c",
+            "key_exchange.c",
+            "keypair.c",
+            "sign.c",
+        )),
     )
 )
-SHIFT_BASE_EXCEPTION_SOURCES = frozenset(ED25519_C_SOURCES[:3])
+SIGNED_ADVERT_SANITIZER_POLICY = {
+    "requested": ["address", "undefined"],
+    "full_ubsan_clean": True,
+    "exceptions": [],
+    "source_level_remediation": {
+        "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
+        "status": "resolved",
+        "upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+        "overlay_path": "overlays/meshcore_ed25519_defined",
+        "validator": "scripts/validate_ed25519_defined_overlay.py",
+        "transformed_expressions": 215,
+    },
+}
+SIGNED_ADVERT_EVIDENCE_PROFILE = (
+    "SIGUI MeshCore signed-advert semantic runtime canonical evidence v1"
+)
+SIGNED_ADVERT_ARTIFACT_TYPE = "d1l_meshcore_signed_advert_semantic_runtime"
 AES_SOURCE = (
     ROOT
     / "third_party"
@@ -154,19 +170,7 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
         != "1867740aad0d61bdcbac25f6dbc8eefe6eed9e7b37f48d9d0b9d80500ad431e0"
     ):
         raise GateFailure("signed-advert external dependency pin drifted")
-    sanitizer = manifest.get("sanitizer_policy", {})
-    expected_exceptions = [
-        str(path.relative_to(ROOT)).replace("\\", "/")
-        for path in ED25519_C_SOURCES[:3]
-    ]
-    if (
-        sanitizer.get("requested") != ["address", "undefined"]
-        or sanitizer.get("full_ubsan_clean") is not False
-        or sanitizer.get("shift_base_exceptions") != expected_exceptions
-        or sanitizer.get("exception_flag") != "-fno-sanitize=shift-base"
-        or sanitizer.get("release_blocker")
-        != "BLK-WP04-ED25519-SHIFT-UB-20260714"
-    ):
+    if manifest.get("sanitizer_policy") != SIGNED_ADVERT_SANITIZER_POLICY:
         raise GateFailure("signed-advert sanitizer policy drifted")
     return manifest
 
@@ -381,8 +385,6 @@ def command_plan(
     for index, source in enumerate((*ED25519_C_SOURCES, AES_SOURCE)):
         output = str(build / f"c_{index}.o")
         flags = list(c_flags)
-        if source in SHIFT_BASE_EXCEPTION_SOURCES and sanitize:
-            flags.append("-fno-sanitize=shift-base")
         if source == AES_SOURCE:
             flags.append("-DAES_DEC_PREKEYED")
         commands.append(
@@ -472,6 +474,171 @@ def write_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def validate_completed_report(
+    report: object,
+    expected_commit: str,
+    *,
+    require_generated_at: bool = True,
+    require_commands: bool = True,
+) -> None:
+    """Reject incomplete or weak signed-advert runtime receipts."""
+
+    manifest = load_manifest()
+    if not isinstance(report, dict):
+        raise ValueError("signed-advert runtime report must be an object")
+    repository = report.get("repository")
+    repository = repository if isinstance(repository, dict) else {}
+    files = repository.get("files")
+    files = files if isinstance(files, dict) else {}
+    expected_files = {
+        path: digest for group in _source_groups(manifest) for path, digest in group.items()
+    }
+    repository_files_exact = set(files) == set(expected_files) and all(
+        isinstance(files[path], dict)
+        and files[path].get("expected_sha256") == digest
+        and files[path].get("actual_sha256") == digest
+        and files[path].get("matched") is True
+        for path, digest in expected_files.items()
+    )
+
+    dependency = manifest["external_dependency"]
+    archive = report.get("external_archive")
+    archive = archive if isinstance(archive, dict) else {}
+    external = report.get("external_sources")
+    external = external if isinstance(external, dict) else {}
+    external_files = external.get("files")
+    external_files = external_files if isinstance(external_files, dict) else {}
+    external_files_exact = set(external_files) == set(dependency["sources"]) and all(
+        isinstance(external_files[path], dict)
+        and external_files[path].get("sha256") == digest
+        and isinstance(external_files[path].get("size"), int)
+        and external_files[path]["size"] > 0
+        for path, digest in dependency["sources"].items()
+    )
+
+    commands = report.get("commands")
+    commands_valid = isinstance(commands, list)
+    if commands_valid:
+        commands_valid = all(
+            isinstance(command, list)
+            and command
+            and all(isinstance(argument, str) for argument in command)
+            for command in commands
+        )
+    flattened = [
+        " ".join(command).replace("\\", "/")
+        for command in commands
+        if isinstance(command, list)
+    ] if isinstance(commands, list) else []
+    if require_commands:
+        commands_valid = (
+            commands_valid
+            and len(commands) == len(command_plan("cc", "cxx", sanitize=True))
+            and not any(
+                argument.startswith("-fno-sanitize=")
+                for command in commands
+                for argument in command
+            )
+            and all(
+                sum(
+                    str(source.relative_to(ROOT)).replace("\\", "/") in command
+                    for command in flattened
+                )
+                == 1
+                for source in ED25519_C_SOURCES
+            )
+        )
+    else:
+        commands_valid = commands is None
+
+    required = {
+        "schema_version": report.get("schema_version") == 1,
+        "artifact_type": report.get("artifact_type")
+        == SIGNED_ADVERT_ARTIFACT_TYPE,
+        "status": report.get("status") == "pass",
+        "passed": report.get("passed") is True,
+        "execution_complete": report.get("execution_complete") is True,
+        "work_package": report.get("work_package") == "WP-04",
+        "capability": report.get("capability") == manifest["capability"],
+        "coverage_boundary": report.get("coverage_boundary")
+        == manifest["coverage_boundary"],
+        "wp04_closure_eligible_false": report.get("wp04_closure_eligible") is False,
+        "closure_ready_false": report.get("closure_ready") is False,
+        "repository_verified": repository.get("verified") is True,
+        "repository_commit": repository.get("repository_commit") == expected_commit,
+        "expected_repository_commit": repository.get("expected_repository_commit")
+        == expected_commit,
+        "upstream_commit": repository.get("upstream_commit")
+        == manifest["upstream"]["commit"],
+        "gitlink_commit": repository.get("gitlink_commit")
+        == manifest["upstream"]["commit"],
+        "source_hash_mode": repository.get("source_hash_mode")
+        == manifest["source_hash_mode"],
+        "repository_files": repository_files_exact,
+        "external_archive": archive.get("verified") is True
+        and archive.get("url") == dependency["archive_url"]
+        and archive.get("size") == dependency["archive_size"]
+        and archive.get("sha256") == dependency["archive_sha256"]
+        and archive.get("version") == dependency["version"]
+        and archive.get("registry_version_id") == dependency["registry_version_id"]
+        and archive.get("release_commit") == dependency["release_commit"],
+        "external_sources": external.get("verified") is True and external_files_exact,
+        "sanitizers_enabled": report.get("sanitizers_enabled") is True,
+        "sanitizer_policy": report.get("sanitizer_policy")
+        == SIGNED_ADVERT_SANITIZER_POLICY,
+        "full_ubsan_clean": report.get("full_ubsan_clean") is True,
+        "commands": commands_valid,
+        "result": report.get("result") == manifest["expected_result"],
+        "assertions": report.get("assertions") == manifest["assertions"],
+        "residual_gaps": report.get("residual_gaps") == manifest["residual_gaps"],
+    }
+    if require_generated_at:
+        generated_at = report.get("generated_at")
+        try:
+            parsed = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+            required["generated_at"] = parsed.tzinfo is not None
+        except (ValueError, OverflowError):
+            required["generated_at"] = False
+    elif "generated_at" in report:
+        required["generated_at_absent"] = False
+    failed = [name for name, passed in required.items() if not passed]
+    if failed:
+        raise ValueError(
+            "signed-advert runtime validation failed: " + ", ".join(failed)
+        )
+
+
+def canonicalize_release_report(report: object, expected_commit: str) -> dict[str, Any]:
+    """Return the deterministic semantic projection stored in release packages."""
+
+    validate_completed_report(report, expected_commit)
+    assert isinstance(report, dict)
+    archive = dict(report["external_archive"])
+    archive.pop("source", None)
+    return {
+        "schema_version": report["schema_version"],
+        "artifact_type": report["artifact_type"],
+        "evidence_profile": SIGNED_ADVERT_EVIDENCE_PROFILE,
+        "status": report["status"],
+        "passed": report["passed"],
+        "execution_complete": report["execution_complete"],
+        "work_package": report["work_package"],
+        "capability": report["capability"],
+        "coverage_boundary": report["coverage_boundary"],
+        "wp04_closure_eligible": report["wp04_closure_eligible"],
+        "closure_ready": report["closure_ready"],
+        "repository": report["repository"],
+        "external_archive": archive,
+        "external_sources": report["external_sources"],
+        "sanitizers_enabled": report["sanitizers_enabled"],
+        "sanitizer_policy": report["sanitizer_policy"],
+        "full_ubsan_clean": report["full_ubsan_clean"],
+        "result": report["result"],
+        "assertions": report["assertions"],
+        "residual_gaps": report["residual_gaps"],
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cc", default="clang")
@@ -509,9 +676,10 @@ def main() -> int:
             )
         report = {
             "schema_version": 1,
-            "artifact_type": "d1l_meshcore_signed_advert_semantic_runtime",
+            "artifact_type": SIGNED_ADVERT_ARTIFACT_TYPE,
             "status": "pass",
             "passed": True,
+            "execution_complete": True,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "work_package": "WP-04",
             "capability": manifest["capability"],
@@ -523,6 +691,7 @@ def main() -> int:
             "external_sources": external_receipt,
             "sanitizers_enabled": args.sanitize,
             "sanitizer_policy": manifest["sanitizer_policy"],
+            "full_ubsan_clean": manifest["sanitizer_policy"]["full_ubsan_clean"],
             "commands": commands,
             "result": result,
             "assertions": manifest["assertions"],

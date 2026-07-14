@@ -30,6 +30,15 @@ The reviewed upstream implementation targets LilyGo T-Deck hardware. MeshCore De
 - License: MIT-style upstream license text
 - Use: MeshCore protocol/library base and feature compatibility target.
 
+## orlp Ed25519
+
+- Source: https://github.com/orlp/ed25519
+- Copyright: Copyright (c) 2015 Orson Peters <orsonpeters@gmail.com>
+- License: zlib (`Zlib` in SPDX)
+- Upstream copy: the Ed25519 implementation vendored by the MeshCore gitlink at `e8d3c53ba1ea863937081cd0caad759b832f3028`
+- Altered source: `overlays/meshcore_ed25519_defined/fe.c`, `ge.c`, and `sc.c` replace undefined signed left shifts with checked-in, equivalent multiplication by powers of two. The files are plainly marked as altered and pin their upstream hashes.
+- Notice: the verbatim license is retained at `overlays/meshcore_ed25519_defined/license.txt` and packaged as `notices/ORLP_ED25519_ZLIB_LICENSE.txt`.
+
 ## Brian Gladman AES implementation
 
 - Copyright: Copyright (c) 1998-2008, Brian Gladman, Worcester, UK. All rights reserved.

@@ -104,7 +104,7 @@ def completed_report(
             "sanitizers": ["address", "undefined"],
         },
         "sanitizer_policy": conformance.ED25519_SANITIZER_POLICY,
-        "full_ubsan_clean": False,
+        "full_ubsan_clean": True,
         "sanitizer_policy_passed": True,
         "vector_matrix": conformance.EXPECTED_VECTOR_MATRIX,
         "payload_version_gate": conformance.EXPECTED_PAYLOAD_VERSION_GATE,
