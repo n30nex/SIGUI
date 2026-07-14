@@ -34,6 +34,9 @@ typedef struct {
 static mock_nvs_slot_t s_slots[MOCK_NVS_SLOT_COUNT];
 static esp_err_t s_fail_next_set;
 static esp_err_t s_fail_next_open;
+static size_t s_open_count;
+static size_t s_fail_open_call;
+static esp_err_t s_fail_scheduled_open;
 static int64_t s_now_us;
 
 static mock_nvs_slot_t *slot_for_namespace(const char *namespace_name, bool create)
@@ -75,6 +78,9 @@ void mock_nvs_reset(void)
     memset(s_slots, 0, sizeof(s_slots));
     s_fail_next_set = ESP_OK;
     s_fail_next_open = ESP_OK;
+    s_open_count = 0U;
+    s_fail_open_call = 0U;
+    s_fail_scheduled_open = ESP_OK;
     s_now_us = 0;
 }
 
@@ -120,6 +126,12 @@ void mock_nvs_fail_next_open(esp_err_t error)
     s_fail_next_open = error == ESP_OK ? ESP_FAIL : error;
 }
 
+void mock_nvs_fail_open_after(size_t successful_opens, esp_err_t error)
+{
+    s_fail_open_call = s_open_count + successful_opens + 1U;
+    s_fail_scheduled_open = error == ESP_OK ? ESP_FAIL : error;
+}
+
 void mock_timer_set_us(int64_t now_us)
 {
     s_now_us = now_us;
@@ -154,6 +166,13 @@ esp_err_t nvs_open(const char *namespace_name, nvs_open_mode_t open_mode,
     (void)open_mode;
     if (!out_handle) {
         return ESP_ERR_INVALID_ARG;
+    }
+    s_open_count++;
+    if (s_fail_open_call != 0U && s_open_count == s_fail_open_call) {
+        const esp_err_t error = s_fail_scheduled_open;
+        s_fail_open_call = 0U;
+        s_fail_scheduled_open = ESP_OK;
+        return error;
     }
     if (s_fail_next_open != ESP_OK) {
         const esp_err_t error = s_fail_next_open;

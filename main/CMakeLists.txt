@@ -28,6 +28,7 @@ idf_component_register(
         "map/map_png_decoder.c"
         "map/map_view_service.c"
         "mesh/advert_data.c"
+        "mesh/channel_store.c"
         "mesh/contact_store.c"
         "mesh/dm_delivery_state.c"
         "mesh/contact_uri.c"

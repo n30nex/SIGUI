@@ -10,6 +10,7 @@
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
 #include "hal/rp2040_bridge.h"
+#include "mesh/channel_store.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
@@ -95,6 +96,10 @@ void app_main(void)
     esp_err_t contact_store_ret = d1l_contact_store_init();
     if (contact_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "contact store load failed: %s", esp_err_to_name(contact_store_ret));
+    }
+    esp_err_t channel_store_ret = d1l_channel_store_init();
+    if (channel_store_ret != ESP_OK) {
+        ESP_LOGW(TAG, "channel store load failed: %s", esp_err_to_name(channel_store_ret));
     }
     esp_err_t read_state_ret = d1l_read_state_init();
     if (read_state_ret != ESP_OK) {
