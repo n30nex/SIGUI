@@ -18,6 +18,11 @@
 static const char KEY_HEX[] =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+static void make_public_key(char key[D1L_NODE_PUBLIC_KEY_HEX_LEN], uint32_t id);
+static void fingerprint_from_key(
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN],
+    const char key[D1L_NODE_PUBLIC_KEY_HEX_LEN]);
+
 typedef struct {
     uint32_t seq;
     uint32_t first_heard_ms;
@@ -389,6 +394,64 @@ static void test_node_nvs_failure_rolls_back_and_retry_succeeds(void)
     assert(strcmp(after.name, "Changed") == 0);
 }
 
+static void test_verified_advert_retry_and_prefix_collision_preserve_node(void)
+{
+    mock_nvs_reset();
+    assert(d1l_node_store_init() == ESP_OK);
+    assert(d1l_contact_store_init() == ESP_OK);
+
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x31U);
+    fingerprint_from_key(fingerprint, key);
+    bool stale = true;
+    assert(d1l_node_store_upsert_advert(
+               fingerprint, key, "Retry Peer", 'C', -55, 80, 1U, 2U,
+               300U, false, 0, 0, &stale) == ESP_OK);
+    assert(!stale);
+
+    d1l_node_entry_t retained = {0};
+    assert(d1l_node_store_find_by_fingerprint(fingerprint, &retained));
+    d1l_contact_verified_advert_result_t result =
+        D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    mock_nvs_fail_next_set(ESP_FAIL);
+    assert(d1l_contact_store_upsert_verified_advert(
+               fingerprint, &retained, &result, NULL) == ESP_FAIL);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
+    assert(!d1l_contact_store_find_by_public_key(key, NULL));
+
+    /* The node replay watermark is retained, but the exact equal advert can
+     * recover contact promotion from the retained full-key node. */
+    stale = false;
+    assert(d1l_node_store_upsert_advert(
+               fingerprint, key, "Retry Peer", 'C', -55, 80, 1U, 2U,
+               300U, false, 0, 0, &stale) == ESP_OK);
+    assert(stale);
+    assert(d1l_node_store_find_by_fingerprint(fingerprint, &retained));
+    result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    assert(d1l_contact_store_upsert_verified_advert(
+               fingerprint, &retained, &result, NULL) == ESP_OK);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
+    assert(d1l_contact_store_find_by_public_key(key, NULL));
+
+    const d1l_node_entry_t baseline = retained;
+    const d1l_node_store_stats_t baseline_stats = d1l_node_store_stats();
+    char colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    copy_field(colliding_key, sizeof(colliding_key), key);
+    colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN - 2U] =
+        colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN - 2U] == 'f' ? 'e' : 'f';
+    stale = true;
+    assert(d1l_node_store_upsert_advert(
+               fingerprint, colliding_key, "Collision", 'R', -20, 100,
+               2U, 3U, 301U, true, 45000000, -80000000, &stale) ==
+           ESP_ERR_INVALID_STATE);
+    assert(!stale);
+    memset(&retained, 0, sizeof(retained));
+    assert(d1l_node_store_find_by_fingerprint(fingerprint, &retained));
+    assert(memcmp(&retained, &baseline, sizeof(retained)) == 0);
+    assert_node_stats_equal(d1l_node_store_stats(), baseline_stats);
+}
+
 static d1l_node_entry_t make_heard_node(const char *name, const char *type)
 {
     d1l_node_entry_t node = {0};
@@ -724,6 +787,7 @@ int main(void)
     test_contact_v3_to_v4_migration();
     test_stale_advert_and_location_preservation();
     test_node_nvs_failure_rolls_back_and_retry_succeeds();
+    test_verified_advert_retry_and_prefix_collision_preserve_node();
     test_contact_nvs_failure_rolls_back_and_retry_succeeds();
     test_verified_contact_create_reload_update_preserves_preferences();
     test_verified_contact_promotes_placeholder_without_losing_preferences();

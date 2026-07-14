@@ -94,6 +94,8 @@ esp_err_t d1l_node_store_init(void);
 esp_err_t d1l_node_store_clear(void);
 /*
  * Accepts only a node's first or strictly newer signed advert timestamp.
+ * Once a fingerprint has a full public key, a different full key sharing that
+ * prefix is rejected with ESP_ERR_INVALID_STATE without changing retained data.
  * A newer locationless advert updates identity/heard metadata while retaining
  * the most recent valid location. out_stale reports an intentional replay
  * rejection separately from storage or initialization errors.

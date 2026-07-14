@@ -75,3 +75,21 @@ def test_signed_advert_rx_binds_exact_full_key_to_truthful_retained_contact_resu
     assert 'return "collision";' in service
     assert 'return "full";' in service
     assert "is_new" not in receiver
+    stale_body = receiver[stale_filter:node_error]
+    assert "retry_verified_contact_promotion" in stale_body
+    assert '"advert_contact_retry"' in stale_body
+    assert '"advert_contact_retry_error"' in stale_body
+    assert '"advert_key_collision"' in receiver
+
+
+def test_heard_node_rejects_full_key_prefix_collision_before_replay_or_mutation():
+    source = (ROOT / "main/mesh/node_store.c").read_text(encoding="utf-8")
+    upsert = source.split("esp_err_t d1l_node_store_upsert_advert", 1)[1].split(
+        "d1l_node_store_stats_t d1l_node_store_stats", 1
+    )[0]
+
+    collision = upsert.index("!public_keys_equal")
+    replay = upsert.index("advert_timestamp <=")
+    mutation = upsert.index("entry->seq =")
+    assert collision < replay < mutation
+    assert "return ESP_ERR_INVALID_STATE;" in upsert[collision:replay]
