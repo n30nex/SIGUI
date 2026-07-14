@@ -42,6 +42,8 @@ constexpr std::size_t kRequestResponseRoundtripVectors = 6U;
 constexpr std::size_t kRequestResponseInvalidVectors = 30U;
 constexpr std::size_t kLoginResponseRoundtripVectors = 10U;
 constexpr std::size_t kLoginResponseInvalidVectors = 34U;
+constexpr std::size_t kLoginPasswordAuthorizationValidVectors = 16U;
+constexpr std::size_t kLoginPasswordAuthorizationInvalidVectors = 17U;
 constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
@@ -2713,6 +2715,218 @@ int main()
     expect_standard_login_response_parse_reject("legacy OK response",
                                                 &malformed_login_response);
 
+    struct LoginPasswordAuthorizationVector {
+        const char *name;
+        uint8_t server_type;
+        uint8_t allow_read_only;
+        std::vector<uint8_t> password;
+        std::vector<uint8_t> admin_password;
+        std::vector<uint8_t> guest_password;
+        uint8_t authorized;
+        uint8_t permissions;
+    };
+    const std::array<LoginPasswordAuthorizationVector,
+                     kLoginPasswordAuthorizationValidVectors>
+        login_password_authorization_vectors = {{
+            {"repeater admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {'a', 'd', 'm', 'i', 'n'}, {'a', 'd', 'm', 'i', 'n'},
+             {'g', 'u', 'e', 's', 't'}, 1U, 0x03U},
+            {"repeater guest", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {'g', 'u', 'e', 's', 't'}, {'a', 'd', 'm', 'i', 'n'},
+             {'g', 'u', 'e', 's', 't'}, 1U, 0x00U},
+            {"repeater denial", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {'n', 'o'}, {'a', 'd', 'm', 'i', 'n'},
+             {'g', 'u', 'e', 's', 't'}, 0U, 0x00U},
+            {"repeater admin precedence", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0U, {'s', 'a', 'm', 'e'}, {'s', 'a', 'm', 'e'},
+             {'s', 'a', 'm', 'e'}, 1U, 0x03U},
+            {"repeater maximum admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'},
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'},
+             {'g'}, 1U, 0x03U},
+            {"repeater empty admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {}, {}, {'g'}, 1U, 0x03U},
+            {"repeater empty guest", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {}, {'a'}, {}, 1U, 0x00U},
+            {"room admin", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {'a', 'd', 'm', 'i', 'n'}, {'a', 'd', 'm', 'i', 'n'},
+             {'r', 'o', 'o', 'm'}, 1U, 0x03U},
+            {"room read-write", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {'r', 'o', 'o', 'm'}, {'a', 'd', 'm', 'i', 'n'},
+             {'r', 'o', 'o', 'm'}, 1U, 0x02U},
+            {"room denial", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {'n', 'o'}, {'a', 'd', 'm', 'i', 'n'},
+             {'r', 'o', 'o', 'm'}, 0U, 0x00U},
+            {"room read-only fallback", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+             {'n', 'o'}, {'a', 'd', 'm', 'i', 'n'},
+             {'r', 'o', 'o', 'm'}, 1U, 0x00U},
+            {"room admin precedence", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+             {'s', 'a', 'm', 'e'}, {'s', 'a', 'm', 'e'},
+             {'s', 'a', 'm', 'e'}, 1U, 0x03U},
+            {"room maximum guest", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'},
+             {'a'},
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'},
+             1U, 0x02U},
+            {"room empty admin", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {}, {}, {'g'}, 1U, 0x03U},
+            {"room empty guest", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {}, {'a'}, {}, 1U, 0x02U},
+            {"room empty-config read-only fallback",
+             D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, {'o', 't', 'h', 'e', 'r'},
+             {}, {}, 1U, 0x00U},
+        }};
+    auto span_data = [&empty_login_password](const std::vector<uint8_t> &span) {
+        return span.empty() ? empty_login_password.data() : span.data();
+    };
+    for (const LoginPasswordAuthorizationVector &vector :
+         login_password_authorization_vectors) {
+        uint8_t authorized = 0xAAU;
+        uint8_t permissions = 0xBBU;
+        if (!d1l_meshcore_oracle_classify_unmatched_login_password(
+                vector.server_type, vector.allow_read_only,
+                span_data(vector.password), vector.password.size(),
+                span_data(vector.admin_password), vector.admin_password.size(),
+                span_data(vector.guest_password), vector.guest_password.size(),
+                &authorized, &permissions) ||
+            authorized != vector.authorized ||
+            permissions != vector.permissions) {
+            failures.push_back(std::string(vector.name) +
+                               " password authorization changed");
+        }
+    }
+
+    const std::array<uint8_t, 5U> auth_password = {'a', 'd', 'm', 'i', 'n'};
+    const std::array<uint8_t, 5U> auth_guest_password = {
+        'g', 'u', 'e', 's', 't'};
+    auto expect_login_password_authorization_reject =
+        [&failures](const char *name, uint8_t server_type,
+                    uint8_t allow_read_only, const uint8_t *password,
+                    std::size_t password_len, const uint8_t *admin_password,
+                    std::size_t admin_password_len, const uint8_t *guest_password,
+                    std::size_t guest_password_len, uint8_t *authorized,
+                    uint8_t *permissions) {
+            if (authorized != nullptr) *authorized = 0xAAU;
+            if (permissions != nullptr) *permissions = 0xBBU;
+            if (d1l_meshcore_oracle_classify_unmatched_login_password(
+                    server_type, allow_read_only, password, password_len,
+                    admin_password, admin_password_len, guest_password,
+                    guest_password_len, authorized, permissions) ||
+                (authorized != nullptr && *authorized != 0xAAU) ||
+                (permissions != nullptr && *permissions != 0xBBU)) {
+                failures.push_back(std::string(name) +
+                                   " password authorization reject changed output");
+            }
+        };
+    uint8_t rejected_authorized = 0U;
+    uint8_t rejected_permissions = 0U;
+    auto expect_standard_login_password_authorization_reject =
+        [&expect_login_password_authorization_reject, &auth_password,
+         &auth_guest_password, &rejected_authorized, &rejected_permissions](
+            const char *name, uint8_t server_type, uint8_t allow_read_only,
+            const uint8_t *password, std::size_t password_len,
+            const uint8_t *admin_password, std::size_t admin_password_len,
+            const uint8_t *guest_password, std::size_t guest_password_len) {
+            expect_login_password_authorization_reject(
+                name, server_type, allow_read_only, password, password_len,
+                admin_password, admin_password_len, guest_password,
+                guest_password_len, &rejected_authorized,
+                &rejected_permissions);
+        };
+    expect_standard_login_password_authorization_reject(
+        "none server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "chat server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "sensor server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "noncanonical room read-only", D1L_MESHCORE_ADVERT_TYPE_ROOM, 2U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "ignored repeater read-only", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "null password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, nullptr,
+        auth_password.size(), auth_password.data(), auth_password.size(),
+        auth_guest_password.data(), auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "null admin password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), nullptr,
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "null guest password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), nullptr, auth_guest_password.size());
+    expect_login_password_authorization_reject(
+        "null authorized output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size(), nullptr, &rejected_permissions);
+    expect_login_password_authorization_reject(
+        "null permissions output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size(), &rejected_authorized, nullptr);
+    const std::array<uint8_t, 16U> overlong_login_password = {
+        '0', '1', '2', '3', '4', '5', '6', '7',
+        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+    expect_standard_login_password_authorization_reject(
+        "overlong password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        overlong_login_password.data(), overlong_login_password.size(),
+        auth_password.data(), auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "overlong admin password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), overlong_login_password.data(),
+        overlong_login_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "overlong guest password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), overlong_login_password.data(),
+        overlong_login_password.size());
+    const std::array<uint8_t, 3U> auth_embedded_nul_password = {'a', 0U, 'b'};
+    expect_standard_login_password_authorization_reject(
+        "embedded NUL password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_embedded_nul_password.data(), auth_embedded_nul_password.size(),
+        auth_password.data(), auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "embedded NUL admin password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(),
+        auth_embedded_nul_password.data(), auth_embedded_nul_password.size(),
+        auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "embedded NUL guest password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_embedded_nul_password.data(),
+        auth_embedded_nul_password.size());
+    const std::array<uint8_t, 1U> control_login_password = {0x01U};
+    expect_standard_login_password_authorization_reject(
+        "non-login control password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        control_login_password.data(), control_login_password.size(),
+        auth_password.data(), auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+
     constexpr uint8_t dm_destination_hash = 0xA1U;
     constexpr uint8_t dm_source_hash = 0xB2U;
     const std::array<uint8_t, 2U> short_dm_text = {'d', 'm'};
@@ -4845,7 +5059,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets\""
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -4863,9 +5077,10 @@ int main()
                   kRouteRoundtripVectors + kAckRoundtripVectors +
                   kTraceRoundtripVectors)
               << ",\"valid\":"
-              << (kSignedAdvertValidVectors + kVerifierKatValidVectors +
-                  kPointValidationValidVectors + kCryptoAdapterKatValidVectors +
-                  kExpectedAckValidVectors)
+               << (kSignedAdvertValidVectors + kVerifierKatValidVectors +
+                   kPointValidationValidVectors + kCryptoAdapterKatValidVectors +
+                   kLoginPasswordAuthorizationValidVectors +
+                   kExpectedAckValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
                   kSignedAdvertPacketInvalidVectors +
@@ -4875,6 +5090,7 @@ int main()
                    kGroupInvalidVectors + kLoginRequestInvalidVectors +
                    kRequestResponseInvalidVectors +
                    kLoginResponseInvalidVectors +
+                   kLoginPasswordAuthorizationInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
                   kPathReturnInvalidVectors +
@@ -4897,6 +5113,8 @@ int main()
                     kRequestResponseInvalidVectors +
                     kLoginResponseRoundtripVectors +
                     kLoginResponseInvalidVectors +
+                    kLoginPasswordAuthorizationValidVectors +
+                    kLoginPasswordAuthorizationInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -4925,6 +5143,8 @@ int main()
                     kRequestResponseInvalidVectors +
                     kLoginResponseRoundtripVectors +
                     kLoginResponseInvalidVectors +
+                    kLoginPasswordAuthorizationValidVectors +
+                    kLoginPasswordAuthorizationInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -5020,6 +5240,16 @@ int main()
                << (kLoginResponseRoundtripVectors +
                    kLoginResponseInvalidVectors)
                << "}"
+               << ",\"login_password_authorization_fixtures\":{\"valid\":"
+               << kLoginPasswordAuthorizationValidVectors << ",\"invalid\":"
+               << kLoginPasswordAuthorizationInvalidVectors
+               << ",\"semantic\":"
+               << (kLoginPasswordAuthorizationValidVectors +
+                   kLoginPasswordAuthorizationInvalidVectors)
+               << ",\"total\":"
+               << (kLoginPasswordAuthorizationValidVectors +
+                   kLoginPasswordAuthorizationInvalidVectors)
+               << "}"
               << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
               << kDmRoundtripVectors << ",\"invalid\":"
               << kDmInvalidVectors << ",\"semantic\":"
@@ -5071,6 +5301,7 @@ int main()
                << ",\"anonymous_login_request_packets\":true"
                 << ",\"regular_request_response_packets\":true"
                 << ",\"canonical_login_response_packets\":true"
+                << ",\"login_password_authorization_fixtures\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"path_return_route_codes\":true"

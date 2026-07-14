@@ -291,6 +291,31 @@ bool d1l_meshcore_oracle_parse_login_response_packet(
     uint8_t out_uniqueness[D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES]);
 
 /*
+ * Deterministic password classification for the ACL-miss/new-client branch of
+ * the pinned repeater and room login handlers. Password/configuration spans are
+ * explicit NUL-free strings bounded by the upstream 15-byte NodePrefs payload.
+ * Admin comparison has precedence over guest comparison. Repeater guest maps
+ * to GUEST; room guest maps to READ_WRITE; a room mismatch maps to GUEST only
+ * when canonical allow_read_only is one. A structurally valid denial returns
+ * true with authorized=0 and permissions=GUEST.
+ *
+ * This boundary does not perform the blank-password existing-ACL shortcut,
+ * contact lookup/insertion/eviction, timestamp replay checks, secret or state
+ * mutation, response creation, dispatch, routing, scheduling, or RF.
+ */
+bool d1l_meshcore_oracle_classify_unmatched_login_password(
+    uint8_t server_advert_type,
+    uint8_t allow_read_only,
+    const uint8_t *password,
+    size_t password_len,
+    const uint8_t *admin_password,
+    size_t admin_password_len,
+    const uint8_t *guest_password,
+    size_t guest_password_len,
+    uint8_t *out_authorized,
+    uint8_t *out_permissions);
+
+/*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash
  * helper reproduces BaseChatMesh::setChannel: a padded 16-byte secret with an
  * all-zero upper half hashes 16 bytes, while other secrets hash all 32. The

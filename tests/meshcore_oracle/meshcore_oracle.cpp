@@ -1112,6 +1112,63 @@ extern "C" bool d1l_meshcore_oracle_parse_login_response_packet(
     return true;
 }
 
+extern "C" bool d1l_meshcore_oracle_classify_unmatched_login_password(
+    uint8_t server_advert_type,
+    uint8_t allow_read_only,
+    const uint8_t *password,
+    size_t password_len,
+    const uint8_t *admin_password,
+    size_t admin_password_len,
+    const uint8_t *guest_password,
+    size_t guest_password_len,
+    uint8_t *out_authorized,
+    uint8_t *out_permissions)
+{
+    if ((server_advert_type != D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         server_advert_type != D1L_MESHCORE_ADVERT_TYPE_ROOM) ||
+        allow_read_only > 1U ||
+        (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         allow_read_only != 0U) ||
+        password == nullptr || admin_password == nullptr ||
+        guest_password == nullptr || out_authorized == nullptr ||
+        out_permissions == nullptr ||
+        password_len > D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES ||
+        admin_password_len > D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES ||
+        guest_password_len > D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES ||
+        (password_len > 0U && password[0] < static_cast<uint8_t>(' ')) ||
+        std::memchr(password, 0, password_len) != nullptr ||
+        std::memchr(admin_password, 0, admin_password_len) != nullptr ||
+        std::memchr(guest_password, 0, guest_password_len) != nullptr) {
+        return false;
+    }
+
+    const bool admin_matches = password_len == admin_password_len &&
+        (password_len == 0U ||
+         std::memcmp(password, admin_password, password_len) == 0);
+    const bool guest_matches = password_len == guest_password_len &&
+        (password_len == 0U ||
+         std::memcmp(password, guest_password, password_len) == 0);
+    uint8_t authorized = 1U;
+    uint8_t permissions = 0U;
+    if (admin_matches) {
+        permissions = 0x03U;
+    } else if (guest_matches) {
+        permissions = server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER
+            ? 0x00U
+            : 0x02U;
+    } else if (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_ROOM &&
+               allow_read_only == 1U) {
+        permissions = 0x00U;
+    } else {
+        authorized = 0U;
+        permissions = 0x00U;
+    }
+
+    *out_authorized = authorized;
+    *out_permissions = permissions;
+    return true;
+}
+
 extern "C" bool d1l_meshcore_oracle_group_channel_hash(
     const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
     uint8_t *out_hash)
