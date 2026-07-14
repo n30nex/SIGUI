@@ -323,10 +323,41 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     mutations.append(
         (unscoped_sanitizer_exception, "sanitizer_exception_command")
     )
+    bundled_sanitizer_exceptions = copy.deepcopy(report)
+    bundled_sanitizer_exceptions["commands"][5].extend(
+        str(source)
+        for source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES[1:]
+    )
+    bundled_sanitizer_exceptions["commands"][6] = [
+        "clang-18",
+        conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+    ]
+    bundled_sanitizer_exceptions["commands"][7] = [
+        "clang-18",
+        conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+    ]
+    mutations.append(
+        (bundled_sanitizer_exceptions, "sanitizer_exception_command")
+    )
+    unrelated_sanitizer_suppression = copy.deepcopy(report)
+    unrelated_sanitizer_suppression["commands"][5].insert(
+        1,
+        "-fno-sanitize=undefined",
+    )
+    mutations.append(
+        (unrelated_sanitizer_suppression, "sanitizer_exception_command")
+    )
 
     for payload, failure in mutations:
         with pytest.raises(ValueError, match=failure):
             conformance.validate_completed_report(payload, commit)
+        canonical_payload = conformance.canonicalize_release_report(payload)
+        with pytest.raises(ValueError, match=failure):
+            conformance.validate_completed_report(
+                canonical_payload,
+                commit,
+                require_generated_at=False,
+            )
 
 
 def test_runner_persists_fuzzer_reproducers_and_records_elapsed_time():

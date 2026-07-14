@@ -2625,30 +2625,71 @@ def validate_completed_report(
     compiler_identities = (compiler.get("cc"), compiler.get("cxx"))
     commands = report.get("commands")
     commands = commands if isinstance(commands, list) else []
+    toolchain = report.get("toolchain")
+    toolchain = toolchain if isinstance(toolchain, dict) else {}
+    clang_receipt = toolchain.get("clang")
+    clang_receipt = clang_receipt if isinstance(clang_receipt, dict) else {}
+    executables = clang_receipt.get("executables")
+    executables = executables if isinstance(executables, dict) else {}
+    cc_receipt = executables.get("cc")
+    cc_receipt = cc_receipt if isinstance(cc_receipt, dict) else {}
+    cxx_receipt = executables.get("cxx")
+    cxx_receipt = cxx_receipt if isinstance(cxx_receipt, dict) else {}
+    cc_command = cc_receipt.get("command")
+    cxx_command = cxx_receipt.get("command")
     exception_commands = [
         command
         for command in commands
         if isinstance(command, list)
         and ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
     ]
-    exception_command_sources = {
-        f"third_party/MeshCore/lib/ed25519/{source.name}"
-        for command in exception_commands
+    sanitizer_disable_flags = [
+        argument
+        for command in commands
+        if isinstance(command, list)
         for argument in command
-        for source in ED25519_SHIFT_BASE_EXCEPTION_SOURCES
-        if (
-            str(argument).replace("\\", "/").endswith(
-                f"/third_party/MeshCore/lib/ed25519/{source.name}"
-            )
+        if isinstance(argument, str) and argument.startswith("-fno-sanitize=")
+    ]
+    observed_exception_commands = sorted(
+        json.dumps(
+            [
+                _canonical_command_argument(argument)
+                if isinstance(argument, str)
+                else argument
+                for argument in command
+            ],
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
         )
-    }
-    expected_exception_sources = {
-        f"third_party/MeshCore/lib/ed25519/{source.name}"
-        for source in ED25519_SHIFT_BASE_EXCEPTION_SOURCES
-    }
+        for command in exception_commands
+    )
+    expected_exception_commands: list[str] = []
+    if isinstance(cc_command, str) and isinstance(cxx_command, str):
+        expected_exception_commands = sorted(
+            json.dumps(
+                [
+                    _canonical_command_argument(argument)
+                    if isinstance(argument, str)
+                    else argument
+                    for argument in command
+                ],
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            for command in command_plan(cc_command, cxx_command, "$BUILD_DIR")
+            if ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
+        )
     exception_command_is_scoped = (
         len(exception_commands) == len(ED25519_SHIFT_BASE_EXCEPTION_SOURCES)
-        and exception_command_sources == expected_exception_sources
+        and observed_exception_commands == expected_exception_commands
+        and len(sanitizer_disable_flags)
+        == len(ED25519_SHIFT_BASE_EXCEPTION_SOURCES)
+        and all(
+            flag == ED25519_SHIFT_BASE_EXCEPTION_FLAG
+            for flag in sanitizer_disable_flags
+        )
     )
     required = {
         "schema_version": report.get("schema_version") == 1,

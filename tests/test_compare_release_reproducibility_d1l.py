@@ -208,21 +208,23 @@ def write_conformance(
         "-o",
         f"{temporary}/packet.o",
     ]
-    for index, source in enumerate(
-        conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES,
-        start=5,
-    ):
+    source_root = str(conformance.ROOT).replace("\\", "/")
+    actions_root = f"/actions/run-{run_index}/checkout"
+    planned_commands = conformance.command_plan(
+        "clang-18",
+        "clang++-18",
+        temporary,
+    )
+    for index, command in enumerate(planned_commands[5:8], start=5):
         report["commands"][index] = [
-            "clang-18",
-            "-fsanitize=address,undefined",
-            conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
-            "-c",
             (
-                f"/actions/run-{run_index}/checkout/third_party/MeshCore/"
-                f"lib/ed25519/{source.name}"
-            ),
-            "-o",
-            f"{temporary}/meshcore_ed25519_{source.stem}.o",
+                actions_root + normalized[len(source_root) :]
+                if normalized == source_root
+                or normalized.startswith(source_root + "/")
+                else normalized
+            )
+            for argument in command
+            for normalized in [str(argument).replace("\\", "/")]
         ]
     report["fuzz_command"] = [
                     f"{temporary}/meshcore_wire_fuzz",
