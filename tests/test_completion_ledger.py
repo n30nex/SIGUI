@@ -65,10 +65,10 @@ def test_repository_ledger_validates_and_status_is_current():
     assert STATUS_PATH.read_text(encoding="utf-8") == render_status(ledger)
 
 
-def test_current_runnable_selection_advances_past_merged_wp02_implementation():
+def test_current_runnable_selection_includes_banked_wp05_and_wp06_slices():
     ledger = load_ledger(LEDGER_PATH)
 
-    assert runnable_work_packages(ledger) == ["WP-04"]
+    assert runnable_work_packages(ledger) == ["WP-04", "WP-06", "WP-05"]
     assert pending_work_packages(ledger)[0] == "WP-02"
     assert release_ready(ledger) is False
 
@@ -118,7 +118,7 @@ def test_execution_blocker_removes_wp01_from_runnable_work():
     item["blockers"] = [blocker["id"]]
     package(ledger, "WP-02")["status"] = "blocked"
 
-    assert runnable_work_packages(ledger) == []
+    assert runnable_work_packages(ledger) == ["WP-05"]
 
 
 def test_unknown_state_is_rejected():

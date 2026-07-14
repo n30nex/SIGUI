@@ -1,8 +1,8 @@
 # Known Limitations
 
-As of the 2026-07-14 merged PR #99 exact-input checkpoint:
+As of the 2026-07-14 merged PR #112 exact-input checkpoint:
 
-- Live `main` is `d5acf0a80af4ff533f48105ea84844bd0d9af6c3` after PR #98 merged schema-v5 durable inbound-DM ACK handling and PR #99 merged fresh learned-route selection on top of the reviewed production/oracle/runtime Ed25519 integration and exact ESP-IDF receipt. Exact merged-main Actions `29317376691` passed 944 host tests plus 32 checksum-contract tests and the Actions-only ESP32 build. All five API ZIPs and 46 nested checksum entries passed across 219 files / 72,613,846 bytes; the independent gate receipt SHA-256 is `db83f48167b57179d2ef0c0800898db51d7d24b3da4847df2af69a77344e7f61`. Portable software aggregates are ACK durability `docs/completion/evidence/wp04/ack_durability_76b07f28918b338bf896d5a1a8a0207b5a112677.json` (SHA-256 `351433586b62cdb4761d41a0dee146c8af4f0edd3c3b6e6e897228ea22e00f3c`) and route selection `docs/completion/evidence/wp04/route_selection_d5acf0a80af4ff533f48105ea84844bd0d9af6c3.json` (SHA-256 `e38a442100cf27f433777eaf6d293b40c44e08a555e406fd7b5d0bb79f9459ac`). These are host/build proofs, not physical or RF closure. WP-01 remains banked on predecessor source `092293f2311a24c9899bc9bf343ab014c4ba0411`; WP-02 software integration is complete but its final-candidate board, UI, SD, reboot, and Map-open roles remain deferred.
+- Live `main` is `10d85ee3a0941aff23f455047358805a861b571e` after PR #112 merged the first WP-08 canonical contact-lifecycle slice. Exact-main Actions `29359402515` passed 977 host tests, 32 checksum-contract tests, 1,008 wire vectors, 931 oracle checks, 100,000 wire-fuzz inputs, and 100,000 advert-fuzz inputs with zero findings; five API ZIPs / 46 entries verified across 219 files / 73,155,041 bytes with valid provenance and SPDX. Strict receipt SHA-256 is `53e07c470b01a46ffcc2414c4e5b9867da9932b11203259a3d0e4e48cd3f78dc`. These slices do not close broader WP-05 semantics/replay/state, complete WP-06 ownership/saturation/fairness/watchdog/reboot/power-loss, WP-07 runtime/RF behavior, WP-08 BLE/on-device QR/official-client/physical acceptance, WP-14 extraction/physical UI, hardware, or release gates. WP-01 remains banked on predecessor source `092293f2311a24c9899bc9bf343ab014c4ba0411`; WP-02 physical roles remain deferred.
 
 - ESP-IDF v5.1.x is end of life and is no longer the selected production target. Standalone migration commit `39a043c` uses version-pinned `espressif/idf:v5.5.4`, commits the exact Actions-generated `dependencies.lock`, applies the tracked Seeed BSP compatibility patch, and passes host, firmware, package, checksum, release, and effective-config checks. That evidence does not yet qualify the combined Map/Wi-Fi candidate: exact COM12 must still report `"idf":"v5.5.4"` and pass board/display/touch/Wi-Fi/RF/RP2040-SD/Map/health/reboot/power-cycle smoke with refreshed commit-matched release evidence. No supported-SDK waiver or hardware qualification is implied by the standalone green build.
 - Manual visual confirmation of display bars and touch target movement is still pending; the serial `display test` and `touch test` commands return OK on hardware. The COM12 hardware pixel-capture path reconstructed the current PR #56 hierarchy from `51258ba` / Actions `29060900359` with matching firmware/host CRC `E72745BA`, a passing simulator diff, `public_rf_tx=false`, and `formats_sd=false`; a three-round all-tab health probe also passed cleanly. PR #51, PR #40, and PR #33 captures remain history for superseded layouts. Physical photos/manual review and final-release-SHA evidence are still pending.
@@ -13,13 +13,26 @@ As of the 2026-07-14 merged PR #99 exact-input checkpoint:
   boundaries, while retaining the separate 100,000-input wire-envelope fuzz
   gate. Receipts are bound to the exact ordered 22-command build plan and keep
   `closure_ready=false`. Real ACK delivery/correlation, route forwarding,
-  TRACE discovery, admin sessions, retained-state recovery, official-peer RF,
-  and hardware remain outside this foundation. PR #93 is now merged and proves
+  generic contact/multi-hop TRACE, admin sessions, retained-state recovery,
+  official-peer RF, and hardware remain outside this foundation. PR #93 is now merged and proves
   the first real signed-advert Identity/Mesh/Dispatcher/BaseChatMesh runtime
   path with duplicate, bad-signature, and self-advert suppression plus balanced
   packet allocation/release. It does not claim ACK, route, TRACE, or admin
   closure. PR #96 now makes the production/oracle/runtime arithmetic boundary
-  exception-free, but the broader protocol closure remains unchanged.
+  exception-free. PR #101 adds one bounded explicit-loop TRACE request and
+  correlated terminal-status path; it deliberately reports
+  `contact_trace_supported=false` and `hardware_verified=false`, so the broader
+  protocol closure remains unchanged. PR #103 adds fail-closed persisted identity
+  classification and exact-full-key verified-contact storage primitives. PR #104
+  binds fail-closed identity startup into the production service, and corrected
+  PR #105 binds verified signed-advert RX to exact-full-key retained-contact
+  promotion with transient-write retry and prefix-collision preservation. PR #112
+  adds strict MeshCore URI import/export, exact-key provenance, collision/capacity
+  rejection, canonical DM authorization, and injection-safe USB JSON. BLE and
+  remaining on-device QR/share surfaces, official-client bidirectional proof,
+  reboot/refresh acceptance, and physical qualification remain open. PR #102
+  remains a host-only authenticated-admin transcript; concrete packet-pool admin
+  dispatch, RF, hardware, and WP-18 acceptance remain open.
 - The signed-advert runtime uses the independently checksum-verified
   `rweather/Crypto` 0.4.0 verifier and executes real
   create/sign/send/filter/verify/dispatch/contact-promotion behavior. It does
@@ -50,8 +63,12 @@ As of the 2026-07-14 merged PR #99 exact-input checkpoint:
   flood. ACK planning uses the same selector, and telemetry reports the immutable
   route actually sent instead of rereading mutable contact state. Exact-candidate
   RF must still prove direct and fallback delivery, correlation, and retry behavior.
-  `codex/wp04-trace-discovery` is local implementation with no pull request yet;
-  no TRACE, admin, persisted-identity, RF, or physical closure is claimed.
+  PR #101 now merges the bounded explicit-loop TRACE software slice, but it
+  deliberately does not derive a route from a contact. PR #104 and corrected PR
+  #105 bind production identity startup and verified signed-advert exact-key
+  contact promotion respectively; PR #102 remains a host-only admin transcript.
+  Complete contact lifecycle/recovery, generic contact and multi-hop TRACE,
+  production admin dispatch, RF, and physical closure are not claimed.
 - Settings are implemented as an NVS-backed firmware model and have passed reboot persistence smoke on real D1L flash. The persisted radio profile is exposed through `settings get`, serial radio setters, and a touch Radio Settings sheet; the user-facing More page groups tools, connections, storage/maps, device, support, and advanced functions behind disclosure rows instead of a flat settings grid. PR #56 proves the collapsed hierarchy and all-tab navigation on COM12; expanded category touch behavior and the remaining system-page redesigns still need physical touch review.
 - First-boot onboarding now persists a setup-complete flag, collects the node name, confirms Canada/USA defaults, keeps Wi-Fi/BLE/observer disabled, and generates/retains the local MeshCore identity. Optional-radio choices in onboarding remain limited until live Wi-Fi/BLE runtime support is enabled.
 - `identity status` now generates and reports an NVS-retained Ed25519 local identity fingerprint. This is a minimal firmware identity model, not the final full MeshCore C++ store integration.

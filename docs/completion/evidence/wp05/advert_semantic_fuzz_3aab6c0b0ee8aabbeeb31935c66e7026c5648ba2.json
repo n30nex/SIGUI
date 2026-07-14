@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp05_advert_semantic_fuzz_exact_main_aggregate",
+  "generated_utc": "2026-07-14T17:25:21.189Z",
+  "claim_scope": "Portable merged-source and exact combined-main Actions checkpoint for one WP-05 slice. The production advert parser runs a pinned 100,000-input ASan/UBSan/libFuzzer gate, malformed inputs produce canonical fail-closed output, and missing, incomplete, or stale semantic-fuzz evidence fails the conformance gate. Exact combined-main software and artifact acceptance is banked, but this aggregate does not close the broader WP-05 semantic, protocol, RF, physical, or release gates.",
+  "exact_pair": {
+    "pull_request": 107,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/107",
+    "base_sha": "db58229aaec8cc5649b94aeb3cefe6af598203a8",
+    "head_sha": "762451a5f8c5a4e3987d916f47619521174c3924",
+    "synthetic_merge_sha": "1ce4a2968bc94545a71904bc21175e3374acd8d8",
+    "merged_main_sha": "3aab6c0b0ee8aabbeeb31935c66e7026c5648ba2",
+    "head_and_synthetic_tree_sha": "a9fa721d3da04ce07cddb8a568c9a4dda02f4eac",
+    "merged_main_tree_sha": "3107f2bf93ec9ce12d6bb78a0f3ccb240d305496",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": false,
+      "reason": "PR #108 merged independently between the PR #107 base and merge; exact-main validation is therefore required on the combined tree."
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29351434425,
+    "actions_event": "pull_request",
+    "checkout_sha": "1ce4a2968bc94545a71904bc21175e3374acd8d8",
+    "conclusion": "success",
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 72841477,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "wire_fuzz_findings": 0,
+    "advert_fuzz_runs_completed": 100000,
+    "advert_fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr107-762451a5f8c5a4e3987d916f47619521174c3924/pr107_strict_gate_762451a5f8c5a4e3987d916f47619521174c3924.json",
+    "strict_receipt_sha256": "b134f520e8631f022e1a611eacbe7de3abb5600e2fe8b6e785c66be388032569"
+  },
+  "artifact_zip_sha256": {
+    "d1l-firmware-artifacts": "7b69def66b7e12ddf1019404d6a6139c858fb742666713a40dd752136b190d73",
+    "d1l-host-artifacts": "42ff2eb8e3ab032410011abaef64e1e1636f7d98d30b96d556008f5a76f2bf30",
+    "d1l-idf55-migration-state": "0da8e7840258b3f591e7adecdc97739b0a18318d061b8271449766527948d764",
+    "d1l-meshcore-wire-conformance": "6c41886512364695921473ddb4a2ed06c407bdb73db1d045caa00ce3e98f6c72",
+    "d1l-release-package": "4920e98aa69df50892a4d14430c092ec7e4b227fcd9e72849954f6b47d504d23"
+  },
+  "implementation_boundary": {
+    "production_parser": "main/mesh/advert_data.c",
+    "semantic_fuzz_harness": "tests/meshcore_conformance/meshcore_advert_fuzz.cpp",
+    "pinned_corpus": "tests/meshcore_conformance/advert_corpus.json",
+    "gate_owner": "scripts/meshcore_conformance_d1l.py",
+    "advert_invalid_output_policy": "canonical_zeroed_with_type_N",
+    "focused_host_conformance_tests_reported": 20
+  },
+  "exact_main_gate": {
+    "actions_run": 29352766306,
+    "validated_combined_main_sha": "bf9ba087e1d863a2596561cb6b3de015c606c598",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 969,
+    "checksum_contract_tests_passed": 32,
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 72906457,
+    "downloaded_tree_sha256": "d145627f520e97cf033b3cb58ff11c52216eb9981c2c4df0d4f61084af846afa",
+    "provenance_sha256": "324077d52fefe1b7574d57da0037bcdf686192dad6941cd4a95a452735a5b90c",
+    "sbom_sha256": "7dbaed713a0828c084a653320c0019c735606552b372977ffe800b26ebbb8076",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-bf9ba087-qa/main_strict_gate_bf9ba087e1d863a2596561cb6b3de015c606c598.json",
+    "receipt_sha256": "32d833e7198d66bf768d26fb11688e64f0ecaf1ce73e10bd36f348817a122fad",
+    "verdict": "exact_combined_main_software_and_artifact_gate_banked",
+    "superseded_run": {
+      "actions_run": 29352510529,
+      "source_sha": "3aab6c0b0ee8aabbeeb31935c66e7026c5648ba2",
+      "status": "cancelled_after_newer_main_superseded_it",
+      "product_failure": false
+    }
+  },
+  "residual_wp05_gates": {
+    "closed": false,
+    "remaining": "Complete the broader semantic conformance and replay/state surface, preserve zero sanitizer and memory findings, and collect required official-peer RF and exact-candidate physical evidence."
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp05_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "advert_semantic_fuzz_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp05_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
