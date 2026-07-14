@@ -1864,6 +1864,51 @@ def test_immutable_source_inputs_gate_rejects_missing_run_receipts(
 
 
 @pytest.mark.parametrize(
+    "receipt",
+    [
+        (
+            "Activating ESP-IDF 5.5\n"
+            "Setting IDF_PATH to '/opt/esp/idf'.\n"
+            "* Checking python dependencies ... OK\n"
+            f"ESP-IDF {audit.SUPPORTED_ESP_IDF_VERSION}\n"
+        ),
+        f"ESP-IDF {audit.SUPPORTED_ESP_IDF_VERSION}\nactivation complete\n",
+        "ESP-IDF v5.5.3\n",
+        "",
+    ],
+    ids=("export-stderr-chatter", "trailing-chatter", "wrong-version", "empty"),
+)
+def test_immutable_source_inputs_gate_rejects_non_exact_idf_version_receipt(
+    tmp_path: Path,
+    receipt: str,
+):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    (run_dir / "d1l-idf55-migration-state" / "idf-version.txt").write_text(
+        receipt, encoding="ascii"
+    )
+
+    gate = audit.immutable_release_source_inputs_gate(
+        run_dir, tmp_path, COMMIT, RUN_ID
+    ).to_dict()
+
+    assert gate["ok"] is False
+    assert "idf_version_exact" in gate["details"]["failures"]
+
+
+def test_immutable_source_inputs_gate_accepts_exact_idf_version_line(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+
+    gate = audit.immutable_release_source_inputs_gate(
+        run_dir, tmp_path, COMMIT, RUN_ID
+    ).to_dict()
+
+    assert gate["ok"] is True
+    assert "idf_version_exact" not in gate["details"]["failures"]
+
+
+@pytest.mark.parametrize(
     ("surface", "failure"),
     [
         ("host_packages", "host_installed_packages_exact"),
