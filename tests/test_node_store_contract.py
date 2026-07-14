@@ -96,6 +96,7 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     app_header = read("main/app/app_model.h")
     app_source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
+    nodes_ui = read("main/ui/ui_nodes.c")
     console = read("main/comms/usb_console.c")
     assert "recent_nodes" in app_header
     assert "d1l_node_view_t recent_nodes" in app_header
@@ -103,9 +104,9 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     assert "node_total_written" in app_header
     assert "d1l_app_model_query_nodes(&node_query" in app_source
     assert "d1l_node_store_query(query, out_entries, max_entries)" in app_source
-    assert "render_node_row" in ui
+    assert "nodes_render_node_row" in nodes_ui
     assert "render_node_role_badge" in ui
-    assert "open_node_detail_event_cb" in ui
+    assert "D1L_UI_NODES_ACTION_OPEN_NODE" in nodes_ui
     assert '"Node Detail"' in ui
     assert 'ok_begin("nodes")' in console
     assert 'strcmp(line, "nodes")' in console
@@ -117,6 +118,6 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     assert '\\"favorite\\"' in console
     assert '\\"keyed\\"' in console
     assert '\\"reachable\\"' in console
-    assert 'view->keyed ? "key" : "no key"' in ui
+    assert 'view->keyed ? "key" : "no key"' in nodes_ui
     assert "Verified MeshCore adverts populate this bounded heard-node store" in console
     assert "nodes" in SMOKE_COMMANDS

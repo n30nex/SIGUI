@@ -332,6 +332,7 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
 def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     source = read("main/ui/ui_phase1.c")
     map_source = read("main/ui/ui_map.c")
+    nodes_source = read("main/ui/ui_nodes.c")
     header = read("main/ui/ui_phase1.h")
     console = read("main/comms/usb_console.c")
     cmake = read("main/CMakeLists.txt")
@@ -464,7 +465,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_obj_scroll_to_y(target, LV_COORD_MAX, LV_ANIM_OFF)" in source
     assert '"Scroll Probe DM"' in source
     assert '"Thread keeps delivery, ACK, and PATH state together."' in source
-    assert '"Scroll proof keeps this empty-state layout validated too."' in source
+    assert '"Scroll proof keeps this empty-state layout validated too."' in nodes_source
 
 
 def test_d1l_ui_display_path_uses_bsp_direct_framebuffers_and_capture_shadow():
@@ -554,7 +555,7 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
         "static void public_test_event_cb", 1
     )[0]
     dm_compose = source.split("static void open_dm_compose_for_contact", 1)[1].split(
-        "static void open_dm_compose_event_cb", 1
+        "static bool contact_from_node_view", 1
     )[0]
     assert "request_full_screen_repaint();" in public_compose
     assert "request_full_screen_repaint();" in dm_compose
@@ -759,7 +760,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_dm_compose": "contact_detail_dm_event_cb",
         "open_contact_options": "open_contact_options_event_cb",
         "close_contact_options": "close_contact_options_event_cb",
-        "open_node_detail": "open_node_detail_event_cb",
+        "open_node_detail": "D1L_UI_NODES_ACTION_OPEN_NODE",
         "close_node_detail": "close_node_detail_event_cb",
         "open_contact_edit": "open_contact_edit_event_cb",
         "close_contact_edit": "close_contact_edit_event_cb",
@@ -895,10 +896,13 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
 
 def test_dm_composer_opens_from_contact_rows():
     source = read("main/ui/ui_phase1.c")
+    nodes_source = read("main/ui/ui_nodes.c")
     assert "static bool s_compose_dm" in source
     assert "static d1l_contact_entry_t s_compose_contact" in source
-    assert "open_dm_compose_event_cb" in source
-    assert 'create_button(row, "DM"' in source
+    assert "D1L_UI_NODES_ACTION_OPEN_CONTACT_DM" in source
+    assert 'nodes_create_button(row, "DM"' in nodes_source
+    assert "nodes_dispatch_contact_dm_event_cb" in nodes_source
+    assert "open_dm_compose_for_contact(event->contact);" in source
     assert "d1l_contact_entry_t selected = *entry" in source
     assert "s_compose_contact = selected" in source
     assert 'lv_label_set_text(s_compose_title, title)' in source
@@ -1009,37 +1013,39 @@ def test_public_message_detail_sheet_opens_from_public_rows():
 
 def test_nodes_screen_renders_heard_node_rows():
     source = read("main/ui/ui_phase1.c")
+    nodes_header = read("main/ui/ui_nodes.h")
+    nodes_source = read("main/ui/ui_nodes.c")
     header = read("main/app/app_model.h")
     model = read("main/app/app_model.c")
-    assert "render_node_row" in source
-    assert "render_contact_row" in source
-    assert "static d1l_node_view_t s_node_rows[D1L_NODE_STORE_CAPACITY]" in source
+    assert "nodes_render_node_row" in nodes_source
+    assert "nodes_render_contact_row" in nodes_source
+    assert "d1l_ui_nodes_controller_t s_nodes_controller" in source
+    assert "d1l_node_view_t node_rows[D1L_NODE_STORE_CAPACITY]" in nodes_header
     assert "recent_node_count" in header
     assert "recent_nodes" in header
     assert "d1l_node_view_t recent_nodes" in header
     assert "d1l_app_model_query_nodes" in header
     assert "d1l_node_store_query(query, out_entries, max_entries)" in model
     assert "d1l_node_query_t node_query" in model
-    assert "node_role_badge_text" in source
-    assert "node_role_color" in source
+    assert "nodes_role_badge_text" in nodes_source
+    assert "nodes_role_color" in nodes_source
     assert "node_view_can_dm" in source
     assert "node_view_management_gated" in source
-    assert 'create_button(row, "DM", 350, -1, 52, 34, open_node_dm_event_cb' in source
+    assert 'nodes_create_button(row, "DM", 350, -1, 52, 34' in nodes_source
     assert "render_node_role_badge" in source
-    assert "lv_obj_add_event_cb(row, open_node_detail_event_cb, LV_EVENT_CLICKED" in source
+    assert "nodes_dispatch_node_open_event_cb" in nodes_source
     assert "recent_contact_count" in source
     assert "recent_contacts" in source
-    assert "No heard nodes yet" in source
+    assert "No heard nodes yet" in nodes_source
     assert "node_total_written" in source
     assert "contact_total_written" in source
-    assert "route_count" in source
     assert "#define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "#define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
-    assert "i < snapshot->recent_contact_count && y <= 190" in source
-    assert "d1l_app_model_query_nodes(&node_query, s_node_rows" in source
+    assert "contact_row_count && y <= 190" in nodes_source
+    assert "d1l_app_model_query_nodes(" in source
     assert "D1L_NODE_STORE_CAPACITY" in source
-    assert '"All Heard"' in source
-    assert "for (size_t i = 0; i < node_rows; ++i)" in source
+    assert '"All Heard"' in nodes_source
+    assert "i < controller->rendered.node_row_count" in nodes_source
 
 
 def test_node_detail_sheet_opens_from_heard_node_rows():
@@ -1048,7 +1054,8 @@ def test_node_detail_sheet_opens_from_heard_node_rows():
     assert "static d1l_node_view_t s_node_detail_node" in source
     assert "create_node_detail_sheet" in source
     assert "render_node_detail_sheet" in source
-    assert "open_node_detail_event_cb" in source
+    assert "D1L_UI_NODES_ACTION_OPEN_NODE" in source
+    assert "show_node_detail_view(event->node, false);" in source
     assert "close_node_detail_event_cb" in source
     assert "hide_node_detail_sheet()" in source
     assert 'create_label(s_node_detail_sheet, "Node Detail"' in source
@@ -1265,6 +1272,7 @@ def test_messages_screen_renders_bounded_preview_rows():
 
 def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     source = read("main/ui/ui_phase1.c")
+    nodes_source = read("main/ui/ui_nodes.c")
     assert "static lv_obj_t *s_contact_detail_sheet" in source
     assert "static lv_obj_t *s_contact_options_sheet" in source
     assert "static lv_obj_t *s_contact_forget_sheet" in source
@@ -1295,7 +1303,8 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     assert "render_route_trace_sheet" in source
     assert "contact_detail_dm_event_cb" in source
     assert "contact_detail_export_event_cb" in source
-    assert "lv_obj_add_event_cb(row, open_contact_detail_event_cb, LV_EVENT_CLICKED" in source
+    assert "nodes_dispatch_contact_open_event_cb" in nodes_source
+    assert "show_contact_detail_for(event->contact);" in source
     assert "d1l_app_model_set_contact_flags(s_contact_detail_contact.fingerprint" in source
     assert "d1l_app_model_rename_contact(s_contact_detail_contact.fingerprint" in source
     assert "d1l_app_model_export_contact_uri(s_contact_detail_contact.fingerprint" in source

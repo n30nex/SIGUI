@@ -101,6 +101,7 @@ def test_ui_console_and_smoke_expose_contacts():
     app_header = read("main/app/app_model.h")
     app_source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
+    nodes_ui = read("main/ui/ui_nodes.c")
     console = read("main/comms/usb_console.c")
     assert "recent_contacts" in app_header
     assert "contact_total_written" in app_header
@@ -113,8 +114,8 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact)" in app_source
     assert "d1l_contact_store_rename(fingerprint, alias, out_contact)" in app_source
     assert "d1l_contact_store_delete(fingerprint, out_contact)" in app_source
-    assert "render_contact_row" in ui
-    assert 'entry->public_key_hex[0] ? "key" : "no key"' in ui
+    assert "nodes_render_contact_row" in nodes_ui
+    assert 'entry->public_key_hex[0] ? "key" : "no key"' in nodes_ui
     assert "create_contact_detail_sheet" in ui
     assert "create_contact_options_sheet" in ui
     assert "create_contact_forget_sheet" in ui
@@ -156,7 +157,7 @@ def test_ui_console_and_smoke_expose_contacts():
     ):
         assert "show_contact_options_sheet();" in static_void_body(ui, symbol), symbol
 
-    assert '"Contacts"' in ui
+    assert '"Contacts"' in nodes_ui
     assert 'ok_begin("contacts")' in console
     assert '\\"out_path_known\\"' in console
     assert '\\"out_path_len\\"' in console
