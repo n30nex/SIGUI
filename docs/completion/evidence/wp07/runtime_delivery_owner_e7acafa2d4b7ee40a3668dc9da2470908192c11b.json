@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp07_runtime_delivery_owner_exact_main_aggregate",
+  "generated_utc": "2026-07-14T21:12:39Z",
+  "claim_scope": "Portable premerge and exact-main software/artifact evidence for the second WP-07 slice. The runtime task is the sole owner of MeshCore request and TX-completion state; outbound DM truth persists across queued, radio, ACK, retry, failure, and reboot transitions; terminal callbacks require the exact nonzero TX operation origin; the watchdog recovers only the exact active origin and quiesces IRQ/latch state before a successor TX; and nonterminal outbound rows, including ACK truth not yet durable, are protected from ring eviction. Exact merged-main software and artifact acceptance is banked. Exact-candidate bidirectional RF/DM/ACK/retry/timeout/reboot/recovery acceptance, downstream UI/physical acceptance, WP-05/WP-06 dependencies, and WP-07 closure remain open.",
+  "exact_pair": {
+    "pull_request": 117,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/117",
+    "base_sha": "e30d6b1067f698d59dd8efe9922018dcbac93b20",
+    "head_sha": "b04595f7ebb2d59f69d1810ed3f3aa142b3d356d",
+    "synthetic_merge_sha": "14ddf361aabc33f6458711b47ac2af5ec00b5636",
+    "merged_main_sha": "e7acafa2d4b7ee40a3668dc9da2470908192c11b",
+    "head_synthetic_and_main_tree_sha": "534fc7e677ea361c75b3df282cb6f287fe4c2421",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29367105974,
+    "actions_event": "pull_request",
+    "checkout_sha": "14ddf361aabc33f6458711b47ac2af5ec00b5636",
+    "conclusion": "success",
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73571098,
+    "downloaded_tree_sha256": "1376293338d2ec887163645730c02cb8bb2e32da06c4278eefd5fb6cf1fcb142",
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "independent_review_remaining_p0_p1_p2": 0,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr117-b04595f/pr117_strict_gate_b04595f7ebb2d59f69d1810ed3f3aa142b3d356d.json",
+    "strict_receipt_sha256": "fd9fdfda7db23ccc5000c982dc690158accef82da4c9378b803e585de24d4f62"
+  },
+  "premerge_artifact_zip_sha256": {
+    "d1l-firmware-artifacts": "7fb0a1e495da343b4adcdd0a65cf8ddbed0cf11cf28ff5abd0025411a8f3ec2a",
+    "d1l-host-artifacts": "007b3926147b8c511f2d054b85bb03aa545b9f198a0f22d78922bbff844d958f",
+    "d1l-idf55-migration-state": "5886db60c77bb7012f203c2d556245677016672279775c8e1d196d3550e0295a",
+    "d1l-meshcore-wire-conformance": "13e0a56d2d804f06fbfd911762efc52bd23f7382e5015c04d1e49687c32efdae",
+    "d1l-release-package": "1f5761d53251ecaf419012931a3f17628c2ae0e6a8bd2aeec13e892f8d805eab"
+  },
+  "implementation_boundary": {
+    "runtime_owner_files": [
+      "main/mesh/meshcore_service.c",
+      "main/mesh/meshcore_service.h",
+      "main/mesh/meshcore_runtime_guard.h"
+    ],
+    "delivery_state_files": [
+      "main/mesh/dm_delivery_state.c",
+      "main/mesh/dm_delivery_state.h",
+      "main/mesh/dm_store.c",
+      "main/mesh/dm_store.h"
+    ],
+    "packaged_source_patch": "patches/sensecap_indicator_tx_origin.patch",
+    "runtime_task_is_sole_meshcore_request_and_tx_completion_owner": true,
+    "truth_persisted_across_queued_radio_ack_retry_failure_and_reboot": true,
+    "terminal_callbacks_require_exact_nonzero_tx_operation_origin": true,
+    "stale_terminal_callbacks_rejected": true,
+    "radio_watchdog_recovers_exact_active_origin": true,
+    "irq_and_latch_quiesced_before_successor_tx": true,
+    "nonterminal_outbound_rows_protected_from_ring_eviction": true,
+    "ack_not_yet_durable_protected_from_ring_eviction": true,
+    "focused_host_tests_reported": 99,
+    "focused_host_tests_skipped": 1
+  },
+  "exact_main_gate": {
+    "actions_run": 29367819813,
+    "validated_main_sha": "e7acafa2d4b7ee40a3668dc9da2470908192c11b",
+    "validated_tree_sha": "534fc7e677ea361c75b3df282cb6f287fe4c2421",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 1005,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73571026,
+    "downloaded_tree_sha256": "04856b7c00f1964004273a2b5d93013b83825f0e325f4f80cbfbd0f25d176c12",
+    "artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "d1876905da28036c892828376b9bfd878c46c4a96918edccdbddfed26fc77c09",
+      "d1l-host-artifacts": "c6c966b9ebeef52c6cc9429ceef57f366cf8eddf2a8216b0d1274166e238a6ff",
+      "d1l-idf55-migration-state": "ef5a07cad77a81a5dbbb9b398ed3a22c9aaa214404d23fd01c8f8918ede2b5e6",
+      "d1l-meshcore-wire-conformance": "bca4507260ee9022765f3ab0b3d16543dd168766fa2aef3871b2d85af9fd317d",
+      "d1l-release-package": "60fd4f29cdaa435700013545fe606a0f8128642798d0434727a1c8f3b8bcad73"
+    },
+    "firmware_manifest_sha256": "cc88c25a2f9c903866442b1ab8675dfbe1cf0bd177b31bac31217832b7c1e62b",
+    "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+    "release_manifest_sha256": "6bb20bddcbaa86f3790af1897da424a67c0ee1e298f3cd2b84c694ee0ba415e7",
+    "host_success_marker_sha256": "5e93ad5be61a1c5b6beb9dc530aa4c3a1ac1db2b4898c8e40ac5cd7fd9aab37b",
+    "meshcore_conformance_receipt_sha256": "dced9c3dfb3c93e451bdda21f195fd1bf610548ab16d8d84d36f9c651d04078b",
+    "meshcore_signed_runtime_receipt_sha256": "03216fcea422383e42bd974365e7e840174f4f6056637f20c2dd8c9f124611d5",
+    "release_audit_sha256": "82e46ffc1642e8d87e7972c5647fbf26e3b87c78253fa8f810f44ebd313ad390",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "release_package_manifest_json_sha256": "7cc4aa044caaef1d3828bfc1de34f5a90d6a2a1ccdae002406a3a12d5c470e31",
+    "application_sha256": "b9f12a2ad0c0b3991282d53e8a6fe1fa6e870d9ae9e2b644d46eee4c66859869",
+    "full_flash_sha256": "0d965a8d7bec18959e0ceb661fb7be0898d673cfcc72809231e23509bc191ded",
+    "provenance_sha256": "e4e89ccf9bb0185f91f6d795b5a11d4665558d260bc144f97482c7cf4775cb88",
+    "sbom_sha256": "eb0e5087e42e568582c673304f08a4cd1668eb62a3347ac3238d9e2edfb7e7b5",
+    "completion_ledger_validation_sha256": "4736b887739ac23e05d6ed513eb14807d14683b5112eb6240af6c8a8b39d591f",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-e7acafa-qa/main_strict_gate_e7acafa2d4b7ee40a3668dc9da2470908192c11b.json",
+    "receipt_sha256": "1c45ad664def258e880fab5a0e4da96ec638fdb238c42cb05570cf9d8926c88e",
+    "verdict": "exact_merged_main_software_and_artifact_gate_banked"
+  },
+  "residual_wp07_gates": {
+    "closed": false,
+    "dependencies_open": [
+      "WP-05",
+      "WP-06"
+    ],
+    "remaining": "Run exact-candidate bidirectional RF/DM/ACK/retry/timeout/reboot/recovery acceptance and downstream UI/physical acceptance, then bank the closure receipt."
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp07_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "second_wp07_runtime_delivery_owner_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp07_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}

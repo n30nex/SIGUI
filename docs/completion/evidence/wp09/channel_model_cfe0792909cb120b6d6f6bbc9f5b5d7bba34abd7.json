@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp09_channel_model_exact_main_aggregate",
+  "generated_utc": "2026-07-14T20:25:01.873Z",
+  "claim_scope": "Portable retained-PR and exact-main Actions checkpoint for the first WP-09 slice. The bounded persistent channel store provides Public plus seven user slots, stable channel/history identities, explicit metadata and unread state, redacted normal reads, constrained official share-URI handling, and fail-closed schema-v2 persistence with v1 migration. This aggregate banks software and downloadable-artifact integrity only; runtime messaging integration, channel UI, official-client interoperability, RF/physical behavior, WP-09 closure, and release closure remain open.",
+  "exact_pair": {
+    "pull_request": 114,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/114",
+    "base_sha": "10d85ee3a0941aff23f455047358805a861b571e",
+    "head_sha": "bc215d81926c2205ada8866cb7e56a5b61e78563",
+    "synthetic_merge_sha": "c9cc3c01a676b510816cc83310062ca42c25b8d8",
+    "merged_main_sha": "cfe0792909cb120b6d6f6bbc9f5b5d7bba34abd7",
+    "head_and_synthetic_tree_sha": "d5511e46b9192c31d3e0c27804fcbaa7b3dc85e5",
+    "merged_main_tree_sha": "810adf9095865cadd11d4f977941d8112480395d",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "merged_main_includes_intervening_pr113_docs": true,
+      "head_tree_expected_to_match_merged_main": false
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29362265022,
+    "actions_event": "pull_request",
+    "checkout_sha": "c9cc3c01a676b510816cc83310062ca42c25b8d8",
+    "conclusion": "success",
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73340045,
+    "downloaded_tree_sha256": "698cf252eb2f0dadeae599533571084e23f52633c3d1088eabf71249c21c4a67",
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "provenance_valid": true,
+    "spdx_valid": true,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr114-bc215d81926c2205ada8866cb7e56a5b61e78563/pr114_strict_gate_bc215d81926c2205ada8866cb7e56a5b61e78563.json",
+    "strict_receipt_sha256": "0b4948c0c2bc4bfa6482c921ad10935935278e2107523f7de4a50e3681753dd8"
+  },
+  "implementation_boundary": {
+    "new_modules": [
+      "main/mesh/channel_store.c",
+      "main/mesh/channel_store.h"
+    ],
+    "integration_files": [
+      "main/CMakeLists.txt",
+      "main/app_main.c"
+    ],
+    "native_and_contract_tests": [
+      "tests/native/channel_store_test.c",
+      "tests/test_channel_store_contract.py",
+      "tests/test_channel_store_native.py"
+    ],
+    "bounded_channel_capacity": 8,
+    "builtin_public_slots": 1,
+    "maximum_user_slots": 7,
+    "stable_64bit_channel_and_history_ids": true,
+    "source_default_enabled_and_unread_metadata": true,
+    "normal_reads_redact_secrets": true,
+    "secret_protocol_view_is_explicit": true,
+    "schema_v2_magic_length_crc_lineage_generation": true,
+    "schema_v1_migration": true,
+    "unknown_or_corrupt_newer_blob_preserved": true,
+    "reset_changes_lineage_and_avoids_id_reuse": true,
+    "official_share_uri_requires_16_byte_secret": true,
+    "locking_and_secret_zeroization_contracts": true,
+    "runtime_messaging_integration_included": false,
+    "channel_ui_included": false
+  },
+  "exact_main_gate": {
+    "actions_run": 29363353046,
+    "validated_main_sha": "cfe0792909cb120b6d6f6bbc9f5b5d7bba34abd7",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 981,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 73355757,
+    "downloaded_tree_sha256": "586eda2c3033ded19e0432b8e0c1f4c2aa6407ace8881ab2fe7474af144e21fe",
+    "host_success_marker_sha256": "032bab4b2eb204bd01e1f5ab8c573b400aad999a804dc3bf598b69acdd20df58",
+    "release_audit_sha256": "712e97e137b81ae9e7208f90d7bbfd5db30edf37ae562b60cea710279473d256",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "release_manifest_sha256": "af2a38f01f0264b87b56b17e2fc8da469a0690d253bb78b5b4d5f0f1b151eedc",
+    "release_package_manifest_sha256": "ac07171815ddbdb697ad64127e8a2ccd814114cd4da1a143232265d424199ce8",
+    "application_sha256": "1dc024d71969be56a459daa900572ead3229ac05b4a41ff6593a50727151cc58",
+    "full_flash_sha256": "5a7afaae7590dad1a6f79fc7382771e971442db861f427032b1dfccf2c434c04",
+    "provenance_sha256": "7647804af08f09616b96e32b91d6618e2c65f319eeb00889f7a702b3606dc0be",
+    "sbom_sha256": "abca27530ee318b4297d323603c0623e102cd4b9ea89615c44d49da898ffe4c0",
+    "receipt_path": "F:/SIGUI-evidence/actions/main-cfe0792-qa/main_strict_gate_cfe0792909cb120b6d6f6bbc9f5b5d7bba34abd7.json",
+    "receipt_sha256": "ab5403f3d31041c0dfed36cca3edf1b6639efef8ded77256a8c4dafdc89e4a29",
+    "verdict": "exact_merged_main_software_and_artifact_gate_banked"
+  },
+  "artifact_zip_sha256": {
+    "d1l-firmware-artifacts": "1af2c8221abeeb5b9d0a0a7444e63f88c43bf0a5fded5a29a3a40986215c7224",
+    "d1l-host-artifacts": "1ef6be1073409793585eacd674485b75164ec2611e31f2c57bfdaf2a2b073f88",
+    "d1l-idf55-migration-state": "2b1fb89ba321d02809c2934a2cd4b412e3bfd914956bb61160af815fed984ac0",
+    "d1l-meshcore-wire-conformance": "9ed08abee3be171ccd3589603b3c7c2d953a5f436a84aa85f339f6fb620ee703",
+    "d1l-release-package": "3d2bc860dbb7015cdb2cc4afbfe0ddbad0b9336f3221d59db5b93b4e3863efb0"
+  },
+  "residual_wp09_gates": {
+    "closed": false,
+    "remaining": "Integrate channel selection, send, receive, history, unread, and persistence semantics with the runtime and UI; prove pinned official-client bidirectional compatibility; complete reboot/reset/recovery and exact-candidate RF/physical acceptance; satisfy WP-05, WP-06, and WP-08 dependencies."
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp09_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "first_wp09_channel_model_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "wp09_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
