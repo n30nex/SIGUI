@@ -27,6 +27,8 @@ def test_channel_store_is_bounded_persistent_and_redacted_by_default():
     assert "D1L_CHANNEL_MUTATION_SECRET_COLLISION" in header
     assert "d1l_channel_store_find_unique_hash" in header
     assert "d1l_channel_store_export_share_uri" in header
+    assert "d1l_channel_store_select" in header
+    assert "d1l_channel_store_snapshot" in header
 
     redacted = header.split("typedef struct {", 1)[1].split(
         "} d1l_channel_info_t;", 1
@@ -57,6 +59,20 @@ def test_channel_store_is_bounded_persistent_and_redacted_by_default():
     assert "channel schema v2 blob layout changed" in source
     assert "Preserve the corrupt/unknown blob for recovery" in source
     assert "persist_store_or_rollback" in source
+    select = source.split("esp_err_t d1l_channel_store_select", 1)[1].split(
+        "esp_err_t d1l_channel_store_remove", 1
+    )[0]
+    assert "d1l_store_lock_take(&s_store_lock)" in select
+    assert "s_entries[index].enabled == 0U" in select
+    assert "make_only_default((size_t)index)" in select
+    assert "persist_store_or_rollback(&s_rollback_scratch)" in select
+    snapshot = source.split("esp_err_t d1l_channel_store_snapshot", 1)[1].split(
+        "size_t d1l_channel_store_copy", 1
+    )[0]
+    assert snapshot.count("d1l_store_lock_take(&s_store_lock)") == 1
+    assert "copy_info(&s_entries[i], &out_channels[i])" in snapshot
+    assert "*out_active_channel_id = s_entries[active_index].channel_id" in snapshot
+    assert ".revision = s_revision" in snapshot
     assert "malloc(" not in source
     assert "calloc(" not in source
     assert "realloc(" not in source

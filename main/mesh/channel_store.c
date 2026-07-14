@@ -1306,6 +1306,49 @@ esp_err_t d1l_channel_store_update(
     return ret;
 }
 
+esp_err_t d1l_channel_store_select(
+    uint64_t channel_id, d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_info)
+{
+    if (!out_result || channel_id == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_result = D1L_CHANNEL_MUTATION_NONE;
+    if (out_info) {
+        memset(out_info, 0, sizeof(*out_info));
+    }
+    esp_err_t ret = ensure_loaded();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    const int index = index_by_id(channel_id);
+    if (index < 0) {
+        ret = ESP_ERR_NOT_FOUND;
+    } else if (s_entries[index].enabled == 0U) {
+        ret = ESP_ERR_INVALID_STATE;
+    } else if (s_entries[index].is_default != 0U) {
+        *out_result = D1L_CHANNEL_MUTATION_EXISTS;
+        copy_info(&s_entries[index], out_info);
+        ret = ESP_OK;
+    } else if (!mutation_counter_available()) {
+        ret = ESP_ERR_INVALID_STATE;
+    } else {
+        fill_blob(&s_rollback_scratch);
+        s_entries[index].updated_ms = now_ms();
+        make_only_default((size_t)index);
+        note_mutation();
+        ret = persist_store_or_rollback(&s_rollback_scratch);
+        if (ret == ESP_OK) {
+            *out_result = D1L_CHANNEL_MUTATION_UPDATED;
+            copy_info(&s_entries[index], out_info);
+        }
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
+}
+
 esp_err_t d1l_channel_store_remove(
     uint64_t channel_id, d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_info)
@@ -1449,6 +1492,56 @@ d1l_channel_store_stats_t d1l_channel_store_stats(void)
     };
     d1l_store_lock_give(&s_store_lock);
     return stats;
+}
+
+esp_err_t d1l_channel_store_snapshot(
+    d1l_channel_info_t *out_channels, size_t max_channels,
+    size_t *out_count, uint64_t *out_active_channel_id,
+    d1l_channel_store_stats_t *out_stats)
+{
+    if (!out_channels || max_channels == 0U || !out_count ||
+        !out_active_channel_id || !out_stats) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_count = 0U;
+    *out_active_channel_id = 0U;
+    memset(out_stats, 0, sizeof(*out_stats));
+
+    esp_err_t ret = ensure_loaded();
+    if (ret != ESP_OK) {
+        out_stats->capacity = D1L_CHANNEL_STORE_CAPACITY;
+        out_stats->load_status = ret;
+        return ret;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    const int active_index = default_index();
+    if (!s_loaded || s_load_status != ESP_OK) {
+        ret = s_load_status != ESP_OK ? s_load_status : ESP_ERR_INVALID_STATE;
+    } else if (active_index < 0 || s_entries[active_index].enabled == 0U) {
+        ret = ESP_ERR_INVALID_STATE;
+    } else {
+        const size_t count = s_count < max_channels ? s_count : max_channels;
+        for (size_t i = 0U; i < count; ++i) {
+            copy_info(&s_entries[i], &out_channels[i]);
+        }
+        *out_count = count;
+        *out_active_channel_id = s_entries[active_index].channel_id;
+        *out_stats = (d1l_channel_store_stats_t){
+            .lineage = s_lineage,
+            .generation = s_generation,
+            .next_channel_id = s_next_channel_id,
+            .revision = s_revision,
+            .total_mutations = s_total_mutations,
+            .count = s_count,
+            .capacity = D1L_CHANNEL_STORE_CAPACITY,
+            .load_status = s_load_status,
+            .loaded = s_loaded,
+        };
+        ret = ESP_OK;
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
 }
 
 size_t d1l_channel_store_copy(d1l_channel_info_t *out_channels,

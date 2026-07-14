@@ -88,6 +88,9 @@ esp_err_t d1l_channel_store_update(
     uint64_t channel_id, const char *name, bool enabled, bool make_default,
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_info);
+esp_err_t d1l_channel_store_select(
+    uint64_t channel_id, d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_info);
 esp_err_t d1l_channel_store_remove(
     uint64_t channel_id, d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_info);
@@ -98,6 +101,11 @@ esp_err_t d1l_channel_store_note_message(uint64_t channel_id,
 esp_err_t d1l_channel_store_mark_all_read(uint64_t channel_id);
 
 d1l_channel_store_stats_t d1l_channel_store_stats(void);
+/* Copies one coherent, redacted metadata generation under the store lock. */
+esp_err_t d1l_channel_store_snapshot(
+    d1l_channel_info_t *out_channels, size_t max_channels,
+    size_t *out_count, uint64_t *out_active_channel_id,
+    d1l_channel_store_stats_t *out_stats);
 size_t d1l_channel_store_copy(d1l_channel_info_t *out_channels,
                               size_t max_channels);
 bool d1l_channel_store_find(uint64_t channel_id,

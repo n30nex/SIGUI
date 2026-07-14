@@ -1,6 +1,7 @@
 #include "usb_console.h"
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -58,6 +59,7 @@ static const uint32_t D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS = 50U;
 static const uint32_t D1L_REBOOT_RESTART_MARGIN_MS = 100U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
+static bool parse_channel_id_hex(const char *text, uint64_t *out_value);
 
 static uint32_t deadline_remaining_ms(int64_t started_us, uint32_t timeout_ms)
 {
@@ -2222,6 +2224,37 @@ static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value)
     return true;
 }
 
+static bool parse_channel_id_hex(const char *text, uint64_t *out_value)
+{
+    if (!text || !out_value) {
+        return false;
+    }
+    const size_t length = strlen(text);
+    if (length == 0U || length > 16U) {
+        return false;
+    }
+    uint64_t value = 0U;
+    for (size_t index = 0U; index < length; ++index) {
+        const unsigned char ch = (unsigned char)text[index];
+        uint8_t digit;
+        if (ch >= '0' && ch <= '9') {
+            digit = (uint8_t)(ch - '0');
+        } else if (ch >= 'a' && ch <= 'f') {
+            digit = (uint8_t)(ch - 'a' + 10U);
+        } else if (ch >= 'A' && ch <= 'F') {
+            digit = (uint8_t)(ch - 'A' + 10U);
+        } else {
+            return false;
+        }
+        value = (value << 4U) | digit;
+    }
+    if (value == 0U) {
+        return false;
+    }
+    *out_value = value;
+    return true;
+}
+
 static bool parse_message_offset_clause(const char *arg, size_t *out_offset)
 {
     if (!arg || !out_offset) {
@@ -4077,6 +4110,95 @@ static void cmd_nodes_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
+static const char *channel_source_name(uint8_t source)
+{
+    switch ((d1l_channel_source_t)source) {
+    case D1L_CHANNEL_SOURCE_BUILTIN:
+        return "builtin";
+    case D1L_CHANNEL_SOURCE_MANUAL:
+        return "manual";
+    case D1L_CHANNEL_SOURCE_URI_IMPORT:
+        return "uri_import";
+    case D1L_CHANNEL_SOURCE_MIGRATED:
+        return "migrated";
+    default:
+        return "unknown";
+    }
+}
+
+static void print_channel_metadata_json(const d1l_channel_info_t *entry,
+                                        uint64_t active_channel_id,
+                                        bool leading_comma)
+{
+    printf("%s{\"channel_id\":\"%016" PRIx64 "\",\"name\":",
+           leading_comma ? "," : "", entry->channel_id);
+    print_json_string(entry->name);
+    printf(",\"source\":");
+    print_json_string(channel_source_name(entry->source));
+    printf(",\"enabled\":%s,\"selected\":%s,\"unread\":%lu,"
+           "\"newest_message_seq\":%lu,\"read_through_seq\":%lu}",
+           bool_json(entry->enabled),
+           bool_json(entry->channel_id == active_channel_id),
+           (unsigned long)entry->unread_count,
+           (unsigned long)entry->newest_message_seq,
+           (unsigned long)entry->read_through_seq);
+}
+
+static void cmd_channels(void)
+{
+    static d1l_channel_info_t entries[D1L_CHANNEL_STORE_CAPACITY];
+    size_t count = 0U;
+    uint64_t active_channel_id = 0U;
+    d1l_channel_store_stats_t stats = {0};
+    const esp_err_t ret = d1l_app_model_copy_channels(
+        entries, D1L_CHANNEL_STORE_CAPACITY, &count, &active_channel_id,
+        &stats);
+    if (ret != ESP_OK) {
+        err_result("channels", esp_err_to_name(ret),
+                   "channel metadata is not available");
+        return;
+    }
+
+    ok_begin("channels");
+    printf(",\"count\":%u,\"capacity\":%u,\"revision\":%lu,"
+           "\"active_channel_id\":\"%016" PRIx64 "\",\"entries\":[",
+           (unsigned)count, (unsigned)D1L_CHANNEL_STORE_CAPACITY,
+           (unsigned long)stats.revision, active_channel_id);
+    for (size_t i = 0; i < count; ++i) {
+        print_channel_metadata_json(&entries[i], active_channel_id, i > 0U);
+    }
+    printf("],\"persisted\":true,\"secret_material_redacted\":true,"
+           "\"public_rf_tx\":false,\"formats_sd\":false}\n");
+}
+
+static void cmd_channels_select(const char *line)
+{
+    const char *arg = line + strlen("channels select ");
+    uint64_t channel_id = 0U;
+    if (!parse_channel_id_hex(arg, &channel_id)) {
+        err_result("channels select", "INVALID_CHANNEL_ID",
+                   "usage: channels select <1-16-hex-channel-id>");
+        return;
+    }
+
+    d1l_channel_info_t selected = {0};
+    const esp_err_t ret = d1l_app_model_select_channel(channel_id, &selected);
+    if (ret != ESP_OK) {
+        err_result("channels select", esp_err_to_name(ret),
+                   ret == ESP_ERR_NOT_FOUND ? "channel does not exist" :
+                   (ret == ESP_ERR_INVALID_STATE ?
+                        "channel is disabled or the store is unavailable" :
+                        "channel selection was not persisted"));
+        return;
+    }
+
+    ok_begin("channels select");
+    printf(",\"selected\":");
+    print_channel_metadata_json(&selected, selected.channel_id, false);
+    printf(",\"persisted\":true,\"secret_material_redacted\":true,"
+           "\"public_rf_tx\":false,\"formats_sd\":false}\n");
+}
+
 static void cmd_contacts(void)
 {
     d1l_contact_store_stats_t stats = d1l_contact_store_stats();
@@ -5176,7 +5298,8 @@ static void cmd_help(void)
            "\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\","
            "\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\","
            "\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\","
-           "\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\","
+           "\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\","
+           "\"channels\",\"channels select <channel-id-hex>\",\"contacts\","
            "\"contacts export [fingerprint]\",\"contacts import <meshcore-uri>\",\"contacts add <fingerprint> [alias]\","
            "\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\","
            "\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\","
@@ -5363,6 +5486,10 @@ static void handle_line(const char *line)
         cmd_nodes();
     } else if (strcmp(line, "nodes clear") == 0) {
         cmd_nodes_clear();
+    } else if (strcmp(line, "channels") == 0) {
+        cmd_channels();
+    } else if (strncmp(line, "channels select ", 16) == 0) {
+        cmd_channels_select(line);
     } else if (strcmp(line, "contacts") == 0) {
         cmd_contacts();
     } else if (strcmp(line, "contacts export") == 0 ||
