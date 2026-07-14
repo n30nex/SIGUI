@@ -302,6 +302,7 @@ def test_app_model_and_ui_preview_recent_dms():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
+    messages_ui = read("main/ui/ui_messages.c")
     thread_render = ui.split("static void render_dm_thread_sheet(void)", 1)[1].split(
         "static void show_dm_thread_for", 1
     )[0]
@@ -317,7 +318,7 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "d1l_dm_store_copy_thread_page(fingerprint, out_entries" in source
     assert "d1l_read_state_dm_entry_is_unread(&out_entries[i])" in source
     assert "d1l_app_model_send_dm_text" in source
-    assert "render_dm_row" in ui
+    assert "messages_render_dm_row" in messages_ui
     assert "d1l_app_model_copy_dm_thread_page(s_dm_thread_fingerprint" in ui
     assert "s_dm_thread_entries[D1L_DM_STORE_CAPACITY]" in ui
     assert "dm_thread_load_older_event_cb" in ui
@@ -330,4 +331,4 @@ def test_app_model_and_ui_preview_recent_dms():
     assert 'create_button(s_dm_thread_sheet, "Read"' not in thread_render
     assert "read_dm_thread_event_cb" not in ui
     assert '"DM"' in ui
-    assert "No direct messages" in ui
+    assert "No direct messages" in messages_ui
