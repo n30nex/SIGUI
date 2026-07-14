@@ -102,6 +102,28 @@ def test_source_sbom_is_deterministic_and_bound_to_exact_identities(tmp_path):
     names = {item["fileName"] for item in first["files"]}
     assert "./source/LICENSE" in names
     assert "./source/THIRD_PARTY_NOTICES.md" in names
+    assert {
+        "./source/.github/d1l-build-inputs.json",
+        "./source/requirements/ci-host-windows.txt",
+        "./source/docs/COMPLETION_LEDGER.yaml",
+    }.issubset(names)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        ".github/d1l-build-inputs.json",
+        "requirements/ci-host-windows.txt",
+        "dependencies.lock",
+        "docs/COMPLETION_LEDGER.yaml",
+    ),
+)
+def test_source_sbom_requires_every_release_inventory_lock(tmp_path, relative):
+    write_source_inputs(tmp_path)
+    (tmp_path / relative).unlink()
+
+    with pytest.raises(FileNotFoundError, match="Missing required SBOM input"):
+        sbom_d1l.build_spdx_document(tmp_path, source_identity())
 
 
 def test_package_sbom_round_trips_and_detects_input_tampering(tmp_path):
@@ -151,6 +173,61 @@ def test_package_sbom_round_trips_and_detects_input_tampering(tmp_path):
         package_manifest=manifest,
     )
     assert any("manifest checksum does not match" in error for error in errors)
+
+
+def test_package_sbom_uses_posix_order_for_mixed_case_paths(tmp_path):
+    source_root = tmp_path / "source"
+    write_source_inputs(source_root)
+    identity = source_identity()
+    first_dir, first_manifest = write_package_inputs(tmp_path / "first")
+    second_dir, second_manifest = write_package_inputs(tmp_path / "second")
+    mixed_case_files = (
+        ("Zeta.bin", b"ZETA"),
+        ("alpha.bin", b"ALPHA"),
+        ("Beta.bin", b"BETA"),
+        ("omega.bin", b"OMEGA"),
+    )
+    for package_dir, entries in (
+        (first_dir, mixed_case_files),
+        (second_dir, reversed(mixed_case_files)),
+    ):
+        for relative, payload in entries:
+            (package_dir / relative).write_bytes(payload)
+
+    first = sbom_d1l.build_spdx_document(
+        source_root,
+        identity,
+        package_dir=first_dir,
+        package_manifest=first_manifest,
+    )
+    second = sbom_d1l.build_spdx_document(
+        source_root,
+        identity,
+        package_dir=second_dir,
+        package_manifest=second_manifest,
+    )
+    package_names = [
+        item["fileName"]
+        for item in first["files"]
+        if item["fileName"].startswith("./package/")
+    ]
+
+    assert package_names == sorted(package_names)
+    assert sbom_d1l.serialize_spdx(first) == sbom_d1l.serialize_spdx(second)
+    assert sbom_d1l.validate_against_inputs(
+        first,
+        source_root,
+        identity,
+        package_dir=first_dir,
+        package_manifest=first_manifest,
+    ) == []
+    assert sbom_d1l.validate_against_inputs(
+        second,
+        source_root,
+        identity,
+        package_dir=second_dir,
+        package_manifest=second_manifest,
+    ) == []
 
 
 def test_validator_rejects_modified_document(tmp_path):

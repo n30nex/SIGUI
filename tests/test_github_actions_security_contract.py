@@ -178,6 +178,12 @@ def test_esp_idf_container_and_recorded_build_inputs_are_digest_pinned() -> None
     assert "cp .github/d1l-build-inputs.json artifacts/idf-migration/build-inputs.json" in workflow
 
 
+def test_esp_idf_release_builds_enable_reproducible_output_mode() -> None:
+    defaults = (ROOT / "sdkconfig.defaults").read_text(encoding="utf-8")
+
+    assert "CONFIG_APP_REPRODUCIBLE_BUILD=y" in defaults.splitlines()
+
+
 def test_windows_host_python_tools_are_version_and_hash_locked() -> None:
     build_inputs = json.loads(BUILD_INPUTS_PATH.read_text(encoding="utf-8"))
     host_python = build_inputs["host_python"]

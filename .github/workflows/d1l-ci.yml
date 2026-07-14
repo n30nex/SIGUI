@@ -219,10 +219,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p artifacts/meshcore-conformance
+          clang_package="$RUNNER_TEMP/clang-18_18.1.3-1ubuntu1_amd64.deb"
+          curl --fail --location --proto '=https' \
+            'https://archive.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-18/clang-18_18.1.3-1ubuntu1_amd64.deb' \
+            --output "$clang_package"
+          test "$(stat -c '%s' "$clang_package")" = "80040"
+          printf '%s  %s\n' \
+            '628b16701014ef7ad648380b20ea74b90dd543857f933b3e34d2fc042783de25' \
+            "$clang_package" | sha256sum --check --strict
           sudo apt-get update
-          sudo apt-get install -y clang-18
-          clang-18 --version | grep -E '^Ubuntu clang version 18\.'
-          clang++-18 --version | grep -E '^Ubuntu clang version 18\.'
+          sudo apt-get install -y "$clang_package"
+          python scripts/verify_ci_tool_inputs.py \
+            --root . \
+            --clang-package "$clang_package" \
+            --cc "$(command -v clang-18)" \
+            --cxx "$(command -v clang++-18)" \
+            --out artifacts/meshcore-conformance/toolchain-inputs.json
 
       - name: Run MeshCore wire-envelope conformance and RX fuzzing
         shell: bash
@@ -237,6 +250,7 @@ jobs:
             --cc clang-18 \
             --cxx clang++-18 \
             --commit "$GITHUB_SHA" \
+            --toolchain-receipt artifacts/meshcore-conformance/toolchain-inputs.json \
             --seed 13746277 \
             --runs 100000 \
             --out "artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json"
@@ -258,13 +272,23 @@ jobs:
 
       - uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2.0.0
         with:
-          version: 1.x
+          version: "1.5.0"
 
       - name: Install RP2040 Arduino core
         shell: bash
         run: |
+          mkdir -p artifacts/rp2040-sd-bridge
           arduino-cli config add board_manager.additional_urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
           arduino-cli core update-index
+          arduino-cli core download rp2040:rp2040@5.6.1
+          arduino_cli_version="$(arduino-cli version | sed -n 's/^arduino-cli[[:space:]]\+Version:[[:space:]]\+\([^[:space:]]\+\).*$/\1/p')"
+          test -n "$arduino_cli_version"
+          python scripts/verify_arduino_build_inputs.py \
+            --root . \
+            --arduino-data-dir "$HOME/.arduino15" \
+            --arduino-cli-version "$arduino_cli_version" \
+            --arduino-cli-path "$(command -v arduino-cli)" \
+            --out artifacts/rp2040-sd-bridge/build-inputs.json
           arduino-cli core install rp2040:rp2040@5.6.1
 
       - name: Disable unused SdFat PIO SDIO serial debug
@@ -406,25 +430,12 @@ jobs:
           import os
           import sys
 
+          from scripts.meshcore_conformance_d1l import validate_completed_report
+
           path = sys.argv[1]
           with open(path, encoding="utf-8") as stream:
               report = json.load(stream)
-          source = report.get("source_verification") or {}
-          required = {
-              "schema_version": report.get("schema_version") == 1,
-              "artifact_type": report.get("artifact_type") == "d1l_meshcore_wire_conformance",
-              "passed": report.get("passed") is True,
-              "status": report.get("status") == "pass",
-              "execution_complete": report.get("execution_complete") is True,
-              "repository_commit": source.get("repository_commit") == os.environ["GITHUB_SHA"],
-              "coverage_boundary": report.get("coverage_boundary") == "wire_envelope_only",
-              "coverage_level": report.get("coverage_level") == "wire_envelope_only",
-              "closure_ready_false": report.get("closure_ready") is False,
-              "issue_65_closure_eligible_false": report.get("issue_65_closure_eligible") is False,
-          }
-          failed = [name for name, ok in required.items() if not ok]
-          if failed:
-              raise SystemExit("MeshCore conformance validation failed: " + ", ".join(failed))
+          validate_completed_report(report, os.environ["GITHUB_SHA"])
           PY
           printf 'D1L_MESHCORE_CONFORMANCE_JSON=%s\n' "$conformance_json" >> "$GITHUB_ENV"
 
