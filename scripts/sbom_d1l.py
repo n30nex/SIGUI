@@ -379,7 +379,10 @@ def collect_package_files(
     validate_manifest_inputs(manifest, package_dir, source_commit)
     excluded_names = {name[2:] for name in PACKAGE_VERIFICATION_EXCLUSIONS}
     files = []
-    for path in sorted(package_dir.rglob("*")):
+    for path in sorted(
+        package_dir.rglob("*"),
+        key=lambda item: item.relative_to(package_dir).as_posix(),
+    ):
         if not path.is_file():
             continue
         relative = path.relative_to(package_dir).as_posix()
