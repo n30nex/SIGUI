@@ -299,7 +299,6 @@ def write_manifest_file(directory: Path, name: str, payload: bytes = b"ok") -> N
 
 def write_esp32_actions_artifact(run_dir: Path) -> dict:
     artifact = run_dir / "d1l-firmware-artifacts"
-    build = artifact / "build"
     files = {
         "build/bootloader/bootloader.bin": b"BOOT",
         "build/partition_table/partition-table.bin": b"PART",
