@@ -8,26 +8,26 @@
 
 | Item | Value |
 |---|---|
-| Live merged `main` | `17a948cf1ad23a5d2a89419039897943028f9bce` |
+| Live merged `main` | `14182d3f198b70ceb588d9d43312bf76d8745284` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
-| Active PR stack | none |
-| Candidate integration state | PRs #62, #64, #80, and #84 are merged; software integration is complete and frozen-candidate physical qualification remains open |
+| Active PR stack | #88 SBOM, #89 provenance, #90 reproducibility comparator; all draft and dependency-stacked |
+| Candidate integration state | PRs #62, #64, #80, #84, #85, #86, and #87 are merged; software integration and the first immutable-input slices are complete, while frozen-candidate physical qualification remains open |
 | Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
 | SDK | ESP-IDF 5.5.4 |
-| Candidate host suite | 823 passing tests in exact merged-main Actions host job |
-| Candidate CI | run `29294553135` green; 2 emitted manifests / 36 checksum entries verified; full RP2040-inclusive baseline remains `29290978741` at 8 / 78 |
+| Candidate host suite | 834 passing tests in exact merged-main Actions host job |
+| Candidate CI | run `29297516173` green; 3 emitted manifests / 39 checksum entries verified; exact-head RP2040 dispatch `29296995585` verified 9 / 81 |
 | Conformance closure | false; `wire_envelope_only` |
-| Release status | not ready to tag; 15 P0 failures and 16 failures overall including P1 remain |
+| Release status | not ready to tag; exact-main audit `29297516173` reports 31 P0 failures / 33 overall across the expanded gate set |
 
 ## Live post-audit reconciliation
 
-- Live `main` is `17a948cf1ad23a5d2a89419039897943028f9bce`; PR #84 head `e5d2f8a21a0cb32713a7c0b3796f1660abda788d` is merged after PRs #62, #64, and #80. Exact merged-main Actions `29294553135` passed 823 host tests plus 24 checksum-contract tests, and both emitted downloaded manifests / 36 entries strict-verified. RP2040 correctly skipped for this host/docs-only slice; the full integrated 8-manifest / 78-entry baseline remains `4ee07caf` / `29290978741`.
+- Live `main` is `14182d3f198b70ceb588d9d43312bf76d8745284`; PR #87 head `655ece5d5d33356937cad24f7e23fa58decf7ff5` merged after PRs #84, #85, and #86. Exact merged-main Actions `29297516173` passed 834 host tests plus 24 checksum-contract tests, and all five downloaded artifacts strict-verified across 3 manifests / 39 entries. Root hashes are firmware `e702d912a508ebccde5a5c426f0f31ab349e362175826b307dc4a3a491efe014`, build inputs `cf3c91f97d7bbd42ae1ee6c19f8d96934ea34a689308b4de05f9edbdd32bbdbe`, and release `0816f442bc9a6456009bc92dad0ee1528219eddb5c62eb6d65c8d21b34b54cc4`. RP2040 correctly skipped on merged main; exact-head dispatch `29296995585` executed the pinned Arduino action, built all three RP2040 variants, and strict-verified 9 manifests / 81 entries without device interaction.
 - Exact merged-main run `29290978741` passed 795 host plus 24 checksum-contract tests and downloaded strict verification of 8 manifests / 78 entries. Root manifest is `22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64`; application is `44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a`; full flash is `ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd`. The earlier `29286754864` 7/8 failure remains preserved as a negative receipt, and the coverage blocker is closed.
 - WP-01 is `merged` with `proof_banked=true`; its physical evidence remains explicitly bound to exact source `092293f2311a24c9899bc9bf343ab014c4ba0411`.
 - Exact push/PR Actions runs `29272708844` / `29272709642` are green. The Actions host job reports 773 passed, and all 8 manifests / 78 checksum entries verify.
 - The accepted pair passed inserted-card stability, 10/10 physical removal/reinsert cycles, 5/5 retained reboots, and a 7,207.089-second six-segment active-storage soak with retained-worker stack floor 7,976 bytes. It used no Public RF and no SD formatting.
-- WP-02 software integration is complete but remains `in_progress` / `proof_banked=false`. The tracked repository-relative baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) binds PR #62/#64/#80 to their trusted heads and fails closed only for missing board, UI, SD, reboot, and Map-open physical receipts. PR #84 merged the hardened baseline/tooling as `17a948cf`; those roles are intentionally deferred to the frozen final candidate. `BLK-WP02-EXACT-HARDWARE-ROLES-20260713` blocks WP-02 completion but not dependent implementation execution, so WP-03 and WP-04 remain runnable while release readiness remains false.
+- WP-02 software integration is complete but remains `in_progress` / `proof_banked=false`. The tracked repository-relative baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) binds PR #62/#64/#80 to their trusted heads and fails closed only for missing board, UI, SD, reboot, and Map-open physical receipts. PR #84 merged the hardened baseline/tooling as `17a948cf`; PRs #86/#87 changed release-security/CI inputs, not the runtime qualification boundary. Those physical roles remain deferred to the frozen final candidate. `BLK-WP02-EXACT-HARDWARE-ROLES-20260713` blocks WP-02 completion but not dependent implementation execution, so WP-03 and WP-04 continue while release readiness remains false.
 
 ### WP-01 canonical exact-source receipts
 
@@ -70,6 +70,20 @@ This proof closes only WP-01's narrow source gate. The exact integrated/frozen c
 - Exact source head `092293f2311a24c9899bc9bf343ab014c4ba0411` passed the WP-01 exact-pair proof listed above. That predecessor proof remains valid for WP-01 but does not qualify the later integrated SHA.
 - Local-only full-stack reconciliation rehearsal `341a3abf4db4c52acf5859e396f25e7adb4cbab1` passed 787 full / 302 focused host tests. It is not remote exact Actions or hardware proof.
 - Exact merged-main Actions `29290978741` and downloaded 8-manifest / 78-entry verification supersede the local integration rehearsals for software proof. Physical proof remains separately exact-SHA-bound.
+
+### PR #86
+
+- Head `1c5e80be662ed64c1f97fc047d6dbfc995567d1c` merged as `9acb7d0cf498793dc0bed4854cc314a2eac2ea0c`.
+- Release-critical workflows, dependency locks, build inputs, packaging, provenance/SBOM, update/security, and RP2040 surfaces now resolve through fail-closed CODEOWNERS contracts.
+- Exact merged-main Actions `29296258019` passed 827 host plus 24 checksum-contract tests; downloaded artifacts strict-passed 2 manifests / 36 entries.
+
+### PR #87
+
+- Head `655ece5d5d33356937cad24f7e23fa58decf7ff5` merged as `14182d3f198b70ceb588d9d43312bf76d8745284`.
+- Remote Actions, ESP-IDF OCI input, Windows Python, wheel-only host requirements, and cross-platform build-input bytes are pinned and fail closed.
+- Exact push/PR Actions `29296977946` / `29296979420` each passed 834 host plus 24 checksum-contract tests and strict-verified 3 manifests / 39 entries. Exact merge ref `74db31b1a778fc8af3b304f321f36748e85c60cf` has verified parents `9acb7d0c` + `655ece5d`.
+- Explicit Actions dispatch `29296995585` executed the pinned Arduino action and all three RP2040 builds; downloaded artifacts strict-passed 9 manifests / 81 entries. This proves the CI build path only and is not physical device evidence.
+- Exact merged-main Actions `29297516173` passed, with application `bd3a071739f7773a92f3dd1869f8152c4091ff5457b50e79e66a792632cfcb64`, full flash `e3b82a8f65ee29b1914ff6ee69dd2d9bd677adbfbafabae1c0d74cf9ab328ad5`, and canonical downloaded tree `78fa7f3b4a043e9deaff6ae9a23d69833fa227845964cee612a54027147dcc88`.
 
 ### Stale feature branch
 
