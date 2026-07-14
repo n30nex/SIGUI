@@ -65,6 +65,14 @@ def workflow_paths() -> list[Path]:
     return sorted((*WORKFLOW_DIR.glob("*.yml"), *WORKFLOW_DIR.glob("*.yaml")))
 
 
+def test_cross_platform_build_input_bytes_are_pinned_to_lf() -> None:
+    attributes = (ROOT / ".gitattributes").read_text(encoding="ascii").splitlines()
+
+    assert ".github/d1l-build-inputs.json text eol=lf" in attributes
+    assert "requirements/ci-host-windows.txt text eol=lf" in attributes
+    assert b"\r\n" not in BUILD_INPUTS_PATH.read_bytes()
+
+
 def top_level_permissions(text: str) -> dict[str, str] | None:
     lines = text.splitlines()
     for index, line in enumerate(lines):
