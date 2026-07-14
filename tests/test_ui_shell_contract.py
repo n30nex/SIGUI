@@ -666,9 +666,9 @@ def test_ui_data_canary_uses_volatile_store_paths():
 def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():
     source = read("main/ui/ui_phase1.c")
     expected_deferred_paths = [
-        "s_packet_search_text[0] = '\\0';\n    if (s_packet_search_textarea)",
+        "d1l_ui_packets_clear_search(&s_packets_controller);\n    if (s_packet_search_textarea)",
         "hide_packet_search_sheet();\n    request_content_refresh();",
-        "s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;\n    s_packet_skip_newest = 0;\n    hide_packet_search_sheet();\n    request_content_refresh();",
+        "d1l_ui_packets_set_search(&s_packets_controller, text);\n    hide_packet_search_sheet();\n    request_content_refresh();",
     ]
     for snippet in expected_deferred_paths:
         assert snippet in source
@@ -1436,18 +1436,16 @@ def test_route_detail_sheet_opens_from_route_rows():
 
 def test_packet_detail_sheet_opens_from_packet_rows():
     source = read("main/ui/ui_phase1.c")
+    packets = read("main/ui/ui_packets.c")
+    packets_header = read("main/ui/ui_packets.h")
     assert "static lv_obj_t *s_packet_detail_sheet" in source
     assert "static lv_obj_t *s_packet_search_sheet" in source
     assert "static d1l_packet_log_entry_t s_packet_detail_packet" in source
-    assert "static d1l_packet_filter_mode_t s_packet_filter_mode" in source
-    assert "static bool s_packets_paused" in source
+    assert "static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR" in source
     assert "static bool s_packet_detail_advanced" in source
-    assert "static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_PACKET_LOG_CAPACITY]" in source
-    assert "static const size_t D1L_PACKET_UI_INITIAL_ROWS = 100U" in source
-    assert "static const size_t D1L_PACKET_UI_LOAD_OLDER_STEP = 100U" in source
-    assert "static size_t s_packet_skip_newest" in source
-    assert "static size_t s_packet_total_matches" in source
-    assert "static bool s_packet_sd_history_page" in source
+    assert "d1l_packet_log_entry_t rows[D1L_PACKET_LOG_CAPACITY]" in packets_header
+    assert "#define D1L_UI_PACKETS_INITIAL_ROWS 100U" in packets_header
+    assert "#define D1L_UI_PACKETS_LOAD_NEWER_STEP 100U" in packets_header
     assert "render_packet_detail_sheet" in source
     assert "open_packet_detail_event_cb" in source
     assert "open_packet_search_event_cb" in source
@@ -1459,10 +1457,13 @@ def test_packet_detail_sheet_opens_from_packet_rows():
     assert "create_packet_detail_sheet" in source
     assert "create_packet_search_sheet" in source
     assert "lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED" in source
+    assert "d1l_packet_log_query_page" not in packets
     assert "d1l_packet_log_query_page" in source
     assert "refresh_packet_terminal_rows" in source
-    assert "packet_entry_color" in source
-    assert "packet_entry_status" in source
+    assert "d1l_ui_packets_query_request" in source
+    assert "d1l_ui_packets_accept_query" in source
+    assert "d1l_ui_packets_entry_color" in source
+    assert "d1l_ui_packets_entry_status" in source
     assert '"All"' in source
     assert '"RX"' in source
     assert '"TX"' in source
@@ -1482,10 +1483,9 @@ def test_packet_detail_sheet_opens_from_packet_rows():
     assert '"Raw Hex"' in source
     assert "raw_hex" in source
     assert "recent_packet_count" in source
-    assert "s_packet_filtered_packets" in source
-    assert "s_packet_filtered_count" in source
-    assert "packet_feed_can_load_older(packet_rows)" in source
-    assert "packet_feed_can_load_newer()" in source
+    assert "s_packets_controller.rows[i]" in source
+    assert "d1l_ui_packets_can_load_older(&s_packets_controller)" in source
+    assert "d1l_ui_packets_can_load_newer(&s_packets_controller)" in source
     assert "hide_packet_detail_sheet()" in source
     assert "hide_packet_search_sheet()" in source
 

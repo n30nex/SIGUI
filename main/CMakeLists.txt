@@ -56,6 +56,7 @@ idf_component_register(
         "ui/ui_modal.c"
         "ui/ui_navigation.c"
         "ui/ui_nodes.c"
+        "ui/ui_packets.c"
         "ui/ui_phase1.c"
         "ui/ui_screen.c"
         "ui/ui_settings.c"
