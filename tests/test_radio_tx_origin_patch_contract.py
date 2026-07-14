@@ -96,6 +96,11 @@ def test_application_queues_exact_origin_tuple_and_rejects_late_a_for_b():
     callbacks = service.split(
         "/* SX1262 callbacks are deliberately bounded", 1
     )[1].split("static esp_err_t configure_radio_profile", 1)[0]
+    retry = body(
+        service,
+        "static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)\n{",
+        "static esp_err_t meshcore_service_handle_send_dm",
+    )
 
     assert "publish_callback_tx_operation(&identity)" in begin
     assert "s_callback_tx_history[(origin - 1U) %" in capture
@@ -103,7 +108,12 @@ def test_application_queues_exact_origin_tuple_and_rejects_late_a_for_b():
     assert "capture_callback_tx_operation(origin, &identity)" in callbacks
     assert ".TxDoneWithOrigin = on_tx_done" in callbacks
     assert ".TxTimeoutWithOrigin = on_tx_timeout" in callbacks
-    assert service.count("Radio.SendWithOrigin(") == 2
+    assert service.count("Radio.SendWithOrigin(") == 3
+    assert retry.count("Radio.SendWithOrigin(") == 1
+    assert retry.index("meshcore_radio_tx_operation_begin(") < retry.index(
+        "Radio.SendWithOrigin("
+    )
+    assert "(uint32_t)s_active_radio_tx.operation_id" in retry
     assert "d1l_mesh_tx_operation_identity_equal(" in service
     assert "memset(s_callback_tx_history, 0, sizeof(s_callback_tx_history))" in service
 
