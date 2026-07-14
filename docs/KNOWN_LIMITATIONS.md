@@ -14,6 +14,19 @@ As of the 2026-07-13 merged WP-02 software-integration checkpoint:
   duplicate/replay/lifetime behavior, retained state, routing behavior, an
   official peer, or hardware. Its artifact must keep `closure_ready=false`, so
   a green job is not issue #65 closure or release qualification.
+- The bounded follow-on signed-advert semantic runtime gate compiles pinned
+  upstream `Identity`/`Packet`/`Dispatcher`/`Mesh`/`BaseChatMesh` behavior with
+  the independently checksum-verified `rweather/Crypto` 0.4.0 verifier. It
+  executes real create/sign/send/filter/verify/dispatch/contact promotion and
+  proves exact-scenario duplicate, forged-signature, self, ownership, lifetime,
+  and deterministic-replay behavior on the host. It does not prove firmware
+  binding, persisted keypair consistency, retained-contact recovery, peer/RF
+  interoperability, routing, ACK delivery, trace, admin sessions, or hardware,
+  and it keeps WP-04 and issue #65 open. The vendored Ed25519 `fe.c`, `ge.c`,
+  and `sc.c` shift-base sanitizer exception remains explicitly release-blocking.
+  The pinned `BaseChatMesh` callback also reports `is_new=false` for the tested
+  newly auto-added contact; integration must not rely on that flag as a truthful
+  new-contact indicator until the upstream behavior is reconciled.
 - Settings are implemented as an NVS-backed firmware model and have passed reboot persistence smoke on real D1L flash. The persisted radio profile is exposed through `settings get`, serial radio setters, and a touch Radio Settings sheet; the user-facing More page groups tools, connections, storage/maps, device, support, and advanced functions behind disclosure rows instead of a flat settings grid. PR #56 proves the collapsed hierarchy and all-tab navigation on COM12; expanded category touch behavior and the remaining system-page redesigns still need physical touch review.
 - First-boot onboarding now persists a setup-complete flag, collects the node name, confirms Canada/USA defaults, keeps Wi-Fi/BLE/observer disabled, and generates/retains the local MeshCore identity. Optional-radio choices in onboarding remain limited until live Wi-Fi/BLE runtime support is enabled.
 - `identity status` now generates and reports an NVS-retained Ed25519 local identity fingerprint. This is a minimal firmware identity model, not the final full MeshCore C++ store integration.
