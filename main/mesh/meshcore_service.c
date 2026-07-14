@@ -1843,6 +1843,26 @@ static esp_err_t build_advert_packet(const d1l_settings_t *settings, bool flood,
     return ESP_OK;
 }
 
+static const char *verified_contact_result_name(
+    d1l_contact_verified_advert_result_t result)
+{
+    switch (result) {
+        case D1L_CONTACT_VERIFIED_ADVERT_CREATED:
+            return "new";
+        case D1L_CONTACT_VERIFIED_ADVERT_UPDATED:
+            return "updated";
+        case D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER:
+            return "promoted";
+        case D1L_CONTACT_VERIFIED_ADVERT_COLLISION:
+            return "collision";
+        case D1L_CONTACT_VERIFIED_ADVERT_FULL:
+            return "full";
+        case D1L_CONTACT_VERIFIED_ADVERT_NONE:
+        default:
+            return "error";
+    }
+}
+
 static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
@@ -1898,15 +1918,6 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
         return;
     }
 
-    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    if (advert.name[0]) {
-        char short_name[13] = {0};
-        sanitize_note(short_name, sizeof(short_name), advert.name);
-        snprintf(note, sizeof(note), "adv %c %s %.8s", advert.type_code, short_name, pub_prefix);
-    } else {
-        snprintf(note, sizeof(note), "adv %c %.8s", advert.type_code, pub_prefix);
-    }
-    s_status.rx_packets++;
     const uint32_t advert_timestamp = read_le32(timestamp);
     bool advert_stale = false;
     esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, advert.name,
@@ -1917,6 +1928,7 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
                                                  advert.lat_e6, advert.lon_e6,
                                                  &advert_stale);
     if (advert_stale) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
         snprintf(note, sizeof(note), "replay %.8s ts=%lu", pub_prefix,
                  (unsigned long)advert_timestamp);
         append_packet_log("rx", "advert_replay", rssi, snr, packet.path_hash_bytes,
@@ -1925,7 +1937,41 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
     }
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "node store upsert failed: %s", esp_err_to_name(ret));
+        append_packet_log("rx", "advert_store_error", rssi, snr,
+                          packet.path_hash_bytes, packet.path_hops, size,
+                          payload, size, esp_err_to_name(ret));
+        return;
     }
+
+    d1l_node_entry_t verified_node = {0};
+    d1l_contact_verified_advert_result_t contact_result =
+        D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    esp_err_t contact_ret = ESP_ERR_INVALID_STATE;
+    if (d1l_node_store_find_by_fingerprint(pub_prefix, &verified_node) &&
+        strcmp(verified_node.public_key_hex, pub_key_hex) == 0) {
+        contact_ret = d1l_contact_store_upsert_verified_advert(
+            pub_prefix, &verified_node, &contact_result, NULL);
+    } else {
+        contact_result = D1L_CONTACT_VERIFIED_ADVERT_COLLISION;
+    }
+    if (contact_ret != ESP_OK) {
+        ESP_LOGW(TAG, "verified advert contact promotion %s: %s",
+                 verified_contact_result_name(contact_result),
+                 esp_err_to_name(contact_ret));
+    }
+
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    if (advert.name[0]) {
+        char short_name[13] = {0};
+        sanitize_note(short_name, sizeof(short_name), advert.name);
+        snprintf(note, sizeof(note), "adv %c %s %.8s c=%s", advert.type_code,
+                 short_name, pub_prefix,
+                 verified_contact_result_name(contact_result));
+    } else {
+        snprintf(note, sizeof(note), "adv %c %.8s c=%s", advert.type_code,
+                 pub_prefix, verified_contact_result_name(contact_result));
+    }
+    s_status.rx_packets++;
     s_status.rx_adverts++;
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(pub_prefix,
