@@ -6,6 +6,7 @@
 
 #include "app/settings_model.h"
 #include "ed_25519.h"
+#include "mock_esp_nvs.h"
 
 static void make_keypair(uint32_t counter, uint8_t public_key[32],
                          uint8_t private_key[64])
@@ -74,17 +75,25 @@ static void test_valid_edge_prefix_is_not_rejected(void)
 {
     uint8_t public_key[32] = {0};
     uint8_t private_key[64] = {0};
-    bool found_edge_prefix = false;
+    bool found_zero_prefix = false;
+    bool found_ff_prefix = false;
     for (uint32_t counter = 0; counter < 4096U; ++counter) {
         make_keypair(counter, public_key, private_key);
-        if (public_key[0] == 0x00U || public_key[0] == 0xffU) {
-            found_edge_prefix = true;
+        if (public_key[0] == 0x00U) {
+            found_zero_prefix = true;
+            assert(d1l_identity_state_classify(true, public_key, private_key) ==
+                   D1L_IDENTITY_STATE_CONSISTENT);
+        } else if (public_key[0] == 0xffU) {
+            found_ff_prefix = true;
+            assert(d1l_identity_state_classify(true, public_key, private_key) ==
+                   D1L_IDENTITY_STATE_CONSISTENT);
+        }
+        if (found_zero_prefix && found_ff_prefix) {
             break;
         }
     }
-    assert(found_edge_prefix);
-    assert(d1l_identity_state_classify(true, public_key, private_key) ==
-           D1L_IDENTITY_STATE_CONSISTENT);
+    assert(found_zero_prefix);
+    assert(found_ff_prefix);
 }
 
 static void test_unclamped_scalar_is_inconsistent_even_with_matching_public(void)
@@ -188,6 +197,24 @@ static void test_settings_sanitizer_fails_closed_and_preserves_evidence(void)
            D1L_IDENTITY_STATE_INCONSISTENT);
 }
 
+static void test_settings_load_status_is_not_forged_by_ram_defaults_or_save(void)
+{
+    mock_nvs_reset();
+    assert(d1l_settings_load_status() == ESP_ERR_INVALID_STATE);
+
+    mock_nvs_fail_next_open(ESP_FAIL);
+    assert(d1l_settings_load() == ESP_FAIL);
+    assert(d1l_settings_load_status() == ESP_FAIL);
+
+    d1l_settings_t defaults = {0};
+    d1l_settings_defaults(&defaults);
+    assert(d1l_settings_save(&defaults) == ESP_OK);
+    assert(d1l_settings_load_status() == ESP_FAIL);
+
+    assert(d1l_settings_load() == ESP_OK);
+    assert(d1l_settings_load_status() == ESP_OK);
+}
+
 int main(void)
 {
     test_absent_and_partial_states();
@@ -196,6 +223,7 @@ int main(void)
     test_unclamped_scalar_is_inconsistent_even_with_matching_public();
     test_uniform_nonce_prefix_is_inconsistent_with_matching_public();
     test_settings_sanitizer_fails_closed_and_preserves_evidence();
+    test_settings_load_status_is_not_forged_by_ram_defaults_or_save();
     assert(strcmp(d1l_identity_state_name(D1L_IDENTITY_STATE_ABSENT),
                   "absent") == 0);
     assert(strcmp(d1l_identity_state_name(D1L_IDENTITY_STATE_CONSISTENT),

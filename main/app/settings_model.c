@@ -15,6 +15,7 @@
 
 static d1l_settings_t s_current;
 static bool s_loaded;
+static esp_err_t s_load_status = ESP_ERR_INVALID_STATE;
 static uint32_t s_mesh_timestamp_last = D1L_SETTINGS_MESH_TIMESTAMP_BASE;
 
 _Static_assert(D1L_IDENTITY_PUBLIC_KEY_LEN == D1L_IDENTITY_STATE_PUBLIC_KEY_LEN,
@@ -590,12 +591,14 @@ static void migrate_v4_settings(d1l_settings_t *dest, const d1l_settings_v4_t *s
 
 esp_err_t d1l_settings_load(void)
 {
+    s_load_status = ESP_ERR_INVALID_STATE;
     d1l_settings_defaults(&s_current);
 
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_SETTINGS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
         s_loaded = false;
+        s_load_status = ret;
         return ret;
     }
 
@@ -738,6 +741,7 @@ esp_err_t d1l_settings_load(void)
     }
     nvs_close(handle);
     s_loaded = (ret == ESP_OK);
+    s_load_status = ret;
     return ret;
 }
 
@@ -883,6 +887,11 @@ const d1l_settings_t *d1l_settings_current(void)
         d1l_settings_defaults(&s_current);
     }
     return &s_current;
+}
+
+esp_err_t d1l_settings_load_status(void)
+{
+    return s_load_status;
 }
 
 d1l_radio_profile_t d1l_settings_radio_profile(const d1l_settings_t *settings)

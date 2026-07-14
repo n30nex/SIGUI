@@ -2353,20 +2353,39 @@ void d1l_meshcore_service_init(void)
 
 esp_err_t d1l_meshcore_service_ensure_identity(void)
 {
+    const esp_err_t load_status = d1l_settings_load_status();
+    if (load_status != ESP_OK) {
+        /* Defaults returned after an unreadable settings blob are not proof
+         * that persisted identity material is absent. Never generate or save
+         * a replacement identity until an actual settings load succeeds. */
+        s_status.identity_ready = false;
+        return load_status;
+    }
+
     d1l_settings_t settings = *d1l_settings_current();
-    if (settings.identity_ready) {
+    const d1l_identity_state_t persisted_state =
+        d1l_settings_identity_state(&settings);
+    if (persisted_state == D1L_IDENTITY_STATE_CONSISTENT) {
         s_status.identity_ready = true;
         return ESP_OK;
+    }
+    if (persisted_state == D1L_IDENTITY_STATE_INCONSISTENT) {
+        /* Preserve invalid persisted material for recovery/diagnostics. It must
+         * never be silently replaced with a new node identity. */
+        s_status.identity_ready = false;
+        return ESP_ERR_INVALID_STATE;
     }
 
     uint8_t seed[D1L_MESHCORE_SEED_SIZE] = {0};
     for (int attempt = 0; attempt < 8; ++attempt) {
         esp_fill_random(seed, sizeof(seed));
         ed25519_create_keypair(settings.identity_public_key, settings.identity_private_key, seed);
-        if (settings.identity_public_key[0] != 0x00 && settings.identity_public_key[0] != 0xff) {
-            settings.identity_ready = true;
+        settings.identity_ready = true;
+        if (d1l_settings_identity_state(&settings) ==
+            D1L_IDENTITY_STATE_CONSISTENT) {
             break;
         }
+        settings.identity_ready = false;
     }
     memset(seed, 0, sizeof(seed));
     if (!settings.identity_ready) {

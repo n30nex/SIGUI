@@ -35,6 +35,7 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "d1l_settings_complete_onboarding" in header
     assert "d1l_settings_reset_onboarding" in header
     assert "d1l_settings_next_mesh_timestamp" in header
+    assert "d1l_settings_load_status" in header
     assert "d1l_settings_v2_t" in source
     assert "d1l_settings_v3_t" in source
     assert "d1l_settings_v4_t" in source
@@ -82,6 +83,15 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->frequency_hz = D1L_RADIO_FREQ_HZ" in source
     assert "settings->tcxo_mode = D1L_TCXO_NONE" in source
     assert "settings->identity_ready = false" in source
+    assert "static esp_err_t s_load_status = ESP_ERR_INVALID_STATE" in source
+    load = source.split("esp_err_t d1l_settings_load(void)", 1)[1].split(
+        "esp_err_t d1l_settings_save", 1
+    )[0]
+    assert "s_load_status = ret;" in load
+    save = source.split("esp_err_t d1l_settings_save", 1)[1].split(
+        "esp_err_t d1l_settings_reset", 1
+    )[0]
+    assert "s_load_status" not in save
 
 
 def test_console_exposes_phase2_foundation_commands():

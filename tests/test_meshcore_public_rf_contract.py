@@ -93,6 +93,42 @@ def test_meshcore_service_generates_identity_and_signed_adverts():
     assert "../third_party/MeshCore/lib/ed25519/sign.c" in cmake
 
 
+def test_meshcore_identity_generation_preserves_inconsistent_persisted_material():
+    source = read("main/mesh/meshcore_service.c")
+    body = source.split("esp_err_t d1l_meshcore_service_ensure_identity(void)", 1)[
+        1
+    ].split("d1l_meshcore_service_status_t d1l_meshcore_service_status", 1)[0]
+
+    load_status = body.index("d1l_settings_load_status()")
+    current = body.index("d1l_settings_current()")
+    classify = body.index("d1l_settings_identity_state(&settings)")
+    reject = body.index("persisted_state == D1L_IDENTITY_STATE_INCONSISTENT")
+    random = body.index("esp_fill_random")
+    save = body.index("d1l_settings_save")
+    assert load_status < current < classify < reject < random < save
+
+    unreadable = body.split("if (load_status != ESP_OK)", 1)[1].split(
+        "d1l_settings_t settings", 1
+    )[0]
+    assert "s_status.identity_ready = false;" in unreadable
+    assert "return load_status;" in unreadable
+    assert "d1l_settings_current" not in unreadable
+    assert "d1l_settings_save" not in unreadable
+
+    inconsistent = body.split(
+        "persisted_state == D1L_IDENTITY_STATE_INCONSISTENT", 1
+    )[1].split("uint8_t seed", 1)[0]
+    assert "s_status.identity_ready = false;" in inconsistent
+    assert "return ESP_ERR_INVALID_STATE;" in inconsistent
+    assert "d1l_settings_save" not in inconsistent
+    assert "esp_fill_random" not in inconsistent
+
+    generation = body.split("uint8_t seed", 1)[1]
+    assert "d1l_settings_identity_state(&settings)" in generation
+    assert "D1L_IDENTITY_STATE_CONSISTENT" in generation
+    assert "identity_public_key[0]" not in generation
+
+
 def test_meshcore_service_uses_meshcore_narrow_radio_profile():
     source = read("main/mesh/meshcore_service.c")
     assert "D1L_MESHCORE_BW_INDEX_62K5" in source
