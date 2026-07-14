@@ -88,7 +88,8 @@ def test_meshcore_service_generates_identity_and_signed_adverts():
     assert "esp_fill_random" in source
     assert "d1l_settings_next_mesh_timestamp" in source
     assert "build_advert_packet" in source
-    assert 'append_packet_log("tx", "advert"' in source
+    assert '"tx", "advert", 0, 0' in source
+    assert "d1l_packet_log_append_raw_deferred" in source
     assert "../third_party/MeshCore/lib/ed25519/keypair.c" in cmake
     assert "../third_party/MeshCore/lib/ed25519/sign.c" in cmake
 

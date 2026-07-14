@@ -71,6 +71,7 @@ static uint32_t s_bump_generation_after_delete_count;
 static bool s_attempt_append_during_delete;
 static bool s_append_during_delete_result;
 static uint32_t s_enable_sd_on_lock_take_countdown;
+static uint32_t s_fail_nonblocking_take_count;
 static bool s_enable_sd_during_nvs_erase;
 static uint32_t s_sd_primary_reads;
 static uint32_t s_sd_primary_writes;
@@ -109,6 +110,7 @@ static void mock_reset(void)
     s_attempt_append_during_delete = false;
     s_append_during_delete_result = true;
     s_enable_sd_on_lock_take_countdown = 0U;
+    s_fail_nonblocking_take_count = 0U;
     s_enable_sd_during_nvs_erase = false;
     s_sd_primary_reads = 0U;
     s_sd_primary_writes = 0U;
@@ -284,7 +286,10 @@ SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *buffer)
 BaseType_t xSemaphoreTake(SemaphoreHandle_t handle, TickType_t ticks_to_wait)
 {
     (void)handle;
-    (void)ticks_to_wait;
+    if (ticks_to_wait == 0U && s_fail_nonblocking_take_count > 0U) {
+        s_fail_nonblocking_take_count--;
+        return 0;
+    }
     if (s_enable_sd_on_lock_take_countdown > 0U) {
         s_enable_sd_on_lock_take_countdown--;
         if (s_enable_sd_on_lock_take_countdown == 0U) {
@@ -588,6 +593,41 @@ static esp_err_t append_packet_checked(const char *note,
     (void)snprintf(entry.note, sizeof(entry.note), "%s", note);
     return d1l_packet_log_append_raw_checked(
         &entry, NULL, 0U, out_stored_seq);
+}
+
+static void test_deferred_append_never_writes_on_caller(void)
+{
+    mock_reset();
+    assert(d1l_packet_log_init() == ESP_OK);
+    const uint32_t nvs_writes_before = s_nvs_writes;
+    const uint32_t primary_writes_before = s_sd_primary_writes;
+
+    d1l_packet_log_entry_t entry;
+    memset(&entry, 0, sizeof(entry));
+    (void)snprintf(entry.direction, sizeof(entry.direction), "tx");
+    (void)snprintf(entry.kind, sizeof(entry.kind), "advert");
+    (void)snprintf(entry.note, sizeof(entry.note), "owner-deferred");
+    assert(d1l_packet_log_append_raw_deferred(&entry, NULL, 0U));
+    assert(s_nvs_writes == nvs_writes_before);
+    assert(s_sd_primary_writes == primary_writes_before);
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(stats.total_written == 1U);
+    assert(stats.persistence_dirty);
+    assert(stats.nvs_fallback_dirty);
+
+    assert(d1l_packet_log_flush_if_due() == ESP_OK);
+    stats = d1l_packet_log_stats();
+    assert(s_nvs_writes == nvs_writes_before + 1U);
+    assert(!stats.persistence_dirty);
+    assert(!stats.nvs_fallback_dirty);
+
+    mock_reset();
+    assert(d1l_packet_log_init() == ESP_OK);
+    s_fail_nonblocking_take_count = 1U;
+    assert(!d1l_packet_log_append_raw_deferred(&entry, NULL, 0U));
+    stats = d1l_packet_log_stats();
+    assert(stats.total_written == 0U);
+    assert(!stats.persistence_dirty);
 }
 
 static void test_late_sd_is_read_and_merged_before_mutation(void)
@@ -1359,6 +1399,7 @@ static void test_force_flush_rejects_snapshot_staled_by_concurrent_append(void)
 
 int main(void)
 {
+    test_deferred_append_never_writes_on_caller();
     test_late_sd_is_read_and_merged_before_mutation();
     test_checked_append_reports_resequenced_sd_overlay();
     test_occupied_next_slot_is_preserved_until_fresh_boundary();

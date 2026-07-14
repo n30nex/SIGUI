@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -32,6 +34,12 @@ static inline void d1l_store_lock_take(d1l_store_lock_t *lock)
     if (handle) {
         (void)xSemaphoreTake(handle, portMAX_DELAY);
     }
+}
+
+static inline bool d1l_store_lock_try_take(d1l_store_lock_t *lock)
+{
+    SemaphoreHandle_t handle = d1l_store_lock_handle(lock);
+    return handle && xSemaphoreTake(handle, 0) == pdTRUE;
 }
 
 static inline void d1l_store_lock_give(d1l_store_lock_t *lock)

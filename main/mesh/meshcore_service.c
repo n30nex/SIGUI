@@ -157,6 +157,7 @@ extern SX126x_t SX126x;
 typedef enum {
     D1L_MESHCORE_SERVICE_CMD_START_RX,
     D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+    D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
     D1L_MESHCORE_SERVICE_EVENT_TX_DONE,
     D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT,
     D1L_MESHCORE_SERVICE_EVENT_RX_DONE,
@@ -170,6 +171,10 @@ typedef struct {
     uint8_t raw_len;
     uint16_t delay_ms;
     bool ack_response;
+    bool flood;
+    char advert_pub_prefix[17];
+    char advert_node_name[D1L_NODE_NAME_LEN];
+    uint8_t advert_path_hash_bytes;
     int16_t rssi;
     int8_t snr;
     uint64_t monotonic_us;
@@ -385,9 +390,10 @@ static bool hex_to_bytes(uint8_t *dest, size_t dest_len, const char *src_hex)
     return src_hex[dest_len * 2U] == '\0';
 }
 
-static bool append_packet_log(const char *direction, const char *kind, int rssi, int snr_quarters,
-                              uint8_t path_hash_bytes, uint8_t path_hops, uint16_t payload_len,
-                              const uint8_t *raw, size_t raw_len, const char *note)
+static bool append_packet_log_internal(
+    const char *direction, const char *kind, int rssi, int snr_quarters,
+    uint8_t path_hash_bytes, uint8_t path_hops, uint16_t payload_len,
+    const uint8_t *raw, size_t raw_len, const char *note, bool defer_flush)
 {
     d1l_packet_log_entry_t entry = {
         .rssi_dbm = rssi,
@@ -399,7 +405,20 @@ static bool append_packet_log(const char *direction, const char *kind, int rssi,
     strncpy(entry.direction, direction, sizeof(entry.direction) - 1U);
     strncpy(entry.kind, kind, sizeof(entry.kind) - 1U);
     sanitize_note(entry.note, sizeof(entry.note), note);
-    return d1l_packet_log_append_raw(&entry, raw, raw_len);
+    return defer_flush ?
+        d1l_packet_log_append_raw_deferred(&entry, raw, raw_len) :
+        d1l_packet_log_append_raw(&entry, raw, raw_len);
+}
+
+static bool append_packet_log(const char *direction, const char *kind, int rssi,
+                              int snr_quarters, uint8_t path_hash_bytes,
+                              uint8_t path_hops, uint16_t payload_len,
+                              const uint8_t *raw, size_t raw_len,
+                              const char *note)
+{
+    return append_packet_log_internal(
+        direction, kind, rssi, snr_quarters, path_hash_bytes, path_hops,
+        payload_len, raw, raw_len, note, false);
 }
 
 static void append_public_message_store_rx(const char *message, int rssi, int snr_quarters,
@@ -2387,6 +2406,75 @@ static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd
     return ESP_OK;
 }
 
+static esp_err_t meshcore_service_handle_send_advert(
+    d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t ret = d1l_meshcore_service_ensure_identity();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (s_tx_busy) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ret = ensure_radio_started();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    const d1l_settings_t *settings = d1l_settings_current();
+    uint32_t tx_timestamp = 0U;
+    ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    ret = build_advert_packet(settings, cmd->flood, tx_timestamp,
+                              cmd->raw, sizeof(cmd->raw),
+                              &cmd->raw_len);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    hex_prefix(cmd->advert_pub_prefix, sizeof(cmd->advert_pub_prefix),
+               settings->identity_public_key, 8U);
+    strncpy(cmd->advert_node_name, settings->node_name,
+            sizeof(cmd->advert_node_name) - 1U);
+    cmd->advert_path_hash_bytes = settings->path_hash_bytes;
+    return meshcore_service_handle_send_raw(cmd);
+}
+
+static void meshcore_service_finalize_send_advert(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd || cmd->raw_len == 0U || cmd->advert_pub_prefix[0] == '\0') {
+        return;
+    }
+
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(note, sizeof(note), "%s %.8s",
+             cmd->flood ? "flood" : "zero", cmd->advert_pub_prefix);
+
+    esp_err_t route_ret = d1l_route_store_upsert_observation(
+        cmd->advert_pub_prefix, cmd->advert_node_name, "advert",
+        route_name(cmd->flood ? D1L_MESHCORE_ROUTE_FLOOD :
+                                D1L_MESHCORE_ROUTE_DIRECT),
+        "tx", 0, 0, cmd->advert_path_hash_bytes, 0, cmd->raw_len);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store advert tx failed: %s",
+                 esp_err_to_name(route_ret));
+    }
+    const bool packet_retained = append_packet_log_internal(
+        "tx", "advert", 0, 0, cmd->advert_path_hash_bytes, 0,
+        cmd->raw_len, cmd->raw, cmd->raw_len, note, true);
+    if (!packet_retained) {
+        ESP_LOGW(TAG, "packet log advert tx retention failed");
+    }
+}
+
 static void meshcore_service_reply(const d1l_meshcore_service_cmd_t *cmd, esp_err_t ret)
 {
     if (cmd && cmd->reply_task) {
@@ -2456,6 +2544,12 @@ static void meshcore_service_task(void *arg)
         case D1L_MESHCORE_SERVICE_CMD_SEND_RAW:
             ret = meshcore_service_handle_send_raw(&cmd);
             break;
+        case D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT:
+            ret = meshcore_service_handle_send_advert(&cmd);
+            if (ret != ESP_OK) {
+                s_status.rejected_commands++;
+            }
+            break;
         case D1L_MESHCORE_SERVICE_EVENT_TX_DONE:
             meshcore_service_handle_radio_tx_done();
             ret = ESP_OK;
@@ -2491,6 +2585,11 @@ static void meshcore_service_task(void *arg)
             d1l_meshcore_start_rx();
         }
         meshcore_service_reply(&cmd, ret);
+        if (cmd.type == D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT &&
+            ret == ESP_OK) {
+            cmd.reply_task = NULL;
+            meshcore_service_finalize_send_advert(&cmd);
+        }
     }
 }
 
@@ -2827,60 +2926,12 @@ void d1l_meshcore_service_trace_snapshot(
 
 esp_err_t d1l_meshcore_service_request_advert(bool flood)
 {
-    esp_err_t ret = d1l_meshcore_service_ensure_identity();
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
-    }
-    d1l_meshcore_service_cmd_t start_cmd = {
-        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
+        .flood = flood,
     };
-    ret = meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
-    }
-    if (s_tx_busy) {
-        s_status.rejected_commands++;
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
-    uint8_t raw_len = 0;
-    const d1l_settings_t *settings = d1l_settings_current();
-    uint32_t tx_timestamp = 0;
-    ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
-    }
-    ret = build_advert_packet(settings, flood, tx_timestamp, raw, sizeof(raw), &raw_len);
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
-    }
-
-    char pub_prefix[17] = {0};
-    hex_prefix(pub_prefix, sizeof(pub_prefix), settings->identity_public_key, 8U);
-    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    snprintf(note, sizeof(note), "%s %.8s", flood ? "flood" : "zero", pub_prefix);
-
-    ret = meshcore_service_send_raw(raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        s_status.rejected_commands++;
-        return ret;
-    }
-    esp_err_t route_ret =
-        d1l_route_store_upsert_observation(pub_prefix, settings->node_name, "advert",
-                                           route_name(flood ? D1L_MESHCORE_ROUTE_FLOOD :
-                                                      D1L_MESHCORE_ROUTE_DIRECT),
-                                           "tx", 0, 0, settings->path_hash_bytes, 0, raw_len);
-    if (route_ret != ESP_OK) {
-        ESP_LOGW(TAG, "route store advert tx failed: %s", esp_err_to_name(route_ret));
-    }
-    append_packet_log("tx", "advert", 0, 0, settings->path_hash_bytes, 0, raw_len,
-                      raw, raw_len, note);
-    return ESP_OK;
+    return meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
 }
 
 esp_err_t d1l_meshcore_service_send_public(const char *text)
