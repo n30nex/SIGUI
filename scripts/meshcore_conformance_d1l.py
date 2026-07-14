@@ -75,7 +75,7 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 21
+ORACLE_CORPUS_VERSION = 22
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
     "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
@@ -83,7 +83,8 @@ ORACLE_COVERAGE_BOUNDARY = (
     "strict_identity_shared_secret_derivation_and_canonical_login_response_"
     "packets_and_login_password_authorization_fixtures_and_existing_acl_"
     "blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_"
-    "and_authenticated_request_replay_transition_fixtures"
+    "and_authenticated_request_replay_transition_fixtures_and_authenticated_"
+    "text_replay_response_session_orchestration_fixtures"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -397,8 +398,8 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": (
-            "identity_signature_and_authenticated_text_replay_retained_"
-            "response_dispatch_fixtures"
+            "identity_signature_and_concrete_packet_creation_dispatch_"
+            "runtime_fixtures"
         ),
         "implemented_prerequisites": [
             "anonymous_login_request_packets",
@@ -409,6 +410,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "existing_acl_blank_login_reuse_fixtures",
             "authorized_login_acl_transition_fixtures",
             "authenticated_request_replay_transition_fixtures",
+            "authenticated_text_replay_response_session_fixtures",
         ],
     },
     {
@@ -645,6 +647,31 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "vectors": {"valid": 15, "invalid": 12},
         },
     },
+    {
+        "id": "authenticated_text_replay_response_session_fixtures",
+        "status": "implemented",
+        "owner": "pinned_repeater_room_authenticated_text_orchestration_rules",
+        "semantic": True,
+        "scope": (
+            "canonical_repeater_room_authenticated_text_admin_role_newer_"
+            "equal_older_session_handler_post_ack_response_creation_outcome_"
+            "and_stored_path_dispatch_projection_only_no_decryption_text_"
+            "parse_hash_handler_storage_packet_pool_dispatch_timing_route_"
+            "execution_identity_secret_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-AUTHENTICATED-TEXT-ORCHESTRATION-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+                "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+                "third_party/MeshCore/src/helpers/ClientACL.h",
+                "third_party/MeshCore/src/helpers/TxtDataHelpers.h",
+            ],
+            "vectors": {"valid": 20, "invalid": 17},
+        },
+    },
 ]
 EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
@@ -708,6 +735,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
             "existing_acl_blank_login_reuse_fixtures",
             "authorized_login_acl_transition_fixtures",
             "authenticated_request_replay_transition_fixtures",
+            "authenticated_text_replay_response_session_fixtures",
             "login_request_response_admin",
         ],
     },
@@ -796,6 +824,7 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
     "third_party/MeshCore/src/helpers/ClientACL.cpp",
     "third_party/MeshCore/src/helpers/ClientACL.h",
     "third_party/MeshCore/src/helpers/CommonCLI.h",
+    "third_party/MeshCore/src/helpers/TxtDataHelpers.h",
     "third_party/MeshCore/src/helpers/AdvertDataHelpers.cpp",
     "third_party/MeshCore/src/helpers/AdvertDataHelpers.h",
     "third_party/MeshCore/lib/ed25519/ed_25519.h",
@@ -963,10 +992,10 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
         "roundtrip": 338,
-        "valid": 79,
-        "invalid": 390,
-        "semantic": 791,
-        "total": 807,
+        "valid": 99,
+        "invalid": 407,
+        "semantic": 828,
+        "total": 844,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -1063,6 +1092,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 27,
             "total": 27,
         },
+        "authenticated_text_replay_response_session_fixtures": {
+            "valid": 20,
+            "invalid": 17,
+            "semantic": 37,
+            "total": 37,
+        },
         "dm_encrypt_decrypt": {
             "roundtrip": 268,
             "invalid": 29,
@@ -1152,6 +1187,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         is not True
         or interface.get("authenticated_request_replay_transition_scope")
         != "repeater_room_prevalidated_authenticated_request_timestamp_duplicate_handler_result_keep_alive_and_record_session_transition_projection_only_no_request_schema_handler_execution_response_hash_creation_storage_identity_secret_dispatch_route_schedule_or_rf"
+        or interface.get("authenticated_text_transition_available") is not True
+        or interface.get("authenticated_text_transition_scope")
+        != "repeater_room_canonical_authenticated_text_newer_equal_older_role_handler_post_session_ack_response_creation_outcome_and_stored_path_dispatch_projection_only_no_decryption_text_parse_hash_handler_storage_packet_pool_dispatch_timing_route_execution_identity_secret_or_rf"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -1276,6 +1314,18 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "authenticated_request_replay_record": (
                     "third_party/MeshCore/src/helpers/ClientACL.h"
                 ),
+                "authenticated_text_repeater": (
+                    "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp"
+                ),
+                "authenticated_text_room": (
+                    "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp"
+                ),
+                "authenticated_text_record": (
+                    "third_party/MeshCore/src/helpers/ClientACL.h"
+                ),
+                "authenticated_text_types": (
+                    "third_party/MeshCore/src/helpers/TxtDataHelpers.h"
+                ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
             ),
@@ -1323,7 +1373,8 @@ def load_oracle_manifest() -> dict[str, Any]:
         "group_anonymous_login_regular_request_response_canonical_login_"
         "response_login_password_authorization_existing_acl_blank_login_"
         "reuse_authorized_login_acl_transition_authenticated_request_replay_"
-        "transition_dm_ack_path_and_"
+        "transition_authenticated_text_replay_response_session_"
+        "orchestration_dm_ack_path_and_"
         "general_path_return_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
@@ -1416,6 +1467,17 @@ def load_oracle_manifest() -> dict[str, Any]:
         "alive_force_since_path_and_timestamp_boundary_cases"
     ):
         raise GateFailure("oracle authenticated-request replay matrix drifted")
+    if determinism.get("authenticated_text_transition_recipe") != (
+        "canonical_text_repeater_admin_gate_and_room_role_gate_then_equal_"
+        "retry_session_commit_handler_or_post_suppression_creation_outcome_"
+        "and_stored_path_dispatch_projection"
+    ):
+        raise GateFailure("oracle authenticated-text recipe drifted")
+    if determinism.get("authenticated_text_transition_matrix") != (
+        "twenty_repeater_room_plain_cli_newer_equal_older_role_empty_max_"
+        "timestamp_creation_failure_ack_multiplicity_and_path_cases"
+    ):
+        raise GateFailure("oracle authenticated-text matrix drifted")
     if determinism.get("independent_verifier_kat") != (
         "RFC 8032 section 7.1 TEST 1 empty message"
     ):
@@ -2413,6 +2475,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "existing_acl_blank_login_reuse_fixtures": True,
                     "authorized_login_acl_transition_fixtures": True,
                     "authenticated_request_replay_transition_fixtures": True,
+                    "authenticated_text_replay_response_session_fixtures": True,
                     "dm_encrypt_decrypt": True,
                     "expected_ack_hash_and_ack_path": True,
                     "path_return_route_codes": True,

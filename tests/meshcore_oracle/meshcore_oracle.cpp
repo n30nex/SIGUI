@@ -1407,6 +1407,125 @@ d1l_meshcore_oracle_apply_authenticated_request_replay_transition(
     return true;
 }
 
+extern "C" bool d1l_meshcore_oracle_apply_authenticated_text_transition(
+    uint8_t server_advert_type,
+    uint8_t text_type,
+    size_t logical_len,
+    uint8_t extra_ack_transmit_enabled,
+    uint8_t handler_reply_available,
+    uint8_t ack_created_mask,
+    uint8_t response_created,
+    uint32_t sender_timestamp,
+    uint32_t current_time,
+    const d1l_meshcore_oracle_login_acl_record_t *record,
+    d1l_meshcore_oracle_authenticated_text_transition_t *out_transition)
+{
+    if ((server_advert_type != D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         server_advert_type != D1L_MESHCORE_ADVERT_TYPE_ROOM) ||
+        text_type > D1L_MESHCORE_ORACLE_TEXT_TYPE_MAX ||
+        logical_len < 5U ||
+        logical_len >
+            D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES ||
+        extra_ack_transmit_enabled > 1U || handler_reply_available > 1U ||
+        (ack_created_mask &
+         static_cast<uint8_t>(~(D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE |
+                                D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI))) != 0U ||
+        response_created > 1U || record == nullptr ||
+        (record != nullptr &&
+         record->out_path_len > D1L_MESHCORE_ORACLE_MAX_PATH_BYTES &&
+         record->out_path_len != D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN) ||
+        out_transition == nullptr) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_authenticated_text_transition_t transition{};
+    transition.record = *record;
+    const uint8_t role = static_cast<uint8_t>(record->permissions & 0x03U);
+    transition.client_gate_accepted =
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_ROOM || role == 0x03U
+        ? 1U
+        : 0U;
+    transition.text_type_supported =
+        text_type == D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN ||
+                text_type == D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA
+            ? 1U
+            : 0U;
+
+    if (transition.client_gate_accepted == 0U ||
+        transition.text_type_supported == 0U ||
+        sender_timestamp < record->last_timestamp) {
+        if (handler_reply_available != 0U || ack_created_mask != 0U ||
+            response_created != 0U) {
+            return false;
+        }
+        *out_transition = transition;
+        return true;
+    }
+
+    transition.replay_accepted = 1U;
+    transition.duplicate =
+        sender_timestamp == record->last_timestamp ? 1U : 0U;
+    transition.session_state_committed = 1U;
+    transition.record.last_timestamp = sender_timestamp;
+    transition.record.last_activity = current_time;
+    if (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_ROOM) {
+        transition.record.room_push_failures = 0U;
+    }
+
+    if (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER) {
+        if (text_type == D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN) {
+            transition.ack_creation_attempt_mask =
+                D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE;
+        }
+        if (transition.duplicate == 0U) {
+            transition.handler_invoked = 1U;
+            transition.handler_committed = 1U;
+        }
+    } else if (text_type == D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA) {
+        if (role == 0x03U && transition.duplicate == 0U) {
+            transition.handler_invoked = 1U;
+            transition.handler_committed = 1U;
+        }
+    } else if (role != 0x00U) {
+        if (transition.duplicate == 0U) {
+            transition.retained_post_committed = 1U;
+        }
+        transition.ack_creation_attempt_mask =
+            D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE;
+        if (record->out_path_len != D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN &&
+            extra_ack_transmit_enabled == 1U) {
+            transition.ack_creation_attempt_mask |=
+                D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI;
+        }
+    }
+
+    if (handler_reply_available != 0U && transition.handler_invoked == 0U) {
+        return false;
+    }
+    transition.response_creation_attempted = handler_reply_available;
+    if ((ack_created_mask & transition.ack_creation_attempt_mask) !=
+            ack_created_mask ||
+        (response_created != 0U &&
+         transition.response_creation_attempted == 0U)) {
+        return false;
+    }
+
+    const uint8_t dispatch_mode =
+        record->out_path_len == D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN
+        ? D1L_MESHCORE_ORACLE_DISPATCH_FLOOD
+        : D1L_MESHCORE_ORACLE_DISPATCH_DIRECT;
+    transition.ack_created_mask = ack_created_mask;
+    transition.ack_dispatch_mode = ack_created_mask == 0U
+        ? D1L_MESHCORE_ORACLE_DISPATCH_NONE
+        : dispatch_mode;
+    transition.response_created = response_created;
+    transition.response_dispatch_mode = response_created == 0U
+        ? D1L_MESHCORE_ORACLE_DISPATCH_NONE
+        : dispatch_mode;
+    *out_transition = transition;
+    return true;
+}
+
 extern "C" bool d1l_meshcore_oracle_group_channel_hash(
     const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
     uint8_t *out_hash)

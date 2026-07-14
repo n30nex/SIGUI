@@ -26,6 +26,14 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH 0x01U
 #define D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE 0x02U
 #define D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN 0xFFU
+#define D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN 0U
+#define D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA 1U
+#define D1L_MESHCORE_ORACLE_TEXT_TYPE_MAX 63U
+#define D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE 0x01U
+#define D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI 0x02U
+#define D1L_MESHCORE_ORACLE_DISPATCH_NONE 0U
+#define D1L_MESHCORE_ORACLE_DISPATCH_DIRECT 1U
+#define D1L_MESHCORE_ORACLE_DISPATCH_FLOOD 2U
 #define D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES 167U
 #define D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES 13U
 #define D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES 4U
@@ -109,6 +117,24 @@ typedef struct {
     uint8_t direct_keep_alive;
     uint8_t response_attempt_eligible;
 } d1l_meshcore_oracle_authenticated_request_transition_t;
+
+typedef struct {
+    d1l_meshcore_oracle_login_acl_record_t record;
+    uint8_t client_gate_accepted;
+    uint8_t text_type_supported;
+    uint8_t replay_accepted;
+    uint8_t duplicate;
+    uint8_t session_state_committed;
+    uint8_t handler_invoked;
+    uint8_t handler_committed;
+    uint8_t retained_post_committed;
+    uint8_t ack_creation_attempt_mask;
+    uint8_t ack_created_mask;
+    uint8_t ack_dispatch_mode;
+    uint8_t response_creation_attempted;
+    uint8_t response_created;
+    uint8_t response_dispatch_mode;
+} d1l_meshcore_oracle_authenticated_text_transition_t;
 
 /*
  * Canonical field representation for upstream AdvertDataBuilder/Parser.
@@ -442,6 +468,40 @@ bool d1l_meshcore_oracle_apply_authenticated_request_replay_transition(
     uint32_t force_since,
     const d1l_meshcore_oracle_login_acl_record_t *record,
     d1l_meshcore_oracle_authenticated_request_transition_t *out_transition);
+
+/*
+ * Deterministic source-order projection for authenticated TXT_MSG handling
+ * after canonical decryption and bounded 5..167-byte logical text extraction.
+ * Repeater accepts
+ * only admin clients; room accepts all canonical roles, then gates CLI/post
+ * effects by role. Both accept equal timestamps as retries, commit session
+ * state before handler/post/packet creation, and never reinvoke a handler or
+ * append a retained room post on a retry. Room also clears push failures.
+ * Repeater PLAIN attempts its ACK before invoking a non-retry handler; room
+ * PLAIN commits its non-retry post before ACK creation. CLI response creation
+ * follows the handler in both servers.
+ * Caller-supplied handler reply and packet-creation outcomes keep handler
+ * commit, retained-session/post mutation, creation attempts and dispatch
+ * selection independently observable. ACK creation bits must be a subset of
+ * the source-eligible simple/multi-ACK attempts; response_created is valid
+ * only after a nonempty handler reply made response creation eligible.
+ *
+ * This function does not decrypt or parse a packet, execute a CLI handler,
+ * append storage, hash/create ACK or response packets, operate a packet pool,
+ * execute dispatch/timing/routing, derive identity/secret state, or claim RF.
+ */
+bool d1l_meshcore_oracle_apply_authenticated_text_transition(
+    uint8_t server_advert_type,
+    uint8_t text_type,
+    size_t logical_len,
+    uint8_t extra_ack_transmit_enabled,
+    uint8_t handler_reply_available,
+    uint8_t ack_created_mask,
+    uint8_t response_created,
+    uint32_t sender_timestamp,
+    uint32_t current_time,
+    const d1l_meshcore_oracle_login_acl_record_t *record,
+    d1l_meshcore_oracle_authenticated_text_transition_t *out_transition);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash

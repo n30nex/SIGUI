@@ -42,8 +42,8 @@ around the pinned upstream `mesh::Packet` envelope reader/writer and the
 public-group, anonymous-login, regular REQ/RESPONSE, canonical repeater/room
 login-response, repeater/room ACL-miss password authorization, blank-password
 existing-ACL reuse, authorized-login ACL record transitions, plain-DM, DM
-ACK+PATH, authenticated-request replay transitions, and general PATH-return
-operations. Its version 21 static
+ACK+PATH, authenticated-request and authenticated-TEXT replay/session
+transitions, and general PATH-return operations. Its version 22 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -233,6 +233,26 @@ force-since presence, and unknown out paths. This projection begins after a
 validated 5-to-167-byte logical request and does not execute request schemas or
 handlers, create response hashes or packets, access storage, derive identity or
 secrets, dispatch, route, schedule, or claim RF behavior.
+The authenticated-TEXT orchestration capability adds twenty source-valid state
+fixtures and seventeen fail-closed structural rejects. It pins the exact
+repeater/room order after canonical authenticated text extraction. Repeater
+first requires an admin role; room accepts every canonical role. Both accept
+equal timestamps as retries and commit timestamp/activity before any handler,
+post, ACK, response creation, or dispatch attempt; room additionally clears
+push failures. Equality refreshes that session state but never reinvokes a CLI
+handler or appends a room post. Repeater plain text is legacy CLI and repeats a
+simple ACK on equality; its ACK attempt precedes the non-retry handler. Room
+CLI is admin-only and never ACKs; room plain text
+from any non-guest role appends a post only when newer and repeats its ACK on
+equality, with the post committed before ACK creation. CLI response creation
+follows the handler in both servers. Known stored paths select direct dispatch and unknown paths select
+flood dispatch independent of the inbound route. A configured room direct ACK
+attempts multi-ACK before the mandatory simple ACK. Caller-supplied packet-
+creation results prove that session, handler, and retained-post commits are not
+rolled back when ACK/response allocation fails. Neither server retains a CLI
+response for replay. The projection does not decrypt or parse message bytes,
+execute a handler or post store, hash/create packets, operate the packet pool,
+execute dispatch/timing/routing, derive identity or secrets, or claim RF.
 The DM capability adds 268 authenticated round trips: every attempt value from
 0 through 255, the normal 160-byte and extended-attempt 158-byte text
 boundaries, and all ten normal text lengths from 11 through 155 whose complete
@@ -307,7 +327,7 @@ The exact packet registry and blocker receipts are copied into
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
 capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
@@ -325,9 +345,9 @@ closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public/DM dispatch, delivery,
 session state, ACK correlation/delivery state, PATH dispatch/route selection,
-TRACE forwarding/path discovery, and login identity-signature, authenticated
-text replay, retained response orchestration, and admin dispatch flows also
-remain pending, so
+TRACE forwarding/path discovery, and login identity-signature plus concrete
+packet-creation, packet-pool, dispatch, and admin-runtime execution also remain
+pending, so
 both `wp04_closure_eligible` and `closure_ready` remain false. Expected-ACK
 derivation and the ACK-specific encrypted PATH body are now deterministic with
 caller-supplied identity/hash/secret/RNG inputs; that bounded primitive must not
@@ -360,9 +380,12 @@ ACL-miss password authorization/denial rules, and blank-password existing-ACL
 reuse boundary are implemented. Authorized-login reuse, insertion/eviction,
 replay gating, and modeled record-field transitions are also pinned.
 Authenticated-request replay and bounded record/session transitions are now
-pinned, but request tags/types beyond keep-alive, authenticated text replay,
-retained response orchestration, and admin dispatch still require identity
-signature handling plus deterministic state fixtures. These receipts describe missing
+pinned. Authenticated-TEXT replay, session/handler/post ordering, creation
+outcomes, and stored-path dispatch selection are also pinned, including the
+absence of a retained CLI response. Request tags/types beyond keep-alive and
+concrete packet creation, packet-pool, dispatch, and admin-runtime execution
+still require identity signature handling plus deterministic runtime fixtures.
+These receipts describe missing
 oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
