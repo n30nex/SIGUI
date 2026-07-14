@@ -260,28 +260,29 @@ def test_home_screen_is_user_first_companion_dashboard():
 
 def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     source = read("main/ui/ui_phase1.c")
+    messages_source = read("main/ui/ui_messages.c")
 
-    message_row = source.split("static void render_message_row", 1)[1].split(
-        "static void render_dm_row", 1
+    message_row = messages_source.split("static void messages_render_public_row", 1)[1].split(
+        "static void messages_render_dm_row", 1
     )[0]
-    dm_row = source.split("static void render_dm_row", 1)[1].split(
-        "static char packet_lower_ascii", 1
+    dm_row = messages_source.split("static void messages_render_dm_row", 1)[1].split(
+        "void d1l_ui_messages_render", 1
     )[0]
-    assert "create_panel(parent, 18, y, 424, 72)" in message_row
-    assert "create_panel(parent, 18, y, 424, 72)" in dm_row
+    assert "messages_create_panel(parent, 18, y, 424, 72)" in message_row
+    assert "messages_create_panel(parent, 18, y, 424, 72)" in dm_row
     assert "lv_obj_set_pos(text, 8, 28)" in message_row
     assert "lv_obj_set_pos(details, 8, 50)" in message_row
     assert "lv_obj_set_pos(text, 8, 28)" in dm_row
     assert "lv_obj_set_pos(details, 8, 50)" in dm_row
 
-    messages = source.split("static void render_messages(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)", 1)[1].split(
-        "static void render_nodes", 1
+    messages = messages_source.split("void d1l_ui_messages_render", 1)[1].split(
+        "void d1l_ui_messages_deactivate", 1
     )[0]
-    assert "create_panel(content, 18, 16, 424, 108)" in messages
+    assert "messages_create_panel(parent, 18, 16, 424, 108)" in messages
     assert "s_content" not in messages
-    assert 'create_button(header, "Compose", 70, 62, 88, 40' in messages
-    assert "for (size_t i = 0; i < snapshot->recent_message_count; ++i)" in messages
-    assert "for (size_t i = 0; i < snapshot->recent_dm_count; ++i)" in messages
+    assert 'messages_create_button(header, "Compose", 70, 62, 88, 40' in messages
+    assert "controller->rendered.public_row_count" in messages
+    assert "controller->rendered.dm_row_count" in messages
 
     nested_body = source.split("static lv_obj_t *create_nested_page_body", 1)[1].split(
         "static lv_obj_t *create_nested_page_label", 1
@@ -292,7 +293,7 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN)" in nested_body
 
     detail = source.split("static void render_message_detail_sheet(void)", 1)[1].split(
-        "static void open_message_detail_event_cb", 1
+        "static void show_message_detail_for", 1
     )[0]
     assert 'create_button(s_message_detail_sheet, "Back", 12, 6, 72, 44' in detail
     assert 'create_nested_page_body(s_message_detail_sheet, "message detail body")' in detail
@@ -742,16 +743,16 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_public_compose": "open_compose_event_cb",
         "edit_public_message": "s_compose_textarea",
         "send_public_text": "send_compose_text",
-        "mark_messages_read": "mark_messages_read_event_cb",
-        "open_messages_public": "open_messages_public_event_cb",
-        "open_messages_dm": "open_messages_dm_event_cb",
+        "mark_messages_read": "D1L_UI_MESSAGES_ACTION_MARK_READ",
+        "open_messages_public": "D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC",
+        "open_messages_dm": "D1L_UI_MESSAGES_ACTION_SHOW_DIRECT",
         "open_public_history": "open_public_history_event_cb",
         "open_public_search": "open_public_search_event_cb",
-        "open_message_detail": "open_message_detail_event_cb",
+        "open_message_detail": "D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE",
         "open_public_reply": "reply_message_detail_event_cb",
         "edit_public_search": "s_public_search_textarea",
         "apply_public_search": "apply_public_search_event_cb",
-        "open_dm_thread": "open_dm_thread_event_cb",
+        "open_dm_thread": "D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD",
         "open_dm_reply": "reply_dm_thread_event_cb",
         "open_contact_detail": "open_contact_detail_event_cb",
         "close_contact_detail": "close_contact_detail_event_cb",
@@ -866,6 +867,7 @@ def test_ui_allocation_wrappers_and_stack_budget_are_hardened():
 
 def test_public_composer_uses_lvgl_textarea_keyboard():
     source = read("main/ui/ui_phase1.c")
+    messages_source = read("main/ui/ui_messages.c")
     assert "create_compose_sheet" in source
     assert "open_compose_event_cb" in source
     assert "show_public_compose_sheet" in source
@@ -888,7 +890,7 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "LV_EVENT_READY" in source
     assert "LV_EVENT_CANCEL" in source
     assert "hide_compose_sheet()" in source
-    assert '"Test"' in source
+    assert '"Test"' in messages_source
 
 
 def test_dm_composer_opens_from_contact_rows():
@@ -906,6 +908,7 @@ def test_dm_composer_opens_from_contact_rows():
 
 def test_dm_thread_sheet_opens_from_recent_dm_rows():
     source = read("main/ui/ui_phase1.c")
+    messages_source = read("main/ui/ui_messages.c")
     create = source.split("static void create_dm_thread_sheet", 1)[1].split(
         "static void create_radio_settings_sheet", 1
     )[0]
@@ -920,7 +923,7 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "static char s_dm_thread_fingerprint" in source
     assert "create_dm_thread_sheet" in source
     assert "render_dm_thread_sheet" in source
-    assert "open_dm_thread_event_cb" in source
+    assert "D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD" in messages_source
     assert "reply_dm_thread_event_cb" in source
     assert "static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY]" in source
     assert "static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY]" in source
@@ -934,8 +937,9 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "thread_count < total_matches && s_dm_thread_limit < D1L_DM_STORE_CAPACITY" in render
     assert 'create_button(body, "Load Older", 0, 0, 424, 48' in render
     assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in render
-    assert "lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE)" in source
-    assert "lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED" in source
+    assert "lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE)" in messages_source
+    assert ".action = D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD" in messages_source
+    assert "show_dm_thread_for(event->dm_message->contact_fingerprint" in source
     assert "d1l_app_model_find_contact(s_dm_thread_fingerprint, &contact)" in source
     assert "open_dm_compose_for_contact(&contact)" in source
     reply = re.search(
@@ -958,21 +962,23 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
 
 def test_public_message_detail_sheet_opens_from_public_rows():
     source = read("main/ui/ui_phase1.c")
+    messages_source = read("main/ui/ui_messages.c")
     create = source.split("static void create_message_detail_sheet", 1)[1].split(
         "static void create_public_search_sheet", 1
     )[0]
     render = source.split("static void render_message_detail_sheet(void)", 1)[1].split(
-        "static void open_message_detail_event_cb", 1
+        "static void show_message_detail_for", 1
     )[0]
 
     assert "static lv_obj_t *s_message_detail_sheet" in source
     assert "static d1l_message_entry_t s_message_detail_message" in source
     assert "render_message_detail_sheet" in source
-    assert "open_message_detail_event_cb" in source
+    assert "show_message_detail_for" in source
     assert "close_message_detail_event_cb" in source
     assert "reply_message_detail_event_cb" in source
     assert "create_message_detail_sheet" in source
-    assert "lv_obj_add_event_cb(row, open_message_detail_event_cb, LV_EVENT_CLICKED" in source
+    assert ".action = D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE" in messages_source
+    assert "show_message_detail_for(event->public_message);" in source
     assert "lv_obj_set_size(s_message_detail_sheet, 480, 424)" in create
     assert "lv_obj_set_pos(s_message_detail_sheet, 0, 56)" in create
     assert 'create_button(s_message_detail_sheet, "Back", 12, 6, 72, 44' in render
@@ -1224,22 +1230,26 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
 
 def test_messages_screen_renders_bounded_preview_rows():
     source = read("main/ui/ui_phase1.c")
+    messages_source = read("main/ui/ui_messages.c")
+    messages_header = read("main/ui/ui_messages.h")
     header = read("main/app/app_model.h")
     assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in header
     assert "#define D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
     assert "static bool s_messages_show_dms" in source
     assert "set_messages_mode(false)" in source
     assert "set_messages_mode(true)" in source
-    assert '"Public Channel"' in source
-    assert '"DM Conversations"' in source
-    assert "for (size_t i = 0; i < snapshot->recent_message_count; ++i)" in source
-    assert "for (size_t i = 0; i < snapshot->recent_dm_count; ++i)" in source
-    assert "y += 80" in source
+    assert '"Public Channel"' in messages_source
+    assert '"DM Conversations"' in messages_source
+    assert "for (size_t i = 0; i < controller->rendered.public_row_count; ++i)" in messages_source
+    assert "for (size_t i = 0; i < controller->rendered.dm_row_count; ++i)" in messages_source
+    assert "y += 80" in messages_source
+    assert "public_rows[D1L_APP_SNAPSHOT_MESSAGE_PREVIEW]" in messages_header
+    assert "dm_rows[D1L_APP_SNAPSHOT_DM_PREVIEW]" in messages_header
     assert "snapshot->message_count" in source
     assert "snapshot->dm_count" in source
     assert "snapshot->public_unread_count" in source
     assert "snapshot->dm_unread_count" in source
-    assert 'create_button(header, "History"' in source
+    assert 'messages_create_button(header, "History"' in messages_source
     assert "static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]" in source
     assert "static size_t s_public_history_limit" in source
     assert "render_public_history_sheet" in source

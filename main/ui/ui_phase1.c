@@ -24,6 +24,7 @@
 #include "ui_home.h"
 #include "ui_keyboard.h"
 #include "ui_map.h"
+#include "ui_messages.h"
 #include "ui_modal.h"
 #include "ui_navigation.h"
 #include "ui_screen.h"
@@ -121,6 +122,7 @@ static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
 static bool s_messages_show_dms;
+static d1l_ui_messages_controller_t s_messages_controller;
 static d1l_contact_entry_t s_compose_contact;
 static d1l_app_radio_profile_edit_t s_radio_edit;
 static int32_t s_map_location_lat_e7;
@@ -205,10 +207,7 @@ static void render_node_detail_sheet(void);
 static void open_dm_compose_event_cb(lv_event_t *event);
 static void open_public_history_event_cb(lv_event_t *event);
 static void open_public_search_event_cb(lv_event_t *event);
-static void open_messages_public_event_cb(lv_event_t *event);
-static void open_messages_dm_event_cb(lv_event_t *event);
 static void open_home_dm_preview_event_cb(lv_event_t *event);
-static void open_dm_thread_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_contact_options_event_cb(lv_event_t *event);
 static void open_contact_forget_event_cb(lv_event_t *event);
@@ -219,7 +218,6 @@ static void open_node_dm_event_cb(lv_event_t *event);
 static void open_contact_edit_event_cb(lv_event_t *event);
 static void open_route_trace_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
-static void open_message_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
 static void open_packet_search_event_cb(lv_event_t *event);
 static void open_mesh_roles_event_cb(lv_event_t *event);
@@ -1870,70 +1868,6 @@ static void render_health_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t
     obj_set_pos_if(line, 0, y);
 }
 
-static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_t *entry)
-{
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 72);
-    if (!row) {
-        return;
-    }
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, open_message_detail_event_cb, LV_EVENT_CLICKED, (void *)entry);
-    lv_obj_set_style_pad_all(row, 8, 0);
-    const bool unread = entry->direction[0] == 'r' && entry->seq > s_snapshot.last_public_read_seq;
-    char snr[16];
-    char meta[96];
-    format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
-    lv_obj_t *author = create_label(row, entry->author[0] ? entry->author : "unknown",
-                                    unread ? 0xFBBF24 :
-                                    (entry->direction[0] == 't' ? 0x93C5FD : 0x5EEAD4));
-    label_set_dot_width(author, 250);
-    lv_obj_set_pos(author, 8, 4);
-    lv_obj_t *state = create_label(row,
-                                   unread ? "new" :
-                                   (entry->direction[0] == 't' ? "queued" : "received"),
-                                   0x8EA0AE);
-    label_set_dot_width(state, 118);
-    lv_obj_set_pos(state, 292, 4);
-    lv_obj_t *text = create_label(row, entry->text[0] ? entry->text : "-", 0xE5EDF5);
-    label_set_dot_width(text, 392);
-    lv_obj_set_pos(text, 8, 28);
-    snprintf(meta, sizeof(meta), "rssi %d  snr %s  hops %u",
-             entry->rssi_dbm, snr, entry->path_hops);
-    lv_obj_t *details = create_label(row, meta, 0x8EA0AE);
-    label_set_dot_width(details, 392);
-    lv_obj_set_pos(details, 8, 50);
-}
-
-static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry, bool unread)
-{
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 72);
-    if (!row) {
-        return;
-    }
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED, (void *)entry);
-    lv_obj_set_style_pad_all(row, 8, 0);
-    char snr[16];
-    char meta[96];
-    format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
-    lv_obj_t *alias = create_label(row, entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint,
-                                    unread ? 0xFBBF24 :
-                                    (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
-    label_set_dot_width(alias, 250);
-    lv_obj_set_pos(alias, 8, 4);
-    lv_obj_t *state = create_label(row, dm_row_state(entry, unread), 0x8EA0AE);
-    label_set_dot_width(state, 118);
-    lv_obj_set_pos(state, 292, 4);
-    lv_obj_t *text = create_label(row, entry->text[0] ? entry->text : "-", 0xE5EDF5);
-    label_set_dot_width(text, 392);
-    lv_obj_set_pos(text, 8, 28);
-    snprintf(meta, sizeof(meta), "rssi %d  snr %s  hops %u",
-             entry->rssi_dbm, snr, entry->path_hops);
-    lv_obj_t *details = create_label(row, meta, 0x8EA0AE);
-    label_set_dot_width(details, 392);
-    lv_obj_set_pos(details, 8, 50);
-}
-
 static char packet_lower_ascii(char c)
 {
     return (c >= 'A' && c <= 'Z') ? (char)(c + ('a' - 'A')) : c;
@@ -3476,9 +3410,8 @@ static void render_message_detail_sheet(void)
     }
 }
 
-static void open_message_detail_event_cb(lv_event_t *event)
+static void show_message_detail_for(const d1l_message_entry_t *entry)
 {
-    const d1l_message_entry_t *entry = (const d1l_message_entry_t *)lv_event_get_user_data(event);
     if (!entry || entry->seq == 0) {
         show_toast("Message", ESP_ERR_INVALID_STATE);
         return;
@@ -4578,17 +4511,6 @@ static void open_home_dm_preview_event_cb(lv_event_t *event)
     show_dm_thread_for(entry->target_fingerprint, entry->sender);
 }
 
-static void open_dm_thread_event_cb(lv_event_t *event)
-{
-    const d1l_dm_entry_t *entry = (const d1l_dm_entry_t *)lv_event_get_user_data(event);
-    if (!entry || entry->contact_fingerprint[0] == '\0') {
-        show_toast("DM", ESP_ERR_INVALID_STATE);
-        return;
-    }
-    show_dm_thread_for(entry->contact_fingerprint,
-                       entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint);
-}
-
 static void set_messages_mode(bool show_dms)
 {
     s_messages_show_dms = show_dms;
@@ -4599,69 +4521,90 @@ static void set_messages_mode(bool show_dms)
     request_tab_switch(D1L_UI_TAB_MESSAGES);
 }
 
-static void open_messages_public_event_cb(lv_event_t *event)
+static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
+                                              d1l_ui_messages_view_model_t *view_model)
 {
-    (void)event;
-    set_messages_mode(false);
+    if (!snapshot || !view_model) {
+        return;
+    }
+    memset(view_model, 0, sizeof(*view_model));
+    view_model->mode = s_messages_show_dms ?
+        D1L_UI_MESSAGES_MODE_DIRECT : D1L_UI_MESSAGES_MODE_PUBLIC;
+    view_model->public_total = snapshot->message_count;
+    view_model->dm_total = snapshot->dm_count;
+    view_model->public_unread = snapshot->public_unread_count;
+    view_model->dm_unread = snapshot->dm_unread_count;
+    view_model->muted_dm_unread = snapshot->muted_dm_unread_count;
+    view_model->last_public_read_seq = snapshot->last_public_read_seq;
+
+    view_model->public_row_count = snapshot->recent_message_count;
+    if (view_model->public_row_count > D1L_APP_SNAPSHOT_MESSAGE_PREVIEW) {
+        view_model->public_row_count = D1L_APP_SNAPSHOT_MESSAGE_PREVIEW;
+    }
+    memcpy(view_model->public_rows, snapshot->recent_messages,
+           view_model->public_row_count * sizeof(view_model->public_rows[0]));
+
+    view_model->dm_row_count = snapshot->recent_dm_count;
+    if (view_model->dm_row_count > D1L_APP_SNAPSHOT_DM_PREVIEW) {
+        view_model->dm_row_count = D1L_APP_SNAPSHOT_DM_PREVIEW;
+    }
+    memcpy(view_model->dm_rows, snapshot->recent_dms,
+           view_model->dm_row_count * sizeof(view_model->dm_rows[0]));
+    memcpy(view_model->dm_row_unread, snapshot->recent_dm_unread,
+           view_model->dm_row_count * sizeof(view_model->dm_row_unread[0]));
 }
 
-static void open_messages_dm_event_cb(lv_event_t *event)
+static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
+                                   void *context)
 {
-    (void)event;
-    set_messages_mode(true);
+    (void)context;
+    if (!event) {
+        return;
+    }
+    switch (event->action) {
+    case D1L_UI_MESSAGES_ACTION_MARK_READ:
+        mark_messages_read_event_cb(NULL);
+        break;
+    case D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC:
+        open_compose_event_cb(NULL);
+        break;
+    case D1L_UI_MESSAGES_ACTION_OPEN_HISTORY:
+        open_public_history_event_cb(NULL);
+        break;
+    case D1L_UI_MESSAGES_ACTION_SEND_PUBLIC_TEST:
+        public_test_event_cb(NULL);
+        break;
+    case D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC:
+        set_messages_mode(false);
+        break;
+    case D1L_UI_MESSAGES_ACTION_SHOW_DIRECT:
+        set_messages_mode(true);
+        break;
+    case D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE:
+        show_message_detail_for(event->public_message);
+        break;
+    case D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD:
+        if (!event->dm_message || event->dm_message->contact_fingerprint[0] == '\0') {
+            show_toast("DM", ESP_ERR_INVALID_STATE);
+            break;
+        }
+        show_dm_thread_for(event->dm_message->contact_fingerprint,
+                           event->dm_message->contact_alias[0] ?
+                           event->dm_message->contact_alias :
+                           event->dm_message->contact_fingerprint);
+        break;
+    case D1L_UI_MESSAGES_ACTION_NONE:
+    default:
+        break;
+    }
 }
 
 static void render_messages(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
-    lv_obj_t *header = create_panel(content, 18, 16, 424, 108);
-    lv_obj_t *title = create_label(header, "Messages", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 170);
-    lv_obj_set_pos(title, 8, 4);
-    lv_obj_t *meta = create_label(header, "", 0x8EA0AE);
-    label_set_fmt(meta, "public %u new %lu  dm %u new %lu muted %lu",
-                  (unsigned)snapshot->message_count,
-                  (unsigned long)snapshot->public_unread_count,
-                  (unsigned)snapshot->dm_count,
-                  (unsigned long)snapshot->dm_unread_count,
-                  (unsigned long)snapshot->muted_dm_unread_count);
-    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(meta, 392);
-    lv_obj_set_pos(meta, 8, 34);
-    create_button(header, "Read", 8, 62, 54, 40, mark_messages_read_event_cb, NULL);
-    create_button(header, "Compose", 70, 62, 88, 40, open_compose_event_cb, NULL);
-    create_button(header, "History", 166, 62, 80, 40, open_public_history_event_cb, NULL);
-    create_button(header, "Test", 254, 62, 64, 40, public_test_event_cb, NULL);
-
-    create_button(content, "Public", 18, 136, 96, 40, open_messages_public_event_cb, NULL);
-    create_button(content, "DMs", 122, 136, 80, 40, open_messages_dm_event_cb, NULL);
-
-    lv_obj_t *mode_label = create_label(content,
-                                        s_messages_show_dms ? "DM Conversations" : "Public Channel",
-                                        s_messages_show_dms ? 0xA7F3D0 : 0x5EEAD4);
-    lv_obj_set_pos(mode_label, 26, 190);
-
-    int y = 218;
-    if (s_messages_show_dms) {
-        for (size_t i = 0; i < snapshot->recent_dm_count; ++i) {
-            render_dm_row(content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i]);
-            y += 80;
-        }
-        if (snapshot->recent_dm_count == 0) {
-            lv_obj_t *empty = create_label(content, "No direct messages", 0x8EA0AE);
-            lv_obj_set_pos(empty, 26, y);
-        }
-    } else {
-        for (size_t i = 0; i < snapshot->recent_message_count; ++i) {
-            render_message_row(content, y, &snapshot->recent_messages[i]);
-            y += 80;
-        }
-        if (snapshot->recent_message_count == 0) {
-            lv_obj_t *empty = create_label(content, "No Public messages", 0x8EA0AE);
-            lv_obj_set_pos(empty, 26, y);
-        }
-    }
+    messages_view_model_from_snapshot(snapshot, &s_messages_controller.rendered);
+    d1l_ui_messages_render(&s_messages_controller, content,
+                           &s_messages_controller.rendered,
+                           handle_messages_action, NULL);
 }
 
 static void render_nodes(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
@@ -6485,6 +6428,9 @@ static void render_active_tab(void)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     layout_content_for_active_tab();
+    if (d1l_ui_navigation_active() != D1L_UI_TAB_MESSAGES) {
+        d1l_ui_messages_deactivate(&s_messages_controller);
+    }
     (void)d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content,
                                renderers, sizeof(renderers) / sizeof(renderers[0]));
     update_onboarding_visibility(&s_snapshot);

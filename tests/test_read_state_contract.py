@@ -62,6 +62,7 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
 def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     console = read("main/comms/usb_console.c")
     ui = read("main/ui/ui_phase1.c")
+    messages_ui = read("main/ui/ui_messages.c")
     show_thread = ui.split("static void show_dm_thread_for", 1)[1].split(
         "static void open_home_dm_preview_event_cb", 1
     )[0]
@@ -80,8 +81,8 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert "messages unread" in SMOKE_COMMANDS
 
     assert "mark_messages_read_event_cb" in ui
-    assert 'create_button(header, "Read"' in ui
-    assert 'unread ? "new"' in ui
+    assert 'messages_create_button(header, "Read"' in messages_ui
+    assert 'unread ? "new"' in messages_ui
     assert "snapshot->muted_dm_unread_count" in ui
     assert "read_dm_thread_event_cb" not in ui
     assert 'create_button(s_dm_thread_sheet, "Read"' not in ui
@@ -89,5 +90,5 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert show_thread.index("d1l_app_model_mark_dm_thread_read(fingerprint)") < show_thread.index(
         "render_dm_thread_sheet();"
     )
-    assert "render_dm_row(content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i])" in ui
-    assert "dm_row_state(entry, unread)" in ui
+    assert "messages_render_dm_row(controller, parent, y, i)" in messages_ui
+    assert "messages_dm_row_state(entry, unread)" in messages_ui
