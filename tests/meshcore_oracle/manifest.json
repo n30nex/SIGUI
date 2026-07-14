@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "corpus_version": 22,
+  "corpus_version": 23,
   "abi_version": 2,
-  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures_and_login_response_creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
@@ -59,10 +59,10 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "2e949ecd9c433f1940f7a3e99257567301f7eab7aaf38e4c0e946cfca9ee5190",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "1216a5e05531e958fc5507a23348db3c96754320d4d80c64f503a5f7e8a03614",
-    "tests/meshcore_oracle/meshcore_oracle.h": "74b062a65a4e33ddeddbf86550179f546d6d8719cb56d666357c4a2ba9254d93",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "33a72bd2e85858089dd3d3125fe1816603c8bb3c83d648b1a40fbe85e2596e46",
+    "tests/meshcore_oracle/coverage_manifest.json": "36e1329c73bbaec27f9c1e43bba238aaac27cd1eb6fb3480e742fb000a380abf",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "896d301ffffa4dc88928572e3b4bdcd4a9573f434f6c2660b72ea3904eb5bc47",
+    "tests/meshcore_oracle/meshcore_oracle.h": "28305dee6f53bcee6ff70d602e924b1c7d450d0dac721c9801ea7052c1521d95",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "8ec2fa119f13c144a441b94f8429e3c09da7365afff23365a0e2f96670f0c92c",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -110,6 +110,12 @@
     "authenticated_request_replay_transition_scope": "repeater_room_prevalidated_authenticated_request_timestamp_duplicate_handler_result_keep_alive_and_record_session_transition_projection_only_no_request_schema_handler_execution_response_hash_creation_storage_identity_secret_dispatch_route_schedule_or_rf",
     "authenticated_text_transition_available": true,
     "authenticated_text_transition_scope": "repeater_room_canonical_authenticated_text_newer_equal_older_role_handler_post_session_ack_response_creation_outcome_and_stored_path_dispatch_projection_only_no_decryption_text_parse_hash_handler_storage_packet_pool_dispatch_timing_route_execution_identity_secret_or_rf",
+    "login_response_dispatch_transition_available": true,
+    "login_response_dispatch_transition_scope": "repeater_room_canonical_response_ready_encoded_path_creation_kind_secret_source_exact_2000ms_room_push_and_300ms_coarse_dispatch_projection_only_flood_transport_scope_required_no_packet_pool_path_copy_clock_queue_dispatch_execution_storage_or_rf",
+    "signed_advert_dispatch_transition_available": true,
+    "signed_advert_dispatch_transition_scope": "mesh_post_decode_complete_self_seen_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_reject_only_upstream_identity_parity_false_no_external_verifier_tables_path_copy_clock_queue_dispatch_or_rf",
+    "signed_advert_send_transition_available": true,
+    "signed_advert_send_transition_scope": "mesh_createadvert_length_pool_error_rtc_sign_then_flood_transport_direct_zero_hop_ownership_queue_order_projection_only_signature_bytes_covered_separately_no_keypair_consistency_self_verify_packet_pool_clock_table_path_copy_queue_dispatch_or_rf",
     "canonical_advert_data": true,
     "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
     "ack_frame_scope": "simple_and_multipart_payload_framing_only",
@@ -160,6 +166,16 @@
       "authenticated_text_room": "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
       "authenticated_text_record": "third_party/MeshCore/src/helpers/ClientACL.h",
       "authenticated_text_types": "third_party/MeshCore/src/helpers/TxtDataHelpers.h",
+      "login_response_dispatch_repeater": "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+      "login_response_dispatch_room": "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+      "login_response_dispatch_mesh_creation": "third_party/MeshCore/src/Mesh.cpp",
+      "signed_advert_dispatch_mesh": "third_party/MeshCore/src/Mesh.cpp",
+      "signed_advert_dispatch_identity_boundary": "third_party/MeshCore/src/Identity.cpp",
+      "signed_advert_dispatch_route": "third_party/MeshCore/src/Mesh.cpp",
+      "signed_advert_send_mesh": "third_party/MeshCore/src/Mesh.cpp",
+      "signed_advert_send_dispatcher": "third_party/MeshCore/src/Dispatcher.cpp",
+      "signed_advert_send_identity": "third_party/MeshCore/src/Identity.cpp",
+      "signed_advert_send_signer": "third_party/MeshCore/lib/ed25519/sign.c",
       "public_group_channel_hash": "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
       "public_group_datagram": "third_party/MeshCore/src/Mesh.cpp",
       "public_group_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
@@ -181,7 +197,7 @@
     }
   },
   "determinism": {
-    "current_vectors": "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_group_anonymous_login_regular_request_response_canonical_login_response_login_password_authorization_existing_acl_blank_login_reuse_authorized_login_acl_transition_authenticated_request_replay_transition_authenticated_text_replay_response_session_orchestration_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
+    "current_vectors": "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_group_anonymous_login_regular_request_response_canonical_login_response_login_password_authorization_existing_acl_blank_login_reuse_authorized_login_acl_transition_authenticated_request_replay_transition_authenticated_text_replay_response_session_orchestration_login_response_creation_dispatch_orchestration_signed_advert_dispatch_transition_signed_advert_creation_send_orchestration_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
     "signed_advert_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "signed_advert_generation_recipe": "ed25519_create_keypair_seed_then_ed25519_sign_public_key_timestamp_wire_bytes_app_data",
     "anonymous_login_recipe": "basechatmesh_timestamp_optional_room_sync_password_then_mesh_anonymous_datagram_aes128_hmac_with_caller_supplied_outer_and_secret",
@@ -202,6 +218,12 @@
     "authenticated_request_replay_transition_matrix": "fifteen_repeater_room_newer_equal_older_handler_success_failure_keep_alive_force_since_path_and_timestamp_boundary_cases",
     "authenticated_text_transition_recipe": "canonical_text_repeater_admin_gate_and_room_role_gate_then_equal_retry_session_commit_handler_or_post_suppression_creation_outcome_and_stored_path_dispatch_projection",
     "authenticated_text_transition_matrix": "twenty_repeater_room_plain_cli_newer_equal_older_role_empty_max_timestamp_creation_failure_ack_multiplicity_and_path_cases",
+    "login_response_dispatch_recipe": "ready_canonical_response_repeater_caller_secret_room_stored_secret_flood_path_return_or_direct_datagram_then_creation_outcome_exact_delays_and_coarse_dispatch_selection",
+    "login_response_dispatch_matrix": "seventeen_absent_repeater_room_flood_direct_encoded_path_creation_success_failure_room_push_delay_and_unknown_path_cases",
+    "signed_advert_dispatch_recipe": "mesh_post_decode_complete_self_seen_gate_then_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_forward_policy_projection",
+    "signed_advert_dispatch_matrix": "twelve_valid_invalid_self_seen_incomplete_direct_zero_hop_flood_do_not_retransmit_forward_policy_and_path_capacity_cases_plus_nineteen_fail_closed_boundaries",
+    "signed_advert_send_recipe": "createadvert_length_then_pool_error_or_rtc_and_vendored_sign_then_caller_selected_flood_transport_flood_direct_or_zero_hop_ownership_and_queue_projection",
+    "signed_advert_send_matrix": "sixteen_oversize_pool_empty_flood_transport_direct_zero_hop_valid_encoded_path_invalid_route_retention_release_and_queue_cases",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
     "canonical_s_regression": "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L",
     "identity_point_forgery_regression": "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation",
@@ -239,10 +261,10 @@
   },
   "vectors": {
     "roundtrip": 338,
-    "valid": 99,
-    "invalid": 407,
-    "semantic": 828,
-    "total": 844,
+    "valid": 144,
+    "invalid": 449,
+    "semantic": 915,
+    "total": 931,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -345,6 +367,24 @@
       "semantic": 37,
       "total": 37
     },
+    "login_response_creation_dispatch_orchestration_fixtures": {
+      "valid": 17,
+      "invalid": 14,
+      "semantic": 31,
+      "total": 31
+    },
+    "signed_advert_dispatch_transition_fixtures": {
+      "valid": 12,
+      "invalid": 19,
+      "semantic": 31,
+      "total": 31
+    },
+    "signed_advert_creation_send_orchestration_fixtures": {
+      "valid": 16,
+      "invalid": 9,
+      "semantic": 25,
+      "total": 25
+    },
     "dm_encrypt_decrypt": {
       "roundtrip": 268,
       "invalid": 29,
@@ -435,22 +475,24 @@
       "id": "identity_signed_advert",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "external_unpinned_ed25519_verifier_and_mesh_dispatch_fixture",
-      "blocked_scope": "upstream_identity_verifier_parity_and_mesh_dispatch_replay_contact_semantics",
+      "blocked_by": "external_unpinned_ed25519_verifier_and_concrete_route_runtime_execution",
+      "blocked_scope": "upstream_identity_verifier_parity_and_concrete_contact_table_path_queue_dispatch_execution",
       "blocker_receipt": {
         "id": "BLK-WP04-IDENTITY-DISPATCH-20260713",
         "status": "open",
         "observed_at": "2026-07-13",
         "pinned_sources": {
           "third_party/MeshCore/src/Identity.cpp": "21e7b533928f2d7dd5b016c048b5c4971db6d475077c793947c17574dd057bd0",
-          "third_party/MeshCore/src/Dispatcher.cpp": "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e"
+          "third_party/MeshCore/src/Dispatcher.cpp": "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e",
+          "third_party/MeshCore/src/Mesh.cpp": "e39aa2ca27cc4d6b1d19c43aeccb5915098aeb5b6a5fc9be98d9fa557a54fd7e"
         },
         "missing_inputs": [
-          "Identity.cpp delegates verification to Ed25519.h, which is absent from the pinned MeshCore gitlink",
-          "deterministic Dispatcher packet-manager, mesh-table, contact, replay, and clock fixtures"
+          "exact external Ed25519.h verifier source used by Identity.cpp is absent from the pinned MeshCore gitlink",
+          "concrete packet-manager, mesh-table, contact, encoded-path, queue, clock, delay, and dispatch runtime execution fixtures",
+          "persisted identity public/private-key consistency validation before advert signing"
         ],
         "blocks_execution": false,
-        "unblocked_slice": "signed_advert_packet_creation"
+        "unblocked_slice": "signed_advert_packet_creation_dispatch_and_send_orchestration"
       }
     },
     {
@@ -592,7 +634,7 @@
       "id": "login_request_response_admin",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "identity_signature_and_concrete_packet_creation_dispatch_runtime_fixtures",
+      "blocked_by": "request_schema_tags_and_concrete_packet_pool_dispatch_execution_fixtures",
       "implemented_prerequisites": [
         "anonymous_login_request_packets",
         "regular_request_response_packets",
@@ -602,7 +644,8 @@
         "existing_acl_blank_login_reuse_fixtures",
         "authorized_login_acl_transition_fixtures",
         "authenticated_request_replay_transition_fixtures",
-        "authenticated_text_replay_response_session_fixtures"
+        "authenticated_text_replay_response_session_fixtures",
+        "login_response_creation_dispatch_orchestration_fixtures"
       ]
     },
     {
@@ -825,6 +868,76 @@
           "invalid": 17
         }
       }
+    },
+    {
+      "id": "login_response_creation_dispatch_orchestration_fixtures",
+      "status": "implemented",
+      "owner": "pinned_repeater_room_login_response_dispatch_rules",
+      "semantic": true,
+      "scope": "canonical_repeater_room_ready_or_absent_login_response_encoded_path_creation_kind_secret_source_exact_room_push_and_response_delays_creation_outcome_and_coarse_dispatch_projection_only_flood_transport_scope_required_no_packet_pool_path_copy_clock_queue_dispatch_execution_storage_or_rf",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-LOGIN-RESPONSE-DISPATCH-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+          "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+          "third_party/MeshCore/src/Mesh.cpp",
+          "third_party/MeshCore/src/Packet.cpp"
+        ],
+        "vectors": {
+          "valid": 17,
+          "invalid": 14
+        }
+      }
+    },
+    {
+      "id": "signed_advert_dispatch_transition_fixtures",
+      "status": "implemented",
+      "owner": "pinned_mesh_signed_advert_gate_and_route_rules",
+      "semantic": true,
+      "scope": "canonical_post_decode_complete_self_seen_gate_caller_supplied_identity_result_callback_and_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_reject_only_upstream_identity_parity_false_no_external_verifier_contact_table_path_queue_dispatch_execution_or_rf",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-SIGNED-ADVERT-DISPATCH-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/src/Mesh.cpp",
+          "third_party/MeshCore/src/Identity.cpp",
+          "third_party/MeshCore/src/Packet.cpp"
+        ],
+        "upstream_identity_parity_proven": false,
+        "d1l_overlong_reject_diverges_from_upstream_truncation": true,
+        "vectors": {
+          "valid": 12,
+          "invalid": 19
+        }
+      }
+    },
+    {
+      "id": "signed_advert_creation_send_orchestration_fixtures",
+      "status": "implemented",
+      "owner": "pinned_mesh_dispatcher_advert_send_ordering_rules",
+      "semantic": true,
+      "scope": "createadvert_length_pool_error_rtc_vendored_sign_then_flood_transport_direct_zero_hop_route_seen_release_retain_queue_order_projection_only_no_keypair_consistency_self_verify_packet_pool_clock_table_path_copy_queue_dispatch_execution_or_rf",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-SIGNED-ADVERT-SEND-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/src/Mesh.cpp",
+          "third_party/MeshCore/src/Dispatcher.cpp",
+          "third_party/MeshCore/src/Identity.cpp",
+          "third_party/MeshCore/src/Packet.cpp",
+          "third_party/MeshCore/lib/ed25519/sign.c"
+        ],
+        "signature_self_verified": false,
+        "keypair_consistency_proven": false,
+        "vectors": {
+          "valid": 16,
+          "invalid": 9
+        }
+      }
     }
   ],
   "production_boundary": {
@@ -845,6 +958,9 @@
       "canonical ClientACL full-key reuse, append or eviction selection plus repeater/room authorized-login record transition projection",
       "canonical repeater/room authenticated-request replay, handler-result commit, and direct keep-alive record/session transition projection",
       "canonical repeater/room authenticated-TEXT replay, session/handler/post commit ordering, packet-creation outcome, and stored-path dispatch projection",
+      "canonical repeater/room login-response PATH-return/datagram selection, encoded stored-path handling, exact room-push/response delays, creation outcome, and coarse dispatch projection with transport-flood scope left unresolved",
+      "canonical Mesh signed-advert post-decode complete/self/seen/caller-supplied verification-result/callback/flood-route projection with direct nonzero-path interception and explicit D1L overlong fail-closed divergence",
+      "canonical Mesh/Dispatcher signed-advert oversize, packet-pool exhaustion, RTC/sign, flood/transport/direct/zero-hop ownership, seen, release/retain, and queue-order projection without runtime execution or keypair-consistency claim",
       "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation",
       "D1L production rejection of non-canonical and low-order advert public keys and signature R points through the pinned MeshCore group decoder"
     ],
@@ -865,7 +981,10 @@
       "repeater/room blank-password full-public-key first-match ACL lookup and reuse decisions, including caller-versus-stored response secret selection and flood-only client out-path invalidation, without storage load/save, ACL insertion/eviction, permission/secret/timestamp/activity mutation, replay, retained session transition, response creation, dispatch, routing, or RF",
       "ClientACL full-public-key reuse, append, strict least-active non-admin eviction and last-slot fallback plus repeater/room authorized-login replay and record-field transition projection, without filesystem execution, full path bytes, unmodified room scheduling fields, identity signature/secret derivation, password comparison, response creation, dispatch, routing, or RF",
       "repeater/room authenticated-request newer/equal/older replay, handler-result commit, and direct keep-alive force-since/pending-ack record/session transitions, without request schema, handler execution, response creation, dispatch, routing, scheduling, or RF",
-      "repeater/room authenticated-TEXT admin/role gates, newer/equal/older replay, session/handler/post commit ordering, ACK/response packet-creation outcomes, and stored-path dispatch selection, without decryption, text parsing, hashing, handler/storage execution, packet-pool execution, dispatch timing/execution, identity derivation, or RF"
+      "repeater/room authenticated-TEXT admin/role gates, newer/equal/older replay, session/handler/post commit ordering, ACK/response packet-creation outcomes, and stored-path dispatch selection, without decryption, text parsing, hashing, handler/storage execution, packet-pool execution, dispatch timing/execution, identity derivation, or RF",
+      "repeater/room login-response ready/absent handling, valid encoded 1/2/3-byte paths, PATH-return versus datagram creation, caller versus stored secret, exact 2000 ms room-push and 300 ms response delays, allocation outcome, and coarse direct/flood selection without region-derived transport scope, packet-pool/path-copy/queue execution, storage, or RF",
+      "Mesh signed-advert receive complete/self/seen/signature-result/callback/flood-route-capacity ordering with direct nonzero-path fail-closed interception, without the external Identity verifier implementation, contact/table/path/queue/dispatch execution, or RF; D1L rejects overlong app data where upstream truncates to 32",
+      "Mesh/Dispatcher signed-advert send oversize-before-allocation, ERR_EVENT_FULL-before-RTC/sign, flood invalid-hash caller retention, direct invalid-encoded-path seen-then-release, and valid flood/transport/direct/zero-hop queue priority ordering without real allocation, clock, signing, keypair consistency, path copy, table mutation, queue execution, or RF"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",

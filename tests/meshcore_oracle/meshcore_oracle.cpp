@@ -1432,8 +1432,8 @@ extern "C" bool d1l_meshcore_oracle_apply_authenticated_text_transition(
                                 D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI))) != 0U ||
         response_created > 1U || record == nullptr ||
         (record != nullptr &&
-         record->out_path_len > D1L_MESHCORE_ORACLE_MAX_PATH_BYTES &&
-         record->out_path_len != D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN) ||
+         record->out_path_len != D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN &&
+         !mesh::Packet::isValidPathLen(record->out_path_len)) ||
         out_transition == nullptr) {
         return false;
     }
@@ -1522,6 +1522,221 @@ extern "C" bool d1l_meshcore_oracle_apply_authenticated_text_transition(
     transition.response_dispatch_mode = response_created == 0U
         ? D1L_MESHCORE_ORACLE_DISPATCH_NONE
         : dispatch_mode;
+    *out_transition = transition;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_apply_login_response_dispatch_transition(
+    uint8_t server_advert_type,
+    uint8_t is_route_flood,
+    uint8_t response_ready,
+    size_t response_len,
+    uint8_t response_created,
+    const d1l_meshcore_oracle_login_acl_record_t *record,
+    d1l_meshcore_oracle_login_response_dispatch_transition_t *out_transition)
+{
+    if ((server_advert_type != D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         server_advert_type != D1L_MESHCORE_ADVERT_TYPE_ROOM) ||
+        is_route_flood > 1U || response_ready > 1U ||
+        response_created > 1U || record == nullptr ||
+        (record != nullptr &&
+         record->out_path_len != D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN &&
+         !mesh::Packet::isValidPathLen(record->out_path_len)) ||
+        out_transition == nullptr ||
+        (response_ready == 0U &&
+         (response_len != 0U || response_created != 0U)) ||
+        (response_ready == 1U &&
+         response_len != D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES)) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_login_response_dispatch_transition_t transition{};
+    transition.record = *record;
+    transition.response_ready = response_ready;
+    if (response_ready == 0U) {
+        *out_transition = transition;
+        return true;
+    }
+
+    transition.response_creation_attempted = 1U;
+    transition.response_creation_kind = is_route_flood == 1U
+        ? D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN
+        : D1L_MESHCORE_ORACLE_CREATION_DATAGRAM;
+    transition.response_secret_source =
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER
+        ? D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER
+        : D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL;
+    transition.room_push_schedule_committed =
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_ROOM ? 1U : 0U;
+    transition.room_push_delay_ms =
+        transition.room_push_schedule_committed == 1U
+        ? D1L_MESHCORE_ORACLE_ROOM_PUSH_DELAY_MS
+        : 0U;
+    transition.response_created = response_created;
+    if (response_created == 0U) {
+        *out_transition = transition;
+        return true;
+    }
+
+    transition.dispatch_attempted = 1U;
+    transition.dispatch_delay_ms =
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_DELAY_MS;
+    if (is_route_flood == 1U ||
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER ||
+        record->out_path_len == D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN) {
+        transition.dispatch_mode = D1L_MESHCORE_ORACLE_DISPATCH_FLOOD;
+        transition.flood_transport_scope_required = 1U;
+    } else {
+        transition.dispatch_mode = D1L_MESHCORE_ORACLE_DISPATCH_DIRECT;
+    }
+    *out_transition = transition;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_apply_signed_advert_dispatch_transition(
+    uint8_t is_route_flood,
+    uint8_t payload_complete,
+    uint8_t is_self,
+    uint8_t already_seen,
+    uint8_t signature_verified,
+    uint8_t do_not_retransmit,
+    uint8_t allow_forward,
+    size_t app_data_len,
+    uint8_t path_hash_size,
+    uint8_t path_hash_count,
+    d1l_meshcore_oracle_signed_advert_dispatch_transition_t *out_transition)
+{
+    if (is_route_flood > 1U || payload_complete > 1U || is_self > 1U ||
+        already_seen > 1U || signature_verified > 1U ||
+        do_not_retransmit > 1U || allow_forward > 1U ||
+        app_data_len > D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES ||
+        path_hash_size == 0U || path_hash_size > 3U ||
+        path_hash_count > 63U ||
+        static_cast<size_t>(path_hash_size) * path_hash_count >
+            D1L_MESHCORE_ORACLE_MAX_PATH_BYTES ||
+        (is_route_flood == 0U && path_hash_count != 0U) ||
+        out_transition == nullptr ||
+        ((payload_complete == 0U || is_self == 1U || already_seen == 1U) &&
+         signature_verified != 0U)) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_signed_advert_dispatch_transition_t transition{};
+    transition.action_class = D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE;
+    if (payload_complete == 0U || is_self == 1U || already_seen == 1U) {
+        *out_transition = transition;
+        return true;
+    }
+
+    transition.signature_check_invoked = 1U;
+    transition.signature_result_caller_supplied = 1U;
+    if (signature_verified == 0U) {
+        *out_transition = transition;
+        return true;
+    }
+
+    transition.advert_callback_invoked = 1U;
+    transition.route_evaluated = 1U;
+    const size_t appended_path_bytes =
+        (static_cast<size_t>(path_hash_count) + 1U) * path_hash_size;
+    if (is_route_flood == 1U && do_not_retransmit == 0U &&
+        appended_path_bytes <= D1L_MESHCORE_ORACLE_MAX_PATH_BYTES &&
+        allow_forward == 1U) {
+        transition.path_append_eligible = 1U;
+        transition.retransmit_schedule_eligible = 1U;
+        transition.action_class =
+            D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED;
+    }
+    *out_transition = transition;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_apply_signed_advert_send_transition(
+    size_t app_data_len,
+    uint8_t packet_pool_available,
+    uint8_t send_mode,
+    uint8_t path_hash_size,
+    uint8_t direct_encoded_path_len,
+    d1l_meshcore_oracle_signed_advert_send_transition_t *out_transition)
+{
+    const bool flood_mode =
+        send_mode == D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD ||
+        send_mode == D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD;
+    const bool direct_mode =
+        send_mode == D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT;
+    const bool zero_hop_mode =
+        send_mode == D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP;
+    if (packet_pool_available > 1U ||
+        (!flood_mode && !direct_mode && !zero_hop_mode) ||
+        (flood_mode && direct_encoded_path_len != 0U) ||
+        (direct_mode && path_hash_size != 0U) ||
+        (zero_hop_mode &&
+         (path_hash_size != 0U || direct_encoded_path_len != 0U)) ||
+        out_transition == nullptr) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_signed_advert_send_transition_t transition{};
+    if (app_data_len > D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES) {
+        transition.terminal_stage =
+            D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_LENGTH_REJECTED;
+        *out_transition = transition;
+        return true;
+    }
+
+    transition.app_length_accepted = 1U;
+    transition.packet_allocation_attempted = 1U;
+    if (packet_pool_available == 0U) {
+        transition.event_full_signaled = 1U;
+        transition.terminal_stage =
+            D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_POOL_EMPTY;
+        *out_transition = transition;
+        return true;
+    }
+
+    transition.packet_created = 1U;
+    transition.rtc_read = 1U;
+    transition.signature_created = 1U;
+    transition.route_preparation_attempted = 1U;
+    if (flood_mode) {
+        if (path_hash_size == 0U || path_hash_size > 3U) {
+            transition.caller_retains_packet = 1U;
+            transition.terminal_stage =
+                D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_INVALID_FLOOD_RETAINED;
+            *out_transition = transition;
+            return true;
+        }
+        transition.route_bits_written = 1U;
+        transition.transport_codes_written =
+            send_mode == D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD
+            ? 1U
+            : 0U;
+        transition.seen_marked = 1U;
+        transition.queue_scheduled = 1U;
+        transition.queue_priority = 3U;
+        transition.terminal_stage =
+            D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED;
+        *out_transition = transition;
+        return true;
+    }
+
+    transition.route_bits_written = 1U;
+    if (direct_mode) {
+        transition.path_copy_attempted = 1U;
+    }
+    transition.seen_marked = 1U;
+    if (direct_mode &&
+        !mesh::Packet::isValidPathLen(direct_encoded_path_len)) {
+        transition.packet_released = 1U;
+        transition.terminal_stage =
+            D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_INVALID_DIRECT_RELEASED;
+        *out_transition = transition;
+        return true;
+    }
+    transition.queue_scheduled = 1U;
+    transition.queue_priority = 0U;
+    transition.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED;
     *out_transition = transition;
     return true;
 }

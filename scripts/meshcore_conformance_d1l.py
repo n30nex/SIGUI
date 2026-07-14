@@ -87,7 +87,7 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 22
+ORACLE_CORPUS_VERSION = 23
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
     "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
@@ -96,7 +96,9 @@ ORACLE_COVERAGE_BOUNDARY = (
     "packets_and_login_password_authorization_fixtures_and_existing_acl_"
     "blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_"
     "and_authenticated_request_replay_transition_fixtures_and_authenticated_"
-    "text_replay_response_session_orchestration_fixtures"
+    "text_replay_response_session_orchestration_fixtures_and_login_response_"
+    "creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_"
+    "transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures"
 )
 BUILD_INPUTS_PATH = ROOT / ".github" / "d1l-build-inputs.json"
 CANONICAL_EVIDENCE_PROFILE = "d1l_meshcore_wire_conformance_package_v1"
@@ -229,9 +231,13 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "id": "identity_signed_advert",
         "status": "pending",
         "owner": "unassigned",
-        "blocked_by": "external_unpinned_ed25519_verifier_and_mesh_dispatch_fixture",
+        "blocked_by": (
+            "external_unpinned_ed25519_verifier_and_concrete_route_runtime_"
+            "execution"
+        ),
         "blocked_scope": (
-            "upstream_identity_verifier_parity_and_mesh_dispatch_replay_contact_semantics"
+            "upstream_identity_verifier_parity_and_concrete_contact_table_"
+            "path_queue_dispatch_execution"
         ),
         "blocker_receipt": {
             "id": "BLK-WP04-IDENTITY-DISPATCH-20260713",
@@ -244,13 +250,19 @@ EXPECTED_ORACLE_CAPABILITIES = [
                 "third_party/MeshCore/src/Dispatcher.cpp": (
                     "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e"
                 ),
+                "third_party/MeshCore/src/Mesh.cpp": (
+                    "e39aa2ca27cc4d6b1d19c43aeccb5915098aeb5b6a5fc9be98d9fa557a54fd7e"
+                ),
             },
             "missing_inputs": [
-                "Identity.cpp delegates verification to Ed25519.h, which is absent from the pinned MeshCore gitlink",
-                "deterministic Dispatcher packet-manager, mesh-table, contact, replay, and clock fixtures",
+                "exact external Ed25519.h verifier source used by Identity.cpp is absent from the pinned MeshCore gitlink",
+                "concrete packet-manager, mesh-table, contact, encoded-path, queue, clock, delay, and dispatch runtime execution fixtures",
+                "persisted identity public/private-key consistency validation before advert signing",
             ],
             "blocks_execution": False,
-            "unblocked_slice": "signed_advert_packet_creation",
+            "unblocked_slice": (
+                "signed_advert_packet_creation_dispatch_and_send_orchestration"
+            ),
         },
     },
     {
@@ -419,8 +431,8 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": (
-            "identity_signature_and_concrete_packet_creation_dispatch_"
-            "runtime_fixtures"
+            "request_schema_tags_and_concrete_packet_pool_dispatch_"
+            "execution_fixtures"
         ),
         "implemented_prerequisites": [
             "anonymous_login_request_packets",
@@ -432,6 +444,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "authorized_login_acl_transition_fixtures",
             "authenticated_request_replay_transition_fixtures",
             "authenticated_text_replay_response_session_fixtures",
+            "login_response_creation_dispatch_orchestration_fixtures",
         ],
     },
     {
@@ -693,6 +706,84 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "vectors": {"valid": 20, "invalid": 17},
         },
     },
+    {
+        "id": "login_response_creation_dispatch_orchestration_fixtures",
+        "status": "implemented",
+        "owner": "pinned_repeater_room_login_response_dispatch_rules",
+        "semantic": True,
+        "scope": (
+            "canonical_repeater_room_ready_or_absent_login_response_encoded_"
+            "path_creation_kind_secret_source_exact_room_push_and_response_"
+            "delays_creation_outcome_and_coarse_dispatch_projection_only_"
+            "flood_transport_scope_required_no_packet_pool_path_copy_clock_"
+            "queue_dispatch_execution_storage_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-LOGIN-RESPONSE-DISPATCH-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+                "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Packet.cpp",
+            ],
+            "vectors": {"valid": 17, "invalid": 14},
+        },
+    },
+    {
+        "id": "signed_advert_dispatch_transition_fixtures",
+        "status": "implemented",
+        "owner": "pinned_mesh_signed_advert_gate_and_route_rules",
+        "semantic": True,
+        "scope": (
+            "canonical_post_decode_complete_self_seen_gate_caller_supplied_"
+            "identity_result_callback_and_flood_route_capacity_projection_"
+            "with_direct_nonzero_intercept_and_d1l_overlong_reject_only_"
+            "upstream_identity_parity_false_no_external_verifier_contact_"
+            "table_path_queue_dispatch_execution_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-SIGNED-ADVERT-DISPATCH-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Identity.cpp",
+                "third_party/MeshCore/src/Packet.cpp",
+            ],
+            "upstream_identity_parity_proven": False,
+            "d1l_overlong_reject_diverges_from_upstream_truncation": True,
+            "vectors": {"valid": 12, "invalid": 19},
+        },
+    },
+    {
+        "id": "signed_advert_creation_send_orchestration_fixtures",
+        "status": "implemented",
+        "owner": "pinned_mesh_dispatcher_advert_send_ordering_rules",
+        "semantic": True,
+        "scope": (
+            "createadvert_length_pool_error_rtc_vendored_sign_then_flood_"
+            "transport_direct_zero_hop_route_seen_release_retain_queue_order_"
+            "projection_only_no_keypair_consistency_self_verify_packet_pool_"
+            "clock_table_path_copy_queue_dispatch_execution_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-SIGNED-ADVERT-SEND-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Dispatcher.cpp",
+                "third_party/MeshCore/src/Identity.cpp",
+                "third_party/MeshCore/src/Packet.cpp",
+                "third_party/MeshCore/lib/ed25519/sign.c",
+            ],
+            "signature_self_verified": False,
+            "keypair_consistency_proven": False,
+            "vectors": {"valid": 16, "invalid": 9},
+        },
+    },
 ]
 EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
@@ -703,6 +794,8 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
             "signed_advert_packet_creation",
             "signed_advert_verification",
             "ed25519_point_validation",
+            "signed_advert_dispatch_transition_fixtures",
+            "signed_advert_creation_send_orchestration_fixtures",
             "identity_signed_advert",
         ],
     },
@@ -757,6 +850,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
             "authorized_login_acl_transition_fixtures",
             "authenticated_request_replay_transition_fixtures",
             "authenticated_text_replay_response_session_fixtures",
+            "login_response_creation_dispatch_orchestration_fixtures",
             "login_request_response_admin",
         ],
     },
@@ -795,6 +889,8 @@ EXPECTED_ORACLE_PACKET_TYPES = [
             "signed_advert_packet_creation",
             "signed_advert_verification",
             "ed25519_point_validation",
+            "signed_advert_dispatch_transition_fixtures",
+            "signed_advert_creation_send_orchestration_fixtures",
             "identity_signed_advert",
         ],
     },
@@ -1013,10 +1109,10 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
         "roundtrip": 338,
-        "valid": 99,
-        "invalid": 407,
-        "semantic": 828,
-        "total": 844,
+        "valid": 144,
+        "invalid": 449,
+        "semantic": 915,
+        "total": 931,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -1119,6 +1215,24 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 37,
             "total": 37,
         },
+        "login_response_creation_dispatch_orchestration_fixtures": {
+            "valid": 17,
+            "invalid": 14,
+            "semantic": 31,
+            "total": 31,
+        },
+        "signed_advert_dispatch_transition_fixtures": {
+            "valid": 12,
+            "invalid": 19,
+            "semantic": 31,
+            "total": 31,
+        },
+        "signed_advert_creation_send_orchestration_fixtures": {
+            "valid": 16,
+            "invalid": 9,
+            "semantic": 25,
+            "total": 25,
+        },
         "dm_encrypt_decrypt": {
             "roundtrip": 268,
             "invalid": 29,
@@ -1211,6 +1325,15 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("authenticated_text_transition_available") is not True
         or interface.get("authenticated_text_transition_scope")
         != "repeater_room_canonical_authenticated_text_newer_equal_older_role_handler_post_session_ack_response_creation_outcome_and_stored_path_dispatch_projection_only_no_decryption_text_parse_hash_handler_storage_packet_pool_dispatch_timing_route_execution_identity_secret_or_rf"
+        or interface.get("login_response_dispatch_transition_available") is not True
+        or interface.get("login_response_dispatch_transition_scope")
+        != "repeater_room_canonical_response_ready_encoded_path_creation_kind_secret_source_exact_2000ms_room_push_and_300ms_coarse_dispatch_projection_only_flood_transport_scope_required_no_packet_pool_path_copy_clock_queue_dispatch_execution_storage_or_rf"
+        or interface.get("signed_advert_dispatch_transition_available") is not True
+        or interface.get("signed_advert_dispatch_transition_scope")
+        != "mesh_post_decode_complete_self_seen_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_reject_only_upstream_identity_parity_false_no_external_verifier_tables_path_copy_clock_queue_dispatch_or_rf"
+        or interface.get("signed_advert_send_transition_available") is not True
+        or interface.get("signed_advert_send_transition_scope")
+        != "mesh_createadvert_length_pool_error_rtc_sign_then_flood_transport_direct_zero_hop_ownership_queue_order_projection_only_signature_bytes_covered_separately_no_keypair_consistency_self_verify_packet_pool_clock_table_path_copy_queue_dispatch_or_rf"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -1347,6 +1470,34 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "authenticated_text_types": (
                     "third_party/MeshCore/src/helpers/TxtDataHelpers.h"
                 ),
+                "login_response_dispatch_repeater": (
+                    "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp"
+                ),
+                "login_response_dispatch_room": (
+                    "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp"
+                ),
+                "login_response_dispatch_mesh_creation": (
+                    "third_party/MeshCore/src/Mesh.cpp"
+                ),
+                "signed_advert_dispatch_mesh": (
+                    "third_party/MeshCore/src/Mesh.cpp"
+                ),
+                "signed_advert_dispatch_identity_boundary": (
+                    "third_party/MeshCore/src/Identity.cpp"
+                ),
+                "signed_advert_dispatch_route": (
+                    "third_party/MeshCore/src/Mesh.cpp"
+                ),
+                "signed_advert_send_mesh": "third_party/MeshCore/src/Mesh.cpp",
+                "signed_advert_send_dispatcher": (
+                    "third_party/MeshCore/src/Dispatcher.cpp"
+                ),
+                "signed_advert_send_identity": (
+                    "third_party/MeshCore/src/Identity.cpp"
+                ),
+                "signed_advert_send_signer": (
+                    "third_party/MeshCore/lib/ed25519/sign.c"
+                ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
             ),
@@ -1395,6 +1546,8 @@ def load_oracle_manifest() -> dict[str, Any]:
         "response_login_password_authorization_existing_acl_blank_login_"
         "reuse_authorized_login_acl_transition_authenticated_request_replay_"
         "transition_authenticated_text_replay_response_session_"
+        "orchestration_login_response_creation_dispatch_orchestration_"
+        "signed_advert_dispatch_transition_signed_advert_creation_send_"
         "orchestration_dm_ack_path_and_"
         "general_path_return_vectors_no_runtime_rng_or_clock"
     ):
@@ -1499,6 +1652,40 @@ def load_oracle_manifest() -> dict[str, Any]:
         "timestamp_creation_failure_ack_multiplicity_and_path_cases"
     ):
         raise GateFailure("oracle authenticated-text matrix drifted")
+    if determinism.get("login_response_dispatch_recipe") != (
+        "ready_canonical_response_repeater_caller_secret_room_stored_secret_"
+        "flood_path_return_or_direct_datagram_then_creation_outcome_exact_"
+        "delays_and_coarse_dispatch_selection"
+    ):
+        raise GateFailure("oracle login-response dispatch recipe drifted")
+    if determinism.get("login_response_dispatch_matrix") != (
+        "seventeen_absent_repeater_room_flood_direct_encoded_path_creation_"
+        "success_failure_room_push_delay_and_unknown_path_cases"
+    ):
+        raise GateFailure("oracle login-response dispatch matrix drifted")
+    if determinism.get("signed_advert_dispatch_recipe") != (
+        "mesh_post_decode_complete_self_seen_gate_then_caller_supplied_"
+        "identity_result_callback_and_canonical_flood_route_capacity_forward_"
+        "policy_projection"
+    ):
+        raise GateFailure("oracle signed-advert dispatch recipe drifted")
+    if determinism.get("signed_advert_dispatch_matrix") != (
+        "twelve_valid_invalid_self_seen_incomplete_direct_zero_hop_flood_do_"
+        "not_retransmit_forward_policy_and_path_capacity_cases_plus_nineteen_"
+        "fail_closed_boundaries"
+    ):
+        raise GateFailure("oracle signed-advert dispatch matrix drifted")
+    if determinism.get("signed_advert_send_recipe") != (
+        "createadvert_length_then_pool_error_or_rtc_and_vendored_sign_then_"
+        "caller_selected_flood_transport_flood_direct_or_zero_hop_ownership_"
+        "and_queue_projection"
+    ):
+        raise GateFailure("oracle signed-advert send recipe drifted")
+    if determinism.get("signed_advert_send_matrix") != (
+        "sixteen_oversize_pool_empty_flood_transport_direct_zero_hop_valid_"
+        "encoded_path_invalid_route_retention_release_and_queue_cases"
+    ):
+        raise GateFailure("oracle signed-advert send matrix drifted")
     if determinism.get("independent_verifier_kat") != (
         "RFC 8032 section 7.1 TEST 1 empty message"
     ):
@@ -2719,6 +2906,9 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "authorized_login_acl_transition_fixtures": True,
                     "authenticated_request_replay_transition_fixtures": True,
                     "authenticated_text_replay_response_session_fixtures": True,
+                    "login_response_creation_dispatch_orchestration_fixtures": True,
+                    "signed_advert_dispatch_transition_fixtures": True,
+                    "signed_advert_creation_send_orchestration_fixtures": True,
                     "dm_encrypt_decrypt": True,
                     "expected_ack_hash_and_ack_path": True,
                     "path_return_route_codes": True,

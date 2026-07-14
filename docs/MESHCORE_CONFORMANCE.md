@@ -43,7 +43,9 @@ public-group, anonymous-login, regular REQ/RESPONSE, canonical repeater/room
 login-response, repeater/room ACL-miss password authorization, blank-password
 existing-ACL reuse, authorized-login ACL record transitions, plain-DM, DM
 ACK+PATH, authenticated-request and authenticated-TEXT replay/session
-transitions, and general PATH-return operations. Its version 22 static
+transitions, login-response creation/dispatch orchestration, signed-advert
+receive dispatch gates, signed-advert creation/send ownership ordering, and
+general PATH-return operations. Its version 23 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -253,6 +255,38 @@ rolled back when ACK/response allocation fails. Neither server retains a CLI
 response for replay. The projection does not decrypt or parse message bytes,
 execute a handler or post store, hash/create packets, operate the packet pool,
 execute dispatch/timing/routing, derive identity or secrets, or claim RF.
+The login-response creation/dispatch capability adds seventeen source-handled
+cases and fourteen fail-closed structural rejects. It uses the pinned encoded
+path rules rather than treating `out_path_len` as a byte count: `00`, `3F`,
+`40`, `60`, `80`, and `95` are valid one/two/three-byte modes, while `61`,
+`96`, and reserved four-byte modes reject without output mutation. Repeater
+flood/direct and room flood/direct/unknown-path flows cover PATH-return versus
+datagram creation, caller versus stored secret selection, allocation failure,
+the room's pre-creation 2000 ms push schedule, and the 300 ms response delay.
+Flood is intentionally coarse: mutable receive-region state decides ordinary
+versus transport flood, so that scope is reported as required and unproven.
+No packet pool, path-byte copy, clock, queue, dispatch, storage, or RF executes.
+The signed-advert receive-dispatch capability adds twelve source-handled cases
+and nineteen rejects. It pins the complete/self/seen/source-order gates, a
+caller-supplied signature result, callback eligibility, and canonical
+one/two/three-byte flood path-capacity/forward-policy decisions. Direct packets
+with a nonzero path fail closed because `Mesh::onRecvPacket` intercepts them
+before the ADVERT switch. D1L rejects app data above 32 bytes while upstream
+receive truncates it before verification; that is an explicit strict D1L
+divergence, not upstream acceptance parity. The external `Ed25519::verify`
+implementation used by `Identity.cpp` remains absent, so
+`upstream_identity_parity_proven=false`.
+The signed-advert creation/send capability adds sixteen source-handled cases
+and nine rejects around the already exact fixed-seed packet vectors. Oversize
+data stops before allocation; pool exhaustion sets the full-event condition
+before RTC/sign/routing; valid creation reaches the pinned vendored signer.
+Invalid flood hash sizes retain caller ownership without route mutation,
+invalid direct encoded paths are marked seen then released without queueing,
+and valid flood/transport-flood versus direct/zero-hop cases pin route/code,
+seen, priority-three/priority-zero, and queue eligibility. Neither upstream nor
+D1L self-verifies a newly emitted signature or proves persisted public/private
+key consistency. Real allocation, RTC, signing, table/path mutation, queueing,
+dispatch, and RF remain outside this projection.
 The DM capability adds 268 authenticated round trips: every attempt value from
 0 through 255, the normal 160-byte and extended-attempt 158-byte text
 boundaries, and all ten normal text lengths from 11 through 155 whose complete
@@ -327,26 +361,29 @@ The exact packet registry and blocker receipts are copied into
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures_and_login_response_creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
 capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
 vendored C verifier. Upstream `Identity.cpp` deliberately delegates to a
 separate external `Ed25519::verify` implementation whose `Ed25519.h` is absent
-from the pinned gitlink, and signed-advert dispatch, replay/timestamp policy, contact
-mutation, and duplicate suppression remain inside `Mesh`. Therefore
+from the pinned gitlink. Signed-advert receive/send ordering is now projected,
+but concrete replay/timestamp policy, contact/table/path mutation, packet-pool,
+queue, and dispatch execution remain inside `Mesh`/`Dispatcher`. Therefore
 `identity_signed_advert` stays pending under
 `BLK-WP04-IDENTITY-DISPATCH-20260713`, which pins `Identity.cpp` and
-`Dispatcher.cpp` and names the missing external verifier plus deterministic
-packet-manager, table, contact, replay, and clock fixtures. That blocker does
+`Dispatcher.cpp`/`Mesh.cpp` and names the missing external verifier plus
+concrete packet-manager, table, contact, encoded-path, queue, delay, clock, and
+dispatch fixtures. It also records the missing persisted-keypair consistency
+guard. That blocker does
 not prevent the strict-point or deterministic signed-packet slices or other independent oracle work;
 the new primitive must not be cited as upstream Identity parity or dispatch
 closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public/DM dispatch, delivery,
 session state, ACK correlation/delivery state, PATH dispatch/route selection,
-TRACE forwarding/path discovery, and login identity-signature plus concrete
-packet-creation, packet-pool, dispatch, and admin-runtime execution also remain
+TRACE forwarding/path discovery, and login request schema/tag handling plus
+concrete packet-pool, dispatch, and admin-runtime execution also remain
 pending, so
 both `wp04_closure_eligible` and `closure_ready` remain false. Expected-ACK
 derivation and the ACK-specific encrypted PATH body are now deterministic with
@@ -382,9 +419,12 @@ replay gating, and modeled record-field transitions are also pinned.
 Authenticated-request replay and bounded record/session transitions are now
 pinned. Authenticated-TEXT replay, session/handler/post ordering, creation
 outcomes, and stored-path dispatch selection are also pinned, including the
-absence of a retained CLI response. Request tags/types beyond keep-alive and
-concrete packet creation, packet-pool, dispatch, and admin-runtime execution
-still require identity signature handling plus deterministic runtime fixtures.
+absence of a retained CLI response. Login-response creation/dispatch ordering,
+encoded stored-path modes, exact delay constants, and allocation outcomes are
+also pinned, while transport-flood scope remains an explicit region-state
+dependency. Request tags/types beyond keep-alive and concrete packet-pool,
+dispatch, and admin-runtime execution still require deterministic runtime
+fixtures.
 These receipts describe missing
 oracle prerequisites; they are not evidence that those semantics ran.
 

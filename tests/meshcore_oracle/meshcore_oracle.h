@@ -34,6 +34,22 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_DISPATCH_NONE 0U
 #define D1L_MESHCORE_ORACLE_DISPATCH_DIRECT 1U
 #define D1L_MESHCORE_ORACLE_DISPATCH_FLOOD 2U
+#define D1L_MESHCORE_ORACLE_CREATION_NONE 0U
+#define D1L_MESHCORE_ORACLE_CREATION_DATAGRAM 1U
+#define D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN 2U
+#define D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE 0U
+#define D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED 1U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD 1U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD 2U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT 3U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP 4U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_LENGTH_REJECTED 1U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_POOL_EMPTY 2U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_INVALID_FLOOD_RETAINED 3U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_INVALID_DIRECT_RELEASED 4U
+#define D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED 5U
+#define D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_DELAY_MS 300U
+#define D1L_MESHCORE_ORACLE_ROOM_PUSH_DELAY_MS 2000U
 #define D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES 167U
 #define D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES 13U
 #define D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES 4U
@@ -135,6 +151,53 @@ typedef struct {
     uint8_t response_created;
     uint8_t response_dispatch_mode;
 } d1l_meshcore_oracle_authenticated_text_transition_t;
+
+typedef struct {
+    d1l_meshcore_oracle_login_acl_record_t record;
+    uint8_t response_ready;
+    uint8_t response_creation_attempted;
+    uint8_t response_creation_kind;
+    uint8_t response_secret_source;
+    uint8_t response_created;
+    uint8_t room_push_schedule_committed;
+    uint32_t room_push_delay_ms;
+    uint8_t dispatch_attempted;
+    uint8_t dispatch_mode;
+    uint8_t flood_transport_scope_required;
+    uint32_t dispatch_delay_ms;
+} d1l_meshcore_oracle_login_response_dispatch_transition_t;
+
+typedef struct {
+    uint8_t signature_check_invoked;
+    uint8_t signature_result_caller_supplied;
+    uint8_t upstream_identity_parity_proven;
+    uint8_t advert_callback_invoked;
+    uint8_t route_evaluated;
+    uint8_t path_append_eligible;
+    uint8_t retransmit_schedule_eligible;
+    uint8_t action_class;
+} d1l_meshcore_oracle_signed_advert_dispatch_transition_t;
+
+typedef struct {
+    uint8_t app_length_accepted;
+    uint8_t packet_allocation_attempted;
+    uint8_t event_full_signaled;
+    uint8_t packet_created;
+    uint8_t rtc_read;
+    uint8_t signature_created;
+    uint8_t signature_self_verified;
+    uint8_t keypair_consistency_proven;
+    uint8_t route_preparation_attempted;
+    uint8_t route_bits_written;
+    uint8_t transport_codes_written;
+    uint8_t path_copy_attempted;
+    uint8_t seen_marked;
+    uint8_t queue_scheduled;
+    uint8_t packet_released;
+    uint8_t caller_retains_packet;
+    uint8_t queue_priority;
+    uint8_t terminal_stage;
+} d1l_meshcore_oracle_signed_advert_send_transition_t;
 
 /*
  * Canonical field representation for upstream AdvertDataBuilder/Parser.
@@ -502,6 +565,90 @@ bool d1l_meshcore_oracle_apply_authenticated_text_transition(
     uint32_t current_time,
     const d1l_meshcore_oracle_login_acl_record_t *record,
     d1l_meshcore_oracle_authenticated_text_transition_t *out_transition);
+
+/*
+ * Deterministic login RESPONSE creation/dispatch projection after the bounded
+ * authorization, ACL/session transition and canonical 13-byte response schema
+ * stages above. Flood login requests attempt an authenticated PATH-return and
+ * flood it. Direct repeater login requests attempt a RESPONSE datagram but
+ * still flood it; direct room login requests use the retained encoded client
+ * out-path when valid and known and otherwise flood. Room commits its exact
+ * 2000 ms delayed-push schedule before packet creation, so allocation failure
+ * does not roll that state back. Successful packet creation selects the exact
+ * 300 ms response delay. Flood versus transport-flood scope depends on mutable
+ * region state absent from this boundary and is reported as required rather
+ * than inferred.
+ * Repeater creation uses the caller anonymous secret; room creation reads the
+ * retained client secret. The record itself is immutable in this stage.
+ *
+ * response_created is a caller-supplied packet-pool outcome. This function
+ * does not construct/hash/encrypt a packet, copy path bytes, schedule/execute
+ * dispatch, operate a packet pool or clock, mutate storage, or claim RF.
+ */
+bool d1l_meshcore_oracle_apply_login_response_dispatch_transition(
+    uint8_t server_advert_type,
+    uint8_t is_route_flood,
+    uint8_t response_ready,
+    size_t response_len,
+    uint8_t response_created,
+    const d1l_meshcore_oracle_login_acl_record_t *record,
+    d1l_meshcore_oracle_login_response_dispatch_transition_t *out_transition);
+
+/*
+ * Deterministic Mesh::onRecvPacket signed-ADVERT gate and route projection.
+ * It pins the exact source order after packet-envelope decode and the direct
+ * nonzero-path pre-switch branch: complete payload, self and duplicate gates;
+ * Identity::verify result; onAdvertRecv callback; then routeRecvPacket flood
+ * capacity/forward policy. Direct packets with a nonzero encoded path are
+ * rejected by this ABI because Mesh intercepts them before ADVERT verification
+ * and the forwarding decision needs additional table/identity state.
+ * A caller-supplied signature result is accepted only when the source would
+ * invoke Identity::verify. The result never claims upstream Identity parity,
+ * because the pinned Identity.cpp delegates to an external Ed25519.h absent
+ * from the pinned gitlink. That missing implementation remains fail-closed.
+ *
+ * The D1L boundary rejects app data beyond 32 bytes; pinned upstream receive
+ * truncates such input to 32 before verification. That stricter behavior is an
+ * explicit fail-closed D1L divergence, not an upstream-acceptance parity claim.
+ * This function does not execute Identity::verify, contact mutation, table
+ * lookup/mutation, path copying, clocks/RNG, packet queues, dispatch, or RF.
+ */
+bool d1l_meshcore_oracle_apply_signed_advert_dispatch_transition(
+    uint8_t is_route_flood,
+    uint8_t payload_complete,
+    uint8_t is_self,
+    uint8_t already_seen,
+    uint8_t signature_verified,
+    uint8_t do_not_retransmit,
+    uint8_t allow_forward,
+    size_t app_data_len,
+    uint8_t path_hash_size,
+    uint8_t path_hash_count,
+    d1l_meshcore_oracle_signed_advert_dispatch_transition_t *out_transition);
+
+/*
+ * Source-order projection around the already-covered deterministic
+ * Mesh::createAdvert bytes and Mesh send helpers. Oversize data is rejected
+ * before packet allocation; pool exhaustion sets ERR_EVENT_FULL before RTC,
+ * signing, or routing. A created advert reads RTC and invokes the pinned
+ * vendored signer exactly once, but neither upstream nor D1L self-verifies the
+ * result or proves persisted public/private-key consistency. Invalid flood
+ * hash size retains caller ownership without route mutation. Direct send writes
+ * route state, copies the encoded path and marks seen before Dispatcher rejects
+ * an invalid encoded path and releases it. Valid flood/transport-flood adverts
+ * queue at priority 3; direct and zero-hop adverts queue at priority 0.
+ *
+ * This is an orchestration/ownership projection only. It does not allocate a
+ * real packet, read clocks, sign, copy path bytes, mutate tables, calculate
+ * delays, queue, transmit, or claim external Identity::verify parity or RF.
+ */
+bool d1l_meshcore_oracle_apply_signed_advert_send_transition(
+    size_t app_data_len,
+    uint8_t packet_pool_available,
+    uint8_t send_mode,
+    uint8_t path_hash_size,
+    uint8_t direct_encoded_path_len,
+    d1l_meshcore_oracle_signed_advert_send_transition_t *out_transition);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash

@@ -52,6 +52,12 @@ constexpr std::size_t kAuthenticatedRequestReplayValidVectors = 15U;
 constexpr std::size_t kAuthenticatedRequestReplayInvalidVectors = 12U;
 constexpr std::size_t kAuthenticatedTextTransitionValidVectors = 20U;
 constexpr std::size_t kAuthenticatedTextTransitionInvalidVectors = 17U;
+constexpr std::size_t kLoginResponseDispatchValidVectors = 17U;
+constexpr std::size_t kLoginResponseDispatchInvalidVectors = 14U;
+constexpr std::size_t kSignedAdvertDispatchValidVectors = 12U;
+constexpr std::size_t kSignedAdvertDispatchInvalidVectors = 19U;
+constexpr std::size_t kSignedAdvertSendValidVectors = 16U;
+constexpr std::size_t kSignedAdvertSendInvalidVectors = 9U;
 constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
@@ -4166,7 +4172,7 @@ int main()
         D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 4U, 0U, 11U,
         &text_record, &rejected_text_transition);
     LoginAclRecord invalid_path_text_record = text_record;
-    invalid_path_text_record.out_path_len = 65U;
+    invalid_path_text_record.out_path_len = 0x61U;
     expect_authenticated_text_transition_reject(
         "invalid retained out path", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
         D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 0U, 0U, 11U,
@@ -4203,6 +4209,646 @@ int main()
         kAuthenticatedTextTransitionInvalidVectors) {
         failures.push_back(
             "authenticated text transition invalid vector count drifted");
+    }
+
+    using LoginResponseDispatchTransition =
+        d1l_meshcore_oracle_login_response_dispatch_transition_t;
+    size_t login_response_dispatch_valid_count = 0U;
+    auto expect_login_response_dispatch =
+        [&failures, &login_acl_record_matches,
+         &login_response_dispatch_valid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            uint8_t response_ready, size_t response_len,
+            uint8_t response_created, const LoginAclRecord &input,
+            uint8_t response_creation_attempted,
+            uint8_t response_creation_kind, uint8_t response_secret_source,
+            uint8_t room_push_schedule_committed,
+            uint8_t dispatch_attempted, uint8_t dispatch_mode) {
+            LoginResponseDispatchTransition transition{};
+            ++login_response_dispatch_valid_count;
+            if (!d1l_meshcore_oracle_apply_login_response_dispatch_transition(
+                    server_type, is_route_flood, response_ready, response_len,
+                    response_created, &input, &transition) ||
+                !login_acl_record_matches(transition.record, input) ||
+                transition.response_ready != response_ready ||
+                transition.response_creation_attempted !=
+                    response_creation_attempted ||
+                transition.response_creation_kind != response_creation_kind ||
+                transition.response_secret_source != response_secret_source ||
+                transition.response_created != response_created ||
+                transition.room_push_schedule_committed !=
+                    room_push_schedule_committed ||
+                transition.room_push_delay_ms !=
+                    (room_push_schedule_committed == 1U
+                         ? D1L_MESHCORE_ORACLE_ROOM_PUSH_DELAY_MS
+                         : 0U) ||
+                transition.dispatch_attempted != dispatch_attempted ||
+                transition.dispatch_mode != dispatch_mode ||
+                transition.flood_transport_scope_required !=
+                    (dispatch_mode == D1L_MESHCORE_ORACLE_DISPATCH_FLOOD
+                         ? 1U
+                         : 0U) ||
+                transition.dispatch_delay_ms !=
+                    (dispatch_attempted == 1U
+                         ? D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_DELAY_MS
+                         : 0U)) {
+                failures.push_back(std::string(name) +
+                                   " login response dispatch changed");
+            }
+        };
+    LoginAclRecord login_dispatch_record = make_login_acl_record(
+        0x61U, 0xA3U, 3U, 0x66U, 11U, 21U, 31U, 41U, 5U);
+    expect_login_response_dispatch(
+        "repeater response not ready", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 0U, 0U, 0U, login_dispatch_record, 0U,
+        D1L_MESHCORE_ORACLE_CREATION_NONE,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_login_response_dispatch(
+        "repeater flood PATH response", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        1U, 1U, D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+    expect_login_response_dispatch(
+        "repeater flood allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_login_response_dispatch(
+        "repeater direct login response still floods",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+    expect_login_response_dispatch(
+        "repeater direct allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    login_dispatch_record.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
+    expect_login_response_dispatch(
+        "repeater direct unknown path response floods",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+
+    login_dispatch_record.out_path_len = 3U;
+    expect_login_response_dispatch(
+        "room flood PATH response", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+    expect_login_response_dispatch(
+        "room push schedule survives PATH allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    login_dispatch_record.out_path_len = 0x00U;
+    expect_login_response_dispatch(
+        "room direct zero-hop encoded path response",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        1U, D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_DIRECT);
+    login_dispatch_record.out_path_len = 0x3FU;
+    expect_login_response_dispatch(
+        "room direct one-byte maximum allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    for (const auto &encoded_path_case :
+         std::array<std::pair<uint8_t, const char *>, 4U>{
+             std::pair<uint8_t, const char *>{
+                 0x40U, "room direct empty two-byte encoded path"},
+             std::pair<uint8_t, const char *>{
+                 0x60U, "room direct maximum two-byte encoded path"},
+             std::pair<uint8_t, const char *>{
+                 0x80U, "room direct empty three-byte encoded path"},
+             std::pair<uint8_t, const char *>{
+                 0x95U, "room direct maximum three-byte encoded path"}}) {
+        login_dispatch_record.out_path_len = encoded_path_case.first;
+        expect_login_response_dispatch(
+            encoded_path_case.second, D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+            D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+            login_dispatch_record, 1U,
+            D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+            D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 1U,
+            D1L_MESHCORE_ORACLE_DISPATCH_DIRECT);
+    }
+    login_dispatch_record.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
+    expect_login_response_dispatch(
+        "room direct unknown path response floods",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+    expect_login_response_dispatch(
+        "room direct unknown path allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_login_response_dispatch(
+        "room response not ready does not schedule push",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U, 0U, 0U,
+        login_dispatch_record, 0U, D1L_MESHCORE_ORACLE_CREATION_NONE,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    if (login_response_dispatch_valid_count !=
+        kLoginResponseDispatchValidVectors) {
+        failures.push_back(
+            "login response dispatch valid vector count drifted");
+    }
+
+    size_t login_response_dispatch_invalid_count = 0U;
+    auto expect_login_response_dispatch_reject =
+        [&failures, &login_response_dispatch_invalid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            uint8_t response_ready, size_t response_len,
+            uint8_t response_created, const LoginAclRecord *input,
+            LoginResponseDispatchTransition *output) {
+            LoginResponseDispatchTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++login_response_dispatch_invalid_count;
+            if (d1l_meshcore_oracle_apply_login_response_dispatch_transition(
+                    server_type, is_route_flood, response_ready, response_len,
+                    response_created, input, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " login dispatch reject changed output");
+            }
+        };
+    LoginResponseDispatchTransition rejected_login_dispatch{};
+    login_dispatch_record.out_path_len = 3U;
+    expect_login_response_dispatch_reject(
+        "none login dispatch server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U, 0U,
+        0U, 0U, &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "chat login dispatch server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U, 0U,
+        0U, 0U, &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "sensor login dispatch server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U,
+        0U, 0U, 0U, &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "noncanonical login route", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 2U,
+        0U, 0U, 0U, &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "noncanonical response readiness",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 2U, 0U, 0U,
+        &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "noncanonical response creation",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 2U,
+        &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "short ready response", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES - 1U, 0U,
+        &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "length on absent response", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0U, D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "creation on absent response", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0U, 0U, 1U, &login_dispatch_record, &rejected_login_dispatch);
+    LoginAclRecord invalid_login_dispatch_record = login_dispatch_record;
+    invalid_login_dispatch_record.out_path_len = 0x61U;
+    expect_login_response_dispatch_reject(
+        "oversize two-byte login retained path",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U, 0U, 0U,
+        &invalid_login_dispatch_record, &rejected_login_dispatch);
+    invalid_login_dispatch_record.out_path_len = 0x96U;
+    expect_login_response_dispatch_reject(
+        "oversize three-byte login retained path",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U, 0U, 0U,
+        &invalid_login_dispatch_record, &rejected_login_dispatch);
+    invalid_login_dispatch_record.out_path_len = 0xC0U;
+    expect_login_response_dispatch_reject(
+        "reserved four-byte login retained path",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U, 0U, 0U,
+        &invalid_login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "null login dispatch record", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U,
+        0U, 0U, nullptr, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "null login dispatch output", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U,
+        0U, 0U, &login_dispatch_record, nullptr);
+    if (login_response_dispatch_invalid_count !=
+        kLoginResponseDispatchInvalidVectors) {
+        failures.push_back(
+            "login response dispatch invalid vector count drifted");
+    }
+
+    using SignedAdvertDispatchTransition =
+        d1l_meshcore_oracle_signed_advert_dispatch_transition_t;
+    size_t signed_advert_dispatch_valid_count = 0U;
+    auto expect_signed_advert_dispatch =
+        [&failures, &signed_advert_dispatch_valid_count](
+            const char *name, uint8_t is_route_flood,
+            uint8_t payload_complete, uint8_t is_self, uint8_t already_seen,
+            uint8_t signature_verified, uint8_t do_not_retransmit,
+            uint8_t allow_forward, size_t app_data_len,
+            uint8_t path_hash_size, uint8_t path_hash_count,
+            uint8_t signature_check_invoked,
+            uint8_t signature_result_caller_supplied,
+            uint8_t advert_callback_invoked, uint8_t route_evaluated,
+            uint8_t path_append_eligible,
+            uint8_t retransmit_schedule_eligible, uint8_t action_class) {
+            SignedAdvertDispatchTransition transition{};
+            ++signed_advert_dispatch_valid_count;
+            if (!d1l_meshcore_oracle_apply_signed_advert_dispatch_transition(
+                    is_route_flood, payload_complete, is_self, already_seen,
+                    signature_verified, do_not_retransmit, allow_forward,
+                    app_data_len, path_hash_size, path_hash_count,
+                    &transition) ||
+                transition.signature_check_invoked !=
+                    signature_check_invoked ||
+                transition.signature_result_caller_supplied !=
+                    signature_result_caller_supplied ||
+                transition.upstream_identity_parity_proven != 0U ||
+                transition.advert_callback_invoked !=
+                    advert_callback_invoked ||
+                transition.route_evaluated != route_evaluated ||
+                transition.path_append_eligible != path_append_eligible ||
+                transition.retransmit_schedule_eligible !=
+                    retransmit_schedule_eligible ||
+                transition.action_class != action_class) {
+                failures.push_back(std::string(name) +
+                                   " signed advert dispatch changed");
+            }
+        };
+    expect_signed_advert_dispatch(
+        "valid flood advert schedules retransmit", 1U, 1U, 0U, 0U, 1U,
+        0U, 1U, 0U, 1U, 0U, 1U, 1U, 1U, 1U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
+    expect_signed_advert_dispatch(
+        "maximum app data and three-byte path fits", 1U, 1U, 0U, 0U, 1U,
+        0U, 1U, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES, 3U, 20U, 1U, 1U,
+        1U, 1U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
+    expect_signed_advert_dispatch(
+        "full three-byte path releases", 1U, 1U, 0U, 0U, 1U, 0U, 1U, 1U,
+        3U, 21U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "forward policy rejection releases", 1U, 1U, 0U, 0U, 1U, 0U,
+        0U, 1U, 1U, 0U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "do-not-retransmit advert releases", 1U, 1U, 0U, 0U, 1U, 1U,
+        1U, 1U, 1U, 0U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "direct advert invokes callback then releases", 0U, 1U, 0U, 0U,
+        1U, 0U, 1U, 1U, 1U, 0U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "invalid signature blocks callback", 1U, 1U, 0U, 0U, 0U, 0U,
+        1U, 1U, 1U, 0U, 1U, 1U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "self advert skips signature", 1U, 1U, 1U, 0U, 0U, 0U, 1U, 1U,
+        1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "seen advert skips signature", 1U, 1U, 0U, 1U, 0U, 0U, 1U, 1U,
+        1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "incomplete advert skips signature", 1U, 0U, 0U, 0U, 0U, 0U,
+        1U, 0U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "two-byte maximum appended path fits", 1U, 1U, 0U, 0U, 1U, 0U,
+        1U, 1U, 2U, 31U, 1U, 1U, 1U, 1U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
+    expect_signed_advert_dispatch(
+        "one-byte maximum appended path fits", 1U, 1U, 0U, 0U, 1U, 0U,
+        1U, 1U, 1U, 63U, 1U, 1U, 1U, 1U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
+    if (signed_advert_dispatch_valid_count !=
+        kSignedAdvertDispatchValidVectors) {
+        failures.push_back(
+            "signed advert dispatch valid vector count drifted");
+    }
+
+    size_t signed_advert_dispatch_invalid_count = 0U;
+    auto expect_signed_advert_dispatch_reject =
+        [&failures, &signed_advert_dispatch_invalid_count](
+            const char *name, uint8_t is_route_flood,
+            uint8_t payload_complete, uint8_t is_self, uint8_t already_seen,
+            uint8_t signature_verified, uint8_t do_not_retransmit,
+            uint8_t allow_forward, size_t app_data_len,
+            uint8_t path_hash_size, uint8_t path_hash_count,
+            SignedAdvertDispatchTransition *output) {
+            SignedAdvertDispatchTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++signed_advert_dispatch_invalid_count;
+            if (d1l_meshcore_oracle_apply_signed_advert_dispatch_transition(
+                    is_route_flood, payload_complete, is_self, already_seen,
+                    signature_verified, do_not_retransmit, allow_forward,
+                    app_data_len, path_hash_size, path_hash_count, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " advert dispatch reject changed output");
+            }
+        };
+    SignedAdvertDispatchTransition rejected_advert_dispatch{};
+    expect_signed_advert_dispatch_reject(
+        "noncanonical advert route", 2U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 1U,
+        0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical payload completeness", 1U, 2U, 0U, 0U, 0U, 0U, 0U,
+        0U, 1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical self flag", 1U, 1U, 2U, 0U, 0U, 0U, 0U, 0U, 1U,
+        0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical seen flag", 1U, 1U, 0U, 2U, 0U, 0U, 0U, 0U, 1U,
+        0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical signature result", 1U, 1U, 0U, 0U, 2U, 0U, 0U, 0U,
+        1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical do-not-retransmit", 1U, 1U, 0U, 0U, 0U, 2U, 0U,
+        0U, 1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical forward policy", 1U, 1U, 0U, 0U, 0U, 0U, 2U, 0U,
+        1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "overlong advert app data", 1U, 1U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U, 1U, 0U,
+        &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "zero advert path hash size", 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U,
+        0U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "reserved four-byte advert path hash", 1U, 1U, 0U, 0U, 0U, 0U,
+        0U, 0U, 4U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "overwide advert path hash", 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U,
+        5U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "oversize two-byte advert path", 1U, 1U, 0U, 0U, 0U, 0U, 0U,
+        0U, 2U, 33U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "oversize three-byte advert path", 1U, 1U, 0U, 0U, 0U, 0U, 0U,
+        0U, 3U, 22U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "overcount advert path", 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 1U,
+        64U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "direct nonzero path intercepted before advert switch", 0U, 1U,
+        0U, 0U, 0U, 0U, 0U, 0U, 1U, 1U,
+        &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "null advert dispatch output", 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U,
+        1U, 0U, nullptr);
+    expect_signed_advert_dispatch_reject(
+        "signature result on incomplete advert", 1U, 0U, 0U, 0U, 1U, 0U,
+        0U, 0U, 1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "signature result on self advert", 1U, 1U, 1U, 0U, 1U, 0U, 0U,
+        0U, 1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "signature result on seen advert", 1U, 1U, 0U, 1U, 1U, 0U, 0U,
+        0U, 1U, 0U, &rejected_advert_dispatch);
+    if (signed_advert_dispatch_invalid_count !=
+        kSignedAdvertDispatchInvalidVectors) {
+        failures.push_back(
+            "signed advert dispatch invalid vector count drifted");
+    }
+
+    using SignedAdvertSendTransition =
+        d1l_meshcore_oracle_signed_advert_send_transition_t;
+    size_t signed_advert_send_valid_count = 0U;
+    auto expect_signed_advert_send =
+        [&failures, &signed_advert_send_valid_count](
+            const char *name, size_t app_data_len,
+            uint8_t packet_pool_available, uint8_t send_mode,
+            uint8_t path_hash_size, uint8_t direct_encoded_path_len,
+            const SignedAdvertSendTransition &expected) {
+            SignedAdvertSendTransition transition{};
+            ++signed_advert_send_valid_count;
+            if (!d1l_meshcore_oracle_apply_signed_advert_send_transition(
+                    app_data_len, packet_pool_available, send_mode,
+                    path_hash_size, direct_encoded_path_len, &transition) ||
+                std::memcmp(&transition, &expected, sizeof(transition)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " signed advert send changed");
+            }
+        };
+    SignedAdvertSendTransition advert_send_expected{};
+    advert_send_expected.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_LENGTH_REJECTED;
+    expect_signed_advert_send(
+        "oversize advert rejects before allocation",
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 0U,
+        advert_send_expected);
+
+    advert_send_expected = {};
+    advert_send_expected.app_length_accepted = 1U;
+    advert_send_expected.packet_allocation_attempted = 1U;
+    advert_send_expected.event_full_signaled = 1U;
+    advert_send_expected.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_POOL_EMPTY;
+    expect_signed_advert_send(
+        "packet pool empty stops before rtc and signature", 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 0U,
+        advert_send_expected);
+
+    SignedAdvertSendTransition created_advert_send{};
+    created_advert_send.app_length_accepted = 1U;
+    created_advert_send.packet_allocation_attempted = 1U;
+    created_advert_send.packet_created = 1U;
+    created_advert_send.rtc_read = 1U;
+    created_advert_send.signature_created = 1U;
+    created_advert_send.route_preparation_attempted = 1U;
+
+    advert_send_expected = created_advert_send;
+    advert_send_expected.route_bits_written = 1U;
+    advert_send_expected.seen_marked = 1U;
+    advert_send_expected.queue_scheduled = 1U;
+    advert_send_expected.queue_priority = 3U;
+    advert_send_expected.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED;
+    expect_signed_advert_send(
+        "empty advert flood size one queues priority three", 0U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 0U,
+        advert_send_expected);
+    expect_signed_advert_send(
+        "maximum advert flood size three queues priority three",
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 3U, 0U,
+        advert_send_expected);
+
+    advert_send_expected.transport_codes_written = 1U;
+    expect_signed_advert_send(
+        "transport flood size one writes codes before queue", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD, 1U, 0U,
+        advert_send_expected);
+    expect_signed_advert_send(
+        "transport flood size three writes codes before queue", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD, 3U, 0U,
+        advert_send_expected);
+
+    advert_send_expected = created_advert_send;
+    advert_send_expected.caller_retains_packet = 1U;
+    advert_send_expected.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_INVALID_FLOOD_RETAINED;
+    expect_signed_advert_send(
+        "invalid zero flood hash retains caller packet", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 0U, 0U,
+        advert_send_expected);
+    expect_signed_advert_send(
+        "invalid four-byte flood hash retains caller packet", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 4U, 0U,
+        advert_send_expected);
+
+    SignedAdvertSendTransition direct_advert_send = created_advert_send;
+    direct_advert_send.route_bits_written = 1U;
+    direct_advert_send.path_copy_attempted = 1U;
+    direct_advert_send.seen_marked = 1U;
+    direct_advert_send.queue_scheduled = 1U;
+    direct_advert_send.queue_priority = 0U;
+    direct_advert_send.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED;
+    expect_signed_advert_send(
+        "direct one-byte maximum encoded path queues", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 0U, 0x3FU,
+        direct_advert_send);
+    expect_signed_advert_send(
+        "direct two-byte maximum encoded path queues", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 0U, 0x60U,
+        direct_advert_send);
+    expect_signed_advert_send(
+        "direct three-byte maximum encoded path queues", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 0U, 0x95U,
+        direct_advert_send);
+
+    SignedAdvertSendTransition invalid_direct_advert_send =
+        created_advert_send;
+    invalid_direct_advert_send.route_bits_written = 1U;
+    invalid_direct_advert_send.path_copy_attempted = 1U;
+    invalid_direct_advert_send.seen_marked = 1U;
+    invalid_direct_advert_send.packet_released = 1U;
+    invalid_direct_advert_send.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_INVALID_DIRECT_RELEASED;
+    for (const auto &invalid_direct_path :
+         std::array<std::pair<uint8_t, const char *>, 4U>{
+             std::pair<uint8_t, const char *>{
+                 0x61U, "invalid two-byte direct path releases"},
+             std::pair<uint8_t, const char *>{
+                 0x96U, "invalid three-byte direct path releases"},
+             std::pair<uint8_t, const char *>{
+                 0xC0U, "reserved four-byte direct path releases"},
+             std::pair<uint8_t, const char *>{
+                 0xFFU, "reserved maximum direct path releases"}}) {
+        expect_signed_advert_send(
+            invalid_direct_path.second, 1U, 1U,
+            D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 0U,
+            invalid_direct_path.first, invalid_direct_advert_send);
+    }
+
+    SignedAdvertSendTransition zero_hop_advert_send = created_advert_send;
+    zero_hop_advert_send.route_bits_written = 1U;
+    zero_hop_advert_send.seen_marked = 1U;
+    zero_hop_advert_send.queue_scheduled = 1U;
+    zero_hop_advert_send.queue_priority = 0U;
+    zero_hop_advert_send.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED;
+    expect_signed_advert_send(
+        "zero-hop advert queues priority zero", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP, 0U, 0U,
+        zero_hop_advert_send);
+    if (signed_advert_send_valid_count != kSignedAdvertSendValidVectors) {
+        failures.push_back("signed advert send valid vector count drifted");
+    }
+
+    size_t signed_advert_send_invalid_count = 0U;
+    auto expect_signed_advert_send_reject =
+        [&failures, &signed_advert_send_invalid_count](
+            const char *name, uint8_t packet_pool_available,
+            uint8_t send_mode, uint8_t path_hash_size,
+            uint8_t direct_encoded_path_len,
+            SignedAdvertSendTransition *output) {
+            SignedAdvertSendTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++signed_advert_send_invalid_count;
+            if (d1l_meshcore_oracle_apply_signed_advert_send_transition(
+                    1U, packet_pool_available, send_mode, path_hash_size,
+                    direct_encoded_path_len, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " advert send reject changed output");
+            }
+        };
+    SignedAdvertSendTransition rejected_advert_send{};
+    expect_signed_advert_send_reject(
+        "noncanonical packet pool result", 2U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "zero advert send mode", 1U, 0U, 0U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "unknown advert send mode", 1U, 5U, 0U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "flood with direct path input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 1U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "transport flood with direct path input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD, 1U, 1U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "direct with flood hash input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 1U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "zero-hop with flood hash input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP, 1U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "zero-hop with direct path input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP, 0U, 1U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "null advert send output", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP, 0U, 0U, nullptr);
+    if (signed_advert_send_invalid_count != kSignedAdvertSendInvalidVectors) {
+        failures.push_back("signed advert send invalid vector count drifted");
     }
 
     constexpr uint8_t dm_destination_hash = 0xA1U;
@@ -6337,7 +6983,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures\""
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures_and_login_response_creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -6362,6 +7008,9 @@ int main()
                    kLoginAclTransitionValidVectors +
                    kAuthenticatedRequestReplayValidVectors +
                    kAuthenticatedTextTransitionValidVectors +
+                   kLoginResponseDispatchValidVectors +
+                   kSignedAdvertDispatchValidVectors +
+                   kSignedAdvertSendValidVectors +
                    kExpectedAckValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
@@ -6377,6 +7026,9 @@ int main()
                    kLoginAclTransitionInvalidVectors +
                    kAuthenticatedRequestReplayInvalidVectors +
                    kAuthenticatedTextTransitionInvalidVectors +
+                   kLoginResponseDispatchInvalidVectors +
+                   kSignedAdvertDispatchInvalidVectors +
+                   kSignedAdvertSendInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
                   kPathReturnInvalidVectors +
@@ -6409,6 +7061,12 @@ int main()
                     kAuthenticatedRequestReplayInvalidVectors +
                     kAuthenticatedTextTransitionValidVectors +
                     kAuthenticatedTextTransitionInvalidVectors +
+                    kLoginResponseDispatchValidVectors +
+                    kLoginResponseDispatchInvalidVectors +
+                    kSignedAdvertDispatchValidVectors +
+                    kSignedAdvertDispatchInvalidVectors +
+                    kSignedAdvertSendValidVectors +
+                    kSignedAdvertSendInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -6447,6 +7105,12 @@ int main()
                     kAuthenticatedRequestReplayInvalidVectors +
                     kAuthenticatedTextTransitionValidVectors +
                     kAuthenticatedTextTransitionInvalidVectors +
+                    kLoginResponseDispatchValidVectors +
+                    kLoginResponseDispatchInvalidVectors +
+                    kSignedAdvertDispatchValidVectors +
+                    kSignedAdvertDispatchInvalidVectors +
+                    kSignedAdvertSendValidVectors +
+                    kSignedAdvertSendInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -6590,6 +7254,33 @@ int main()
                << (kAuthenticatedTextTransitionValidVectors +
                    kAuthenticatedTextTransitionInvalidVectors)
                << "}"
+               << ",\"login_response_creation_dispatch_orchestration_fixtures\":{\"valid\":"
+               << kLoginResponseDispatchValidVectors << ",\"invalid\":"
+               << kLoginResponseDispatchInvalidVectors << ",\"semantic\":"
+               << (kLoginResponseDispatchValidVectors +
+                   kLoginResponseDispatchInvalidVectors)
+               << ",\"total\":"
+               << (kLoginResponseDispatchValidVectors +
+                   kLoginResponseDispatchInvalidVectors)
+               << "}"
+               << ",\"signed_advert_dispatch_transition_fixtures\":{\"valid\":"
+               << kSignedAdvertDispatchValidVectors << ",\"invalid\":"
+               << kSignedAdvertDispatchInvalidVectors << ",\"semantic\":"
+               << (kSignedAdvertDispatchValidVectors +
+                   kSignedAdvertDispatchInvalidVectors)
+               << ",\"total\":"
+               << (kSignedAdvertDispatchValidVectors +
+                   kSignedAdvertDispatchInvalidVectors)
+               << "}"
+               << ",\"signed_advert_creation_send_orchestration_fixtures\":{\"valid\":"
+               << kSignedAdvertSendValidVectors << ",\"invalid\":"
+               << kSignedAdvertSendInvalidVectors << ",\"semantic\":"
+               << (kSignedAdvertSendValidVectors +
+                   kSignedAdvertSendInvalidVectors)
+               << ",\"total\":"
+               << (kSignedAdvertSendValidVectors +
+                   kSignedAdvertSendInvalidVectors)
+               << "}"
               << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
               << kDmRoundtripVectors << ",\"invalid\":"
               << kDmInvalidVectors << ",\"semantic\":"
@@ -6646,6 +7337,9 @@ int main()
                 << ",\"authorized_login_acl_transition_fixtures\":true"
                 << ",\"authenticated_request_replay_transition_fixtures\":true"
                 << ",\"authenticated_text_replay_response_session_fixtures\":true"
+                << ",\"login_response_creation_dispatch_orchestration_fixtures\":true"
+                << ",\"signed_advert_dispatch_transition_fixtures\":true"
+                << ",\"signed_advert_creation_send_orchestration_fixtures\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"path_return_route_codes\":true"
