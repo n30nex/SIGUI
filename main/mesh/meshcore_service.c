@@ -20,6 +20,8 @@
 #include "mesh/dm_store.h"
 #include "mesh/ed25519_canonical.h"
 #include "mesh/meshcore_ack_dispatch.h"
+#include "mesh/meshcore_dm_retry.h"
+#include "mesh/meshcore_path_dispatch.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_runtime_guard.h"
 #include "mesh/meshcore_route_selection.h"
@@ -49,6 +51,7 @@
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 0x01U
 #define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
 #define D1L_MESHCORE_TXT_TYPE_PLAIN 0U
+#define D1L_MESHCORE_REQUEST_TYPE 0x00U
 #define D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS 30000U
 #define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 8192U
 #define D1L_MESHCORE_SERVICE_QUEUE_LEN 6U
@@ -60,6 +63,8 @@
 #define D1L_MESHCORE_TX_WATCHDOG_GRACE_MS 250U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
 #define D1L_MESHCORE_DM_COMMAND_TIMEOUT_MS 5000U
+#define D1L_MESHCORE_PATH_RESPONSE_TIMEOUT_MS 60000U
+#define D1L_MESHCORE_RECIPROCAL_PATH_DELAY_MS 500U
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ chars");
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
@@ -132,6 +137,8 @@ typedef struct {
     uint8_t raw_len;
     bool path_probe;
     bool ack_persistence_pending;
+    bool flood_retry_consumed;
+    d1l_meshcore_dm_ack_deadline_t ack_deadline;
 } d1l_pending_dm_tx_t;
 
 static d1l_pending_dm_tx_t s_pending_dm_tx;
@@ -160,13 +167,17 @@ typedef struct {
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
     uint8_t path_len;
     uint8_t path[D1L_MESHCORE_MAX_PATH_BYTES];
-    uint32_t learned_at_ms;
+    uint32_t generation;
     bool valid;
 } d1l_boot_route_t;
 
 static d1l_boot_route_t s_boot_routes[D1L_CONTACT_STORE_CAPACITY];
 static uint8_t s_boot_route_next;
 static d1l_store_lock_t s_boot_route_lock = D1L_STORE_LOCK_INITIALIZER;
+static d1l_meshcore_path_response_expectation_t s_path_response_expectation;
+static char s_path_response_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static d1l_store_lock_t s_path_response_lock = D1L_STORE_LOCK_INITIALIZER;
+static d1l_meshcore_path_replay_cache_t s_path_replay_cache;
 extern SX126x_t SX126x;
 
 typedef enum {
@@ -244,7 +255,11 @@ static esp_err_t meshcore_service_send_ack_async(
     const d1l_meshcore_ack_dispatch_plan_t *plan,
     const uint8_t *raw,
     uint8_t raw_len);
+static esp_err_t meshcore_service_queue_raw_response(
+    const uint8_t *raw, uint8_t raw_len, uint16_t delay_ms);
 static void finalize_pending_dm_radio_result(bool sent, esp_err_t error);
+static esp_err_t retry_pending_dm_as_flood(uint64_t now_us);
+static void fail_pending_dm_ack_timeout(esp_err_t error);
 
 static bool meshcore_request_slots_init(void)
 {
@@ -995,6 +1010,37 @@ static esp_err_t transition_pending_dm_tx(
     return ret;
 }
 
+static esp_err_t transition_pending_dm_retry(uint32_t retry_ack_hash)
+{
+    if (!s_pending_dm_tx.delivery.active ||
+        s_pending_dm_tx.delivery.state != D1L_DM_DELIVERY_RETRY_WAIT) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const uint64_t session_id = s_pending_dm_tx.delivery.session_id;
+    const uint32_t expected_revision = s_pending_dm_tx.delivery.revision;
+    d1l_dm_delivery_transition_outcome_t outcome = {0};
+    const esp_err_t ret = d1l_dm_store_transition_delivery_retry(
+        session_id, expected_revision, retry_ack_hash, &outcome);
+    if (!outcome.changed ||
+        !d1l_dm_delivery_owner_apply(
+            &s_pending_dm_tx.delivery, outcome.delivery_session_id,
+            expected_revision, outcome.current_state,
+            outcome.delivery_revision)) {
+        record_dm_delivery_status(
+            session_id, expected_revision,
+            s_pending_dm_tx.delivery.state,
+            ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret);
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    s_pending_dm_tx.delivery.ack_hash = outcome.ack_hash;
+    s_pending_dm_tx.ack_hash = outcome.ack_hash;
+    s_pending_dm_tx.attempt = outcome.attempt;
+    record_dm_delivery_status(
+        session_id, outcome.delivery_revision, outcome.current_state, ret);
+    return ret;
+}
+
 static void reconcile_pending_dm_ack_persistence(void)
 {
     d1l_dm_delivery_owner_t *owner = &s_pending_dm_tx.delivery;
@@ -1111,11 +1157,12 @@ static void clear_boot_routes(void)
 }
 
 static void remember_boot_route(const char *fingerprint,
-                                const uint8_t *path,
-                                uint8_t path_len,
-                                uint32_t learned_at_ms)
+                                 const uint8_t *path,
+                                 uint8_t path_len,
+                                 uint32_t generation)
 {
     if (!fingerprint || fingerprint[0] == '\0' ||
+        generation == 0U ||
         !d1l_meshcore_wire_path_len_valid(path_len)) {
         return;
     }
@@ -1150,17 +1197,17 @@ static void remember_boot_route(const char *fingerprint,
     if (path_bytes > 0U) {
         memcpy(record->path, path, path_bytes);
     }
-    record->learned_at_ms = learned_at_ms;
+    record->generation = generation;
     record->valid = true;
     d1l_store_lock_give(&s_boot_route_lock);
 }
 
 static bool lookup_boot_route(const char *fingerprint,
-                              const uint8_t *path,
-                              uint8_t path_len,
-                              uint32_t *out_learned_at_ms)
+                               const uint8_t *path,
+                               uint8_t path_len,
+                               uint32_t generation)
 {
-    if (!fingerprint || fingerprint[0] == '\0' || !out_learned_at_ms ||
+    if (!fingerprint || fingerprint[0] == '\0' || generation == 0U ||
         !d1l_meshcore_wire_path_len_valid(path_len)) {
         return false;
     }
@@ -1174,11 +1221,11 @@ static bool lookup_boot_route(const char *fingerprint,
     for (size_t i = 0U; i < D1L_CONTACT_STORE_CAPACITY; ++i) {
         const d1l_boot_route_t *record = &s_boot_routes[i];
         if (record->valid && record->path_len == path_len &&
+            record->generation == generation &&
             strncmp(record->fingerprint, fingerprint,
                     sizeof(record->fingerprint)) == 0 &&
             (path_bytes == 0U ||
              memcmp(record->path, path, path_bytes) == 0)) {
-            *out_learned_at_ms = record->learned_at_ms;
             found = true;
             break;
         }
@@ -1211,11 +1258,52 @@ static void record_dm_route_selection(
     case D1L_MESHCORE_ROUTE_SELECTION_FLOOD_MALFORMED_PATH:
         s_status.dm_route_malformed_fallback++;
         break;
+    case D1L_MESHCORE_ROUTE_SELECTION_FLOOD_EXPIRED_PATH:
+        s_status.dm_route_expired_fallback++;
+        break;
+    case D1L_MESHCORE_ROUTE_SELECTION_FLOOD_FAILED_PATH:
+        s_status.dm_route_failed_fallback++;
+        break;
+    case D1L_MESHCORE_ROUTE_SELECTION_FLOOD_DIRECT_RETRY:
+        s_status.dm_route_direct_retry_fallback++;
+        break;
     default:
         break;
     }
     s_status.dm_route_last_reason = (uint8_t)selection->reason;
     s_status.dm_route_last_path_age_ms = selection->path_age_ms;
+}
+
+static void record_pending_direct_path_result(bool success)
+{
+    if (!s_pending_dm_tx.delivery.active ||
+        s_pending_dm_tx.selection.route != D1L_MESHCORE_ROUTE_DIRECT ||
+        s_pending_dm_tx.selection.path_generation == 0U) {
+        return;
+    }
+
+    /* This runs only in the sole runtime owner after a callback has been
+     * copied into the event queue. The call updates one in-RAM record; the
+     * retained worker owns all serialization and NVS I/O. */
+    d1l_contact_entry_t contact = {0};
+    d1l_meshcore_path_result_t result = D1L_MESHCORE_PATH_RESULT_STALE;
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    const esp_err_t ret = d1l_contact_store_note_path_result(
+        s_pending_dm_tx.fingerprint,
+        s_pending_dm_tx.selection.path_generation, success, now_ms,
+        &contact, &result);
+    if (ret == ESP_ERR_INVALID_STATE &&
+        result == D1L_MESHCORE_PATH_RESULT_STALE) {
+        return;
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "direct path result update failed: %s",
+                 esp_err_to_name(ret));
+        return;
+    }
+    if (result == D1L_MESHCORE_PATH_RESULT_FLOOD_FALLBACK) {
+        ESP_LOGW(TAG, "direct path failure threshold reached; flood required");
+    }
 }
 
 static void clear_pending_ack_tx(void)
@@ -1653,6 +1741,42 @@ static esp_err_t calc_dm_identity_digest(
     return ESP_OK;
 }
 
+static esp_err_t calc_path_replay_identity(
+    uint8_t out_identity[D1L_MESHCORE_PATH_REPLAY_IDENTITY_BYTES],
+    const uint8_t sender_pub[D1L_MESHCORE_PUB_KEY_SIZE],
+    const uint8_t *encrypted_payload, size_t encrypted_payload_len)
+{
+    if (!out_identity || !sender_pub || !encrypted_payload ||
+        encrypted_payload_len == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const mbedtls_md_info_t *md =
+        mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (!md || mbedtls_md_get_size(md) !=
+                   D1L_MESHCORE_PATH_REPLAY_IDENTITY_BYTES) {
+        return ESP_FAIL;
+    }
+    mbedtls_md_context_t ctx;
+    mbedtls_md_init(&ctx);
+    int md_ret = mbedtls_md_setup(&ctx, md, 0);
+    if (md_ret == 0) {
+        md_ret = mbedtls_md_starts(&ctx);
+    }
+    if (md_ret == 0) {
+        md_ret = mbedtls_md_update(
+            &ctx, sender_pub, D1L_MESHCORE_PUB_KEY_SIZE);
+    }
+    if (md_ret == 0) {
+        md_ret = mbedtls_md_update(
+            &ctx, encrypted_payload, encrypted_payload_len);
+    }
+    if (md_ret == 0) {
+        md_ret = mbedtls_md_finish(&ctx, out_identity);
+    }
+    mbedtls_md_free(&ctx);
+    return md_ret == 0 ? ESP_OK : ESP_FAIL;
+}
+
 static esp_err_t calc_dm_ack_hash(uint32_t *out_hash, const uint8_t *plain, size_t plain_len,
                                   const uint8_t *sender_pub_key)
 {
@@ -1688,12 +1812,13 @@ static esp_err_t calc_dm_ack_hash(uint32_t *out_hash, const uint8_t *plain, size
 }
 
 static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
-                                      const d1l_contact_entry_t *contact,
-                                      const char *text,
-                                      const d1l_meshcore_route_selection_t *selection,
-                                      uint32_t tx_timestamp, uint8_t *raw,
-                                      size_t raw_size, uint8_t *out_len,
-                                      uint32_t *out_ack_hash)
+                                       const d1l_contact_entry_t *contact,
+                                       const char *text,
+                                       const d1l_meshcore_route_selection_t *selection,
+                                       uint8_t attempt, uint32_t tx_timestamp,
+                                       uint8_t *raw,
+                                       size_t raw_size, uint8_t *out_len,
+                                       uint32_t *out_ack_hash)
 {
     if (!settings || !settings->identity_ready || !contact || !selection ||
         !raw || !out_len || !out_ack_hash) {
@@ -1731,8 +1856,11 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
 
     uint8_t plain[D1L_MESHCORE_MAX_TEXT_BYTES] = {0};
     write_le32(plain, tx_timestamp);
-    const uint8_t attempt = 0;
-    plain[4] = (uint8_t)((D1L_MESHCORE_TXT_TYPE_PLAIN << 2) | attempt);
+    if (attempt > 3U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    plain[4] = (uint8_t)((D1L_MESHCORE_TXT_TYPE_PLAIN << 2) |
+                         (attempt & 0x03U));
     const size_t message_len = strlen(text);
     memcpy(&plain[5], text, message_len);
     const size_t plain_len = 5U + message_len;
@@ -1768,6 +1896,60 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
         return ESP_ERR_INVALID_SIZE;
     }
     *out_len = (uint8_t)i;
+    return ESP_OK;
+}
+
+static esp_err_t build_path_discovery_request(
+    const d1l_settings_t *settings, const d1l_contact_entry_t *contact,
+    uint32_t tag, uint8_t *raw, size_t raw_size, uint8_t *out_len)
+{
+    if (!settings || !settings->identity_ready || !contact || !raw ||
+        !out_len || !d1l_contact_store_can_dm(contact) ||
+        settings->path_hash_bytes < 1U || settings->path_hash_bytes > 3U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t dest_pub[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+    if (!hex_to_bytes(dest_pub, sizeof(dest_pub), contact->public_key_hex)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+    ed25519_key_exchange(secret, dest_pub, settings->identity_private_key);
+
+    const uint8_t header = (uint8_t)(
+        (D1L_MESHCORE_REQUEST_TYPE << 2U) | D1L_MESHCORE_ROUTE_FLOOD);
+    const uint8_t path_len =
+        (uint8_t)((settings->path_hash_bytes - 1U) << 6U);
+    size_t index = 0U;
+    if (!d1l_meshcore_wire_write_prefix(
+            header, 0U, 0U, path_len, NULL,
+            raw, raw_size, &index) || raw_size - index < 2U) {
+        memset(secret, 0, sizeof(secret));
+        return ESP_ERR_INVALID_SIZE;
+    }
+    raw[index++] = dest_pub[0];
+    raw[index++] = settings->identity_public_key[0];
+
+    /* Pinned companion-radio Path Discovery request: correlation tag,
+     * telemetry request, inverse BASE-only permission mask, three reserved
+     * bytes, and one random packet-identity word. */
+    uint8_t plain[13] = {0};
+    write_le32(plain, tag);
+    plain[4] = 0x03U;
+    plain[5] = (uint8_t)~0x01U;
+    write_le32(&plain[9], esp_random());
+    size_t cipher_len = 0U;
+    const esp_err_t ret = meshcore_encrypt_then_mac(
+        secret, &raw[index], raw_size - index,
+        plain, sizeof(plain), &cipher_len);
+    memset(secret, 0, sizeof(secret));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    index += cipher_len;
+    if (index > UINT8_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    *out_len = (uint8_t)index;
     return ESP_OK;
 }
 
@@ -1835,6 +2017,67 @@ static esp_err_t build_dm_ack_response(
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (index > UINT8_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    *out_len = (uint8_t)index;
+    return ESP_OK;
+}
+
+static esp_err_t build_reciprocal_path_packet(
+    const d1l_settings_t *settings,
+    const uint8_t sender_pub[D1L_MESHCORE_PUB_KEY_SIZE],
+    const uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE],
+    const uint8_t *direct_path, uint8_t direct_path_len,
+    const uint8_t *return_path, uint8_t return_path_len,
+    uint8_t *raw, size_t raw_size, uint8_t *out_len)
+{
+    if (!settings || !settings->identity_ready || !sender_pub || !secret ||
+        !raw || !out_len ||
+        !d1l_meshcore_wire_path_len_valid(direct_path_len) ||
+        !d1l_meshcore_wire_path_len_valid(return_path_len)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint8_t direct_bytes =
+        d1l_meshcore_wire_path_byte_len(direct_path_len);
+    const uint8_t return_bytes =
+        d1l_meshcore_wire_path_byte_len(return_path_len);
+    if ((direct_bytes > 0U && !direct_path) ||
+        (return_bytes > 0U && !return_path)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint8_t header = (uint8_t)(
+        (D1L_MESHCORE_PAYLOAD_PATH << 2U) | D1L_MESHCORE_ROUTE_DIRECT);
+    size_t index = 0U;
+    if (!d1l_meshcore_wire_write_prefix(
+            header, 0U, 0U, direct_path_len, direct_path,
+            raw, raw_size, &index) || raw_size - index < 2U) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    raw[index++] = sender_pub[0];
+    raw[index++] = settings->identity_public_key[0];
+
+    uint8_t plain[1U + D1L_MESHCORE_MAX_PATH_BYTES + 1U + 4U] = {0};
+    size_t plain_len = 0U;
+    plain[plain_len++] = return_path_len;
+    if (return_bytes > 0U) {
+        memcpy(&plain[plain_len], return_path, return_bytes);
+        plain_len += return_bytes;
+    }
+    plain[plain_len++] = 0xffU;
+    const uint32_t nonce = esp_random();
+    write_le32(&plain[plain_len], nonce);
+    plain_len += sizeof(nonce);
+
+    size_t cipher_len = 0U;
+    const esp_err_t ret = meshcore_encrypt_then_mac(
+        secret, &raw[index], raw_size - index,
+        plain, plain_len, &cipher_len);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    index += cipher_len;
     if (index > UINT8_MAX) {
         return ESP_ERR_INVALID_SIZE;
     }
@@ -2017,6 +2260,23 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         const size_t extended_attempt_index = 6U + message_len;
         const uint8_t extended_attempt =
             extended_attempt_index < plain_len ? plain[extended_attempt_index] : 0U;
+        const uint32_t ack_route_now_ms =
+            (uint32_t)(esp_timer_get_time() / 1000ULL);
+        d1l_contact_entry_t ack_contact = {0};
+        bool ack_path_expired = false;
+        const esp_err_t prepare_ret = d1l_contact_store_prepare_path_route(
+            contact->fingerprint, ack_route_now_ms, &ack_contact,
+            &ack_path_expired);
+        if (prepare_ret != ESP_OK ||
+            !d1l_contact_store_can_dm(&ack_contact)) {
+            memset(secret, 0, sizeof(secret));
+            ESP_LOGW(TAG, "DM contact revalidation failed: %s",
+                     esp_err_to_name(
+                         prepare_ret != ESP_OK ? prepare_ret :
+                                                 ESP_ERR_INVALID_STATE));
+            return false;
+        }
+        contact = &ack_contact;
         uint32_t ack_hash = 0;
         const esp_err_t ack_hash_ret =
             calc_dm_ack_hash(&ack_hash, plain, 5U + message_len, sender_pub);
@@ -2041,18 +2301,17 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         if (ack_build_ret == ESP_OK) {
             uint8_t ack_hash_bytes[4] = {0};
             write_le32(ack_hash_bytes, ack_hash);
-            uint32_t ack_route_learned_at_ms = 0U;
-            const bool ack_route_learned_this_boot = contact->out_path_valid &&
-                lookup_boot_route(contact->fingerprint, contact->out_path,
-                                  contact->out_path_len,
-                                  &ack_route_learned_at_ms);
-            const uint32_t ack_route_now_ms =
-                (uint32_t)(esp_timer_get_time() / 1000ULL);
+            const bool ack_route_learned_this_boot =
+                ack_contact.out_path_valid &&
+                lookup_boot_route(
+                    ack_contact.fingerprint, ack_contact.out_path,
+                    ack_contact.out_path_len,
+                    ack_contact.out_path_state.generation);
             d1l_meshcore_route_selection_t ack_route_selection = {0};
-            const bool selected = d1l_meshcore_route_select(
-                contact->out_path_valid, ack_route_learned_this_boot,
-                contact->out_path, contact->out_path_len,
-                ack_route_learned_at_ms, ack_route_now_ms,
+            const bool selected = d1l_meshcore_route_select_canonical(
+                ack_contact.out_path_valid, ack_route_learned_this_boot,
+                ack_contact.out_path, ack_contact.out_path_len,
+                &ack_contact.out_path_state, ack_route_now_ms,
                 settings->path_hash_bytes, &ack_route_selection);
             const bool ack_direct = selected &&
                 ack_route_selection.route == D1L_MESHCORE_ROUTE_DIRECT;
@@ -2152,6 +2411,12 @@ static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *p
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
     if (d1l_dm_delivery_owner_ack_matches(
             &s_pending_dm_tx.delivery, ack_hash)) {
+        /* Authentication and exact owner correlation are already complete.
+         * Stop the RF deadline and credit the direct generation even if the
+         * retained ACK transition needs a later persistence retry. */
+        d1l_meshcore_dm_ack_deadline_clear(
+            &s_pending_dm_tx.ack_deadline);
+        record_pending_direct_path_result(true);
         const esp_err_t ret = transition_pending_dm_tx(
             D1L_DM_DELIVERY_ACKNOWLEDGED,
             D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK);
@@ -2223,6 +2488,26 @@ static void parse_rx_ack_packet(const uint8_t *payload, uint16_t size,
     record_dm_ack(ack_hash, &packet, rssi, snr, size, payload, size, source);
 }
 
+static d1l_meshcore_path_response_result_t dispatch_path_response(
+    const char *fingerprint, const uint8_t *data, size_t data_len,
+    uint64_t now_us)
+{
+    d1l_store_lock_take(&s_path_response_lock);
+    const bool contact_matches = fingerprint &&
+        strncmp(s_path_response_fingerprint, fingerprint,
+                sizeof(s_path_response_fingerprint)) == 0;
+    const d1l_meshcore_path_response_result_t result =
+        d1l_meshcore_path_response_take(
+            &s_path_response_expectation, contact_matches,
+            data, data_len, now_us);
+    if (result == D1L_MESHCORE_PATH_RESPONSE_MATCHED ||
+        result == D1L_MESHCORE_PATH_RESPONSE_EXPIRED) {
+        s_path_response_fingerprint[0] = '\0';
+    }
+    d1l_store_lock_give(&s_path_response_lock);
+    return result;
+}
+
 static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
                                  int16_t rssi, int8_t snr)
 {
@@ -2255,51 +2540,101 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
         const size_t plain_len =
             meshcore_decrypt_after_mac(secret, plain, sizeof(plain) - 1U,
                                        &packet.payload[2], packet.payload_len - 2U);
-        memset(secret, 0, sizeof(secret));
-        if (plain_len < 2U) {
+        d1l_meshcore_path_plain_t decoded = {0};
+        if (!d1l_meshcore_path_plain_decode(plain, plain_len, &decoded)) {
+            memset(secret, 0, sizeof(secret));
             continue;
         }
 
-        const uint8_t out_path_len = plain[0];
-        if (!d1l_meshcore_wire_path_len_valid(out_path_len)) {
-            continue;
-        }
-        const uint8_t out_path_bytes = d1l_meshcore_wire_path_byte_len(out_path_len);
-        if ((size_t)(2U + out_path_bytes) > plain_len) {
-            continue;
-        }
-
-        const uint8_t *out_path = out_path_bytes > 0 ? &plain[1] : NULL;
-        const uint8_t extra_type = plain[1U + out_path_bytes];
-        const uint8_t *extra = &plain[2U + out_path_bytes];
-        const size_t extra_len = plain_len - (2U + out_path_bytes);
-        esp_err_t ret = d1l_contact_store_update_path(contact->fingerprint, out_path, out_path_len);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "contact path update failed: %s", esp_err_to_name(ret));
+        uint8_t replay_identity[
+            D1L_MESHCORE_PATH_REPLAY_IDENTITY_BYTES] = {0};
+        esp_err_t ret = calc_path_replay_identity(
+            replay_identity, sender_pub, packet.payload, packet.payload_len);
+        if (ret != ESP_OK ||
+            !d1l_meshcore_path_replay_take(
+                &s_path_replay_cache, replay_identity)) {
+            memset(replay_identity, 0, sizeof(replay_identity));
+            memset(secret, 0, sizeof(secret));
             return;
         }
-        remember_boot_route(
-            contact->fingerprint, out_path, out_path_len,
-            (uint32_t)(esp_timer_get_time() / 1000ULL));
 
-        const uint8_t out_hash_bytes = d1l_meshcore_wire_path_hash_size(out_path_len);
-        const uint8_t out_hops = d1l_meshcore_wire_path_hash_count(out_path_len);
+        d1l_contact_entry_t learned_contact = {0};
+        ret = d1l_contact_store_update_path_from_source(
+            contact->fingerprint, decoded.path, decoded.path_len,
+            decoded.source,
+            &learned_contact);
+        if (ret != ESP_OK) {
+            (void)d1l_meshcore_path_replay_forget(
+                &s_path_replay_cache, replay_identity);
+            memset(replay_identity, 0, sizeof(replay_identity));
+            memset(secret, 0, sizeof(secret));
+            ESP_LOGW(TAG, "contact path update failed: %s",
+                     esp_err_to_name(ret));
+            return;
+        } else {
+            remember_boot_route(
+                learned_contact.fingerprint, decoded.path, decoded.path_len,
+                learned_contact.out_path_state.generation);
+        }
+        memset(replay_identity, 0, sizeof(replay_identity));
+
+        const uint8_t out_hash_bytes =
+            d1l_meshcore_wire_path_hash_size(decoded.path_len);
+        const uint8_t out_hops =
+            d1l_meshcore_wire_path_hash_count(decoded.path_len);
         s_status.rx_packets++;
         esp_err_t route_ret =
-            d1l_route_store_upsert_observation(contact->fingerprint, contact->alias, "path_return",
+            d1l_route_store_upsert_observation(learned_contact.fingerprint,
+                                               learned_contact.alias, "path_return",
                                                route_name(packet.route), "rx", rssi,
                                                (snr * 10) / 4, out_hash_bytes, out_hops, size);
         if (route_ret != ESP_OK) {
             ESP_LOGW(TAG, "route store path rx failed: %s", esp_err_to_name(route_ret));
         }
         char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-        snprintf(note, sizeof(note), "path %.12s hops=%u", contact->alias, out_hops);
+        snprintf(note, sizeof(note), "path %.12s hops=%u",
+                 learned_contact.alias, out_hops);
         append_packet_log("rx", "path_return", rssi, snr, out_hash_bytes, out_hops, size,
-                          payload, size, note);
+                           payload, size, note);
 
-        if (extra_type == D1L_MESHCORE_PAYLOAD_ACK && extra_len >= 4U) {
-            record_dm_ack(read_le32(extra), &packet, rssi, snr, size, payload, size, "path_ack");
+        if (decoded.kind == D1L_MESHCORE_PATH_EXTRA_ACK) {
+            record_dm_ack(read_le32(decoded.extra), &packet, rssi, snr,
+                          size, payload, size, "path_ack");
+        } else if (decoded.kind == D1L_MESHCORE_PATH_EXTRA_RESPONSE) {
+            const d1l_meshcore_path_response_result_t response =
+                dispatch_path_response(
+                    learned_contact.fingerprint, decoded.extra,
+                    decoded.extra_len, (uint64_t)esp_timer_get_time());
+            snprintf(note, sizeof(note), "path_response %.12s result=%u",
+                     learned_contact.alias, (unsigned)response);
+            append_packet_log(
+                "rx", response == D1L_MESHCORE_PATH_RESPONSE_MATCHED ?
+                          "path_response" : "path_response_unmatched",
+                rssi, snr, out_hash_bytes, out_hops, size,
+                payload, size, note);
         }
+
+        d1l_meshcore_reciprocal_path_plan_t reciprocal_plan = {0};
+        if (d1l_meshcore_reciprocal_path_take(
+                &reciprocal_plan, true, packet.route)) {
+            uint8_t reciprocal[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
+            uint8_t reciprocal_len = 0U;
+            ret = build_reciprocal_path_packet(
+                settings, sender_pub, secret,
+                decoded.path, decoded.path_len,
+                packet.path, packet.path_len,
+                reciprocal, sizeof(reciprocal), &reciprocal_len);
+            if (ret == ESP_OK) {
+                ret = meshcore_service_queue_raw_response(
+                    reciprocal, reciprocal_len,
+                    D1L_MESHCORE_RECIPROCAL_PATH_DELAY_MS);
+            }
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "reciprocal PATH queue failed: %s",
+                         esp_err_to_name(ret));
+            }
+        }
+        memset(secret, 0, sizeof(secret));
         return;
     }
 }
@@ -2753,11 +3088,25 @@ static void meshcore_service_handle_radio_tx_done(
                 ret = awaiting_ret;
             }
         }
-        if (ret != ESP_OK || !s_pending_dm_tx.delivery.active ||
-            s_pending_dm_tx.delivery.state !=
-                D1L_DM_DELIVERY_AWAITING_ACK) {
+        const bool awaiting_ack_owned =
+            s_pending_dm_tx.delivery.active &&
+            s_pending_dm_tx.delivery.state ==
+                D1L_DM_DELIVERY_AWAITING_ACK;
+        if (ret != ESP_OK) {
             ESP_LOGW(TAG, "DM TxDone state persistence failed: %s",
                      esp_err_to_name(ret));
+        }
+        /* transition_pending_dm_tx publishes an accepted exact-owner state
+         * even when its deferred flush reports an error.  Arm from that owner
+         * truth, not from the persistence return code, so the retry worker can
+         * never strand an AWAITING_ACK session while storage catches up. */
+        if (awaiting_ack_owned &&
+            !d1l_meshcore_dm_ack_deadline_arm(
+                       &s_pending_dm_tx.ack_deadline,
+                       (uint64_t)esp_timer_get_time(),
+                       s_pending_dm_tx.selection.route)) {
+            ESP_LOGE(TAG, "DM ACK deadline arm failed");
+            fail_pending_dm_ack_timeout(ESP_ERR_INVALID_STATE);
         }
         finalize_pending_dm_radio_result(true, ESP_OK);
     } else {
@@ -2839,6 +3188,26 @@ static void meshcore_service_run_owner_maintenance(void)
 {
     meshcore_service_handle_radio_tx_watchdog();
     reconcile_pending_dm_ack_persistence();
+    if (!s_pending_dm_tx.delivery.active ||
+        s_pending_dm_tx.delivery.state != D1L_DM_DELIVERY_AWAITING_ACK) {
+        return;
+    }
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    const d1l_meshcore_dm_ack_deadline_action_t action =
+        d1l_meshcore_dm_ack_deadline_take_due_when_idle(
+            &s_pending_dm_tx.ack_deadline, now_us,
+            s_pending_dm_tx.selection.route,
+            s_pending_dm_tx.flood_retry_consumed ?
+                1U : s_pending_dm_tx.attempt,
+            s_tx_busy);
+    if (action == D1L_MESHCORE_DM_ACK_DEADLINE_RETRY_FLOOD) {
+        const esp_err_t ret = retry_pending_dm_as_flood(now_us);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "DM flood retry failed: %s", esp_err_to_name(ret));
+        }
+    } else if (action == D1L_MESHCORE_DM_ACK_DEADLINE_FAIL_TIMEOUT) {
+        fail_pending_dm_ack_timeout(ESP_ERR_TIMEOUT);
+    }
 }
 
 static void meshcore_service_handle_radio_rx_done(
@@ -3240,6 +3609,155 @@ static esp_err_t fail_pending_dm_before_radio(esp_err_t error)
     return transition_ret;
 }
 
+static void fail_pending_dm_ack_timeout(esp_err_t error)
+{
+    if (!s_pending_dm_tx.delivery.active) {
+        return;
+    }
+    const esp_err_t timeout_error = error == ESP_OK ? ESP_ERR_TIMEOUT : error;
+    const esp_err_t ret = transition_pending_dm_tx(
+        D1L_DM_DELIVERY_FAILED_TIMEOUT,
+        D1L_DM_DELIVERY_REASON_ACK_TIMEOUT, timeout_error);
+
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(note, sizeof(note), "ack_timeout try=%u %.20s",
+             s_pending_dm_tx.attempt, s_pending_dm_tx.text);
+    append_packet_log(
+        "tx_fail", "dm_ack_timeout", 0, 0,
+        s_pending_dm_tx.selection.path_hash_bytes,
+        s_pending_dm_tx.selection.path_hops,
+        s_pending_dm_tx.raw_len, s_pending_dm_tx.raw,
+        s_pending_dm_tx.raw_len, note);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "DM ACK timeout persistence failed: %s",
+                 esp_err_to_name(ret));
+    }
+    if (s_pending_dm_tx.delivery.active &&
+        d1l_dm_delivery_state_terminal(s_pending_dm_tx.delivery.state)) {
+        clear_pending_dm_tx();
+    } else if (s_pending_dm_tx.delivery.active) {
+        /* A failed retained transition must not strand an unarmed session. */
+        (void)d1l_meshcore_dm_ack_deadline_arm(
+            &s_pending_dm_tx.ack_deadline,
+            (uint64_t)esp_timer_get_time(),
+            s_pending_dm_tx.selection.route);
+    }
+}
+
+static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)
+{
+    if (!s_pending_dm_tx.delivery.active ||
+        s_pending_dm_tx.delivery.state != D1L_DM_DELIVERY_AWAITING_ACK ||
+        s_pending_dm_tx.selection.route != D1L_MESHCORE_ROUTE_DIRECT ||
+        s_pending_dm_tx.attempt != 0U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_pending_dm_tx.flood_retry_consumed = true;
+
+    /* Attribute only the peer ACK timeout to the exact direct generation.
+     * Local radio failures never call this path. */
+    record_pending_direct_path_result(false);
+
+    const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
+    d1l_contact_entry_t contact = {0};
+    bool path_expired = false;
+    esp_err_t ret = d1l_contact_store_prepare_path_route(
+        s_pending_dm_tx.fingerprint, now_ms, &contact, &path_expired);
+    if (ret != ESP_OK || !d1l_contact_store_can_dm(&contact)) {
+        const esp_err_t failure = ret != ESP_OK ? ret : ESP_ERR_INVALID_STATE;
+        fail_pending_dm_ack_timeout(failure);
+        return failure;
+    }
+
+    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_meshcore_route_selection_t retry_selection = {0};
+    if (!d1l_meshcore_route_select(
+            false, false, NULL, 0U, 0U, now_ms,
+            settings->path_hash_bytes, &retry_selection)) {
+        fail_pending_dm_ack_timeout(ESP_ERR_INVALID_STATE);
+        return ESP_ERR_INVALID_STATE;
+    }
+    retry_selection.reason =
+        D1L_MESHCORE_ROUTE_SELECTION_FLOOD_DIRECT_RETRY;
+
+    uint32_t tx_timestamp = 0U;
+    ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
+    if (ret != ESP_OK) {
+        fail_pending_dm_ack_timeout(ret);
+        return ret;
+    }
+    const uint8_t retry_attempt = 1U;
+    uint8_t retry_raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
+    uint8_t retry_raw_len = 0U;
+    uint32_t retry_ack_hash = 0U;
+    ret = build_dm_text_packet(
+        settings, &contact, s_pending_dm_tx.text, &retry_selection,
+        retry_attempt, tx_timestamp, retry_raw, sizeof(retry_raw),
+        &retry_raw_len, &retry_ack_hash);
+    if (ret != ESP_OK) {
+        fail_pending_dm_ack_timeout(ret);
+        return ret;
+    }
+    if (s_tx_busy) {
+        fail_pending_dm_ack_timeout(ESP_ERR_INVALID_STATE);
+        return ESP_ERR_INVALID_STATE;
+    }
+    ret = ensure_radio_started();
+    if (ret != ESP_OK) {
+        fail_pending_dm_ack_timeout(ret);
+        return ret;
+    }
+
+    ret = transition_pending_dm_tx(
+        D1L_DM_DELIVERY_RETRY_WAIT,
+        D1L_DM_DELIVERY_REASON_RETRY_SCHEDULED, ESP_ERR_TIMEOUT);
+    if (ret != ESP_OK) {
+        fail_pending_dm_ack_timeout(ret);
+        return ret;
+    }
+    ret = transition_pending_dm_retry(retry_ack_hash);
+    if (ret != ESP_OK) {
+        if (s_pending_dm_tx.delivery.state == D1L_DM_DELIVERY_RETRY_WAIT) {
+            fail_pending_dm_ack_timeout(ret);
+        } else {
+            (void)fail_pending_dm_before_radio(ret);
+        }
+        return ret;
+    }
+
+    s_pending_dm_tx.selection = retry_selection;
+    memcpy(s_pending_dm_tx.raw, retry_raw, retry_raw_len);
+    s_pending_dm_tx.raw_len = retry_raw_len;
+    ret = transition_pending_dm_tx(
+        D1L_DM_DELIVERY_WAITING_RADIO,
+        D1L_DM_DELIVERY_REASON_RADIO_RESERVED, ESP_OK);
+    if (ret != ESP_OK) {
+        (void)fail_pending_dm_before_radio(ret);
+        return ret;
+    }
+    ret = transition_pending_dm_tx(
+        D1L_DM_DELIVERY_TX_ACTIVE,
+        D1L_DM_DELIVERY_REASON_RADIO_STARTED, ESP_OK);
+    if (ret != ESP_OK) {
+        (void)fail_pending_dm_before_radio(ret);
+        return ret;
+    }
+    if (!meshcore_radio_tx_operation_begin(
+            D1L_MESH_TX_OPERATION_DM, &s_pending_dm_tx.delivery)) {
+        (void)fail_pending_dm_before_radio(ESP_ERR_INVALID_STATE);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_active_tx_ack_response = false;
+    s_tx_busy = true;
+    s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    Radio.SendWithOrigin(
+        s_pending_dm_tx.raw, s_pending_dm_tx.raw_len,
+        (uint32_t)s_active_radio_tx.operation_id);
+    record_dm_route_selection(&retry_selection);
+    return ESP_OK;
+}
+
 static esp_err_t meshcore_service_handle_send_dm(
     const d1l_meshcore_service_cmd_t *cmd)
 {
@@ -3281,15 +3799,24 @@ static esp_err_t meshcore_service_handle_send_dm(
     }
 
     const d1l_settings_t *settings = d1l_settings_current();
-    uint32_t route_learned_at_ms = 0U;
+    bool path_expired = false;
+    const esp_err_t prepare_ret = d1l_contact_store_prepare_path_route(
+        contact.fingerprint, now_ms, &contact, &path_expired);
+    if (prepare_ret != ESP_OK) {
+        return prepare_ret;
+    }
+    if (!d1l_contact_store_can_dm(&contact)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     const bool route_learned_this_boot = contact.out_path_valid &&
         lookup_boot_route(contact.fingerprint, contact.out_path,
-                          contact.out_path_len, &route_learned_at_ms);
+                          contact.out_path_len,
+                          contact.out_path_state.generation);
     d1l_meshcore_route_selection_t selection = {0};
-    if (!d1l_meshcore_route_select(
+    if (!d1l_meshcore_route_select_canonical(
             contact.out_path_valid, route_learned_this_boot,
             contact.out_path, contact.out_path_len,
-            route_learned_at_ms, now_ms, settings->path_hash_bytes,
+            &contact.out_path_state, now_ms, settings->path_hash_bytes,
             &selection)) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -3303,7 +3830,7 @@ static esp_err_t meshcore_service_handle_send_dm(
     uint8_t raw_len = 0U;
     uint32_t ack_hash = 0U;
     ret = build_dm_text_packet(settings, &contact, cmd->dm_text, &selection,
-                               tx_timestamp, raw, sizeof(raw), &raw_len,
+                               0U, tx_timestamp, raw, sizeof(raw), &raw_len,
                                &ack_hash);
     if (ret != ESP_OK) {
         return ret;
@@ -3625,6 +4152,28 @@ static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
     return meshcore_service_send_command(&cmd, timeout_ms);
 }
 
+static esp_err_t meshcore_service_queue_raw_response(
+    const uint8_t *raw, uint8_t raw_len, uint16_t delay_ms)
+{
+    if (!raw || raw_len == 0U || !s_service_queue) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+        .raw_len = raw_len,
+        .delay_ms = delay_ms,
+    };
+    memcpy(cmd.raw, raw, raw_len);
+    if (xQueueSendToFront(s_service_queue, &cmd, 0) != pdTRUE) {
+        runtime_note_queue_drop(false);
+        return ESP_ERR_TIMEOUT;
+    }
+    runtime_note_queue_depth(s_service_queue,
+                             &s_runtime_command_queue_high_water);
+    meshcore_service_wake();
+    return ESP_OK;
+}
+
 static esp_err_t meshcore_service_send_ack_async(
     const d1l_contact_entry_t *contact,
     uint32_t ack_hash,
@@ -3722,6 +4271,12 @@ void d1l_meshcore_service_init(void)
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
     clear_pending_ack_tx();
     clear_boot_routes();
+    memset(&s_path_replay_cache, 0, sizeof(s_path_replay_cache));
+    d1l_store_lock_take(&s_path_response_lock);
+    memset(&s_path_response_expectation, 0,
+           sizeof(s_path_response_expectation));
+    s_path_response_fingerprint[0] = '\0';
+    d1l_store_lock_give(&s_path_response_lock);
     restore_ack_dedupe_from_store();
     s_status.ack_tx_last_error = ESP_OK;
     s_service_initialized = task_ret == ESP_OK;
@@ -3975,22 +4530,81 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
         return ESP_ERR_INVALID_ARG;
     }
 
-    char token[D1L_MESSAGE_TEXT_LEN] = {0};
-    const int written = snprintf(token, sizeof(token), "path_%08lX",
-                                 (unsigned long)esp_random());
-    if (written <= 0 || (size_t)written >= sizeof(token)) {
-        s_status.rejected_commands++;
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    esp_err_t ret = meshcore_service_send_dm_command(
-        fingerprint, token, true);
+    esp_err_t ret = d1l_meshcore_service_ensure_identity();
     if (ret != ESP_OK) {
         return ret;
     }
-    if (out_token && out_token_size > 0) {
-        snprintf(out_token, out_token_size, "%s", token);
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    d1l_contact_entry_t contact = {0};
+    bool path_expired = false;
+    ret = d1l_contact_store_prepare_path_route(
+        fingerprint, now_ms, &contact, &path_expired);
+    if (ret != ESP_OK || !d1l_contact_store_can_dm(&contact)) {
+        return ret != ESP_OK ? ret : ESP_ERR_INVALID_STATE;
     }
+
+    uint32_t tag = 0U;
+    ret = d1l_settings_next_mesh_timestamp(&tag);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const d1l_settings_t *settings = d1l_settings_current();
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
+    uint8_t raw_len = 0U;
+    ret = build_path_discovery_request(
+        settings, &contact, tag, raw, sizeof(raw), &raw_len);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    d1l_store_lock_take(&s_path_response_lock);
+    if (s_path_response_expectation.active &&
+        now_us <= s_path_response_expectation.deadline_us) {
+        d1l_store_lock_give(&s_path_response_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_path_response_expectation.tag = tag;
+    s_path_response_expectation.deadline_us =
+        now_us > UINT64_MAX -
+                     (uint64_t)D1L_MESHCORE_PATH_RESPONSE_TIMEOUT_MS * 1000ULL ?
+            UINT64_MAX :
+            now_us +
+                (uint64_t)D1L_MESHCORE_PATH_RESPONSE_TIMEOUT_MS * 1000ULL;
+    s_path_response_expectation.active = true;
+    snprintf(s_path_response_fingerprint,
+             sizeof(s_path_response_fingerprint), "%s", contact.fingerprint);
+    d1l_store_lock_give(&s_path_response_lock);
+
+    ret = meshcore_service_send_raw(
+        raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        d1l_store_lock_take(&s_path_response_lock);
+        if (s_path_response_expectation.active &&
+            s_path_response_expectation.tag == tag) {
+            memset(&s_path_response_expectation, 0,
+                   sizeof(s_path_response_expectation));
+            s_path_response_fingerprint[0] = '\0';
+        }
+        d1l_store_lock_give(&s_path_response_lock);
+        return ret;
+    }
+
+    if (out_token && out_token_size > 0) {
+        snprintf(out_token, out_token_size, "path_%08lX",
+                 (unsigned long)tag);
+    }
+    const esp_err_t route_ret = d1l_route_store_upsert_observation(
+        contact.fingerprint, contact.alias, "path_discovery_req",
+        route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx", 0, 0,
+        settings->path_hash_bytes, 0U, raw_len);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "path discovery route store failed: %s",
+                 esp_err_to_name(route_ret));
+    }
+    append_packet_log("tx", "path_discovery_req", 0, 0,
+                      settings->path_hash_bytes, 0U, raw_len,
+                      raw, raw_len, "correlated_path_request");
     return ESP_OK;
 }
 

@@ -5,13 +5,12 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "meshcore_path_state.h"
 #include "meshcore_wire.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS (30U * 60U * 1000U)
 
 typedef enum {
     D1L_MESHCORE_ROUTE_SELECTION_NONE = 0,
@@ -20,6 +19,9 @@ typedef enum {
     D1L_MESHCORE_ROUTE_SELECTION_FLOOD_PREBOOT_PATH,
     D1L_MESHCORE_ROUTE_SELECTION_FLOOD_STALE_PATH,
     D1L_MESHCORE_ROUTE_SELECTION_FLOOD_MALFORMED_PATH,
+    D1L_MESHCORE_ROUTE_SELECTION_FLOOD_EXPIRED_PATH,
+    D1L_MESHCORE_ROUTE_SELECTION_FLOOD_FAILED_PATH,
+    D1L_MESHCORE_ROUTE_SELECTION_FLOOD_DIRECT_RETRY,
 } d1l_meshcore_route_selection_reason_t;
 
 typedef struct {
@@ -30,6 +32,7 @@ typedef struct {
     uint8_t path_hash_bytes;
     uint8_t path_hops;
     uint32_t path_age_ms;
+    uint32_t path_generation;
     d1l_meshcore_route_selection_reason_t reason;
 } d1l_meshcore_route_selection_t;
 
@@ -103,6 +106,65 @@ static inline bool d1l_meshcore_route_select(
     return true;
 }
 
+/* Select from one retained canonical record. Lifecycle state is authoritative:
+ * an expired or failure-threshold path produces an exact flood reason even
+ * after its privacy-sensitive bytes have been reset by the contact store. */
+static inline bool d1l_meshcore_route_select_canonical(
+    bool path_known,
+    bool learned_this_boot,
+    const uint8_t *path,
+    uint8_t path_len,
+    const d1l_meshcore_path_state_t *path_state,
+    uint32_t now_ms,
+    uint8_t flood_path_hash_bytes,
+    d1l_meshcore_route_selection_t *out_selection)
+{
+    if (!path_state || !out_selection || flood_path_hash_bytes < 1U ||
+        flood_path_hash_bytes > 3U) {
+        return false;
+    }
+
+    const uint8_t lifecycle = path_state->lifecycle;
+    bool select_known = path_known;
+    d1l_meshcore_route_selection_reason_t forced_reason =
+        D1L_MESHCORE_ROUTE_SELECTION_NONE;
+    if (lifecycle == D1L_MESHCORE_PATH_STATE_NONE) {
+        select_known = false;
+        if (path_known) {
+            forced_reason =
+                D1L_MESHCORE_ROUTE_SELECTION_FLOOD_MALFORMED_PATH;
+        }
+    } else if (lifecycle == D1L_MESHCORE_PATH_STATE_EXPIRED) {
+        select_known = false;
+        forced_reason = D1L_MESHCORE_ROUTE_SELECTION_FLOOD_EXPIRED_PATH;
+    } else if (lifecycle == D1L_MESHCORE_PATH_STATE_FAILED) {
+        select_known = false;
+        forced_reason = D1L_MESHCORE_ROUTE_SELECTION_FLOOD_FAILED_PATH;
+    } else if (lifecycle != D1L_MESHCORE_PATH_STATE_VALID || !path_known) {
+        select_known = false;
+        forced_reason = D1L_MESHCORE_ROUTE_SELECTION_FLOOD_MALFORMED_PATH;
+    }
+
+    d1l_meshcore_route_selection_t selection = {0};
+    if (!d1l_meshcore_route_select(
+            select_known, learned_this_boot, path, path_len,
+            d1l_meshcore_path_state_validated_at_ms(path_state), now_ms,
+            flood_path_hash_bytes, &selection)) {
+        return false;
+    }
+    if (forced_reason != D1L_MESHCORE_ROUTE_SELECTION_NONE) {
+        selection.reason = forced_reason;
+        if (forced_reason == D1L_MESHCORE_ROUTE_SELECTION_FLOOD_EXPIRED_PATH ||
+            forced_reason == D1L_MESHCORE_ROUTE_SELECTION_FLOOD_FAILED_PATH) {
+            selection.path_age_ms = now_ms -
+                d1l_meshcore_path_state_validated_at_ms(path_state);
+        }
+    }
+    selection.path_generation = path_state->generation;
+    *out_selection = selection;
+    return true;
+}
+
 static inline const char *d1l_meshcore_route_selection_reason_name(
     d1l_meshcore_route_selection_reason_t reason)
 {
@@ -119,6 +181,12 @@ static inline const char *d1l_meshcore_route_selection_reason_name(
         return "flood_stale_path";
     case D1L_MESHCORE_ROUTE_SELECTION_FLOOD_MALFORMED_PATH:
         return "flood_bad_path";
+    case D1L_MESHCORE_ROUTE_SELECTION_FLOOD_EXPIRED_PATH:
+        return "flood_expired_path";
+    case D1L_MESHCORE_ROUTE_SELECTION_FLOOD_FAILED_PATH:
+        return "flood_failed_path";
+    case D1L_MESHCORE_ROUTE_SELECTION_FLOOD_DIRECT_RETRY:
+        return "flood_direct_retry";
     default:
         return "unknown";
     }

@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include "mesh/meshcore_ack_dispatch.h"
+#include "mesh/meshcore_dm_retry.h"
+#include "mesh/meshcore_path_dispatch.h"
 #include "mesh/meshcore_route_selection.h"
 
 static void test_valid_direct_path_selection(void)
@@ -196,6 +198,260 @@ static void test_fail_closed_without_partial_output(void)
         true, true, path, 0x01U, 1U, 2U, 1U, NULL));
 }
 
+static void test_canonical_retained_lifecycle_and_exact_fallback(void)
+{
+    const uint8_t path[] = {0x31U};
+    d1l_meshcore_path_state_t state = {0};
+    assert(d1l_meshcore_path_state_learn(
+        &state, D1L_MESHCORE_PATH_SOURCE_ACK_PATH, 1000U));
+    const uint32_t generation = state.generation;
+    d1l_meshcore_route_selection_t selection = {0};
+
+    /* Retained boot-relative timestamps never authorize a later boot. */
+    assert(d1l_meshcore_route_select_canonical(
+        true, false, path, 0x01U, &state, 1001U, 2U, &selection));
+    expect_flood(
+        &selection, D1L_MESHCORE_ROUTE_SELECTION_FLOOD_PREBOOT_PATH, 2U);
+    assert(selection.path_generation == generation);
+
+    assert(d1l_meshcore_route_select_canonical(
+        true, true, path, 0x01U, &state, 1001U, 2U, &selection));
+    assert(selection.route == D1L_MESHCORE_ROUTE_DIRECT);
+    assert(selection.path_generation == generation);
+
+    assert(d1l_meshcore_path_state_note_direct_result(
+        &state, generation, true, 2000U) ==
+        D1L_MESHCORE_PATH_RESULT_UPDATED);
+    assert(d1l_meshcore_route_select_canonical(
+        true, true, path, 0x01U, &state, 2001U, 2U, &selection));
+    assert(selection.route == D1L_MESHCORE_ROUTE_DIRECT);
+    assert(selection.path_age_ms == 1U);
+
+    assert(d1l_meshcore_path_state_note_direct_result(
+        &state, generation, false, 3000U) ==
+        D1L_MESHCORE_PATH_RESULT_UPDATED);
+    assert(d1l_meshcore_path_state_note_direct_result(
+        &state, generation, false, 4000U) ==
+        D1L_MESHCORE_PATH_RESULT_FLOOD_FALLBACK);
+    assert(state.lifecycle == D1L_MESHCORE_PATH_STATE_FAILED);
+    assert(d1l_meshcore_route_select_canonical(
+        false, false, NULL, 0U, &state, 4001U, 2U, &selection));
+    expect_flood(
+        &selection, D1L_MESHCORE_ROUTE_SELECTION_FLOOD_FAILED_PATH, 2U);
+
+    assert(d1l_meshcore_path_state_learn(
+        &state, D1L_MESHCORE_PATH_SOURCE_PATH_RESPONSE, 5000U));
+    assert(!d1l_meshcore_path_state_expire_if_due(
+        &state, 5000U + D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS));
+    assert(d1l_meshcore_path_state_expire_if_due(
+        &state, 5001U + D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS));
+    assert(d1l_meshcore_route_select_canonical(
+        false, false, NULL, 0U, &state,
+        5001U + D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS,
+        1U, &selection));
+    expect_flood(
+        &selection, D1L_MESHCORE_ROUTE_SELECTION_FLOOD_EXPIRED_PATH, 1U);
+}
+
+static void test_owner_clock_ack_deadline_is_bounded_and_take_once(void)
+{
+    d1l_meshcore_dm_ack_deadline_t deadline = {0};
+    assert(d1l_meshcore_dm_ack_deadline_arm(
+        &deadline, 100U, D1L_MESHCORE_ROUTE_DIRECT));
+    const uint64_t direct_due =
+        100U + (uint64_t)D1L_MESHCORE_DIRECT_ACK_TIMEOUT_MS * 1000ULL;
+    assert(d1l_meshcore_dm_ack_deadline_take_due(
+               &deadline, direct_due - 1U, D1L_MESHCORE_ROUTE_DIRECT, 0U) ==
+           D1L_MESHCORE_DM_ACK_DEADLINE_NONE);
+    assert(d1l_meshcore_dm_ack_deadline_take_due(
+               &deadline, direct_due, D1L_MESHCORE_ROUTE_DIRECT, 0U) ==
+           D1L_MESHCORE_DM_ACK_DEADLINE_RETRY_FLOOD);
+    assert(d1l_meshcore_dm_ack_deadline_take_due(
+               &deadline, UINT64_MAX, D1L_MESHCORE_ROUTE_DIRECT, 0U) ==
+           D1L_MESHCORE_DM_ACK_DEADLINE_NONE);
+
+    assert(d1l_meshcore_dm_ack_deadline_arm(
+        &deadline, 200U, D1L_MESHCORE_ROUTE_FLOOD));
+    assert(d1l_meshcore_dm_ack_deadline_take_due(
+               &deadline, deadline.deadline_us,
+               D1L_MESHCORE_ROUTE_FLOOD, 1U) ==
+           D1L_MESHCORE_DM_ACK_DEADLINE_FAIL_TIMEOUT);
+
+    assert(d1l_meshcore_dm_ack_deadline_arm(
+        &deadline, 300U, D1L_MESHCORE_ROUTE_DIRECT));
+    assert(d1l_meshcore_dm_ack_deadline_take_due(
+               &deadline, deadline.deadline_us,
+               D1L_MESHCORE_ROUTE_DIRECT, 1U) ==
+           D1L_MESHCORE_DM_ACK_DEADLINE_FAIL_TIMEOUT);
+
+    assert(d1l_meshcore_dm_ack_deadline_arm(
+        &deadline, UINT64_MAX - 10U, D1L_MESHCORE_ROUTE_FLOOD));
+    assert(deadline.deadline_us == UINT64_MAX);
+    d1l_meshcore_dm_ack_deadline_clear(&deadline);
+    assert(!deadline.armed);
+    assert(!d1l_meshcore_dm_ack_deadline_arm(&deadline, 0U, 0xffU));
+}
+
+static void test_due_ack_deadline_survives_radio_contention_once(void)
+{
+    d1l_meshcore_dm_ack_deadline_t deadline = {0};
+    assert(d1l_meshcore_dm_ack_deadline_arm(
+        &deadline, 100U, D1L_MESHCORE_ROUTE_DIRECT));
+    const uint64_t due = deadline.deadline_us;
+
+    unsigned flood_attempts = 0U;
+    if (d1l_meshcore_dm_ack_deadline_take_due_when_idle(
+            &deadline, due, D1L_MESHCORE_ROUTE_DIRECT, 0U, true) ==
+        D1L_MESHCORE_DM_ACK_DEADLINE_RETRY_FLOOD) {
+        flood_attempts++;
+    }
+    assert(deadline.armed);
+    assert(flood_attempts == 0U);
+
+    if (d1l_meshcore_dm_ack_deadline_take_due_when_idle(
+            &deadline, due + 1U, D1L_MESHCORE_ROUTE_DIRECT, 0U, false) ==
+        D1L_MESHCORE_DM_ACK_DEADLINE_RETRY_FLOOD) {
+        flood_attempts++;
+    }
+    assert(!deadline.armed);
+    assert(flood_attempts == 1U);
+    assert(d1l_meshcore_dm_ack_deadline_take_due_when_idle(
+               &deadline, UINT64_MAX, D1L_MESHCORE_ROUTE_DIRECT, 0U, false) ==
+           D1L_MESHCORE_DM_ACK_DEADLINE_NONE);
+    assert(flood_attempts == 1U);
+}
+
+static void test_path_generation_saturates_and_success_at_zero_is_explicit(void)
+{
+    d1l_meshcore_path_state_t state = {0};
+    state.generation = UINT32_MAX;
+    const d1l_meshcore_path_state_t before = state;
+    assert(!d1l_meshcore_path_state_learn(
+        &state, D1L_MESHCORE_PATH_SOURCE_OBSERVED, 1U));
+    assert(memcmp(&state, &before, sizeof(state)) == 0);
+
+    memset(&state, 0, sizeof(state));
+    assert(d1l_meshcore_path_state_learn(
+        &state, D1L_MESHCORE_PATH_SOURCE_ACK_PATH, UINT32_MAX));
+    const uint32_t generation = state.generation;
+    assert(d1l_meshcore_path_state_note_direct_result(
+               &state, generation, true, 0U) ==
+           D1L_MESHCORE_PATH_RESULT_UPDATED);
+    assert((state.flags & D1L_MESHCORE_PATH_FLAG_HAS_SUCCESS) != 0U);
+    assert(d1l_meshcore_path_state_validated_at_ms(&state) == 0U);
+    assert(!d1l_meshcore_path_state_expire_if_due(
+        &state, D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS));
+    assert(d1l_meshcore_path_state_expire_if_due(
+        &state, D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS + 1U));
+}
+
+static void test_path_subtype_vectors_and_correlated_response_surface(void)
+{
+    const uint8_t ack[] = {0x00U, 0x03U, 1U, 2U, 3U, 4U};
+    d1l_meshcore_path_plain_t decoded = {0};
+    assert(d1l_meshcore_path_plain_decode(ack, sizeof(ack), &decoded));
+    assert(decoded.raw_extra_type == 0x03U);
+    assert(decoded.extra_type == D1L_MESHCORE_PAYLOAD_ACK);
+    assert(decoded.source == D1L_MESHCORE_PATH_SOURCE_ACK_PATH);
+    assert(decoded.kind == D1L_MESHCORE_PATH_EXTRA_ACK);
+
+    uint8_t reserved_ack[sizeof(ack)] = {0};
+    memcpy(reserved_ack, ack, sizeof(ack));
+    reserved_ack[1] = 0x13U;
+    assert(d1l_meshcore_path_plain_decode(
+        reserved_ack, sizeof(reserved_ack), &decoded));
+    assert(decoded.extra_type == D1L_MESHCORE_PAYLOAD_ACK);
+    assert(decoded.source == D1L_MESHCORE_PATH_SOURCE_ACK_PATH);
+    assert(decoded.kind == D1L_MESHCORE_PATH_EXTRA_ACK);
+
+    uint8_t response[sizeof(ack)] = {0};
+    memcpy(response, ack, sizeof(ack));
+    response[1] = 0x01U;
+    assert(d1l_meshcore_path_plain_decode(
+        response, sizeof(response), &decoded));
+    assert(decoded.source == D1L_MESHCORE_PATH_SOURCE_PATH_RESPONSE);
+    assert(decoded.kind == D1L_MESHCORE_PATH_EXTRA_RESPONSE);
+    response[1] = 0x11U;
+    assert(d1l_meshcore_path_plain_decode(
+        response, sizeof(response), &decoded));
+    assert(decoded.extra_type == D1L_MESHCORE_PATH_EXTRA_TYPE_RESPONSE);
+    assert(decoded.kind == D1L_MESHCORE_PATH_EXTRA_RESPONSE);
+
+    const uint8_t dummy[] = {0x00U, 0xffU, 9U, 8U, 7U, 6U};
+    assert(d1l_meshcore_path_plain_decode(dummy, sizeof(dummy), &decoded));
+    assert(decoded.extra_type == 0x0fU);
+    assert(decoded.source == D1L_MESHCORE_PATH_SOURCE_OBSERVED);
+    assert(decoded.kind == D1L_MESHCORE_PATH_EXTRA_NONE);
+
+    const uint8_t missing_extra[] = {0x00U};
+    const uint8_t truncated_path[] = {0x01U, 0xaaU};
+    assert(!d1l_meshcore_path_plain_decode(
+        missing_extra, sizeof(missing_extra), &decoded));
+    assert(!d1l_meshcore_path_plain_decode(
+        truncated_path, sizeof(truncated_path), &decoded));
+
+    d1l_meshcore_path_response_expectation_t expectation = {
+        .tag = 0x04030201U,
+        .deadline_us = 500U,
+        .active = true,
+    };
+    assert(d1l_meshcore_path_response_take(
+               &expectation, true, &ack[2], 4U, 499U) ==
+           D1L_MESHCORE_PATH_RESPONSE_MATCHED);
+    assert(!expectation.active);
+    assert(d1l_meshcore_path_response_take(
+               &expectation, true, &ack[2], 4U, 499U) ==
+           D1L_MESHCORE_PATH_RESPONSE_UNMATCHED);
+    expectation.active = true;
+    assert(d1l_meshcore_path_response_take(
+               &expectation, false, &ack[2], 4U, 499U) ==
+           D1L_MESHCORE_PATH_RESPONSE_UNMATCHED);
+    assert(expectation.active);
+    assert(d1l_meshcore_path_response_take(
+               &expectation, true, &ack[2], 3U, 499U) ==
+           D1L_MESHCORE_PATH_RESPONSE_MALFORMED);
+    assert(d1l_meshcore_path_response_take(
+               &expectation, true, &ack[2], 4U, 501U) ==
+           D1L_MESHCORE_PATH_RESPONSE_EXPIRED);
+    assert(!expectation.active);
+
+    d1l_meshcore_reciprocal_path_plan_t reciprocal = {0};
+    assert(d1l_meshcore_reciprocal_path_take(
+        &reciprocal, true, D1L_MESHCORE_ROUTE_FLOOD));
+    assert(!d1l_meshcore_reciprocal_path_take(
+        &reciprocal, true, D1L_MESHCORE_ROUTE_FLOOD));
+    memset(&reciprocal, 0, sizeof(reciprocal));
+    assert(!d1l_meshcore_reciprocal_path_take(
+        &reciprocal, true, D1L_MESHCORE_ROUTE_DIRECT));
+    assert(!d1l_meshcore_reciprocal_path_take(
+        &reciprocal, false, D1L_MESHCORE_ROUTE_FLOOD));
+    assert(d1l_meshcore_reciprocal_path_take(
+        &reciprocal, true, D1L_MESHCORE_ROUTE_TRANSPORT_FLOOD));
+}
+
+static void test_authenticated_path_replay_mutates_and_responds_once(void)
+{
+    d1l_meshcore_path_replay_cache_t cache = {0};
+    uint8_t identity[D1L_MESHCORE_PATH_REPLAY_IDENTITY_BYTES] = {0};
+    for (size_t i = 0U; i < sizeof(identity); ++i) {
+        identity[i] = (uint8_t)(i + 1U);
+    }
+
+    unsigned mutations = 0U;
+    unsigned reciprocal_responses = 0U;
+    for (unsigned delivery = 0U; delivery < 2U; ++delivery) {
+        if (d1l_meshcore_path_replay_take(&cache, identity)) {
+            mutations++;
+            reciprocal_responses++;
+        }
+    }
+    assert(mutations == 1U);
+    assert(reciprocal_responses == 1U);
+
+    assert(d1l_meshcore_path_replay_forget(&cache, identity));
+    assert(d1l_meshcore_path_replay_take(&cache, identity));
+}
+
 int main(void)
 {
     test_valid_direct_path_selection();
@@ -203,6 +459,12 @@ int main(void)
     test_preboot_timestamp_alias_never_becomes_fresh();
     test_ack_plans_consume_immutable_freshness_selection();
     test_fail_closed_without_partial_output();
+    test_canonical_retained_lifecycle_and_exact_fallback();
+    test_owner_clock_ack_deadline_is_bounded_and_take_once();
+    test_due_ack_deadline_survives_radio_contention_once();
+    test_path_generation_saturates_and_success_at_zero_is_explicit();
+    test_path_subtype_vectors_and_correlated_response_surface();
+    test_authenticated_path_replay_mutates_and_responds_once();
     assert(strcmp(d1l_meshcore_route_selection_reason_name(
                       D1L_MESHCORE_ROUTE_SELECTION_NONE),
                   "none") == 0);
@@ -212,6 +474,12 @@ int main(void)
     assert(strcmp(d1l_meshcore_route_selection_reason_name(
                       D1L_MESHCORE_ROUTE_SELECTION_FLOOD_PREBOOT_PATH),
                   "flood_preboot_path") == 0);
+    assert(strcmp(d1l_meshcore_route_selection_reason_name(
+                      D1L_MESHCORE_ROUTE_SELECTION_FLOOD_FAILED_PATH),
+                  "flood_failed_path") == 0);
+    assert(strcmp(d1l_meshcore_route_selection_reason_name(
+                      D1L_MESHCORE_ROUTE_SELECTION_FLOOD_DIRECT_RETRY),
+                  "flood_direct_retry") == 0);
     puts("meshcore route selection vectors passed");
     return 0;
 }

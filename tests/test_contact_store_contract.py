@@ -48,7 +48,8 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "D1L_CONTACT_OUT_PATH_MAX 64U" in header
     assert "public_key_hex" in header
     assert "out_path_valid" in header
-    assert "D1L_CONTACT_STORE_SCHEMA 6U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA 7U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA_V6 6U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V5 5U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V4 4U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V3 3U" in source
@@ -56,6 +57,7 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "d1l_contact_store_blob_v3_t" in source
     assert "d1l_contact_store_blob_v4_t" in source
     assert "d1l_contact_store_blob_v5_t" in source
+    assert "d1l_contact_store_blob_v6_t" in source
     assert "d1l_contact_store_blob_v2_t" in source
     assert "d1l_contact_store_blob_v1_t" in source
     assert "migrate_v1_blob" in source
@@ -63,6 +65,7 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "migrate_v3_blob" in source
     assert "migrate_v4_blob" in source
     assert "migrate_v5_blob" in source
+    assert "migrate_v6_blob" in source
     assert "migrate_legacy_advert_type" in source
     assert "contact schema v1 layout changed" in source
     assert "contact schema v2 layout changed" in source
@@ -70,6 +73,7 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "contact schema v4 layout changed" in source
     assert "contact schema v5 layout changed" in source
     assert "contact schema v6 layout changed" in source
+    assert "contact schema v7 layout changed" in source
     assert 'D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"' in source
     assert 'D1L_CONTACT_STORE_KEY "contacts"' in source
     assert "nvs_get_blob" in source
@@ -80,6 +84,19 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "find_index_by_fingerprint" in source
     assert "oldest_evictable_placeholder_index" in source
     assert "d1l_contact_store_update_path" in source
+    assert "d1l_contact_store_update_path_from_source" in source
+    assert "d1l_contact_store_prepare_path_route" in source
+    assert "d1l_contact_store_note_path_result" in source
+    assert "retained_path_record_is_valid" in source
+    assert "D1L_CONTACT_PATH_PERSIST_MIN_INTERVAL_MS 1000U" in header
+    assert "d1l_contact_store_flush" in header
+    assert "d1l_contact_store_flush_if_due" in header
+    assert "persistence_revision" in header
+    assert "saturates and rejects further mutations" in header
+    assert "persistence_commit_count" in header
+    assert "persistence_coalesced_count" in header
+    assert "persistence_fail_count" in header
+    assert "persistence_dirty" in header
     assert "d1l_contact_store_set_flags" in source
     assert "d1l_contact_store_rename" in header
     assert "d1l_contact_store_delete" in header
@@ -95,8 +112,57 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "d1l_contact_store_has_export_key" in source
     assert "CONFIG_LV_USE_QRCODE=y" in sdkconfig_defaults
     assert '"mesh/contact_store.c"' in cmake
+    assert '"mesh/meshcore_path_state.c"' in cmake
     assert '"mesh/contact_uri.c"' in cmake
     assert "d1l_contact_store_init()" in app_main
+
+    for signature in (
+        "esp_err_t d1l_contact_store_update_path_from_source(",
+        "esp_err_t d1l_contact_store_prepare_path_route(",
+        "esp_err_t d1l_contact_store_note_path_result(",
+    ):
+        body = c_function(source, signature)
+        assert "mark_deferred_persistence_locked(" in body
+        assert "fill_blob(" not in body
+        assert "persist_store" not in body
+        assert "nvs_" not in body
+
+    deferred_flush = c_function(source, "static esp_err_t flush_deferred_path_state(")
+    assert "fill_blob(&s_persist_snapshot)" in deferred_flush
+    assert "write_contact_blob(&s_persist_snapshot)" in deferred_flush
+    assert "s_persist_io_lock" in deferred_flush
+    revision = c_function(source, "static esp_err_t reserve_persistence_revision_locked(")
+    assert "revision == UINT32_MAX" in revision
+    assert "revision + 1U" in revision
+    assert "__atomic_add_fetch" not in revision
+    sequence = c_function(source, "static esp_err_t reserve_sequenced_mutation_locked(")
+    assert "s_next_seq == UINT32_MAX" in sequence
+    assert "reserve_persistence_revision_locked(true)" in sequence
+    assert source.count("entry->seq = s_next_seq++;") == 8
+    for signature in (
+        "esp_err_t d1l_contact_store_upsert_from_node(",
+        "esp_err_t d1l_contact_store_upsert_verified_advert(",
+        "esp_err_t d1l_contact_store_import_uri(",
+        "esp_err_t d1l_contact_store_update_path_from_source(",
+        "esp_err_t d1l_contact_store_prepare_path_route(",
+        "esp_err_t d1l_contact_store_note_path_result(",
+        "esp_err_t d1l_contact_store_set_flags(",
+        "esp_err_t d1l_contact_store_rename(",
+    ):
+        mutation = c_function(source, signature)
+        reserve_at = mutation.index("reserve_sequenced_mutation_locked()")
+        seq_at = mutation.index("entry->seq = s_next_seq++;")
+        assert reserve_at < seq_at
+    assert "return force ? ESP_ERR_INVALID_STATE : ESP_OK" in deferred_flush
+    assert "result = ESP_ERR_INVALID_STATE" in deferred_flush
+
+    init = c_function(source, "esp_err_t d1l_contact_store_init(")
+    clear = c_function(source, "esp_err_t d1l_contact_store_clear(")
+    assert "reserve_persistence_revision_locked(false)" in clear
+    assert "nvs_erase_key" not in init
+    assert "ESP_ERR_NOT_SUPPORTED" in init
+    assert "ESP_ERR_INVALID_STATE" in init
+    assert "nvs_erase_key(handle, D1L_CONTACT_STORE_KEY)" in clear
 
 
 def test_contacts_can_promote_heard_nodes_by_fingerprint():

@@ -27,10 +27,12 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_dm_store_flush_if_due()" in worker
     assert "d1l_packet_log_flush_if_due()" in worker
     assert "d1l_route_store_flush_if_due()" in worker
+    assert "d1l_contact_store_flush_if_due()" in worker
     assert "d1l_message_store_flush()" in worker
     assert "d1l_dm_store_flush()" in worker
     assert "d1l_packet_log_flush()" in worker
     assert "d1l_route_store_flush()" in worker
+    assert "d1l_contact_store_flush()" in worker
     assert "request_id" in worker
     assert "s_result_request_id" in worker
     assert "deadline_us" in worker
@@ -46,6 +48,8 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS)" in service
     assert "ulTaskNotifyTake(pdTRUE, portMAX_DELAY)" not in service
     assert "d1l_route_store_flush_if_due()" not in service
+    assert "d1l_contact_store_flush_if_due()" not in service
+    assert "d1l_contact_store_flush()" not in service
     assert "d1l_route_store_worker_force_flush(" in console
     assert "D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U" in console
     assert "D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS = 50U" in console

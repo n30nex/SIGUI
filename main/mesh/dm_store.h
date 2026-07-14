@@ -81,6 +81,8 @@ typedef struct {
     d1l_dm_delivery_state_t previous_state;
     d1l_dm_delivery_state_t current_state;
     uint8_t retry_count;
+    uint8_t attempt;
+    uint32_t ack_hash;
     uint32_t delivery_revision;
     esp_err_t error;
 } d1l_dm_delivery_transition_outcome_t;
@@ -162,6 +164,12 @@ esp_err_t d1l_dm_store_transition_delivery(
     uint32_t expected_delivery_revision,
     d1l_dm_delivery_state_t next_state,
     d1l_dm_delivery_reason_t reason, esp_err_t error,
+    d1l_dm_delivery_transition_outcome_t *outcome);
+/* Atomically advances RETRY_WAIT -> RETRY_TX and binds the ACK identity of
+ * the rebuilt attempt to the same retained delivery session. */
+esp_err_t d1l_dm_store_transition_delivery_retry(
+    uint64_t delivery_session_id, uint32_t expected_delivery_revision,
+    uint32_t retry_ack_hash,
     d1l_dm_delivery_transition_outcome_t *outcome);
 const char *d1l_dm_ack_state_name(d1l_dm_ack_state_t state);
 const char *d1l_dm_ack_dispatch_kind_name(uint8_t dispatch_kind);

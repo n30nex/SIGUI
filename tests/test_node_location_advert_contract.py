@@ -313,7 +313,7 @@ def test_legacy_node_and_contact_roles_migrate_fail_closed():
         assert 'canonical = "unknown"' in migration
         assert "Legacy sensor is ambiguous" in migration
 
-    assert "D1L_CONTACT_STORE_SCHEMA 6U" in contacts
+    assert "D1L_CONTACT_STORE_SCHEMA 7U" in contacts
     assert "D1L_CONTACT_STORE_SCHEMA_V5 5U" in contacts
     assert "D1L_CONTACT_STORE_SCHEMA_V4 4U" in contacts
     assert "D1L_CONTACT_STORE_SCHEMA_V3 3U" in contacts

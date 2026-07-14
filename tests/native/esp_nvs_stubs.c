@@ -38,6 +38,18 @@ static size_t s_open_count;
 static size_t s_fail_open_call;
 static esp_err_t s_fail_scheduled_open;
 static int64_t s_now_us;
+static void (*s_next_set_hook)(void);
+static void (*s_semaphore_take_hook)(void);
+static size_t s_semaphore_takes_before_hook;
+
+static void run_hook_once(void (**hook_slot)(void))
+{
+    void (*hook)(void) = *hook_slot;
+    *hook_slot = NULL;
+    if (hook) {
+        hook();
+    }
+}
 
 static mock_nvs_slot_t *slot_for_namespace(const char *namespace_name, bool create)
 {
@@ -82,6 +94,9 @@ void mock_nvs_reset(void)
     s_fail_open_call = 0U;
     s_fail_scheduled_open = ESP_OK;
     s_now_us = 0;
+    s_next_set_hook = NULL;
+    s_semaphore_take_hook = NULL;
+    s_semaphore_takes_before_hook = 0U;
 }
 
 bool mock_nvs_seed_blob(const char *namespace_name, const char *key,
@@ -132,6 +147,17 @@ void mock_nvs_fail_open_after(size_t successful_opens, esp_err_t error)
     s_fail_scheduled_open = error == ESP_OK ? ESP_FAIL : error;
 }
 
+void mock_nvs_run_during_next_set(void (*hook)(void))
+{
+    s_next_set_hook = hook;
+}
+
+void mock_semaphore_run_after_takes(size_t take_count, void (*hook)(void))
+{
+    s_semaphore_take_hook = hook;
+    s_semaphore_takes_before_hook = hook ? take_count : 0U;
+}
+
 void mock_timer_set_us(int64_t now_us)
 {
     s_now_us = now_us;
@@ -151,6 +177,12 @@ BaseType_t xSemaphoreTake(SemaphoreHandle_t handle, TickType_t ticks_to_wait)
 {
     (void)handle;
     (void)ticks_to_wait;
+    if (s_semaphore_take_hook && s_semaphore_takes_before_hook > 0U) {
+        s_semaphore_takes_before_hook--;
+        if (s_semaphore_takes_before_hook == 0U) {
+            run_hook_once(&s_semaphore_take_hook);
+        }
+    }
     return pdTRUE;
 }
 
@@ -238,6 +270,7 @@ esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value,
     memcpy(slot->pending, value, length);
     slot->pending_len = length;
     slot->pending_kind = MOCK_PENDING_SET;
+    run_hook_once(&s_next_set_hook);
     return ESP_OK;
 }
 
