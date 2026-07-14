@@ -4,7 +4,8 @@
 The current package has two explicitly permitted byte-variable metadata files:
 
 * ``manifest.json`` may differ only at ``created_at``, the GitHub Actions run
-  id/attempt/URL, and ``source_build_dir``;
+  id/attempt/URL, ``source_build_dir``, and the bound raw conformance-run
+  receipt identity whose semantic projection is byte-stable in the package;
 * ``SHA256SUMS.txt`` may consequently differ only in its ``manifest.json`` row.
 
 Every other file, resolved build input, toolchain lock, package identity, and
@@ -19,7 +20,7 @@ import copy
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -62,8 +63,23 @@ ARTIFACT_TYPE = "d1l_release_reproducibility_comparison"
 PROJECT = "MeshCore DeskOS D1L"
 WORKFLOW_NAME = "d1l-ci"
 REPOSITORY = "n30nex/SIGUI"
+PROFILE_FULL_RELEASE = "full-release"
+PROFILE_ESP32_ONLY = "esp32-only"
+COMPARISON_PROFILES = (PROFILE_FULL_RELEASE, PROFILE_ESP32_ONLY)
+RP2040_ARTIFACT_NAMES = (
+    "rp2040-sd-bridge-firmware",
+    "rp2040-sd-smoke-firmware",
+    "rp2040-seeed-official-sd-smoke-firmware",
+)
+CANONICAL_CONFORMANCE_PROFILE = "d1l_meshcore_wire_conformance_package_v1"
+CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
+CONFORMANCE_MAX_AGE_DAYS = 14
 PERMITTED_MANIFEST_PATHS = (
     "/created_at",
+    "/meshcore_conformance/run_receipt/expires_at",
+    "/meshcore_conformance/run_receipt/generated_at",
+    "/meshcore_conformance/run_receipt/sha256",
+    "/meshcore_conformance/run_receipt/size",
     "/source_build_dir",
     "/workflow/run_attempt",
     "/workflow/run_id",
@@ -246,6 +262,13 @@ def normalize_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     workflow["run_id"] = "<permitted-run-id>"
     workflow["run_attempt"] = "<permitted-run-attempt>"
     workflow["run_url"] = "<permitted-run-url>"
+    conformance = normalized.get("meshcore_conformance")
+    receipt = conformance.get("run_receipt") if isinstance(conformance, dict) else None
+    if isinstance(receipt, dict):
+        receipt["generated_at"] = "<permitted-conformance-generated-at>"
+        receipt["expires_at"] = "<permitted-conformance-expires-at>"
+        receipt["sha256"] = "<permitted-conformance-run-receipt-sha256>"
+        receipt["size"] = "<permitted-conformance-run-receipt-size>"
     return normalized
 
 
@@ -277,8 +300,8 @@ def json_difference_paths(first: object, second: object, prefix: str = "") -> li
     return [] if first == second else [prefix or "/"]
 
 
-def required_package_paths(source_commit: str) -> set[str]:
-    return {
+def required_package_paths(source_commit: str, profile: str) -> set[str]:
+    required = {
         "README_RELEASE.md",
         "SHA256SUMS.txt",
         "debug/meshcore_deskos_d1l.elf",
@@ -305,10 +328,112 @@ def required_package_paths(source_commit: str) -> set[str]:
         f"sbom_{source_commit}.spdx.json",
         "update/meshcore_deskos_d1l-app.bin",
     }
+    if profile == PROFILE_FULL_RELEASE:
+        required.update(
+            f"rp2040/{name}/SHA256SUMS.txt" for name in RP2040_ARTIFACT_NAMES
+        )
+        required.add(
+            "rp2040/rp2040-sd-bridge-firmware/build-inputs.json"
+        )
+    return required
+
+
+def validate_rp2040_profile(
+    manifest: dict[str, Any],
+    package_dir: Path,
+    source_commit: str,
+    profile: str,
+) -> None:
+    if profile not in COMPARISON_PROFILES:
+        raise ComparisonError(
+            "invalid_comparison_profile", f"unsupported comparison profile: {profile}"
+        )
+    groups = manifest.get("rp2040_artifacts")
+    groups = groups if isinstance(groups, list) else []
+    if profile == PROFILE_ESP32_ONLY:
+        if groups:
+            raise ComparisonError(
+                "package_profile_mismatch",
+                "esp32-only comparison received RP2040 release artifacts",
+            )
+        return
+
+    names = [group.get("name") for group in groups if isinstance(group, dict)]
+    if names != list(RP2040_ARTIFACT_NAMES) or len(groups) != len(
+        RP2040_ARTIFACT_NAMES
+    ):
+        raise ComparisonError(
+            "missing_rp2040_artifacts",
+            "full-release profile requires all three RP2040 artifact roots",
+        )
+
+    for group, name in zip(groups, RP2040_ARTIFACT_NAMES, strict=True):
+        expected_root = f"rp2040/{name}"
+        if group.get("path") != expected_root:
+            raise ComparisonError(
+                "invalid_rp2040_artifact",
+                f"RP2040 artifact root is invalid for {name}",
+            )
+        group_dir = (package_dir / expected_root).resolve()
+        try:
+            group_dir.relative_to(package_dir.resolve())
+        except ValueError as exc:
+            raise ComparisonError(
+                "invalid_rp2040_artifact", f"RP2040 artifact escapes package: {name}"
+            ) from exc
+        inventory = package_inventory(group_dir)
+        checksum_manifest(group_dir, inventory)
+        expected_files = {f"{expected_root}/{path}" for path in inventory}
+        raw_files = group.get("files")
+        declared_files = {
+            item.get("path")
+            for item in raw_files
+            if isinstance(item, dict) and isinstance(item.get("path"), str)
+        } if isinstance(raw_files, list) else set()
+        if declared_files != expected_files or len(declared_files) != len(
+            raw_files if isinstance(raw_files, list) else []
+        ):
+            raise ComparisonError(
+                "invalid_rp2040_artifact",
+                f"RP2040 manifest inventory is incomplete for {name}",
+            )
+        uf2_files = group.get("uf2_files")
+        if (
+            not isinstance(uf2_files, list)
+            or not uf2_files
+            or any(
+                not isinstance(path, str)
+                or path not in expected_files
+                or not path.lower().endswith(".uf2")
+                for path in uf2_files
+            )
+        ):
+            raise ComparisonError(
+                "invalid_rp2040_artifact", f"RP2040 UF2 inventory is invalid for {name}"
+            )
+
+    receipt_path = (
+        package_dir
+        / "rp2040"
+        / "rp2040-sd-bridge-firmware"
+        / "build-inputs.json"
+    )
+    receipt = load_json_object(receipt_path, "RP2040 build-input receipt")
+    if (
+        receipt.get("schema") != 1
+        or receipt.get("kind") != "d1l_arduino_build_inputs"
+        or receipt.get("ok") is not True
+        or receipt.get("source_commit") != source_commit
+        or receipt.get("archives_verified") is not True
+    ):
+        raise ComparisonError(
+            "invalid_rp2040_build_inputs",
+            "full-release RP2040 build-input receipt is incomplete or stale",
+        )
 
 
 def validate_manifest_shape(
-    manifest: dict[str, Any], package_dir: Path, source_commit: str
+    manifest: dict[str, Any], package_dir: Path, source_commit: str, profile: str
 ) -> dict[str, str]:
     if manifest.get("schema") != 1 or manifest.get("project") != PROJECT:
         raise ComparisonError(
@@ -371,6 +496,7 @@ def validate_manifest_shape(
         validate_manifest_inputs(manifest, package_dir, source_commit)
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise ComparisonError("invalid_manifest_binding", str(exc)) from exc
+    validate_rp2040_profile(manifest, package_dir, source_commit, profile)
 
     conformance = manifest.get("meshcore_conformance")
     expected_conformance = f"evidence/meshcore_conformance_{source_commit}.json"
@@ -380,6 +506,31 @@ def validate_manifest_shape(
     ):
         raise ComparisonError(
             "missing_required_payload", "exact-SHA conformance evidence is missing"
+        )
+    run_receipt = conformance.get("run_receipt")
+    if (
+        conformance.get("evidence_profile") != CANONICAL_CONFORMANCE_PROFILE
+        or not isinstance(run_receipt, dict)
+        or run_receipt.get("artifact") != CONFORMANCE_ACTIONS_ARTIFACT
+        or run_receipt.get("path") != f"meshcore_conformance_{source_commit}.json"
+        or isinstance(run_receipt.get("size"), bool)
+        or not isinstance(run_receipt.get("size"), int)
+        or run_receipt["size"] <= 0
+        or re.fullmatch(r"[0-9a-f]{64}", str(run_receipt.get("sha256") or ""))
+        is None
+    ):
+        raise ComparisonError(
+            "invalid_conformance_binding",
+            "canonical conformance evidence has no valid raw Actions receipt binding",
+        )
+    generated_at = parse_utc(run_receipt.get("generated_at"), "conformance generated_at")
+    expires_at = parse_utc(run_receipt.get("expires_at"), "conformance expires_at")
+    generated_time = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    expires_time = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    if expires_time != generated_time + timedelta(days=CONFORMANCE_MAX_AGE_DAYS):
+        raise ComparisonError(
+            "invalid_conformance_binding",
+            "raw conformance receipt expiry does not match the release policy",
         )
     sbom = manifest.get("sbom")
     provenance = manifest.get("provenance")
@@ -502,11 +653,14 @@ def load_snapshot(
     source_commit: str,
     source_identity: dict,
     label: str,
+    profile: str,
 ) -> dict[str, Any]:
     package_dir = package_dir.resolve()
     inventory = package_inventory(package_dir)
     checksums = checksum_manifest(package_dir, inventory)
-    missing_paths = sorted(required_package_paths(source_commit) - set(inventory))
+    missing_paths = sorted(
+        required_package_paths(source_commit, profile) - set(inventory)
+    )
     if missing_paths:
         raise ComparisonError(
             "missing_required_payload",
@@ -514,7 +668,7 @@ def load_snapshot(
         )
 
     manifest = load_json_object(package_dir / "manifest.json", "release manifest")
-    actions = validate_manifest_shape(manifest, package_dir, source_commit)
+    actions = validate_manifest_shape(manifest, package_dir, source_commit, profile)
     normalized_manifest = normalize_manifest(manifest)
 
     sbom_path = package_dir / f"sbom_{source_commit}.spdx.json"
@@ -620,11 +774,12 @@ def failure(code: str, detail: str, package: str | None = None) -> dict[str, str
     return result
 
 
-def base_receipt(source_commit: str) -> dict[str, Any]:
+def base_receipt(source_commit: str, profile: str) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "artifact_type": ARTIFACT_TYPE,
         "source_commit": source_commit,
+        "comparison_profile": profile,
         "status": "fail",
         "reproducible": False,
         "packages": [],
@@ -660,13 +815,14 @@ def compare_with_identity(
     second_package: Path,
     source_commit: str,
     source_identity: dict,
+    profile: str,
 ) -> dict[str, Any]:
-    receipt = base_receipt(source_commit)
+    receipt = base_receipt(source_commit, profile)
     snapshots = []
     for label, package_dir in (("first", first_package), ("second", second_package)):
         try:
             snapshot = load_snapshot(
-                root, package_dir, source_commit, source_identity, label
+                root, package_dir, source_commit, source_identity, label, profile
             )
         except ComparisonError as exc:
             receipt["packages"].append(
@@ -806,13 +962,23 @@ def compare_release_packages(
     *,
     source_identity: dict | None = None,
     enforce_clean_source: bool = True,
+    profile: str = PROFILE_FULL_RELEASE,
 ) -> dict[str, Any]:
     source_commit = exact_sha(expected_source_sha, "expected source SHA")
+    if profile not in COMPARISON_PROFILES:
+        receipt = base_receipt(source_commit, profile)
+        receipt["failures"] = [
+            failure(
+                "invalid_comparison_profile",
+                f"unsupported comparison profile: {profile}",
+            )
+        ]
+        return receipt
     root = root.resolve()
     if source_identity is None:
         info = git_info(root)
         if info.get("dirty"):
-            receipt = base_receipt(source_commit)
+            receipt = base_receipt(source_commit, profile)
             receipt["failures"] = [
                 failure("dirty_source", "comparison requires a clean source worktree")
             ]
@@ -822,7 +988,7 @@ def compare_release_packages(
             repository_commit is None
             or exact_sha(repository_commit, "repository source commit") != source_commit
         ):
-            receipt = base_receipt(source_commit)
+            receipt = base_receipt(source_commit, profile)
             receipt["failures"] = [
                 failure(
                     "source_sha_mismatch",
@@ -833,13 +999,13 @@ def compare_release_packages(
         try:
             identity = discover_source_identity(root, source_commit)
         except (FileNotFoundError, OSError, ValueError) as exc:
-            receipt = base_receipt(source_commit)
+            receipt = base_receipt(source_commit, profile)
             receipt["failures"] = [failure("invalid_source_identity", str(exc))]
             return receipt
     else:
         identity = normalize_source_identity(source_identity)
         if identity["commit"] != source_commit:
-            receipt = base_receipt(source_commit)
+            receipt = base_receipt(source_commit, profile)
             receipt["failures"] = [
                 failure(
                     "source_sha_mismatch",
@@ -848,7 +1014,7 @@ def compare_release_packages(
             ]
             return receipt
         if enforce_clean_source:
-            receipt = base_receipt(source_commit)
+            receipt = base_receipt(source_commit, profile)
             receipt["failures"] = [
                 failure(
                     "invalid_source_identity",
@@ -857,7 +1023,7 @@ def compare_release_packages(
             ]
             return receipt
     return compare_with_identity(
-        root, first_package, second_package, source_commit, identity
+        root, first_package, second_package, source_commit, identity, profile
     )
 
 
@@ -867,6 +1033,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--first-package", required=True)
     parser.add_argument("--second-package", required=True)
     parser.add_argument("--source-sha", required=True)
+    parser.add_argument(
+        "--profile", choices=COMPARISON_PROFILES, default=PROFILE_FULL_RELEASE
+    )
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
 
@@ -882,13 +1051,15 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--out must be outside both compared package directories")
 
     try:
-        receipt = compare_release_packages(root, first, second, args.source_sha)
+        receipt = compare_release_packages(
+            root, first, second, args.source_sha, profile=args.profile
+        )
     except (OSError, TypeError, ValueError) as exc:
         try:
             source_commit = exact_sha(args.source_sha, "expected source SHA")
         except ValueError:
             source_commit = str(args.source_sha)
-        receipt = base_receipt(source_commit)
+        receipt = base_receipt(source_commit, args.profile)
         receipt["failures"] = [failure("comparison_error", str(exc))]
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(canonical_json(receipt), encoding="ascii")

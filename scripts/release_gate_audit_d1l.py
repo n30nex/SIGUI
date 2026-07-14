@@ -19,6 +19,17 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.verify_checksums import verify_sha256_manifest
 
 try:
+    from meshcore_conformance_d1l import (
+        CANONICAL_EVIDENCE_PROFILE,
+        canonicalize_release_report,
+    )
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.meshcore_conformance_d1l import (
+        CANONICAL_EVIDENCE_PROFILE,
+        canonicalize_release_report,
+    )
+
+try:
     from sd_reboot_remount_acceptance_d1l import (
         crashlog_transition_passed,
         persistence_readback_commands,
@@ -69,6 +80,7 @@ MESHCORE_CONFORMANCE_ARTIFACT_TYPE = "d1l_meshcore_wire_conformance"
 MESHCORE_CONFORMANCE_BOUNDARY = "wire_envelope_only"
 MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
 MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
+MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
 HOST_CHECKS_ARTIFACT_TYPE = "d1l_host_checks_success"
 REQUIRED_ESP32_FLASH_ROLES = {
     0x0: "build/bootloader/bootloader.bin",
@@ -453,19 +465,66 @@ def meshcore_conformance_evidence_gate(
     now: datetime | None = None,
     expected_run_id: str | None = None,
 ) -> GateResult:
+    """Bind a fresh Actions receipt to deterministic packaged evidence."""
+
+    def resolve_inside(
+        base: Path | None,
+        relative: object,
+        *,
+        missing_code: str,
+        outside_code: str,
+        unresolvable_code: str,
+    ) -> Path | None:
+        if base is None or not isinstance(relative, str) or not relative:
+            failures.append(missing_code)
+            return None
+        try:
+            candidate = (base / relative).resolve()
+            candidate.relative_to(base.resolve())
+        except ValueError:
+            failures.append(outside_code)
+            return None
+        except (OSError, RuntimeError):
+            failures.append(unresolvable_code)
+            return None
+        return candidate
+
+    def json_report(path: Path | None, invalid_code: str) -> dict[str, Any]:
+        try:
+            value = read_json(path)
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            failures.append(invalid_code)
+            return {}
+        if not isinstance(value, dict):
+            failures.append(invalid_code)
+            return {}
+        return value
+
+    def file_identity(
+        path: Path | None, hash_code: str, stat_code: str
+    ) -> tuple[str | None, int | None]:
+        if path is None or not path.is_file():
+            return None, None
+        try:
+            digest = sha256_file(path)
+        except OSError:
+            failures.append(hash_code)
+            digest = None
+        try:
+            size = path.stat().st_size
+        except OSError:
+            failures.append(stat_code)
+            size = None
+        return digest, size
+
     package = find_release_package(github_run_dir)
     manifest_path = package / "manifest.json" if package else None
     failures: list[str] = []
-    try:
-        manifest = read_json(manifest_path)
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        manifest = {}
-        failures.append("manifest_json_invalid")
-    if not isinstance(manifest, dict):
-        manifest = {}
-        failures.append("manifest_json_invalid")
+    manifest = json_report(manifest_path, "manifest_json_invalid")
     metadata = manifest.get("meshcore_conformance")
     metadata = metadata if isinstance(metadata, dict) else {}
+    run_receipt = metadata.get("run_receipt")
+    run_receipt = run_receipt if isinstance(run_receipt, dict) else {}
     if not package:
         failures.append("release_package_missing")
     if not commit:
@@ -475,31 +534,35 @@ def meshcore_conformance_evidence_gate(
     if not metadata:
         failures.append("manifest_metadata_missing")
 
-    evidence_path: Path | None = None
-    relative_path = metadata.get("path")
-    if package and isinstance(relative_path, str) and relative_path:
-        try:
-            candidate = (package / relative_path).resolve()
-            candidate.relative_to(package.resolve())
-        except ValueError:
-            failures.append("evidence_path_outside_package")
-        except (OSError, RuntimeError):
-            failures.append("evidence_path_unresolvable")
-        else:
-            evidence_path = candidate
-    elif metadata:
-        failures.append("evidence_path_missing")
+    evidence_path = resolve_inside(
+        package,
+        metadata.get("path"),
+        missing_code="evidence_path_missing",
+        outside_code="evidence_path_outside_package",
+        unresolvable_code="evidence_path_unresolvable",
+    )
     if evidence_path and not evidence_path.is_file():
         failures.append("evidence_file_missing")
 
-    try:
-        report = read_json(evidence_path)
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        report = {}
-        failures.append("evidence_json_invalid")
-    if not isinstance(report, dict):
-        report = {}
-        failures.append("evidence_json_invalid")
+    receipt_artifact = run_receipt.get("artifact")
+    receipt_root = (
+        github_run_dir / receipt_artifact
+        if github_run_dir is not None
+        and receipt_artifact == MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
+        else None
+    )
+    run_receipt_path = resolve_inside(
+        receipt_root,
+        run_receipt.get("path"),
+        missing_code="run_receipt_path_missing",
+        outside_code="run_receipt_path_outside_artifact",
+        unresolvable_code="run_receipt_path_unresolvable",
+    )
+    if run_receipt_path and not run_receipt_path.is_file():
+        failures.append("run_receipt_file_missing")
+
+    canonical_report = json_report(evidence_path, "evidence_json_invalid")
+    report = json_report(run_receipt_path, "run_receipt_json_invalid")
     source_verification = report.get("source_verification")
     source_commit = (
         source_verification.get("repository_commit")
@@ -515,6 +578,8 @@ def meshcore_conformance_evidence_gate(
         checks = {
             "metadata_artifact_type": metadata.get("artifact_type") == MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
             "metadata_source_commit": metadata.get("source_commit") == commit,
+            "metadata_evidence_profile": metadata.get("evidence_profile")
+            == CANONICAL_EVIDENCE_PROFILE,
             "metadata_boundary": metadata.get("coverage_boundary") == MESHCORE_CONFORMANCE_BOUNDARY,
             "metadata_level": metadata.get("coverage_level") == MESHCORE_CONFORMANCE_BOUNDARY,
             "metadata_closure_ready_false": metadata.get("closure_ready") is False,
@@ -529,6 +594,11 @@ def meshcore_conformance_evidence_gate(
             "package_workflow_run_id": bool(expected_run_id)
             and str(package_workflow.get("run_id")) == str(expected_run_id),
             "evidence_filename": bool(evidence_path and evidence_path.name == expected_name),
+            "run_receipt_artifact": receipt_artifact
+            == MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT,
+            "run_receipt_filename": bool(
+                run_receipt_path and run_receipt_path.name == expected_name
+            ),
         }
         failures.extend(name for name, ok in checks.items() if not ok)
     if report:
@@ -545,28 +615,39 @@ def meshcore_conformance_evidence_gate(
             "report_issue_65_false": report.get("issue_65_closure_eligible") is False,
         }
         failures.extend(name for name, ok in checks.items() if not ok)
-    elif evidence_path and evidence_path.is_file() and "evidence_json_invalid" not in failures:
-        failures.append("evidence_json_invalid")
+    if canonical_report:
+        checks = {
+            "canonical_evidence_profile": canonical_report.get("evidence_profile")
+            == CANONICAL_EVIDENCE_PROFILE,
+            "canonical_evidence_matches_run_receipt": bool(report)
+            and canonical_report == canonicalize_release_report(report),
+        }
+        failures.extend(name for name, ok in checks.items() if not ok)
 
-    actual_sha = None
-    evidence_size = None
-    if evidence_path and evidence_path.is_file():
-        try:
-            actual_sha = sha256_file(evidence_path)
-        except OSError:
-            failures.append("evidence_hash_unreadable")
-        try:
-            evidence_size = evidence_path.stat().st_size
-        except OSError:
-            failures.append("evidence_stat_unreadable")
+    actual_sha, evidence_size = file_identity(
+        evidence_path, "evidence_hash_unreadable", "evidence_stat_unreadable"
+    )
+    receipt_sha, receipt_size = file_identity(
+        run_receipt_path,
+        "run_receipt_hash_unreadable",
+        "run_receipt_stat_unreadable",
+    )
     if metadata and actual_sha != metadata.get("sha256"):
         failures.append("evidence_sha256_mismatch")
     if evidence_size is not None and metadata.get("size") != evidence_size:
         failures.append("evidence_size_mismatch")
+    if run_receipt and receipt_sha != run_receipt.get("sha256"):
+        failures.append("run_receipt_sha256_mismatch")
+    if receipt_size is not None and run_receipt.get("size") != receipt_size:
+        failures.append("run_receipt_size_mismatch")
 
     generated_at = parse_utc_timestamp(report.get("generated_at")) if report else None
-    metadata_generated_at = parse_utc_timestamp(metadata.get("generated_at")) if metadata else None
-    metadata_expires_at = parse_utc_timestamp(metadata.get("expires_at")) if metadata else None
+    metadata_generated_at = (
+        parse_utc_timestamp(run_receipt.get("generated_at")) if run_receipt else None
+    )
+    metadata_expires_at = (
+        parse_utc_timestamp(run_receipt.get("expires_at")) if run_receipt else None
+    )
     checked_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     expected_expires_at = None
     expires_at_computable = generated_at is not None
@@ -595,6 +676,8 @@ def meshcore_conformance_evidence_gate(
         evidence.append(rel(manifest_path, root))
     if evidence_path and evidence_path.is_file():
         evidence.append(rel(evidence_path, root))
+    if run_receipt_path and run_receipt_path.is_file():
+        evidence.append(rel(run_receipt_path, root))
     return GateResult(
         "meshcore_wire_conformance_packaged",
         "P0",
@@ -616,6 +699,7 @@ def meshcore_conformance_evidence_gate(
             "package_git_dirty_entries": package_git.get("dirty_entries"),
             "source_commit": source_commit,
             "sha256": actual_sha,
+            "run_receipt_sha256": receipt_sha,
             "generated_at": generated_at.isoformat() if generated_at else None,
             "expires_at": expected_expires_at.isoformat() if expected_expires_at else None,
             "checked_at": checked_at.isoformat(),

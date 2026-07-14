@@ -20,6 +20,10 @@ except ModuleNotFoundError:
     from scripts.verify_checksums import is_link_or_reparse, verify_checksum_tree
 
 if __package__:
+    from .meshcore_conformance_d1l import (
+        CANONICAL_EVIDENCE_PROFILE,
+        canonicalize_release_report,
+    )
     from .provenance_d1l import write_package_provenance
     from .sbom_d1l import (
         discover_source_identity,
@@ -27,6 +31,10 @@ if __package__:
         write_package_sbom,
     )
 else:
+    from meshcore_conformance_d1l import (  # type: ignore[no-redef]
+        CANONICAL_EVIDENCE_PROFILE,
+        canonicalize_release_report,
+    )
     from provenance_d1l import write_package_provenance  # type: ignore[no-redef]
     from sbom_d1l import (  # type: ignore[no-redef]
         discover_source_identity,
@@ -58,6 +66,7 @@ MESHCORE_CONFORMANCE_ARTIFACT_TYPE = "d1l_meshcore_wire_conformance"
 MESHCORE_CONFORMANCE_BOUNDARY = "wire_envelope_only"
 MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
 MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
+MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
 
 
 def utc_stamp() -> str:
@@ -149,18 +158,34 @@ def copy_meshcore_conformance_evidence(
         raise ValueError(
             f"MeshCore conformance filename must be {expected_name}, got {source.name}"
         )
+    raw_size = source.stat().st_size
+    raw_sha256 = sha256_file(source)
+    canonical_report = canonicalize_release_report(report)
+    if canonical_report.get("evidence_profile") != CANONICAL_EVIDENCE_PROFILE:
+        raise ValueError("MeshCore conformance canonical evidence profile is invalid")
+
     evidence_dir = package_dir / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     dest = evidence_dir / expected_name
-    shutil.copy2(source, dest)
+    dest.write_text(
+        json.dumps(canonical_report, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="ascii",
+    )
     return {
         "artifact_type": MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
         "path": dest.relative_to(package_dir).as_posix(),
         "size": dest.stat().st_size,
         "sha256": sha256_file(dest),
         "source_commit": source_commit,
-        "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
-        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+        "evidence_profile": CANONICAL_EVIDENCE_PROFILE,
+        "run_receipt": {
+            "artifact": MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT,
+            "path": expected_name,
+            "size": raw_size,
+            "sha256": raw_sha256,
+            "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
+            "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+        },
         "max_age_days": MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
         "coverage_boundary": MESHCORE_CONFORMANCE_BOUNDARY,
         "coverage_level": MESHCORE_CONFORMANCE_BOUNDARY,

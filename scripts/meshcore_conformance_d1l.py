@@ -8,6 +8,7 @@ delivery, RF, or complete MeshCore conformance claim.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -30,6 +31,14 @@ WIRE_SOURCE = ROOT / "main" / "mesh" / "meshcore_wire.c"
 PACKET_SOURCE = ROOT / "third_party" / "MeshCore" / "src" / "Packet.cpp"
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
+CANONICAL_EVIDENCE_PROFILE = "d1l_meshcore_wire_conformance_package_v1"
+VOLATILE_RUN_RECEIPT_FIELDS = (
+    "/generated_at",
+    "/commands/*/checkout-and-temporary-build-paths",
+    "/fuzz_command/temporary-build-and-findings-paths",
+    "/fuzz_result/duration_ms",
+    "/fuzz_result/artifact_prefix",
+)
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
     "path": "third_party/MeshCore",
@@ -396,6 +405,81 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             str(Path(build_dir) / "meshcore_wire_fuzz"),
         ],
     ]
+
+
+def _canonical_command_argument(value: str) -> str:
+    """Replace run-local source, temporary, and findings paths with tokens."""
+
+    normalized = value.replace("\\", "/")
+    source_root = str(ROOT).replace("\\", "/")
+    if normalized == source_root or normalized.startswith(source_root + "/"):
+        normalized = "$SOURCE_ROOT" + normalized[len(source_root) :]
+    else:
+        for marker in ("/third_party/", "/tests/", "/main/"):
+            marker_index = normalized.find(marker)
+            if marker_index > 0:
+                normalized = "$SOURCE_ROOT" + normalized[marker_index:]
+                break
+        else:
+            if normalized.endswith("/main"):
+                normalized = "$SOURCE_ROOT/main"
+    normalized = re.sub(
+        r"(?:[A-Za-z]:)?(?:/[^/]+)*/d1l-meshcore-conformance-[^/]+",
+        "$BUILD_DIR",
+        normalized,
+    )
+    if normalized.startswith("-artifact_prefix="):
+        normalized = "-artifact_prefix=$FINDINGS_DIR/"
+    return normalized
+
+
+def canonicalize_release_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Project a live conformance receipt into deterministic package evidence.
+
+    The live Actions artifact retains wall-clock time, elapsed time, and local
+    paths for freshness and forensic review. The release package carries the
+    same semantic result without those run-local values, so two independent
+    runs of one source revision can produce byte-identical package payloads.
+    """
+
+    if not isinstance(report, dict):
+        raise ValueError("MeshCore conformance report must be an object")
+    canonical = copy.deepcopy(report)
+    canonical.pop("generated_at", None)
+
+    for field in ("commands", "fuzz_command"):
+        commands = canonical.get(field)
+        if not isinstance(commands, list):
+            continue
+        normalized_commands: list[Any] = []
+        for command in commands:
+            if isinstance(command, list):
+                normalized_commands.append(
+                    [
+                        _canonical_command_argument(item)
+                        if isinstance(item, str)
+                        else item
+                        for item in command
+                    ]
+                )
+            elif isinstance(command, str):
+                normalized_commands.append(_canonical_command_argument(command))
+            else:
+                normalized_commands.append(command)
+        canonical[field] = normalized_commands
+
+    fuzz_result = canonical.get("fuzz_result")
+    if isinstance(fuzz_result, dict):
+        fuzz_result.pop("duration_ms", None)
+        fuzz_result.pop("artifact_prefix", None)
+
+    canonical["evidence_profile"] = CANONICAL_EVIDENCE_PROFILE
+    canonical["canonicalization"] = {
+        "volatile_run_receipt_fields_omitted_or_normalized": list(
+            VOLATILE_RUN_RECEIPT_FIELDS
+        )
+    }
+    return canonical
 
 
 def compiler_identity(compiler: str) -> str:

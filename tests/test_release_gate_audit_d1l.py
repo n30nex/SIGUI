@@ -617,9 +617,15 @@ def write_release_package(
     report = conformance or meshcore_conformance_payload(commit)
     generated_at = datetime.fromisoformat(report["generated_at"].replace("Z", "+00:00"))
     expires_at = generated_at + timedelta(days=audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS)
+    receipt_relative = f"meshcore_conformance_{commit}.json"
+    receipt_path = (
+        run_dir / audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT / receipt_relative
+    )
+    write_json(receipt_path, report)
+    receipt_bytes = receipt_path.read_bytes()
     evidence_relative = f"evidence/meshcore_conformance_{commit}.json"
     evidence_path = package / evidence_relative
-    write_json(evidence_path, report)
+    write_json(evidence_path, audit.canonicalize_release_report(report))
     evidence_bytes = evidence_path.read_bytes()
     write_json(
         package / "manifest.json",
@@ -637,8 +643,19 @@ def write_release_package(
                 "size": len(evidence_bytes),
                 "sha256": hashlib.sha256(evidence_bytes).hexdigest(),
                 "source_commit": commit,
-                "generated_at": generated_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                "expires_at": expires_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "evidence_profile": audit.CANONICAL_EVIDENCE_PROFILE,
+                "run_receipt": {
+                    "artifact": audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT,
+                    "path": receipt_relative,
+                    "size": len(receipt_bytes),
+                    "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+                    "generated_at": generated_at.astimezone(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    "expires_at": expires_at.astimezone(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                },
                 "max_age_days": audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
                 "coverage_boundary": audit.MESHCORE_CONFORMANCE_BOUNDARY,
                 "coverage_level": audit.MESHCORE_CONFORMANCE_BOUNDARY,
@@ -1982,6 +1999,23 @@ def test_meshcore_packaged_evidence_gate_rejects_mismatch_expiry_and_tampering(
     assert "evidence_sha256_mismatch" in tampered["details"]["failures"]
     assert "evidence_size_mismatch" in tampered["details"]["failures"]
 
+    receipt_tamper_run = tmp_path / "receipt-tamper"
+    write_release_package(receipt_tamper_run)
+    raw_receipt = (
+        receipt_tamper_run
+        / audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
+        / f"meshcore_conformance_{COMMIT}.json"
+    )
+    raw_receipt.write_text(
+        raw_receipt.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+    )
+    receipt_tampered = audit.meshcore_conformance_evidence_gate(
+        receipt_tamper_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+    assert receipt_tampered["ok"] is False
+    assert "run_receipt_sha256_mismatch" in receipt_tampered["details"]["failures"]
+    assert "run_receipt_size_mismatch" in receipt_tampered["details"]["failures"]
+
     wrong_run_dir = tmp_path / "wrong-run"
     write_release_package(wrong_run_dir, workflow_run_id="999999")
     wrong_run = audit.meshcore_conformance_evidence_gate(
@@ -2007,14 +2041,24 @@ def test_meshcore_packaged_evidence_gate_rejects_mismatch_expiry_and_tampering(
     overflow_run_dir = tmp_path / "overflow"
     overflow_package = write_release_package(overflow_run_dir)
     overflow_evidence = overflow_package / f"evidence/meshcore_conformance_{COMMIT}.json"
-    overflow_report = json.loads(overflow_evidence.read_text(encoding="utf-8"))
+    overflow_receipt = (
+        overflow_run_dir
+        / audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
+        / f"meshcore_conformance_{COMMIT}.json"
+    )
+    overflow_report = json.loads(overflow_receipt.read_text(encoding="utf-8"))
     overflow_report["generated_at"] = "9999-12-31T00:00:00Z"
-    write_json(overflow_evidence, overflow_report)
+    write_json(overflow_receipt, overflow_report)
+    write_json(overflow_evidence, audit.canonicalize_release_report(overflow_report))
     overflow_manifest_path = overflow_package / "manifest.json"
     overflow_manifest = json.loads(overflow_manifest_path.read_text(encoding="utf-8"))
     overflow_metadata = overflow_manifest["meshcore_conformance"]
-    overflow_metadata["generated_at"] = overflow_report["generated_at"]
-    overflow_metadata["expires_at"] = "9999-12-31T23:59:59Z"
+    overflow_metadata["run_receipt"]["generated_at"] = overflow_report["generated_at"]
+    overflow_metadata["run_receipt"]["expires_at"] = "9999-12-31T23:59:59Z"
+    overflow_metadata["run_receipt"]["size"] = overflow_receipt.stat().st_size
+    overflow_metadata["run_receipt"]["sha256"] = hashlib.sha256(
+        overflow_receipt.read_bytes()
+    ).hexdigest()
     overflow_metadata["size"] = overflow_evidence.stat().st_size
     overflow_metadata["sha256"] = hashlib.sha256(overflow_evidence.read_bytes()).hexdigest()
     write_json(overflow_manifest_path, overflow_manifest)

@@ -1,6 +1,7 @@
 import copy
+import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -89,14 +90,31 @@ def write_source_tree(root: Path) -> None:
     )
 
 
-def write_build(build: Path, app_payload: bytes = b"APP") -> None:
+def deterministic_build_payload(role: str, source_payload: bytes) -> bytes:
+    identity = hashlib.sha256(
+        role.encode("ascii") + b"\0" + COMMIT.encode("ascii") + b"\0" + source_payload
+    ).digest()
+    return b"D1L-DETERMINISTIC\0" + role.encode("ascii") + b"\0" + identity
+
+
+def write_build(build: Path, app_source: bytes = b"app-source-v1") -> None:
     (build / "bootloader").mkdir(parents=True)
     (build / "partition_table").mkdir(parents=True)
-    (build / "bootloader" / "bootloader.bin").write_bytes(b"BOOT")
-    (build / "partition_table" / "partition-table.bin").write_bytes(b"PART")
-    (build / "meshcore_deskos_d1l.bin").write_bytes(app_payload)
-    (build / "meshcore_deskos_d1l.elf").write_bytes(b"ELF")
-    (build / "meshcore_deskos_d1l.map").write_text("MAP", encoding="ascii")
+    (build / "bootloader" / "bootloader.bin").write_bytes(
+        deterministic_build_payload("bootloader", b"boot-source-v1")
+    )
+    (build / "partition_table" / "partition-table.bin").write_bytes(
+        deterministic_build_payload("partition-table", b"partition-source-v1")
+    )
+    (build / "meshcore_deskos_d1l.bin").write_bytes(
+        deterministic_build_payload("app", app_source)
+    )
+    (build / "meshcore_deskos_d1l.elf").write_bytes(
+        deterministic_build_payload("elf", app_source)
+    )
+    (build / "meshcore_deskos_d1l.map").write_bytes(
+        deterministic_build_payload("map", app_source)
+    )
     (build / "flasher_args.json").write_text(
         json.dumps(
             {
@@ -116,16 +134,22 @@ def write_build(build: Path, app_payload: bytes = b"APP") -> None:
     )
 
 
-def write_conformance(root: Path, commit: str = COMMIT) -> Path:
+def write_conformance(
+    root: Path,
+    run_index: int,
+    commit: str = COMMIT,
+    *,
+    completed_runs: int = 100000,
+) -> Path:
     path = root / f"meshcore_conformance_{commit}.json"
+    generated_at = datetime.now(timezone.utc) - timedelta(seconds=run_index)
+    temporary = f"/tmp/d1l-meshcore-conformance-run-{run_index}"
     path.write_text(
         json.dumps(
             {
                 "schema_version": 1,
                 "artifact_type": package_release_d1l.MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
-                "generated_at": datetime.now(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z"),
+                "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
                 "passed": True,
                 "status": "pass",
                 "execution_complete": True,
@@ -134,12 +158,81 @@ def write_conformance(root: Path, commit: str = COMMIT) -> Path:
                 "closure_ready": False,
                 "issue_65_closure_eligible": False,
                 "source_verification": {"repository_commit": commit},
+                "commands": [
+                    [
+                        "clang-18",
+                        "-c",
+                        f"/actions/run-{run_index}/checkout/main/mesh/meshcore_wire.c",
+                        "-o",
+                        f"{temporary}/wire.o",
+                    ],
+                    [
+                        "clang++-18",
+                        "-c",
+                        f"/actions/run-{run_index}/checkout/third_party/MeshCore/src/Packet.cpp",
+                        "-o",
+                        f"{temporary}/packet.o",
+                    ],
+                ],
+                "fuzz_command": [
+                    f"{temporary}/meshcore_wire_fuzz",
+                    "-runs=100000",
+                    "-seed=13746277",
+                    f"-artifact_prefix=/tmp/findings-run-{run_index}/",
+                    f"{temporary}/corpus",
+                ],
+                "fuzz_result": {
+                    "passed": True,
+                    "requested_runs": 100000,
+                    "completed_runs": completed_runs,
+                    "duration_ms": 1000 + run_index,
+                    "artifact_prefix": f"/tmp/findings-run-{run_index}",
+                    "finding_files": [],
+                    "findings": 0,
+                },
             },
             sort_keys=True,
         ),
         encoding="ascii",
     )
     return path
+
+
+def write_rp2040_artifacts(root: Path, run_index: int) -> Path:
+    artifact_root = root / "artifacts" / f"rp2040-build-{run_index}"
+    for name in compare_release_reproducibility_d1l.RP2040_ARTIFACT_NAMES:
+        artifact_dir = artifact_root / name
+        artifact_dir.mkdir(parents=True)
+        uf2 = artifact_dir / f"{name}.uf2"
+        uf2.write_bytes(
+            deterministic_build_payload(f"rp2040:{name}", b"rp2040-source-v1")
+        )
+        if name == "rp2040-sd-bridge-firmware":
+            build_inputs = artifact_dir / "build-inputs.json"
+            build_inputs.write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "kind": "d1l_arduino_build_inputs",
+                        "ok": True,
+                        "source_commit": COMMIT,
+                        "archives_verified": True,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="ascii",
+            )
+        rows = [
+            f"{sbom_d1l.sha256_file(path)}  ./{path.name}"
+            for path in sorted(artifact_dir.iterdir())
+            if path.is_file() and path.name != "SHA256SUMS.txt"
+        ]
+        (artifact_dir / "SHA256SUMS.txt").write_text(
+            "\n".join(rows) + "\n", encoding="ascii"
+        )
+    return artifact_root
 
 
 def clean_git_info(commit: str = COMMIT) -> dict:
@@ -160,11 +253,12 @@ def build_pair(
     run_ids: tuple[str, str] = ("1001", "1002"),
     app_payloads: tuple[bytes, bytes] = (b"APP", b"APP"),
     second_package_name: str | None = None,
+    include_rp2040: bool = True,
+    conformance_completed_runs: tuple[int, int] = (100000, 100000),
 ) -> tuple[Path, Path, Path, dict]:
     root = tmp_path / "source"
     root.mkdir()
     write_source_tree(root)
-    conformance = write_conformance(root)
     identity = source_identity()
     monkeypatch.setattr(package_release_d1l, "git_info", lambda _root: clean_git_info())
     monkeypatch.setattr(
@@ -185,6 +279,12 @@ def build_pair(
     ):
         build = root / f"build-{index}"
         write_build(build, app_payload)
+        conformance = write_conformance(
+            root, index, completed_runs=conformance_completed_runs[index - 1]
+        )
+        rp2040_artifacts = (
+            write_rp2040_artifacts(root, index) if include_rp2040 else None
+        )
         monkeypatch.setenv("GITHUB_RUN_ID", run_id)
         package_name = (
             second_package_name
@@ -197,6 +297,7 @@ def build_pair(
             out_dir=root / "artifacts" / f"run-{index}",
             package_name=package_name,
             full_size=0x20000,
+            rp2040_artifact_root=rp2040_artifacts,
             meshcore_conformance_json=conformance,
         )
         packages.append(root / "artifacts" / f"run-{index}" / package_name)
@@ -225,6 +326,9 @@ def test_two_distinct_actions_packages_are_reproducible_and_receipt_is_determini
     assert receipt == repeated
     assert receipt["status"] == "pass"
     assert receipt["reproducible"] is True
+    assert receipt["comparison_profile"] == (
+        compare_release_reproducibility_d1l.PROFILE_FULL_RELEASE
+    )
     assert receipt["failures"] == []
     assert all(receipt["comparison"].values())
     assert (
@@ -242,11 +346,77 @@ def test_two_distinct_actions_packages_are_reproducible_and_receipt_is_determini
     observed = set(
         receipt["permitted_nonreproducible_metadata"]["observed_manifest_differences"]
     )
-    assert {"/source_build_dir", "/workflow/run_id", "/workflow/run_url"} <= observed
+    assert {
+        "/meshcore_conformance/run_receipt/expires_at",
+        "/meshcore_conformance/run_receipt/generated_at",
+        "/meshcore_conformance/run_receipt/sha256",
+        "/source_build_dir",
+        "/workflow/run_id",
+        "/workflow/run_url",
+    } <= observed
     assert observed <= set(compare_release_reproducibility_d1l.PERMITTED_MANIFEST_PATHS)
+    first_evidence = json.loads(
+        (first / f"evidence/meshcore_conformance_{COMMIT}.json").read_text(
+            encoding="ascii"
+        )
+    )
+    second_evidence = json.loads(
+        (second / f"evidence/meshcore_conformance_{COMMIT}.json").read_text(
+            encoding="ascii"
+        )
+    )
+    assert first_evidence == second_evidence
+    assert "generated_at" not in first_evidence
+    assert "duration_ms" not in first_evidence["fuzz_result"]
+    assert "artifact_prefix" not in first_evidence["fuzz_result"]
+    assert "run-1" not in json.dumps(first_evidence)
+    assert "run-2" not in json.dumps(second_evidence)
     serialized = compare_release_reproducibility_d1l.canonical_json(receipt)
     assert str(root) not in serialized
     assert serialized == compare_release_reproducibility_d1l.canonical_json(repeated)
+
+
+def test_full_release_profile_rejects_packages_without_rp2040_roots(
+    tmp_path, monkeypatch
+):
+    root, first, second, identity = build_pair(
+        tmp_path, monkeypatch, include_rp2040=False
+    )
+
+    receipt = compare(root, first, second, identity)
+
+    assert receipt["reproducible"] is False
+    assert receipt["comparison_profile"] == (
+        compare_release_reproducibility_d1l.PROFILE_FULL_RELEASE
+    )
+    assert receipt["packages"] == [
+        {"label": "first", "valid": False, "error_code": "missing_required_payload"},
+        {"label": "second", "valid": False, "error_code": "missing_required_payload"},
+    ]
+    assert all(
+        "rp2040/" in item["detail"]
+        for item in receipt["failures"]
+        if item["code"] == "missing_required_payload"
+    )
+
+
+def test_semantic_conformance_drift_is_not_hidden_by_volatile_normalization(
+    tmp_path, monkeypatch
+):
+    root, first, second, identity = build_pair(
+        tmp_path,
+        monkeypatch,
+        conformance_completed_runs=(100000, 99999),
+    )
+
+    receipt = compare(root, first, second, identity)
+
+    assert receipt["reproducible"] is False
+    assert receipt["comparison"]["payload_sha256_match"] is False
+    mismatch = next(
+        item for item in receipt["failures"] if item["code"] == "payload_sha256_mismatch"
+    )
+    assert f"evidence/meshcore_conformance_{COMMIT}.json" in mismatch["detail"]
 
 
 def test_same_actions_run_is_rejected(tmp_path, monkeypatch):

@@ -47,3 +47,28 @@ Both outputs are unsigned in-toto Statements. Checksums can detect accidental
 changes against trusted inputs, but they do not authenticate the statement. No
 SLSA Build level is claimed. A signed envelope with a trusted signer-builder
 binding is a separate release requirement.
+
+## Reproducibility comparison
+
+The MeshCore conformance job publishes a raw
+`d1l-meshcore-wire-conformance` Actions receipt containing its execution time,
+elapsed fuzz time, and run-local paths. Release packaging validates that fresh
+receipt, records its exact SHA-256 identity in `manifest.json`, and packages a
+canonical semantic projection under `evidence/`. The projection omits or
+normalizes only those volatile receipt fields. The release audit requires the
+raw receipt, its manifest binding, and the canonical projection to agree, so
+canonical packaging does not replace live-run freshness evidence.
+
+Compare two independently downloaded packages with the fail-closed full release
+profile (also the CLI default):
+
+```text
+python scripts/compare_release_reproducibility_d1l.py --root . \
+  --first-package <run-one-package> --second-package <run-two-package> \
+  --source-sha <sha> --profile full-release --out <comparison.json>
+```
+
+`full-release` requires all three RP2040 artifact roots, each root checksum
+manifest, at least one UF2 per root, and the checksum-bound Arduino build-input
+receipt in the production SD-bridge artifact. `esp32-only` is an explicitly
+named development profile and cannot accept a package containing RP2040 files.

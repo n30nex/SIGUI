@@ -279,7 +279,29 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         assert (package_dir / artifact["uf2_files"][0]).is_file()
     conformance_metadata = manifest["meshcore_conformance"]
     packaged_conformance = package_dir / conformance_metadata["path"]
-    assert packaged_conformance.read_bytes() == conformance.read_bytes()
+    packaged_report = json.loads(packaged_conformance.read_text(encoding="ascii"))
+    assert packaged_report == package_release_d1l.canonicalize_release_report(
+        json.loads(conformance.read_text(encoding="utf-8"))
+    )
+    assert packaged_conformance.read_bytes() != conformance.read_bytes()
+    assert "generated_at" not in packaged_report
+    assert conformance_metadata["evidence_profile"] == (
+        package_release_d1l.CANONICAL_EVIDENCE_PROFILE
+    )
+    run_receipt = conformance_metadata["run_receipt"]
+    assert run_receipt["artifact"] == (
+        package_release_d1l.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
+    )
+    assert run_receipt["path"] == conformance.name
+    assert run_receipt["size"] == conformance.stat().st_size
+    assert run_receipt["sha256"] == package_release_d1l.sha256_file(conformance)
+    assert run_receipt["generated_at"] == json.loads(
+        conformance.read_text(encoding="utf-8")
+    )["generated_at"]
+    assert datetime.fromisoformat(run_receipt["expires_at"].replace("Z", "+00:00")) == (
+        datetime.fromisoformat(run_receipt["generated_at"].replace("Z", "+00:00"))
+        + timedelta(days=package_release_d1l.MESHCORE_CONFORMANCE_MAX_AGE_DAYS)
+    )
     assert conformance_metadata["source_commit"] == commit
     assert conformance_metadata["coverage_level"] == "wire_envelope_only"
     assert conformance_metadata["closure_ready"] is False
