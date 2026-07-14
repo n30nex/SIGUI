@@ -102,6 +102,28 @@ def test_source_sbom_is_deterministic_and_bound_to_exact_identities(tmp_path):
     names = {item["fileName"] for item in first["files"]}
     assert "./source/LICENSE" in names
     assert "./source/THIRD_PARTY_NOTICES.md" in names
+    assert {
+        "./source/.github/d1l-build-inputs.json",
+        "./source/requirements/ci-host-windows.txt",
+        "./source/docs/COMPLETION_LEDGER.yaml",
+    }.issubset(names)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        ".github/d1l-build-inputs.json",
+        "requirements/ci-host-windows.txt",
+        "dependencies.lock",
+        "docs/COMPLETION_LEDGER.yaml",
+    ),
+)
+def test_source_sbom_requires_every_release_inventory_lock(tmp_path, relative):
+    write_source_inputs(tmp_path)
+    (tmp_path / relative).unlink()
+
+    with pytest.raises(FileNotFoundError, match="Missing required SBOM input"):
+        sbom_d1l.build_spdx_document(tmp_path, source_identity())
 
 
 def test_package_sbom_round_trips_and_detects_input_tampering(tmp_path):

@@ -25,7 +25,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 if __package__:
-    from .package_release_d1l import git_info
+    from .package_release_d1l import (
+        git_info,
+        package_inventory_payloads,
+        validate_generated_package_metadata,
+    )
     from .provenance_d1l import (
         GITHUB_HOSTED_BUILDER,
         validate_against_inputs as validate_provenance_against_inputs,
@@ -41,7 +45,11 @@ if __package__:
         validate_spdx_profile,
     )
 else:
-    from package_release_d1l import git_info  # type: ignore[no-redef]
+    from package_release_d1l import (  # type: ignore[no-redef]
+        git_info,
+        package_inventory_payloads,
+        validate_generated_package_metadata,
+    )
     from provenance_d1l import (  # type: ignore[no-redef]
         GITHUB_HOSTED_BUILDER,
         validate_against_inputs as validate_provenance_against_inputs,
@@ -99,6 +107,7 @@ REQUIRED_TOOLCHAIN_MATERIALS = (
 REQUIRED_INPUT_MATERIALS = (
     "SIGUI source",
     ".github/workflows/d1l-ci.yml",
+    "docs/COMPLETION_LEDGER.yaml",
     "partitions_d1l.csv",
     "third_party/MeshCore",
     "third_party/sensecap_indicator_esp32",
@@ -311,6 +320,8 @@ def required_package_paths(source_commit: str, profile: str) -> set[str]:
         "docs/RP2040_SD_BRIDGE_FLASH_D1L.md",
         "docs/USER_GUIDE_D1L.md",
         f"evidence/meshcore_conformance_{source_commit}.json",
+        f"build_inputs_{source_commit}.json",
+        f"capability_manifest_{source_commit}.json",
         "firmware/bootloader.bin",
         "firmware/flasher_args.json",
         "firmware/meshcore_deskos_d1l.bin",
@@ -325,6 +336,7 @@ def required_package_paths(source_commit: str, profile: str) -> set[str]:
         "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
         "notices/THIRD_PARTY_NOTICES.md",
         f"provenance_{source_commit}.json",
+        f"release_evidence_index_{source_commit}.json",
         f"sbom_{source_commit}.spdx.json",
         "update/meshcore_deskos_d1l-app.bin",
     }
@@ -433,7 +445,11 @@ def validate_rp2040_profile(
 
 
 def validate_manifest_shape(
-    manifest: dict[str, Any], package_dir: Path, source_commit: str, profile: str
+    root: Path,
+    manifest: dict[str, Any],
+    package_dir: Path,
+    source_commit: str,
+    profile: str,
 ) -> dict[str, str]:
     if manifest.get("schema") != 1 or manifest.get("project") != PROJECT:
         raise ComparisonError(
@@ -496,6 +512,21 @@ def validate_manifest_shape(
         validate_manifest_inputs(manifest, package_dir, source_commit)
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise ComparisonError("invalid_manifest_binding", str(exc)) from exc
+    try:
+        expected_inventory_payloads = package_inventory_payloads(root, source_commit)
+        for contract_name, expected_payload in expected_inventory_payloads.items():
+            payload = validate_generated_package_metadata(
+                package_dir,
+                manifest.get(contract_name),
+                source_commit,
+                contract_name,
+            )
+            if payload != expected_payload:
+                raise ValueError(
+                    f"Packaged {contract_name} does not match its exact source inputs"
+                )
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise ComparisonError("invalid_package_metadata", str(exc)) from exc
     validate_rp2040_profile(manifest, package_dir, source_commit, profile)
 
     conformance = manifest.get("meshcore_conformance")
@@ -668,7 +699,7 @@ def load_snapshot(
         )
 
     manifest = load_json_object(package_dir / "manifest.json", "release manifest")
-    actions = validate_manifest_shape(manifest, package_dir, source_commit, profile)
+    actions = validate_manifest_shape(root, manifest, package_dir, source_commit, profile)
     normalized_manifest = normalize_manifest(manifest)
 
     sbom_path = package_dir / f"sbom_{source_commit}.spdx.json"

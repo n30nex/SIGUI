@@ -132,6 +132,57 @@ def write_fake_notices(root: Path) -> None:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(contents, encoding="ascii")
+    requirements = root / package_release_d1l.HOST_REQUIREMENTS_SOURCE
+    requirements.parent.mkdir(parents=True, exist_ok=True)
+    requirements.write_text("pytest==8.4.1\nruff==0.12.2\n", encoding="ascii")
+    build_inputs = {
+        "schema": 1,
+        "kind": "d1l_build_inputs",
+        "host_python": {
+            "requirements": {
+                "path": package_release_d1l.HOST_REQUIREMENTS_SOURCE.as_posix(),
+                "sha256": package_release_d1l.sha256_file(requirements),
+            }
+        },
+    }
+    build_inputs_path = root / package_release_d1l.BUILD_INPUTS_SOURCE
+    build_inputs_path.parent.mkdir(parents=True, exist_ok=True)
+    build_inputs_path.write_text(
+        json.dumps(build_inputs, indent=2, sort_keys=True) + "\n", encoding="ascii"
+    )
+    ledger = {
+        "schema_version": 1,
+        "snapshot_at": "2026-07-13T23:13:07Z",
+        "release_posture": "not_ready_to_tag",
+        "repository": {"main": {"commit": "a" * 40}},
+        "capabilities": [
+            {
+                "id": "public_messages",
+                "runtime_available": True,
+                "documentation_status": "hardware_proven",
+            },
+            {
+                "id": "authenticated_remote_admin",
+                "runtime_available": False,
+                "documentation_status": "not_started",
+            },
+        ],
+        "blockers": [],
+        "work_packages": [
+            {
+                "id": "WP-03",
+                "title": "Reproducible release inputs",
+                "status": "in_progress",
+                "required_evidence": ["build_inputs_<sha>.json"],
+                "evidence": [],
+            }
+        ],
+    }
+    ledger_path = root / package_release_d1l.COMPLETION_LEDGER_SOURCE
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text(
+        json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="ascii"
+    )
 
 
 def fake_source_identity(commit: str) -> dict:
@@ -329,10 +380,9 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert "./notices/LICENSE" in sha_text
     assert "./notices/THIRD_PARTY_NOTICES.md" in sha_text
     assert f"./evidence/meshcore_conformance_{commit}.json" in sha_text
-    assert verify_sha256_manifest(package_dir / "SHA256SUMS.txt")
-    for artifact in manifest["rp2040_artifacts"]:
-        nested_manifest = package_dir / "rp2040" / artifact["name"] / "SHA256SUMS.txt"
-        assert verify_sha256_manifest(nested_manifest)
+    assert f"./build_inputs_{commit}.json" in sha_text
+    assert f"./capability_manifest_{commit}.json" in sha_text
+    assert f"./release_evidence_index_{commit}.json" in sha_text
     assert f"./sbom_{commit}.spdx.json" in sha_text
     assert f"./provenance_{commit}.json" in sha_text
     sbom_path = package_dir / manifest["sbom"]["path"]
@@ -346,6 +396,39 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert any(item["versionInfo"] == "2" * 40 for item in sbom["packages"])
     assert any(item["fileName"] == "./package/firmware/meshcore_deskos_d1l.bin" for item in sbom["files"])
     assert any(item["fileName"] == "./source/THIRD_PARTY_NOTICES.md" for item in sbom["files"])
+    for source_name in (
+        ".github/d1l-build-inputs.json",
+        "requirements/ci-host-windows.txt",
+        "docs/COMPLETION_LEDGER.yaml",
+    ):
+        assert any(item["fileName"] == f"./source/{source_name}" for item in sbom["files"])
+    for contract_name in package_release_d1l.PACKAGE_METADATA_CONTRACTS:
+        metadata = manifest[contract_name]
+        payload = package_release_d1l.validate_generated_package_metadata(
+            package_dir, metadata, commit, contract_name
+        )
+        assert metadata["generated_package_metadata"] is True
+        assert metadata["release_evidence"] is False
+        assert metadata["physical_closure_claimed"] is False
+        assert payload["source_commit"] == commit
+    build_inputs_payload = json.loads(
+        (package_dir / f"build_inputs_{commit}.json").read_text(encoding="ascii")
+    )
+    assert build_inputs_payload["source"]["path"] == ".github/d1l-build-inputs.json"
+    capability_payload = json.loads(
+        (package_dir / f"capability_manifest_{commit}.json").read_text(encoding="ascii")
+    )
+    assert [item["id"] for item in capability_payload["capabilities"]] == [
+        "authenticated_remote_admin",
+        "public_messages",
+    ]
+    evidence_payload = json.loads(
+        (package_dir / f"release_evidence_index_{commit}.json").read_text(
+            encoding="ascii"
+        )
+    )
+    assert evidence_payload["release_ready"] is False
+    assert evidence_payload["readiness_evaluated_by_packaging"] is False
     provenance_path = package_dir / manifest["provenance"]["path"]
     assert manifest["provenance"]["valid"] is True
     assert manifest["provenance"]["authenticated"] is False
@@ -362,6 +445,25 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         for item in provenance["subject"]
     )
     assert any(item["name"] == f"sbom_{commit}.spdx.json" for item in provenance["subject"])
+    for path in (
+        f"build_inputs_{commit}.json",
+        f"capability_manifest_{commit}.json",
+        f"release_evidence_index_{commit}.json",
+    ):
+        assert any(item["name"] == path for item in provenance["subject"])
+    material_names = {
+        item["name"]
+        for item in provenance["predicate"]["buildDefinition"]["resolvedDependencies"]
+    }
+    assert {
+        ".github/d1l-build-inputs.json",
+        "requirements/ci-host-windows.txt",
+        "docs/COMPLETION_LEDGER.yaml",
+    }.issubset(material_names)
+    assert verify_sha256_manifest(package_dir / "SHA256SUMS.txt")
+    for artifact in manifest["rp2040_artifacts"]:
+        nested_manifest = package_dir / "rp2040" / artifact["name"] / "SHA256SUMS.txt"
+        assert verify_sha256_manifest(nested_manifest)
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
     assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
@@ -369,7 +471,72 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert "`notices/` contains the project license" in readme
     assert f"`sbom_{commit}.spdx.json` is the deterministic SPDX 2.3 SBOM" in readme
     assert f"`provenance_{commit}.json` is deterministic unsigned SLSA v1 provenance" in readme
+    assert "package metadata, not new release evidence or physical closure" in readme
     assert "structural prerequisite and does not close issue #65" in readme
+
+
+def test_exact_sha_package_metadata_contract_rejects_missing_stale_and_mismatched(
+    tmp_path,
+):
+    write_fake_notices(tmp_path)
+    package_dir = tmp_path / "package"
+    package_dir.mkdir()
+    commit = "a" * 40
+    payloads = package_release_d1l.package_inventory_payloads(tmp_path, commit)
+
+    metadata = package_release_d1l.write_package_metadata_artifact(
+        package_dir, "build_inputs", commit, payloads["build_inputs"]
+    )
+    target = package_dir / metadata["path"]
+    target.unlink()
+    with pytest.raises(FileNotFoundError, match="Missing exact-SHA package metadata"):
+        package_release_d1l.validate_generated_package_metadata(
+            package_dir, metadata, commit, "build_inputs"
+        )
+
+    metadata = package_release_d1l.write_package_metadata_artifact(
+        package_dir, "build_inputs", commit, payloads["build_inputs"]
+    )
+    stale = dict(metadata)
+    stale["path"] = f"build_inputs_{'b' * 40}.json"
+    with pytest.raises(ValueError, match="stale or invalid: path"):
+        package_release_d1l.validate_generated_package_metadata(
+            package_dir, stale, commit, "build_inputs"
+        )
+
+    mismatched_payload = dict(payloads["build_inputs"])
+    mismatched_payload["source_commit"] = "b" * 40
+    target.write_text(
+        package_release_d1l.canonical_json(mismatched_payload), encoding="ascii"
+    )
+    mismatched = {
+        **metadata,
+        "size": target.stat().st_size,
+        "sha256": package_release_d1l.sha256_file(target),
+    }
+    with pytest.raises(ValueError, match="identity is stale or invalid: source_commit"):
+        package_release_d1l.validate_generated_package_metadata(
+            package_dir, mismatched, commit, "build_inputs"
+        )
+
+
+def test_package_inventory_metadata_fails_closed_on_missing_sources_and_bad_ledger(
+    tmp_path,
+):
+    write_fake_notices(tmp_path)
+    commit = "a" * 40
+    build_inputs = tmp_path / package_release_d1l.BUILD_INPUTS_SOURCE
+    build_inputs.unlink()
+    with pytest.raises(ValueError, match="build-input lock is missing or unreadable JSON"):
+        package_release_d1l.package_inventory_payloads(tmp_path, commit)
+
+    write_fake_notices(tmp_path)
+    ledger_path = tmp_path / package_release_d1l.COMPLETION_LEDGER_SOURCE
+    ledger = json.loads(ledger_path.read_text(encoding="ascii"))
+    ledger["capabilities"].append(dict(ledger["capabilities"][0]))
+    ledger_path.write_text(json.dumps(ledger), encoding="ascii")
+    with pytest.raises(ValueError, match="duplicate id public_messages"):
+        package_release_d1l.package_inventory_payloads(tmp_path, commit)
 
 
 def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_path, monkeypatch):

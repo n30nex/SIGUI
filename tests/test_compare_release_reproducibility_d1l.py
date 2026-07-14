@@ -88,6 +88,38 @@ def write_source_tree(root: Path) -> None:
     build_lock.write_text(
         json.dumps(build_inputs, indent=2, sort_keys=True) + "\n", encoding="ascii"
     )
+    ledger = {
+        "schema_version": 1,
+        "snapshot_at": "2026-07-13T23:13:07Z",
+        "release_posture": "not_ready_to_tag",
+        "repository": {"main": {"commit": COMMIT}},
+        "capabilities": [
+            {
+                "id": "public_messages",
+                "runtime_available": True,
+                "documentation_status": "hardware_proven",
+            }
+        ],
+        "blockers": [],
+        "work_packages": [
+            {
+                "id": "WP-03",
+                "title": "Reproducible release inputs",
+                "status": "in_progress",
+                "required_evidence": [
+                    "build_inputs_<sha>.json",
+                    "sbom_<sha>.spdx.json",
+                    "provenance_<sha>.json",
+                ],
+                "evidence": [],
+            }
+        ],
+    }
+    ledger_path = root / package_release_d1l.COMPLETION_LEDGER_SOURCE
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text(
+        json.dumps(ledger, indent=2, sort_keys=True) + "\n", encoding="ascii"
+    )
 
 
 def deterministic_build_payload(role: str, source_payload: bytes) -> bytes:
@@ -244,6 +276,10 @@ def clean_git_info(commit: str = COMMIT) -> dict:
         "dirty_entries": [],
         "source_patches": [],
     }
+
+
+def rewrite_package_checksums(package_dir: Path) -> None:
+    package_release_d1l.write_sha256sums(package_dir)
 
 
 def build_pair(
@@ -484,6 +520,57 @@ def test_changed_source_input_invalidates_both_packages(tmp_path, monkeypatch):
         {"label": "second", "valid": False, "error_code": "invalid_sbom"},
     ]
     assert {item["code"] for item in receipt["failures"]} == {"invalid_sbom"}
+
+
+@pytest.mark.parametrize(
+    ("contract_name", "mutation"),
+    [
+        ("build_inputs", "missing"),
+        ("capability_manifest", "stale_filename"),
+        ("release_evidence_index", "mismatched_sha"),
+    ],
+)
+def test_exact_sha_package_metadata_contract_is_fail_closed(
+    tmp_path, monkeypatch, contract_name, mutation
+):
+    root, first, second, identity = build_pair(tmp_path, monkeypatch)
+    manifest_path = first / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="ascii"))
+    metadata = manifest[contract_name]
+    target = first / metadata["path"]
+
+    if mutation == "missing":
+        target.unlink()
+    elif mutation == "stale_filename":
+        stale_name = package_release_d1l.package_metadata_filename(
+            contract_name, "b" * 40
+        )
+        target.rename(first / stale_name)
+        metadata["path"] = stale_name
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="ascii")
+    else:
+        payload = json.loads(target.read_text(encoding="ascii"))
+        payload["source_commit"] = "b" * 40
+        target.write_text(
+            package_release_d1l.canonical_json(payload), encoding="ascii"
+        )
+        metadata["size"] = target.stat().st_size
+        metadata["sha256"] = package_release_d1l.sha256_file(target)
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="ascii")
+    rewrite_package_checksums(first)
+
+    receipt = compare(root, first, second, identity)
+
+    assert receipt["reproducible"] is False
+    assert receipt["packages"][0] == {
+        "label": "first",
+        "valid": False,
+        "error_code": (
+            "missing_required_payload"
+            if mutation != "mismatched_sha"
+            else "invalid_package_metadata"
+        ),
+    }
 
 
 def test_invalid_toolchain_lock_is_rejected(tmp_path, monkeypatch):

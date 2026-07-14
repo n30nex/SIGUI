@@ -50,6 +50,7 @@ REQUIRED_NOTICE_SOURCES = (
 
 REQUIRED_SOURCE_INPUTS = (
     ".gitmodules",
+    ".github/d1l-build-inputs.json",
     ".github/workflows/d1l-ci.yml",
     "CMakeLists.txt",
     "LICENSE",
@@ -57,6 +58,7 @@ REQUIRED_SOURCE_INPUTS = (
     "dependencies.lock",
     "docs/ATTRIBUTIONS.md",
     "docs/BUILD_PROVENANCE_D1L.md",
+    "docs/COMPLETION_LEDGER.yaml",
     "docs/SOURCE_AUDIT_AND_ATTRIBUTION.md",
     "main/CMakeLists.txt",
     "partitions_d1l.csv",
@@ -67,6 +69,7 @@ REQUIRED_SOURCE_INPUTS = (
     "scripts/provenance_d1l.py",
     "scripts/sbom_d1l.py",
     "scripts/verify_arduino_build_inputs.py",
+    "requirements/ci-host-windows.txt",
     "sdkconfig.defaults",
 )
 
@@ -314,7 +317,14 @@ def manifest_claims(manifest: dict) -> dict[str, tuple[str, int | None]]:
         if isinstance(values, list):
             for value in values:
                 add(value)
-    for name in ("update_image", "full_flash_image", "meshcore_conformance"):
+    for name in (
+        "update_image",
+        "full_flash_image",
+        "meshcore_conformance",
+        "build_inputs",
+        "capability_manifest",
+        "release_evidence_index",
+    ):
         add(manifest.get(name))
     groups = manifest.get("rp2040_artifacts")
     if isinstance(groups, list):
