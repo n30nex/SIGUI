@@ -56,12 +56,14 @@ REQUIRED_SOURCE_INPUTS = (
     "THIRD_PARTY_NOTICES.md",
     "dependencies.lock",
     "docs/ATTRIBUTIONS.md",
+    "docs/BUILD_PROVENANCE_D1L.md",
     "docs/SOURCE_AUDIT_AND_ATTRIBUTION.md",
     "main/CMakeLists.txt",
     "partitions_d1l.csv",
     "patches/sensecap_indicator_idf55_compat.patch",
     "patches/sensecap_indicator_touch_fix.patch",
     "scripts/package_release_d1l.py",
+    "scripts/provenance_d1l.py",
     "scripts/sbom_d1l.py",
     "sdkconfig.defaults",
 )
@@ -367,7 +369,10 @@ def collect_package_files(
         if not path.is_file():
             continue
         relative = path.relative_to(package_dir).as_posix()
-        if relative in excluded_names or relative == f"sbom_{source_commit}.spdx.json":
+        if relative in excluded_names or relative in {
+            f"sbom_{source_commit}.spdx.json",
+            f"provenance_{source_commit}.json",
+        }:
             continue
         files.append(file_record(path, relative, "Package"))
     if not files:
@@ -513,7 +518,10 @@ def build_spdx_document(
             "FIRMWARE",
             package_files,
             excluded_files=list(PACKAGE_VERIFICATION_EXCLUSIONS)
-            + [f"./sbom_{identity['commit']}.spdx.json"],
+            + [
+                f"./sbom_{identity['commit']}.spdx.json",
+                f"./provenance_{identity['commit']}.json",
+            ],
         )
         release["attributionTexts"] = [
             "See notices/LICENSE, notices/THIRD_PARTY_NOTICES.md, "
