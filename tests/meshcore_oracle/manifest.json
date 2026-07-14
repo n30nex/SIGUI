@@ -70,7 +70,7 @@
     "main/CMakeLists.txt": "f3c722e6fcc97d18cee61b78bf91e27e6cf1a1655e657953a1919aefef809208",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/ed25519_canonical.h": "52a30b40ea99f25f0d19d991929e167035828a3a2d7479ef6d1dda9ca94a57f5",
-    "main/mesh/meshcore_service.c": "b5b2c0cb6a3a316d0d83f61b5c113b6db5cce8583e33b769b652f2e42c20b303",
+    "main/mesh/meshcore_service.c": "644ef3a4ca24c51b211c24bbdb2614c686cad6fd6dce56488b290d1f2d490532",
     "overlays/meshcore_ed25519_defined/fe.c": "1d5040487ff44538e9a03164e8bbe3a9d3446d0efc9669578f20ba4a8751bdfc",
     "overlays/meshcore_ed25519_defined/ge.c": "b17611fd0b5d8bb3bae2dca3926150a6a2f9f579a7357dcf7feb296779d9d653",
     "overlays/meshcore_ed25519_defined/license.txt": "f68d76b9c1c2271422e55134ea94cf71f2ac3fc3ed6a7ec6b83a1a0538753214",

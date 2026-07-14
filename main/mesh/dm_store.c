@@ -11,7 +11,8 @@
 
 #define D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES
 #define D1L_DM_STORE_KEY "threads"
-#define D1L_DM_STORE_SCHEMA 4U
+#define D1L_DM_STORE_SCHEMA 5U
+#define D1L_DM_STORE_SCHEMA_V4 4U
 #define D1L_DM_STORE_SCHEMA_V3 3U
 #define D1L_DM_STORE_SCHEMA_V2 2U
 #define D1L_DM_STORE_SCHEMA_V1 1U
@@ -30,6 +31,26 @@ typedef struct {
     d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
 } d1l_dm_store_blob_t;
 
+/* Frozen schema-v2/v3/v4 entry layout. Never alias a legacy blob through the
+ * live d1l_dm_entry_t: extending the live row must not silently change the
+ * accepted legacy byte sizes. */
+typedef struct {
+    uint32_t seq;
+    uint32_t uptime_ms;
+    char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char contact_alias[D1L_CONTACT_ALIAS_LEN];
+    char direction[D1L_DM_DIRECTION_LEN];
+    char text[D1L_MESSAGE_TEXT_LEN];
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    uint8_t attempt;
+    bool delivered;
+    bool acked;
+    uint32_t ack_hash;
+} d1l_dm_entry_v4_t;
+
 typedef struct {
     uint32_t schema;
     uint32_t next_seq;
@@ -39,7 +60,20 @@ typedef struct {
     uint32_t count;
     uint32_t epoch;
     uint32_t content_revision;
-    d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
+    uint64_t clear_lineage;
+    d1l_dm_entry_v4_t entries[D1L_DM_STORE_CAPACITY];
+} d1l_dm_store_blob_v4_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t head;
+    uint32_t count;
+    uint32_t epoch;
+    uint32_t content_revision;
+    d1l_dm_entry_v4_t entries[D1L_DM_STORE_CAPACITY];
 } d1l_dm_store_blob_v3_t;
 
 typedef struct {
@@ -49,7 +83,7 @@ typedef struct {
     uint32_t dropped_oldest;
     uint32_t head;
     uint32_t count;
-    d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
+    d1l_dm_entry_v4_t entries[D1L_DM_STORE_CAPACITY];
 } d1l_dm_store_blob_v2_t;
 
 typedef struct {
@@ -81,7 +115,8 @@ typedef struct {
 
 typedef union {
     uint32_t schema;
-    d1l_dm_store_blob_t v4;
+    d1l_dm_store_blob_t v5;
+    d1l_dm_store_blob_v4_t v4;
     d1l_dm_store_blob_v3_t v3;
     d1l_dm_store_blob_v2_t v2;
     d1l_dm_store_blob_v1_t v1;
@@ -201,6 +236,85 @@ static bool persisted_text_is_valid(const char *text, size_t capacity,
     return true;
 }
 
+static bool legacy_entry_is_valid(const d1l_dm_entry_v4_t *entry,
+                                  uint32_t next_seq)
+{
+    return entry && entry->seq > 0U && entry->seq < next_seq &&
+           persisted_text_is_valid(entry->contact_fingerprint,
+                                   sizeof(entry->contact_fingerprint), false) &&
+           persisted_text_is_valid(entry->contact_alias,
+                                   sizeof(entry->contact_alias), false) &&
+           persisted_text_is_valid(entry->direction,
+                                   sizeof(entry->direction), false) &&
+           persisted_text_is_valid(entry->text, sizeof(entry->text), false) &&
+           entry->path_hash_bytes <= 3U && entry->path_hops <= 63U &&
+           (uint16_t)entry->path_hash_bytes * entry->path_hops <= 64U;
+}
+
+static bool digest_bytes_are_zero(
+    const uint8_t digest[D1L_DM_IDENTITY_DIGEST_BYTES])
+{
+    if (!digest) {
+        return false;
+    }
+    for (size_t i = 0U; i < D1L_DM_IDENTITY_DIGEST_BYTES; ++i) {
+        if (digest[i] != 0U) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool valid_identity_digest_equal(const d1l_dm_entry_t *left,
+                                        const d1l_dm_entry_t *right)
+{
+    return left && right && left->identity_digest_valid &&
+           right->identity_digest_valid &&
+           memcmp(left->identity_digest, right->identity_digest,
+                  D1L_DM_IDENTITY_DIGEST_BYTES) == 0;
+}
+
+static bool ack_metadata_is_valid(const d1l_dm_entry_t *entry)
+{
+    if (!entry) {
+        return false;
+    }
+    if (!entry->identity_digest_valid) {
+        return entry->ack_dispatch_count == 0U &&
+               entry->ack_dispatch_kind == 0U &&
+               entry->ack_state == D1L_DM_ACK_STATE_LEGACY_UNVERIFIED &&
+               entry->ack_last_error == ESP_OK &&
+               digest_bytes_are_zero(entry->identity_digest);
+    }
+    if (strncmp(entry->direction, "rx", sizeof(entry->direction)) != 0 ||
+        entry->ack_dispatch_count > D1L_DM_ACK_DISPATCH_MAX ||
+        entry->ack_dispatch_kind > D1L_DM_ACK_DISPATCH_KIND_MAX ||
+        entry->ack_state == D1L_DM_ACK_STATE_LEGACY_UNVERIFIED) {
+        return false;
+    }
+    if (entry->ack_dispatch_count == 0U) {
+        return entry->ack_state == D1L_DM_ACK_STATE_RETRYABLE &&
+               entry->ack_dispatch_kind == 0U &&
+               entry->ack_last_error == ESP_OK;
+    }
+    if (entry->ack_dispatch_kind == 0U) {
+        return false;
+    }
+    switch (entry->ack_state) {
+    case D1L_DM_ACK_STATE_PENDING:
+    case D1L_DM_ACK_STATE_SENT:
+        return entry->ack_last_error == ESP_OK;
+    case D1L_DM_ACK_STATE_RETRYABLE:
+        return entry->ack_dispatch_count == 1U &&
+               entry->ack_last_error != ESP_OK;
+    case D1L_DM_ACK_STATE_TERMINAL:
+        return entry->ack_dispatch_count == D1L_DM_ACK_DISPATCH_MAX &&
+               entry->ack_last_error != ESP_OK;
+    default:
+        return false;
+    }
+}
+
 static bool persisted_entry_is_valid(const d1l_dm_entry_t *entry,
                                      uint32_t next_seq)
 {
@@ -213,7 +327,8 @@ static bool persisted_entry_is_valid(const d1l_dm_entry_t *entry,
                                    sizeof(entry->direction), false) &&
            persisted_text_is_valid(entry->text, sizeof(entry->text), false) &&
            entry->path_hash_bytes <= 3U && entry->path_hops <= 63U &&
-           (uint16_t)entry->path_hash_bytes * entry->path_hops <= 64U;
+           (uint16_t)entry->path_hash_bytes * entry->path_hops <= 64U &&
+           ack_metadata_is_valid(entry);
 }
 
 static bool blob_is_valid(const d1l_dm_store_blob_t *blob, size_t len)
@@ -232,6 +347,12 @@ static bool blob_is_valid(const d1l_dm_store_blob_t *blob, size_t len)
             blob->entries[i].seq <= previous_seq) {
             return false;
         }
+        for (size_t previous = 0U; previous < i; ++previous) {
+            if (valid_identity_digest_equal(&blob->entries[previous],
+                                            &blob->entries[i])) {
+                return false;
+            }
+        }
         previous_seq = blob->entries[i].seq;
     }
     return true;
@@ -247,6 +368,28 @@ static bool blob_v2_header_is_valid(const d1l_dm_store_blob_v2_t *blob,
            blob->total_written >= blob->count;
 }
 
+static bool blob_v4_is_valid(const d1l_dm_store_blob_v4_t *blob, size_t len)
+{
+    if (!blob || len != sizeof(*blob) ||
+        blob->schema != D1L_DM_STORE_SCHEMA_V4 || blob->epoch == 0U ||
+        blob->content_revision == 0U ||
+        blob->head >= D1L_DM_STORE_CAPACITY ||
+        blob->count > D1L_DM_STORE_CAPACITY || blob->next_seq == 0U ||
+        blob->total_written < blob->count ||
+        blob->head != blob->count % D1L_DM_STORE_CAPACITY) {
+        return false;
+    }
+    uint32_t previous_seq = 0U;
+    for (size_t i = 0U; i < blob->count; ++i) {
+        if (!legacy_entry_is_valid(&blob->entries[i], blob->next_seq) ||
+            blob->entries[i].seq <= previous_seq) {
+            return false;
+        }
+        previous_seq = blob->entries[i].seq;
+    }
+    return true;
+}
+
 static bool blob_v3_is_valid(const d1l_dm_store_blob_v3_t *blob, size_t len)
 {
     if (!blob || len != sizeof(*blob) ||
@@ -260,7 +403,7 @@ static bool blob_v3_is_valid(const d1l_dm_store_blob_v3_t *blob, size_t len)
     }
     uint32_t previous_seq = 0U;
     for (size_t i = 0U; i < blob->count; ++i) {
-        if (!persisted_entry_is_valid(&blob->entries[i], blob->next_seq) ||
+        if (!legacy_entry_is_valid(&blob->entries[i], blob->next_seq) ||
             blob->entries[i].seq <= previous_seq) {
             return false;
         }
@@ -284,6 +427,53 @@ static uint32_t migration_revision(uint32_t total_written)
     return total_written == UINT32_MAX ? UINT32_MAX : total_written + 1U;
 }
 
+static void convert_v4_entry(const d1l_dm_entry_v4_t *old,
+                             d1l_dm_entry_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->seq = old->seq;
+    out->uptime_ms = old->uptime_ms;
+    memcpy(out->contact_fingerprint, old->contact_fingerprint,
+           sizeof(out->contact_fingerprint));
+    memcpy(out->contact_alias, old->contact_alias,
+           sizeof(out->contact_alias));
+    memcpy(out->direction, old->direction, sizeof(out->direction));
+    memcpy(out->text, old->text, sizeof(out->text));
+    out->rssi_dbm = old->rssi_dbm;
+    out->snr_tenths = old->snr_tenths;
+    out->path_hash_bytes = old->path_hash_bytes;
+    out->path_hops = old->path_hops;
+    out->attempt = old->attempt;
+    out->delivered = old->delivered;
+    out->acked = old->acked;
+    out->ack_hash = old->ack_hash;
+    out->ack_state = D1L_DM_ACK_STATE_LEGACY_UNVERIFIED;
+    out->ack_last_error = ESP_OK;
+}
+
+static void convert_v4_blob(const d1l_dm_store_blob_v4_t *old,
+                            d1l_dm_store_blob_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->schema = D1L_DM_STORE_SCHEMA;
+    out->epoch = old->epoch;
+    out->content_revision = old->content_revision;
+    out->clear_lineage = old->clear_lineage;
+    out->next_seq = old->next_seq;
+    out->total_written = old->total_written;
+    out->dropped_oldest = old->dropped_oldest;
+    out->head = old->count % D1L_DM_STORE_CAPACITY;
+    out->count = old->count;
+    const size_t oldest = old->count == 0U ? 0U :
+        (old->head + D1L_DM_STORE_CAPACITY - old->count) %
+        D1L_DM_STORE_CAPACITY;
+    for (size_t i = 0U; i < old->count; ++i) {
+        convert_v4_entry(&old->entries[
+                             (oldest + i) % D1L_DM_STORE_CAPACITY],
+                         &out->entries[i]);
+    }
+}
+
 static void convert_v3_blob(const d1l_dm_store_blob_v3_t *old,
                             d1l_dm_store_blob_t *out)
 {
@@ -301,8 +491,9 @@ static void convert_v3_blob(const d1l_dm_store_blob_v3_t *old,
         (old->head + D1L_DM_STORE_CAPACITY - old->count) %
         D1L_DM_STORE_CAPACITY;
     for (size_t i = 0U; i < old->count; ++i) {
-        out->entries[i] = old->entries[
-            (oldest + i) % D1L_DM_STORE_CAPACITY];
+        convert_v4_entry(&old->entries[
+                             (oldest + i) % D1L_DM_STORE_CAPACITY],
+                         &out->entries[i]);
     }
 }
 
@@ -322,7 +513,9 @@ static void convert_v2_blob(const d1l_dm_store_blob_v2_t *old,
     const size_t oldest = old->count == 0U ? 0U :
         (old->head + D1L_DM_STORE_CAPACITY - old->count) % D1L_DM_STORE_CAPACITY;
     for (size_t i = 0U; i < old->count; ++i) {
-        out->entries[i] = old->entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        convert_v4_entry(&old->entries[
+                             (oldest + i) % D1L_DM_STORE_CAPACITY],
+                         &out->entries[i]);
     }
 }
 
@@ -378,10 +571,21 @@ static esp_err_t decode_raw_blob(const d1l_dm_store_raw_blob_t *raw, size_t len,
     }
     *out_upgrade = false;
     if (raw->schema == D1L_DM_STORE_SCHEMA) {
-        if (!blob_is_valid(&raw->v4, len)) {
+        if (!blob_is_valid(&raw->v5, len)) {
             return ESP_ERR_INVALID_STATE;
         }
-        *out = raw->v4;
+        *out = raw->v5;
+        return ESP_OK;
+    }
+    if (raw->schema == D1L_DM_STORE_SCHEMA_V4) {
+        if (!blob_v4_is_valid(&raw->v4, len)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        convert_v4_blob(&raw->v4, out);
+        if (!blob_is_valid(out, sizeof(*out))) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        *out_upgrade = true;
         return ESP_OK;
     }
     if (raw->schema == D1L_DM_STORE_SCHEMA_V3) {
@@ -522,6 +726,30 @@ static void load_blob_locked(const d1l_dm_store_blob_t *blob)
     s_head = blob->count % D1L_DM_STORE_CAPACITY;
 }
 
+static bool normalize_interrupted_ack_locked(void)
+{
+    bool changed = false;
+    for (size_t i = 0U; i < s_count; ++i) {
+        d1l_dm_entry_t *entry = &s_entries[i];
+        if (!entry->identity_digest_valid ||
+            entry->ack_state != D1L_DM_ACK_STATE_PENDING) {
+            continue;
+        }
+        entry->ack_state =
+            entry->ack_dispatch_count >= D1L_DM_ACK_DISPATCH_MAX ?
+                D1L_DM_ACK_STATE_TERMINAL : D1L_DM_ACK_STATE_RETRYABLE;
+        entry->ack_last_error = D1L_DM_ACK_INTERRUPTED_ERROR;
+        changed = true;
+    }
+    if (changed) {
+        if (s_content_revision < UINT32_MAX) {
+            s_content_revision++;
+        }
+        s_state_revision++;
+    }
+    return changed;
+}
+
 static bool blobs_equal(const d1l_dm_store_blob_t *left,
                         const d1l_dm_store_blob_t *right)
 {
@@ -531,14 +759,74 @@ static bool blobs_equal(const d1l_dm_store_blob_t *left,
 static bool entry_identity_equal(const d1l_dm_entry_t *left,
                                  const d1l_dm_entry_t *right)
 {
-    return left && right && left->seq == right->seq &&
-           left->uptime_ms == right->uptime_ms &&
-           left->ack_hash == right->ack_hash &&
-           strncmp(left->contact_fingerprint, right->contact_fingerprint,
-                   sizeof(left->contact_fingerprint)) == 0 &&
-           strncmp(left->direction, right->direction,
-                   sizeof(left->direction)) == 0 &&
-           strncmp(left->text, right->text, sizeof(left->text)) == 0;
+    if (valid_identity_digest_equal(left, right)) {
+        return true;
+    }
+    if (!left || !right ||
+        (left->identity_digest_valid && right->identity_digest_valid) ||
+        left->seq != right->seq ||
+        left->uptime_ms != right->uptime_ms ||
+        left->ack_hash != right->ack_hash ||
+        strncmp(left->contact_fingerprint, right->contact_fingerprint,
+                sizeof(left->contact_fingerprint)) != 0 ||
+        strncmp(left->direction, right->direction,
+                sizeof(left->direction)) != 0 ||
+        strncmp(left->text, right->text, sizeof(left->text)) != 0) {
+        return false;
+    }
+    return true;
+}
+
+static uint8_t ack_state_merge_rank(d1l_dm_ack_state_t state)
+{
+    switch (state) {
+    case D1L_DM_ACK_STATE_TERMINAL:
+        return 4U;
+    case D1L_DM_ACK_STATE_SENT:
+        return 3U;
+    case D1L_DM_ACK_STATE_RETRYABLE:
+        return 2U;
+    case D1L_DM_ACK_STATE_PENDING:
+        return 1U;
+    default:
+        return 0U;
+    }
+}
+
+static void copy_ack_metadata(d1l_dm_entry_t *dest,
+                              const d1l_dm_entry_t *source)
+{
+    memcpy(dest->identity_digest, source->identity_digest,
+           D1L_DM_IDENTITY_DIGEST_BYTES);
+    dest->identity_digest_valid = source->identity_digest_valid;
+    dest->ack_dispatch_count = source->ack_dispatch_count;
+    dest->ack_dispatch_kind = source->ack_dispatch_kind;
+    dest->ack_state = source->ack_state;
+    dest->ack_last_error = source->ack_last_error;
+}
+
+static void merge_ack_metadata(d1l_dm_entry_t *dest,
+                               const d1l_dm_entry_t *source,
+                               bool source_newer)
+{
+    if (!dest || !source || !source->identity_digest_valid) {
+        return;
+    }
+    if (!dest->identity_digest_valid) {
+        copy_ack_metadata(dest, source);
+        return;
+    }
+    if (memcmp(dest->identity_digest, source->identity_digest,
+               D1L_DM_IDENTITY_DIGEST_BYTES) != 0 ||
+        source->ack_dispatch_count < dest->ack_dispatch_count) {
+        return;
+    }
+    if (source->ack_dispatch_count > dest->ack_dispatch_count ||
+        ack_state_merge_rank(source->ack_state) >
+            ack_state_merge_rank(dest->ack_state) ||
+        (source_newer && source->ack_state == dest->ack_state)) {
+        copy_ack_metadata(dest, source);
+    }
 }
 
 static void sort_entries_by_seq(d1l_dm_entry_t *entries, size_t count)
@@ -586,6 +874,8 @@ static esp_err_t merge_same_epoch_locked(const d1l_dm_store_blob_t *primary,
            merged_count * sizeof(s_merge_entries[0]));
     uint32_t next_seq = max_u32(s_compare_blob_scratch.next_seq,
                                 primary->next_seq);
+    const bool primary_newer =
+        primary->content_revision > s_compare_blob_scratch.content_revision;
     uint32_t additional_count = 0U;
     uint32_t retained_live_count = 0U;
 
@@ -614,6 +904,27 @@ static esp_err_t merge_same_epoch_locked(const d1l_dm_store_blob_t *primary,
 
     for (size_t source = 0U; source < primary->count; ++source) {
         d1l_dm_entry_t candidate = primary->entries[source];
+        size_t identity_match = 0U;
+        bool identity_match_set = false;
+        for (size_t current = 0U; current < merged_count; ++current) {
+            if (entry_identity_equal(&s_merge_entries[current], &candidate)) {
+                identity_match = current;
+                identity_match_set = true;
+                break;
+            }
+        }
+        if (identity_match_set) {
+            s_merge_entries[identity_match].delivered =
+                s_merge_entries[identity_match].delivered || candidate.delivered;
+            s_merge_entries[identity_match].acked =
+                s_merge_entries[identity_match].acked || candidate.acked;
+            if (candidate.attempt > s_merge_entries[identity_match].attempt) {
+                s_merge_entries[identity_match].attempt = candidate.attempt;
+            }
+            merge_ack_metadata(&s_merge_entries[identity_match], &candidate,
+                               primary_newer);
+            continue;
+        }
         size_t seq_match = 0U;
         bool seq_match_set = false;
         for (size_t current = 0U; current < merged_count; ++current) {
@@ -622,17 +933,6 @@ static esp_err_t merge_same_epoch_locked(const d1l_dm_store_blob_t *primary,
                 seq_match_set = true;
                 break;
             }
-        }
-        if (seq_match_set &&
-            entry_identity_equal(&s_merge_entries[seq_match], &candidate)) {
-            s_merge_entries[seq_match].delivered =
-                s_merge_entries[seq_match].delivered || candidate.delivered;
-            s_merge_entries[seq_match].acked =
-                s_merge_entries[seq_match].acked || candidate.acked;
-            if (candidate.attempt > s_merge_entries[seq_match].attempt) {
-                s_merge_entries[seq_match].attempt = candidate.attempt;
-            }
-            continue;
         }
         if (seq_match_set) {
             if (next_seq == UINT32_MAX) {
@@ -728,21 +1028,56 @@ static esp_err_t merge_primary_locked(const d1l_dm_store_blob_t *primary,
 
     size_t overlay_count = 0U;
     const uint32_t overlay_mutations = s_mutations_since_init;
+    uint32_t overlay_total_additions = overlay_mutations;
     const uint32_t overlay_content_revision = s_content_revision;
-    if (s_mutated_since_init) {
-        const size_t oldest = s_count == 0U ? 0U :
-            (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
-        for (size_t i = 0U; i < s_count; ++i) {
-            const d1l_dm_entry_t *entry =
-                &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
-            if (entry->seq >= s_boot_next_seq) {
-                s_overlay_entries[overlay_count++] = *entry;
-            }
+    const size_t oldest = s_count == 0U ? 0U :
+        (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
+    for (size_t i = 0U; i < s_count; ++i) {
+        const d1l_dm_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        /* Preserve authenticated ACK metadata for identities present on both
+         * backends even when a higher-epoch primary wins the message history.
+         * Only genuinely live post-boot rows may be replayed when absent. */
+        if (entry->identity_digest_valid ||
+            (s_mutated_since_init && entry->seq >= s_boot_next_seq)) {
+            s_overlay_entries[overlay_count++] = *entry;
         }
     }
     sort_entries_by_seq(s_overlay_entries, overlay_count);
     load_blob_locked(primary);
+    bool result_differs_primary = false;
     for (size_t i = 0U; i < overlay_count; ++i) {
+        d1l_dm_entry_t *identity_match = NULL;
+        for (size_t current = 0U; current < s_count; ++current) {
+            if (entry_identity_equal(&s_entries[current],
+                                     &s_overlay_entries[i])) {
+                identity_match = &s_entries[current];
+                break;
+            }
+        }
+        if (identity_match) {
+            const d1l_dm_entry_t before = *identity_match;
+            identity_match->delivered = identity_match->delivered ||
+                                        s_overlay_entries[i].delivered;
+            identity_match->acked = identity_match->acked ||
+                                    s_overlay_entries[i].acked;
+            if (s_overlay_entries[i].attempt > identity_match->attempt) {
+                identity_match->attempt = s_overlay_entries[i].attempt;
+            }
+            merge_ack_metadata(identity_match, &s_overlay_entries[i], true);
+            result_differs_primary = result_differs_primary ||
+                memcmp(&before, identity_match, sizeof(before)) != 0;
+            continue;
+        }
+        const bool replay_live = s_mutated_since_init &&
+            s_overlay_entries[i].seq >= s_boot_next_seq;
+        const bool preserve_pending =
+            s_overlay_entries[i].identity_digest_valid &&
+            s_overlay_entries[i].ack_state == D1L_DM_ACK_STATE_PENDING &&
+            s_overlay_entries[i].ack_dispatch_count > 0U;
+        if (!replay_live && !preserve_pending) {
+            continue;
+        }
         const esp_err_t replay_ret =
             append_resequenced_locked(&s_overlay_entries[i]);
         if (replay_ret != ESP_OK) {
@@ -750,16 +1085,29 @@ static esp_err_t merge_primary_locked(const d1l_dm_store_blob_t *primary,
             load_blob_locked(&s_compare_blob_scratch);
             return replay_ret;
         }
+        if (preserve_pending && !replay_live &&
+            overlay_total_additions < UINT32_MAX) {
+            overlay_total_additions++;
+        }
+        result_differs_primary = true;
     }
-    s_total_written = primary->total_written > UINT32_MAX - overlay_mutations ?
-        UINT32_MAX : primary->total_written + overlay_mutations;
+    s_total_written =
+        primary->total_written > UINT32_MAX - overlay_total_additions ?
+            UINT32_MAX : primary->total_written + overlay_total_additions;
     s_dropped_oldest = s_total_written >= s_count ?
         s_total_written - (uint32_t)s_count : 0U;
     if (overlay_content_revision > s_content_revision) {
         s_content_revision = overlay_content_revision;
+        result_differs_primary = true;
+    }
+    if (overlay_total_additions > 0U) {
+        result_differs_primary = true;
+    }
+    if (result_differs_primary && s_content_revision < UINT32_MAX) {
+        s_content_revision++;
     }
     *out_changed = !blobs_equal(&s_compare_blob_scratch, primary) ||
-                   overlay_count > 0U;
+                   result_differs_primary;
     return ESP_OK;
 }
 
@@ -1150,6 +1498,7 @@ esp_err_t d1l_dm_store_init(void)
                                backend_state.generation);
         }
     }
+    (void)normalize_interrupted_ack_locked();
     const bool effective_sd_problem = sd_problem ||
         init_merge_ret != ESP_OK || init_generation_changed;
     fill_blob_locked(&s_compare_blob_scratch);
@@ -1248,18 +1597,29 @@ static esp_err_t append_internal(const char *contact_fingerprint,
                                  const char *contact_alias,
                                  const char *direction, const char *text,
                                  int rssi_dbm, int snr_tenths,
-                                 uint8_t path_hash_bytes, uint8_t path_hops,
-                                 uint8_t attempt, bool delivered, bool acked,
-                                 uint32_t ack_hash, bool persist)
+                                  uint8_t path_hash_bytes, uint8_t path_hops,
+                                  uint8_t attempt, bool delivered, bool acked,
+                                  uint32_t ack_hash, bool persist,
+                                  const uint8_t *identity_digest,
+                                  d1l_dm_store_append_outcome_t *outcome)
 {
+    if (outcome) {
+        memset(outcome, 0, sizeof(*outcome));
+        outcome->error = ESP_ERR_INVALID_ARG;
+    }
     if (!contact_fingerprint || contact_fingerprint[0] == '\0' ||
         !text || text[0] == '\0' || path_hash_bytes > 3U ||
         path_hops > 63U ||
-        (uint16_t)path_hash_bytes * path_hops > 64U) {
+        (uint16_t)path_hash_bytes * path_hops > 64U ||
+        (identity_digest && (!persist || !direction ||
+                             strncmp(direction, "rx", D1L_DM_DIRECTION_LEN) != 0))) {
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t ret = ensure_store_initialized();
     if (ret != ESP_OK) {
+        if (outcome) {
+            outcome->error = ret;
+        }
         return ret;
     }
 
@@ -1275,7 +1635,15 @@ static esp_err_t append_internal(const char *contact_fingerprint,
         .delivered = delivered,
         .acked = acked,
         .ack_hash = ack_hash,
+        .ack_state = identity_digest ? D1L_DM_ACK_STATE_RETRYABLE :
+                                       D1L_DM_ACK_STATE_LEGACY_UNVERIFIED,
+        .ack_last_error = ESP_OK,
+        .identity_digest_valid = identity_digest != NULL,
     };
+    if (identity_digest) {
+        memcpy(entry.identity_digest, identity_digest,
+               D1L_DM_IDENTITY_DIGEST_BYTES);
+    }
     sanitize_ascii(entry.contact_fingerprint,
                    sizeof(entry.contact_fingerprint), contact_fingerprint);
     sanitize_ascii(entry.contact_alias, sizeof(entry.contact_alias),
@@ -1289,6 +1657,9 @@ static esp_err_t append_internal(const char *contact_fingerprint,
         s_volatile_entry = entry;
         s_volatile_valid = true;
         d1l_store_lock_give(&s_store_lock);
+        if (outcome) {
+            outcome->error = ESP_OK;
+        }
         return ESP_OK;
     }
 
@@ -1296,6 +1667,9 @@ static esp_err_t append_internal(const char *contact_fingerprint,
         (s_count == D1L_DM_STORE_CAPACITY &&
          s_dropped_oldest == UINT32_MAX)) {
         d1l_store_lock_give(&s_store_lock);
+        if (outcome) {
+            outcome->error = ESP_ERR_INVALID_STATE;
+        }
         return ESP_ERR_INVALID_STATE;
     }
     s_volatile_valid = false;
@@ -1320,7 +1694,16 @@ static esp_err_t append_internal(const char *contact_fingerprint,
     s_sd_primary_dirty = true;
     s_nvs_fallback_dirty = true;
     d1l_store_lock_give(&s_store_lock);
-    return d1l_dm_store_flush();
+    if (outcome) {
+        outcome->inserted = true;
+        outcome->row_seq = entry.seq;
+    }
+    ret = d1l_dm_store_flush();
+    if (outcome) {
+        outcome->durable = ret == ESP_OK;
+        outcome->error = ret;
+    }
+    return ret;
 }
 
 esp_err_t d1l_dm_store_append(const char *contact_fingerprint,
@@ -1333,7 +1716,29 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint,
 {
     return append_internal(contact_fingerprint, contact_alias, direction, text,
                            rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
-                           attempt, delivered, acked, ack_hash, true);
+                           attempt, delivered, acked, ack_hash, true, NULL,
+                           NULL);
+}
+
+esp_err_t d1l_dm_store_append_rx_identity(
+    const char *contact_fingerprint, const char *contact_alias,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, uint8_t attempt,
+    uint32_t ack_hash,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_store_append_outcome_t *outcome)
+{
+    if (!identity_digest || !outcome) {
+        if (outcome) {
+            memset(outcome, 0, sizeof(*outcome));
+            outcome->error = ESP_ERR_INVALID_ARG;
+        }
+        return ESP_ERR_INVALID_ARG;
+    }
+    return append_internal(contact_fingerprint, contact_alias, "rx", text,
+                           rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
+                           attempt, true, false, ack_hash, true,
+                           identity_digest, outcome);
 }
 
 esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint,
@@ -1347,7 +1752,228 @@ esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint,
 {
     return append_internal(contact_fingerprint, contact_alias, direction, text,
                            rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
-                           attempt, delivered, acked, ack_hash, false);
+                           attempt, delivered, acked, ack_hash, false, NULL,
+                           NULL);
+}
+
+static d1l_dm_entry_t *find_rx_identity_locked(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint32_t row_seq)
+{
+    if (!identity_digest) {
+        return NULL;
+    }
+    const size_t oldest = s_count == 0U ? 0U :
+        (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
+    for (size_t i = 0U; i < s_count; ++i) {
+        d1l_dm_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        if (entry->identity_digest_valid &&
+            (row_seq == 0U || entry->seq == row_seq) &&
+            memcmp(entry->identity_digest, identity_digest,
+                   D1L_DM_IDENTITY_DIGEST_BYTES) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+bool d1l_dm_store_find_rx_identity(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_entry_t *out_entry)
+{
+    if (!identity_digest || ensure_store_initialized() != ESP_OK) {
+        return false;
+    }
+    d1l_store_lock_take(&s_store_lock);
+    const d1l_dm_entry_t *entry =
+        find_rx_identity_locked(identity_digest, 0U);
+    if (entry && out_entry) {
+        *out_entry = *entry;
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return entry != NULL;
+}
+
+static void note_ack_metadata_mutation_locked(void)
+{
+    if (s_content_revision < UINT32_MAX) {
+        s_content_revision++;
+    }
+    s_state_revision++;
+    s_mutated_since_init = true;
+    s_device_lineage_authoritative = true;
+    s_sd_primary_dirty = true;
+    s_nvs_fallback_dirty = true;
+}
+
+esp_err_t d1l_dm_store_reserve_ack_dispatch(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation)
+{
+    if (reservation) {
+        memset(reservation, 0, sizeof(*reservation));
+        reservation->error = ESP_ERR_INVALID_ARG;
+    }
+    if (!identity_digest || !reservation || dispatch_kind == 0U ||
+        dispatch_kind > D1L_DM_ACK_DISPATCH_KIND_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = ensure_store_initialized();
+    if (ret != ESP_OK) {
+        reservation->error = ret;
+        return ret;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    d1l_dm_entry_t *entry = find_rx_identity_locked(identity_digest, 0U);
+    if (!entry || persistence_dirty_locked(s_last_sd_primary_required) ||
+        (entry->ack_state != D1L_DM_ACK_STATE_RETRYABLE &&
+         entry->ack_state != D1L_DM_ACK_STATE_SENT) ||
+        entry->ack_dispatch_count >= D1L_DM_ACK_DISPATCH_MAX) {
+        const esp_err_t failure = entry ? ESP_ERR_INVALID_STATE :
+                                          ESP_ERR_NOT_FOUND;
+        d1l_store_lock_give(&s_store_lock);
+        reservation->error = failure;
+        return reservation->error;
+    }
+
+    const uint32_t row_seq = entry->seq;
+    const uint8_t previous_count = entry->ack_dispatch_count;
+    entry->ack_dispatch_count++;
+    entry->ack_dispatch_kind = dispatch_kind;
+    entry->ack_state = D1L_DM_ACK_STATE_PENDING;
+    entry->ack_last_error = ESP_OK;
+    note_ack_metadata_mutation_locked();
+    d1l_store_lock_give(&s_store_lock);
+
+    ret = d1l_dm_store_flush();
+    if (ret != ESP_OK) {
+        /* A split SD/NVS write can partially commit before the other backend
+         * reports failure. Keep the reservation dirty and pending; rolling it
+         * back could regress a durable count and permit an ACK storm. */
+        reservation->reserved = true;
+        reservation->row_seq = row_seq;
+        reservation->dispatch_count = (uint8_t)(previous_count + 1U);
+        reservation->error = ret;
+        return ret;
+    }
+
+    reservation->reserved = true;
+    reservation->durable = true;
+    reservation->row_seq = row_seq;
+    reservation->dispatch_count = (uint8_t)(previous_count + 1U);
+    reservation->error = ESP_OK;
+    return ESP_OK;
+}
+
+esp_err_t d1l_dm_store_rebind_pending_ack_dispatch(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind)
+{
+    if (row_seq == 0U || !identity_digest || dispatch_kind == 0U ||
+        dispatch_kind > D1L_DM_ACK_DISPATCH_KIND_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = ensure_store_initialized();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    d1l_dm_entry_t *entry =
+        find_rx_identity_locked(identity_digest, row_seq);
+    if (!entry || entry->ack_state != D1L_DM_ACK_STATE_PENDING ||
+        entry->ack_dispatch_count == 0U) {
+        const esp_err_t failure = entry ? ESP_ERR_INVALID_STATE :
+                                          ESP_ERR_NOT_FOUND;
+        d1l_store_lock_give(&s_store_lock);
+        return failure;
+    }
+    if (entry->ack_dispatch_kind == dispatch_kind) {
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_OK;
+    }
+    entry->ack_dispatch_kind = dispatch_kind;
+    note_ack_metadata_mutation_locked();
+    d1l_store_lock_give(&s_store_lock);
+
+    /* As with reservation, never roll this back after persistence starts: one
+     * backend may already contain the rebound kind. Dirty pending state blocks
+     * RF until a later flush makes that same reservation coherent. */
+    return d1l_dm_store_flush();
+}
+
+esp_err_t d1l_dm_store_complete_ack_dispatch(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    bool sent, esp_err_t error)
+{
+    if (row_seq == 0U || !identity_digest ||
+        (sent && error != ESP_OK) || (!sent && error == ESP_OK)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = ensure_store_initialized();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    /* Reconciliation may re-sequence a retained row while an already queued
+     * RF response is in flight. The validated full digest is unique in v5 and
+     * remains the primary callback correlation; row_seq is only a stale-safe
+     * diagnostic hint after dispatch. */
+    d1l_dm_entry_t *entry = find_rx_identity_locked(identity_digest, 0U);
+    if (!entry || entry->ack_state != D1L_DM_ACK_STATE_PENDING ||
+        entry->ack_dispatch_count == 0U) {
+        const esp_err_t failure = entry ? ESP_ERR_INVALID_STATE :
+                                          ESP_ERR_NOT_FOUND;
+        d1l_store_lock_give(&s_store_lock);
+        return failure;
+    }
+    if (sent) {
+        entry->ack_state = D1L_DM_ACK_STATE_SENT;
+        entry->ack_last_error = ESP_OK;
+    } else {
+        entry->ack_state =
+            entry->ack_dispatch_count >= D1L_DM_ACK_DISPATCH_MAX ?
+                D1L_DM_ACK_STATE_TERMINAL : D1L_DM_ACK_STATE_RETRYABLE;
+        entry->ack_last_error = error;
+    }
+    note_ack_metadata_mutation_locked();
+    d1l_store_lock_give(&s_store_lock);
+    return d1l_dm_store_flush();
+}
+
+const char *d1l_dm_ack_state_name(d1l_dm_ack_state_t state)
+{
+    switch (state) {
+    case D1L_DM_ACK_STATE_PENDING:
+        return "pending";
+    case D1L_DM_ACK_STATE_SENT:
+        return "sent";
+    case D1L_DM_ACK_STATE_RETRYABLE:
+        return "retryable";
+    case D1L_DM_ACK_STATE_TERMINAL:
+        return "terminal";
+    default:
+        return "legacy_unverified";
+    }
+}
+
+const char *d1l_dm_ack_dispatch_kind_name(uint8_t dispatch_kind)
+{
+    switch (dispatch_kind) {
+    case 1U:
+        return "flood_ack";
+    case 2U:
+        return "direct_ack";
+    case 3U:
+        return "flood_ack_path";
+    default:
+        return "none";
+    }
 }
 
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash,

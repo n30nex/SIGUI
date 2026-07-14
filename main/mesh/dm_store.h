@@ -12,6 +12,18 @@
 #define D1L_DM_STORE_CAPACITY 16U
 #define D1L_DM_DIRECTION_LEN 4U
 #define D1L_DM_STORE_PERSIST_RETRY_INTERVAL_MS 5000U
+#define D1L_DM_IDENTITY_DIGEST_BYTES 32U
+#define D1L_DM_ACK_DISPATCH_MAX 2U
+#define D1L_DM_ACK_DISPATCH_KIND_MAX 3U
+#define D1L_DM_ACK_INTERRUPTED_ERROR ESP_ERR_INVALID_STATE
+
+typedef enum {
+    D1L_DM_ACK_STATE_LEGACY_UNVERIFIED = 0,
+    D1L_DM_ACK_STATE_PENDING,
+    D1L_DM_ACK_STATE_SENT,
+    D1L_DM_ACK_STATE_RETRYABLE,
+    D1L_DM_ACK_STATE_TERMINAL,
+} d1l_dm_ack_state_t;
 
 typedef struct {
     uint32_t seq;
@@ -28,7 +40,28 @@ typedef struct {
     bool delivered;
     bool acked;
     uint32_t ack_hash;
+    uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES];
+    uint8_t ack_dispatch_count;
+    uint8_t ack_dispatch_kind;
+    d1l_dm_ack_state_t ack_state;
+    esp_err_t ack_last_error;
+    bool identity_digest_valid;
 } d1l_dm_entry_t;
+
+typedef struct {
+    bool inserted;
+    bool durable;
+    uint32_t row_seq;
+    esp_err_t error;
+} d1l_dm_store_append_outcome_t;
+
+typedef struct {
+    bool reserved;
+    bool durable;
+    uint32_t row_seq;
+    uint8_t dispatch_count;
+    esp_err_t error;
+} d1l_dm_ack_reservation_t;
 
 typedef struct {
     uint32_t next_seq;
@@ -67,12 +100,35 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
                               int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
                               uint8_t attempt, bool delivered, bool acked,
                               uint32_t ack_hash);
+esp_err_t d1l_dm_store_append_rx_identity(
+    const char *contact_fingerprint, const char *contact_alias,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, uint8_t attempt,
+    uint32_t ack_hash,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_store_append_outcome_t *outcome);
 esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint, const char *contact_alias,
                                        const char *direction, const char *text, int rssi_dbm,
                                        int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
                                        uint8_t attempt, bool delivered, bool acked,
                                        uint32_t ack_hash);
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry);
+bool d1l_dm_store_find_rx_identity(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    d1l_dm_entry_t *out_entry);
+esp_err_t d1l_dm_store_reserve_ack_dispatch(
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind, d1l_dm_ack_reservation_t *reservation);
+esp_err_t d1l_dm_store_rebind_pending_ack_dispatch(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    uint8_t dispatch_kind);
+esp_err_t d1l_dm_store_complete_ack_dispatch(
+    uint32_t row_seq,
+    const uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES],
+    bool sent, esp_err_t error);
+const char *d1l_dm_ack_state_name(d1l_dm_ack_state_t state);
+const char *d1l_dm_ack_dispatch_kind_name(uint8_t dispatch_kind);
 d1l_dm_store_stats_t d1l_dm_store_stats(void);
 size_t d1l_dm_store_copy_recent_page(d1l_dm_entry_t *out_entries, size_t max_entries,
                                      size_t skip_newest, size_t *out_total_matches);
