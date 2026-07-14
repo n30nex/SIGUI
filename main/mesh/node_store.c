@@ -124,6 +124,29 @@ static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
     dest[out] = '\0';
 }
 
+static char lower_hex_char(char value)
+{
+    if (value >= 'A' && value <= 'F') {
+        return (char)(value + ('a' - 'A'));
+    }
+    return value;
+}
+
+static bool public_keys_equal(const char *left, const char *right)
+{
+    if (!left || !right) {
+        return false;
+    }
+    for (size_t i = 0U; i < D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U; ++i) {
+        if (left[i] == '\0' || right[i] == '\0' ||
+            lower_hex_char(left[i]) != lower_hex_char(right[i])) {
+            return false;
+        }
+    }
+    return left[D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U] == '\0' &&
+           right[D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U] == '\0';
+}
+
 static void migrate_legacy_advert_type(
     char dest[D1L_NODE_TYPE_LEN],
     const char legacy_type[D1L_NODE_STORE_LEGACY_TYPE_LEN])
@@ -689,6 +712,12 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
     const uint32_t dropped_oldest_before = s_dropped_oldest;
     const uint32_t marker_generation_before = s_marker_generation;
     int existing = find_by_fingerprint(fingerprint);
+    if (existing >= 0 && public_key_hex && public_key_hex[0] != '\0' &&
+        s_entries[existing].public_key_hex[0] != '\0' &&
+        !public_keys_equal(s_entries[existing].public_key_hex, public_key_hex)) {
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     if (existing >= 0 && advert_timestamp <= s_entries[existing].advert_timestamp) {
         d1l_store_lock_give(&s_store_lock);
         *out_stale = true;
