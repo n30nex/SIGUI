@@ -94,7 +94,7 @@ def test_firmware_parser_is_bounded_and_matches_meshcore_appdata_layout():
         "advert_location_in_bounds",
         "app_data_len - i < 8U",
         "app_data_len - i < 2U",
-        "name_len + 1U < sizeof(out->name)",
+        "name_len + 1U < sizeof(parsed.name)",
     ):
         assert token in parser
     assert '"mesh/advert_data.c"' in cmake

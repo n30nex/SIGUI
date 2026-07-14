@@ -37,9 +37,16 @@ else:
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "tests" / "meshcore_conformance" / "manifest.json"
 CORPUS_PATH = ROOT / "tests" / "meshcore_conformance" / "corpus.json"
+ADVERT_CORPUS_PATH = (
+    ROOT / "tests" / "meshcore_conformance" / "advert_corpus.json"
+)
 HARNESS_PATH = ROOT / "tests" / "meshcore_conformance" / "meshcore_wire_conformance.cpp"
 FUZZ_PATH = ROOT / "tests" / "meshcore_conformance" / "meshcore_wire_fuzz.cpp"
+ADVERT_FUZZ_PATH = (
+    ROOT / "tests" / "meshcore_conformance" / "meshcore_advert_fuzz.cpp"
+)
 WIRE_SOURCE = ROOT / "main" / "mesh" / "meshcore_wire.c"
+LOCAL_ADVERT_SOURCE = ROOT / "main" / "mesh" / "advert_data.c"
 PACKET_SOURCE = ROOT / "third_party" / "MeshCore" / "src" / "Packet.cpp"
 ADVERT_DATA_SOURCE = (
     ROOT
@@ -127,6 +134,9 @@ VOLATILE_RUN_RECEIPT_FIELDS = (
     "/fuzz_command/temporary-build-and-findings-paths",
     "/fuzz_result/duration_ms",
     "/fuzz_result/artifact_prefix",
+    "/advert_fuzz_command/temporary-build-and-findings-paths",
+    "/advert_fuzz_result/duration_ms",
+    "/advert_fuzz_result/artifact_prefix",
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -146,6 +156,11 @@ EXPECTED_FUZZ_CORPUS = {
     "manifest": "tests/meshcore_conformance/corpus.json",
     "sha256": "ad0d3d03f1699a86c61812b5307b0bd47ffd50cd9fdbbbd69f73f1df893eef25",
     "seed_count": 5,
+}
+EXPECTED_ADVERT_FUZZ_CORPUS = {
+    "manifest": "tests/meshcore_conformance/advert_corpus.json",
+    "sha256": "9a85e4377e1bc59542e5509edb105225fe303578f5f5a860f217b0c619513b1c",
+    "seed_count": 8,
 }
 
 EXPECTED_VECTORS = {
@@ -198,6 +213,19 @@ EXPECTED_FUZZ = {
     "seed": DEFAULT_SEED,
     "max_input_bytes": 255,
     "sanitizers": ["address", "undefined"],
+}
+EXPECTED_ADVERT_FUZZ = {
+    "engine": "libFuzzer",
+    "runs": DEFAULT_RUNS,
+    "seed": DEFAULT_SEED,
+    "max_input_bytes": 33,
+    "sanitizers": ["address", "undefined"],
+    "target": "local_advert_parser",
+    "production_sources": [
+        "main/mesh/advert_data.c",
+        "main/mesh/advert_data.h",
+    ],
+    "invalid_output_policy": "canonical_zeroed_with_type_N",
 }
 EXPECTED_ORACLE_CAPABILITIES = [
     {
@@ -1212,6 +1240,8 @@ def load_manifest() -> dict[str, Any]:
         raise GateFailure("manifest production wire source list drifted")
     if manifest.get("fuzz_corpus") != EXPECTED_FUZZ_CORPUS:
         raise GateFailure("manifest fuzz corpus pin drifted")
+    if manifest.get("advert_fuzz_corpus") != EXPECTED_ADVERT_FUZZ_CORPUS:
+        raise GateFailure("manifest advert fuzz corpus pin drifted")
     if manifest.get("constants") != {
         "max_raw_packet": 255,
         "max_path_bytes": 64,
@@ -1226,6 +1256,8 @@ def load_manifest() -> dict[str, Any]:
         raise GateFailure("manifest vector matrix drifted")
     if manifest.get("fuzz") != EXPECTED_FUZZ:
         raise GateFailure("manifest fuzz contract drifted")
+    if manifest.get("advert_fuzz") != EXPECTED_ADVERT_FUZZ:
+        raise GateFailure("manifest advert fuzz contract drifted")
     return manifest
 
 
@@ -2237,19 +2269,31 @@ def verify_oracle_sources(manifest: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def load_corpus(manifest: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[str, bytes, str]]]:
-    corpus_pin = manifest.get("fuzz_corpus", {})
-    expected_path = str(CORPUS_PATH.relative_to(ROOT)).replace("\\", "/")
+def load_fuzz_corpus(
+    manifest: dict[str, Any],
+    *,
+    pin_name: str,
+    corpus_path: Path,
+    coverage_boundary: str,
+    max_input_bytes: int,
+) -> tuple[dict[str, Any], list[tuple[str, bytes, str]]]:
+    corpus_pin = manifest.get(pin_name, {})
+    expected_path = str(corpus_path.relative_to(ROOT)).replace("\\", "/")
     if corpus_pin.get("manifest") != expected_path:
         raise GateFailure("primary manifest points at an unexpected fuzz corpus")
-    if corpus_pin.get("sha256") != sha256_lf_text_file(CORPUS_PATH):
+    if corpus_pin.get("sha256") != sha256_lf_text_file(corpus_path):
         raise GateFailure("fuzz corpus manifest SHA256 does not match the primary manifest")
     try:
-        corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+        corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise GateFailure(f"cannot read fuzz corpus manifest: {exc}") from exc
-    if corpus.get("encoding") != "hex" or corpus.get("coverage_boundary") != "local_wire_decoder_only":
-        raise GateFailure("fuzz corpus must be hex and local-wire-decoder-only")
+    if (
+        corpus.get("encoding") != "hex"
+        or corpus.get("coverage_boundary") != coverage_boundary
+    ):
+        raise GateFailure(
+            f"fuzz corpus must be hex and {coverage_boundary}"
+        )
     decoded: list[tuple[str, bytes, str]] = []
     names: set[str] = set()
     for entry in corpus.get("seeds", []):
@@ -2263,7 +2307,7 @@ def load_corpus(manifest: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[st
         except (TypeError, ValueError) as exc:
             raise GateFailure(f"invalid hex corpus seed {name}") from exc
         actual_hash = hashlib.sha256(payload).hexdigest()
-        if not payload or len(payload) > 255 or actual_hash != expected_hash:
+        if not payload or len(payload) > max_input_bytes or actual_hash != expected_hash:
             raise GateFailure(f"fuzz corpus seed {name} failed length or SHA256 validation")
         names.add(name)
         decoded.append((name, payload, actual_hash))
@@ -2272,6 +2316,30 @@ def load_corpus(manifest: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[st
     if len(decoded) != corpus_pin.get("seed_count"):
         raise GateFailure("fuzz corpus seed count does not match the primary manifest")
     return corpus, decoded
+
+
+def load_corpus(
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], list[tuple[str, bytes, str]]]:
+    return load_fuzz_corpus(
+        manifest,
+        pin_name="fuzz_corpus",
+        corpus_path=CORPUS_PATH,
+        coverage_boundary="local_wire_decoder_only",
+        max_input_bytes=255,
+    )
+
+
+def load_advert_corpus(
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], list[tuple[str, bytes, str]]]:
+    return load_fuzz_corpus(
+        manifest,
+        pin_name="advert_fuzz_corpus",
+        corpus_path=ADVERT_CORPUS_PATH,
+        coverage_boundary="local_advert_parser",
+        max_input_bytes=33,
+    )
 
 
 def verify_sources(manifest: dict[str, Any], expected_commit: str | None) -> dict[str, Any]:
@@ -2600,6 +2668,48 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-o",
             str(Path(build_dir) / "meshcore_wire_fuzz"),
         ],
+        [
+            cc,
+            "-std=c11",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            fuzzer_compile_sanitizers,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(ROOT / "main"),
+            "-c",
+            str(LOCAL_ADVERT_SOURCE),
+            "-o",
+            str(Path(build_dir) / "d1l_advert_data_fuzz.o"),
+        ],
+        [
+            cxx,
+            "-std=c++17",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            fuzzer_compile_sanitizers,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(ROOT / "main"),
+            "-c",
+            str(ADVERT_FUZZ_PATH),
+            "-o",
+            str(Path(build_dir) / "meshcore_advert_fuzz.o"),
+        ],
+        [
+            cxx,
+            "-fsanitize=fuzzer,address,undefined",
+            str(Path(build_dir) / "d1l_advert_data_fuzz.o"),
+            str(Path(build_dir) / "meshcore_advert_fuzz.o"),
+            "-o",
+            str(Path(build_dir) / "meshcore_advert_fuzz"),
+        ],
     ]
     ed25519_commands = [
         [
@@ -2664,7 +2774,7 @@ def canonicalize_release_report(report: dict[str, Any]) -> dict[str, Any]:
     canonical = copy.deepcopy(report)
     canonical.pop("generated_at", None)
 
-    for field in ("commands", "fuzz_command"):
+    for field in ("commands", "fuzz_command", "advert_fuzz_command"):
         commands = canonical.get(field)
         if not isinstance(commands, list):
             continue
@@ -2689,6 +2799,10 @@ def canonicalize_release_report(report: dict[str, Any]) -> dict[str, Any]:
     if isinstance(fuzz_result, dict):
         fuzz_result.pop("duration_ms", None)
         fuzz_result.pop("artifact_prefix", None)
+    advert_fuzz_result = canonical.get("advert_fuzz_result")
+    if isinstance(advert_fuzz_result, dict):
+        advert_fuzz_result.pop("duration_ms", None)
+        advert_fuzz_result.pop("artifact_prefix", None)
 
     canonical["evidence_profile"] = CANONICAL_EVIDENCE_PROFILE
     canonical["canonicalization"] = {
@@ -2718,8 +2832,12 @@ def validate_completed_report(
     vector = vector if isinstance(vector, dict) else {}
     fuzz = report.get("fuzz_result")
     fuzz = fuzz if isinstance(fuzz, dict) else {}
+    advert_fuzz = report.get("advert_fuzz_result")
+    advert_fuzz = advert_fuzz if isinstance(advert_fuzz, dict) else {}
     corpus = report.get("corpus")
     corpus = corpus if isinstance(corpus, dict) else {}
+    advert_corpus = report.get("advert_corpus")
+    advert_corpus = advert_corpus if isinstance(advert_corpus, dict) else {}
     compiler = report.get("compiler")
     compiler = compiler if isinstance(compiler, dict) else {}
     expected_source_names = set(EXPECTED_UPSTREAM["sources"])
@@ -2742,6 +2860,21 @@ def validate_completed_report(
             and re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256") or ""))
             is not None
             for item in corpus_seeds
+        )
+    )
+    advert_corpus_seeds = advert_corpus.get("seeds")
+    advert_corpus_seeds_complete = (
+        isinstance(advert_corpus_seeds, list)
+        and len(advert_corpus_seeds) == EXPECTED_ADVERT_FUZZ_CORPUS["seed_count"]
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and isinstance(item.get("size"), int)
+            and item["size"] > 0
+            and item["size"] <= EXPECTED_ADVERT_FUZZ["max_input_bytes"]
+            and re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256") or ""))
+            is not None
+            for item in advert_corpus_seeds
         )
     )
     compiler_identities = (compiler.get("cc"), compiler.get("cxx"))
@@ -2829,6 +2962,14 @@ def validate_completed_report(
         and corpus.get("manifest_sha256") == EXPECTED_FUZZ_CORPUS["sha256"]
         and corpus.get("seed_count") == EXPECTED_FUZZ_CORPUS["seed_count"]
         and corpus_seeds_complete,
+        "advert_corpus": advert_corpus.get("verified") is True
+        and advert_corpus.get("path") == EXPECTED_ADVERT_FUZZ_CORPUS["manifest"]
+        and advert_corpus.get("manifest_sha256")
+        == EXPECTED_ADVERT_FUZZ_CORPUS["sha256"]
+        and advert_corpus.get("coverage_boundary") == "local_advert_parser"
+        and advert_corpus.get("seed_count")
+        == EXPECTED_ADVERT_FUZZ_CORPUS["seed_count"]
+        and advert_corpus_seeds_complete,
         "vector_passed": vector.get("passed") is True,
         "vector_counts": vector.get("vectors")
         == {"local_to_upstream": 504, "upstream_to_local": 504, "total": 1008},
@@ -2851,12 +2992,25 @@ def validate_completed_report(
         and fuzz.get("max_input_bytes") == 255
         and fuzz.get("sanitizers") == ["address", "undefined"],
         "fuzz_findings": fuzz.get("finding_files") == [] and fuzz.get("findings") == 0,
+        "advert_fuzz_passed": advert_fuzz.get("passed") is True,
+        "advert_fuzz_complete": advert_fuzz.get("engine") == "libFuzzer"
+        and advert_fuzz.get("target") == "local_advert_parser"
+        and advert_fuzz.get("invalid_output_policy")
+        == "canonical_zeroed_with_type_N"
+        and advert_fuzz.get("seed") == DEFAULT_SEED
+        and advert_fuzz.get("requested_runs") == DEFAULT_RUNS
+        and advert_fuzz.get("completed_runs") == DEFAULT_RUNS
+        and advert_fuzz.get("max_input_bytes") == 33
+        and advert_fuzz.get("sanitizers") == ["address", "undefined"],
+        "advert_fuzz_findings": advert_fuzz.get("finding_files") == []
+        and advert_fuzz.get("findings") == 0,
         "compiler": all(
             isinstance(identity, str) and "clang version 18.1.3" in identity
             for identity in compiler_identities
         ),
         "commands": command_plan_is_exact
-        and isinstance(report.get("fuzz_command"), list),
+        and isinstance(report.get("fuzz_command"), list)
+        and isinstance(report.get("advert_fuzz_command"), list),
         "sanitizer_disable_flags_absent": sanitizer_disable_flags == [],
         "sanitizer_policy": report.get("sanitizer_policy")
         == ED25519_SANITIZER_POLICY,
@@ -3049,6 +3203,8 @@ def base_report(
             "vector_oracle": "pinned_Packet_wire_read_write_only",
             "upstream_oracle_interface": ORACLE_COVERAGE_BOUNDARY,
             "fuzz_target": "local_wire_decoder_only",
+            "semantic_fuzz_targets": ["local_advert_parser"],
+            "advert_parser_fuzz_covered": True,
             "packet_semantics_covered": False,
             "crypto_oracle_available": False,
             "public_group_crypto_oracle_available": True,
@@ -3060,6 +3216,7 @@ def base_report(
             "commit": args.commit,
             "seed": args.seed,
             "fuzz_runs": args.runs,
+            "advert_fuzz_runs": args.runs,
             "sanitizers": ["address", "undefined"],
         },
         "sanitizer_policy": oracle_manifest["sanitizer_policy"],
@@ -3092,10 +3249,14 @@ def base_report(
         "vector_matrix": manifest["vector_matrix"],
         "payload_version_gate": manifest["payload_version_gate"],
         "corpus": None,
+        "advert_corpus": None,
         "commands": command_plan(args.cc, args.cxx),
         "source_verification": None,
         "vector_result": None,
+        "fuzz_command": None,
         "fuzz_result": None,
+        "advert_fuzz_command": None,
+        "advert_fuzz_result": None,
         "toolchain": None,
         "sanitizer_errors": None,
         "memory_errors": None,
@@ -3174,6 +3335,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             oracle_manifest
         )
         _corpus, corpus_seeds = load_corpus(manifest)
+        _advert_corpus, advert_corpus_seeds = load_advert_corpus(manifest)
         report["corpus"] = {
             "path": str(CORPUS_PATH.relative_to(ROOT)).replace("\\", "/"),
             "manifest_sha256": sha256_lf_text_file(CORPUS_PATH),
@@ -3182,6 +3344,17 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             "seeds": [
                 {"name": name, "size": len(payload), "sha256": digest}
                 for name, payload, digest in corpus_seeds
+            ],
+            "verified": True,
+        }
+        report["advert_corpus"] = {
+            "path": str(ADVERT_CORPUS_PATH.relative_to(ROOT)).replace("\\", "/"),
+            "manifest_sha256": sha256_lf_text_file(ADVERT_CORPUS_PATH),
+            "coverage_boundary": "local_advert_parser",
+            "seed_count": len(advert_corpus_seeds),
+            "seeds": [
+                {"name": name, "size": len(payload), "sha256": digest}
+                for name, payload, digest in advert_corpus_seeds
             ],
             "verified": True,
         }
@@ -3222,6 +3395,10 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             corpus_dir.mkdir()
             for index, (name, payload, _digest) in enumerate(corpus_seeds):
                 (corpus_dir / f"{index:02d}_{name}").write_bytes(payload)
+            advert_corpus_dir = build_dir / "advert-corpus"
+            advert_corpus_dir.mkdir()
+            for index, (name, payload, _digest) in enumerate(advert_corpus_seeds):
+                (advert_corpus_dir / f"{index:02d}_{name}").write_bytes(payload)
             commands = command_plan(args.cc, args.cxx, str(build_dir))
             report["commands"] = commands
             for command in commands:
@@ -3363,6 +3540,93 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 )
             if finding_files:
                 raise GateFailure("libFuzzer emitted finding artifacts despite a zero exit")
+
+            advert_findings_dir = (
+                args.out.parent
+                / (
+                    "meshcore_advert_fuzz_findings_"
+                    f"{source_verification['repository_commit']}"
+                )
+            ).resolve()
+            advert_findings_dir.mkdir(parents=True, exist_ok=True)
+            if any(advert_findings_dir.iterdir()):
+                raise GateFailure(
+                    "advert fuzzer findings directory is not empty: "
+                    f"{advert_findings_dir}"
+                )
+            advert_fuzz_command = [
+                str(build_dir / "meshcore_advert_fuzz"),
+                f"-runs={args.runs}",
+                f"-seed={args.seed}",
+                "-max_len=33",
+                "-print_final_stats=1",
+                f"-artifact_prefix={advert_findings_dir}{os.sep}",
+                str(advert_corpus_dir),
+            ]
+            advert_fuzz_started = time.monotonic()
+            try:
+                advert_fuzz = run_process(
+                    advert_fuzz_command,
+                    timeout=args.timeout_sec,
+                    env=sanitizer_env,
+                )
+            except GateFailure:
+                report["advert_fuzz_command"] = advert_fuzz_command
+                report["advert_fuzz_result"] = {
+                    "passed": False,
+                    "engine": "libFuzzer",
+                    "target": "local_advert_parser",
+                    "invalid_output_policy": "canonical_zeroed_with_type_N",
+                    "seed": args.seed,
+                    "requested_runs": args.runs,
+                    "completed_runs": None,
+                    "duration_ms": round(
+                        (time.monotonic() - advert_fuzz_started) * 1000
+                    ),
+                    "max_input_bytes": 33,
+                    "sanitizers": ["address", "undefined"],
+                    "artifact_prefix": str(advert_findings_dir),
+                    "finding_files": sorted(
+                        path.name for path in advert_findings_dir.iterdir()
+                    ),
+                }
+                raise
+            advert_fuzz_duration_ms = round(
+                (time.monotonic() - advert_fuzz_started) * 1000
+            )
+            advert_completed = completed_fuzz_runs(advert_fuzz.stderr, args.runs)
+            advert_finding_files = sorted(
+                path.name for path in advert_findings_dir.iterdir()
+            )
+            report["advert_fuzz_command"] = advert_fuzz_command
+            report["advert_fuzz_result"] = {
+                "passed": advert_completed == args.runs,
+                "engine": "libFuzzer",
+                "target": "local_advert_parser",
+                "invalid_output_policy": "canonical_zeroed_with_type_N",
+                "seed": args.seed,
+                "requested_runs": args.runs,
+                "completed_runs": advert_completed,
+                "duration_ms": advert_fuzz_duration_ms,
+                "max_input_bytes": 33,
+                "sanitizers": ["address", "undefined"],
+                "artifact_prefix": str(advert_findings_dir),
+                "finding_files": advert_finding_files,
+                "findings": (
+                    0
+                    if advert_completed == args.runs and not advert_finding_files
+                    else None
+                ),
+            }
+            if advert_completed != args.runs:
+                raise GateFailure(
+                    "advert libFuzzer completion count was "
+                    f"{advert_completed}, expected {args.runs}"
+                )
+            if advert_finding_files:
+                raise GateFailure(
+                    "advert libFuzzer emitted finding artifacts despite a zero exit"
+                )
 
         report["compiler"] = {"cc": cc_identity, "cxx": cxx_identity}
         report["sanitizer_errors"] = 0

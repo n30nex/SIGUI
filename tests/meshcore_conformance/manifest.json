@@ -21,6 +21,11 @@
     "sha256": "ad0d3d03f1699a86c61812b5307b0bd47ffd50cd9fdbbbd69f73f1df893eef25",
     "seed_count": 5
   },
+  "advert_fuzz_corpus": {
+    "manifest": "tests/meshcore_conformance/advert_corpus.json",
+    "sha256": "9a85e4377e1bc59542e5509edb105225fe303578f5f5a860f217b0c619513b1c",
+    "seed_count": 8
+  },
   "constants": {
     "max_raw_packet": 255,
     "max_path_bytes": 64,
@@ -79,5 +84,21 @@
       "address",
       "undefined"
     ]
+  },
+  "advert_fuzz": {
+    "engine": "libFuzzer",
+    "runs": 100000,
+    "seed": 13746277,
+    "max_input_bytes": 33,
+    "sanitizers": [
+      "address",
+      "undefined"
+    ],
+    "target": "local_advert_parser",
+    "production_sources": [
+      "main/mesh/advert_data.c",
+      "main/mesh/advert_data.h"
+    ],
+    "invalid_output_policy": "canonical_zeroed_with_type_N"
   }
 }
