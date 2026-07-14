@@ -68,7 +68,7 @@ def test_repository_ledger_validates_and_status_is_current():
 def test_current_runnable_selection_advances_past_merged_wp02_implementation():
     ledger = load_ledger(LEDGER_PATH)
 
-    assert runnable_work_packages(ledger)[:2] == ["WP-03", "WP-04"]
+    assert runnable_work_packages(ledger) == ["WP-04"]
     assert pending_work_packages(ledger)[0] == "WP-02"
     assert release_ready(ledger) is False
 
