@@ -20,6 +20,12 @@ typedef struct {
     uint32_t rx_adverts;
     uint32_t tx_packets;
     uint32_t rejected_commands;
+    uint32_t ack_tx_queued;
+    uint32_t ack_tx_done;
+    uint32_t ack_tx_failed;
+    uint32_t ack_tx_duplicate_rows_suppressed;
+    uint32_t ack_tx_last_hash;
+    esp_err_t ack_tx_last_error;
     uint8_t path_hash_bytes;
     bool identity_ready;
     bool radio_ready;

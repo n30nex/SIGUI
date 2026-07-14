@@ -682,6 +682,7 @@ static void message_detail_mode_event_cb(lv_event_t *event);
 static void map_location_keyboard_event_cb(lv_event_t *event);
 static void process_pending_content_refresh(void);
 static void process_pending_scroll_probe(void);
+static const char *dm_row_state(const d1l_dm_entry_t *entry, bool unread);
 static void process_pending_compose_probe(void);
 static bool object_is_visible(lv_obj_t *obj);
 
@@ -1920,11 +1921,7 @@ static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry, 
                                     (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
     label_set_dot_width(alias, 250);
     lv_obj_set_pos(alias, 8, 4);
-    lv_obj_t *state = create_label(row,
-                                   unread ? "new" :
-                                   (entry->acked ? "acked" :
-                                    (entry->direction[0] == 't' ? "sent" : "received")),
-                                   0x8EA0AE);
+    lv_obj_t *state = create_label(row, dm_row_state(entry, unread), 0x8EA0AE);
     label_set_dot_width(state, 118);
     lv_obj_set_pos(state, 292, 4);
     lv_obj_t *text = create_label(row, entry->text[0] ? entry->text : "-", 0xE5EDF5);
@@ -4387,6 +4384,12 @@ static void open_public_history_event_cb(lv_event_t *event)
 
 static const char *dm_row_state(const d1l_dm_entry_t *entry, bool unread)
 {
+    if (entry->direction[0] == 'r') {
+        if (entry->identity_digest_valid) {
+            return d1l_dm_ack_state_name(entry->ack_state);
+        }
+        return unread ? "new legacy" : "legacy";
+    }
     if (unread) {
         return "new";
     }

@@ -26,13 +26,26 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert 'D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"' in blob_store
     assert 'D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"' in blob_store
     assert "D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
-    assert "D1L_DM_STORE_SCHEMA 4U" in source
+    assert "D1L_DM_STORE_SCHEMA 5U" in source
+    assert "D1L_DM_STORE_SCHEMA_V4 4U" in source
     assert "D1L_DM_STORE_SCHEMA_V3 3U" in source
     assert "D1L_DM_STORE_SCHEMA_V2 2U" in source
     assert "D1L_DM_STORE_SCHEMA_V1 1U" in source
     assert "convert_v2_blob" in source
     assert "convert_v1_blob" in source
     assert "convert_v3_blob" in source
+    assert "convert_v4_blob" in source
+    assert "d1l_dm_entry_v4_t" in source
+    assert "d1l_dm_store_blob_v4_t" in source
+    assert "D1L_DM_IDENTITY_DIGEST_BYTES 32U" in header
+    assert "identity_digest_valid" in header
+    assert "ack_dispatch_count" in header
+    assert "ack_dispatch_kind" in header
+    assert "ack_state" in header
+    assert "ack_last_error" in header
+    assert "d1l_dm_store_append_rx_identity" in header
+    assert "d1l_dm_store_reserve_ack_dispatch" in header
+    assert "d1l_dm_store_complete_ack_dispatch" in header
     assert "s_clear_lineage" in source
     assert "new_clear_lineage" in source
     assert "esp_random()" in source
@@ -130,6 +143,135 @@ def test_meshcore_service_retains_dm_when_queued_not_only_tx_done():
     assert "Radio.Send(raw, raw_len)" not in send_body
     assert "static bool append_dm_store_tx" in source
     assert "static void clear_pending_dm_tx" in source
+
+
+def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
+    source = read("main/mesh/meshcore_service.c")
+    header = read("main/mesh/meshcore_service.h")
+    planner = read("main/mesh/meshcore_ack_dispatch.h")
+    console = read("main/comms/usb_console.c")
+    identity_body = source.split("static esp_err_t calc_dm_identity_digest", 1)[1].split(
+        "static esp_err_t calc_dm_ack_hash", 1
+    )[0]
+    dm_parse_body = source.split("static bool parse_rx_dm_packet", 1)[1].split(
+        "static void record_dm_ack", 1
+    )[0]
+
+    assert '#include "mesh/meshcore_ack_dispatch.h"' in source
+    assert "D1L_MESHCORE_DM_ACK_WIRE_BYTES 6U" in planner
+    assert "D1L_MESHCORE_DM_ACK_DELAY_MS 200U" in planner
+    assert "D1L_MESHCORE_DM_ACK_MAX_DISPATCHES 2U" in planner
+    assert "D1L_MESHCORE_ACK_DISPATCH_FLOOD_ACK_PATH" in planner
+    assert "D1L_MESHCORE_ACK_DISPATCH_DIRECT_ACK" in planner
+    assert "D1L_MESHCORE_ACK_DISPATCH_FLOOD_ACK" in planner
+    assert "build_dm_ack_response" in source
+    assert "meshcore_service_send_ack_async" in source
+    assert "xQueueSendToFront(s_service_queue, &cmd, 0)" in source
+    assert ".ack_response = true" in source
+    assert "vTaskDelay(pdMS_TO_TICKS(cmd->delay_ms))" in source
+    assert "const bool ack_queued = parse_rx_dm_packet" in source
+    assert "if (!ack_queued)" in source
+    assert "complete_pending_ack_tx(true, ESP_OK)" in source
+    assert "complete_pending_ack_tx(false, ESP_ERR_TIMEOUT)" in source
+    assert "if (s_active_tx_ack_response)" in source
+    assert "s_active_tx_ack_response = cmd->ack_response" in source
+    assert "d1l_meshcore_dm_identity_material" in planner
+    assert "out[index++] = (uint8_t)(plain[4] >> 2U)" in planner
+    assert "calc_dm_identity_digest" in source
+    assert "d1l_meshcore_dm_identity_material" in identity_body
+    assert "extended_attempt" not in identity_body
+    assert "d1l_meshcore_ack_dedupe_contains" in source
+    assert "d1l_meshcore_ack_dedupe_remember" in source
+    assert "dispatch_bounded_dm_ack" in source
+    assert 'append_packet_log("rx", "dm_text_duplicate"' in source
+    assert dm_parse_body.count("record_dm_ack_failure(ack_hash, store_ret);") == 1
+    assert "d1l_dm_store_append_rx_identity(" in dm_parse_body
+    assert "store_outcome.inserted" in dm_parse_body
+    assert "remember_ack_identity_state(&retained_identity, false)" in dm_parse_body
+    assert "d1l_dm_store_find_rx_identity(identity_digest" in dm_parse_body
+    assert "uint32_t ack_tx_queued;" in header
+    assert "uint32_t ack_tx_done;" in header
+    assert "uint32_t ack_tx_failed;" in header
+    assert "uint32_t ack_tx_duplicate_rows_suppressed;" in header
+    assert "ack_tx_duplicate_suppressed" not in header
+    assert '\\\"ack_tx\\\":{' in console
+    assert '\\\"duplicate_rows_suppressed\\\":%lu' in console
+    assert '\\\"duplicate_suppressed\\\"' not in console
+
+
+def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot():
+    store_h = read("main/mesh/dm_store.h")
+    store_c = read("main/mesh/dm_store.c")
+    service = read("main/mesh/meshcore_service.c")
+    console = read("main/comms/usb_console.c")
+    ui = read("main/ui/ui_phase1.c")
+    limitations = read("docs/KNOWN_LIMITATIONS.md")
+
+    dispatch = service.split("static bool dispatch_bounded_dm_ack", 1)[1].split(
+        "static void parse_rx_public_packet", 1
+    )[0]
+    completion = service.split("static void complete_pending_ack_tx", 1)[1].split(
+        "static void complete_unqueued_ack_reservation", 1
+    )[0]
+    initialization = service.split("void d1l_meshcore_service_init", 1)[1].split(
+        "esp_err_t d1l_meshcore_service_ensure_identity", 1
+    )[0]
+
+    assert "D1L_DM_STORE_SCHEMA 5U" in store_c
+    assert "D1L_DM_STORE_SCHEMA_V4 4U" in store_c
+    assert "d1l_dm_entry_v4_t" in store_c
+    assert "d1l_dm_store_blob_v4_t" in store_c
+    assert "convert_v4_blob" in store_c
+    assert "D1L_DM_ACK_STATE_LEGACY_UNVERIFIED" in store_h
+    assert "D1L_DM_ACK_STATE_PENDING" in store_h
+    assert "D1L_DM_ACK_STATE_SENT" in store_h
+    assert "D1L_DM_ACK_STATE_RETRYABLE" in store_h
+    assert "D1L_DM_ACK_STATE_TERMINAL" in store_h
+    assert "normalize_interrupted_ack_locked" in store_c
+    assert "D1L_DM_ACK_INTERRUPTED_ERROR" in store_c
+    assert "identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES]" in store_h
+    assert "d1l_dm_store_append_outcome_t" in store_h
+    assert "outcome->inserted = true" in store_c
+    assert "outcome->durable = ret == ESP_OK" in store_c
+    assert "A split SD/NVS write can partially commit" in store_c
+    assert "rolling it\n         * back" in store_c
+    assert "previous_state" not in store_c
+
+    reserve_at = dispatch.index("d1l_dm_store_reserve_ack_dispatch(")
+    queue_at = dispatch.index("meshcore_service_send_ack_async(")
+    assert reserve_at < queue_at
+    assert "retained.ack_state == D1L_DM_ACK_STATE_PENDING" in dispatch
+    assert "d1l_dm_store_flush()" in dispatch
+    assert "reservation.reserved" in dispatch
+    assert "reservation.reserved || reserve_ret != ESP_ERR_INVALID_STATE" in dispatch
+    assert "d1l_meshcore_ack_dedupe_mark_durable" in dispatch
+    rebind_at = dispatch.index("d1l_dm_store_rebind_pending_ack_dispatch(")
+    assert rebind_at < queue_at
+    assert "retained.ack_dispatch_kind != (uint8_t)plan->kind" in dispatch
+    assert "record_dm_ack_failure(ack_hash, rebind_ret)" in dispatch
+    assert "valid_identity_digest_equal" in store_c
+    assert "identity_match_set" in store_c
+    assert "d1l_dm_store_complete_ack_dispatch(" in completion
+    assert completion.index("d1l_dm_store_complete_ack_dispatch(") < completion.index(
+        "clear_pending_ack_tx();"
+    )
+    assert "s_pending_ack_tx.row_seq" in completion
+    assert "s_pending_ack_tx.identity_digest" in completion
+    assert "find_rx_identity_locked(identity_digest, 0U)" in store_c
+    assert "row_seq is only a stale-safe" in store_c
+    assert "pending_ack_identity_matches(digest)" in dispatch
+    assert "s_pending_ack_tx.row_seq == retained.seq" not in dispatch
+    assert "restore_ack_dedupe_from_store();" in initialization
+
+    assert '\\\"ack_response\\\":{' in console
+    assert '\\\"identity_valid\\\":%s' in console
+    assert '\\\"state\\\":\\\"%s\\\"' in console
+    assert '\\\"dispatch_count\\\":%u' in console
+    assert '\\\"last_kind\\\":\\\"%s\\\"' in console
+    assert '\\\"last_error\\\":\\\"%s\\\"' in console
+    assert "d1l_dm_ack_state_name(entry->ack_state)" in ui
+    assert "legacy_unverified" in limitations
+    assert "never hydrated into the ACK cache" in limitations
 
 
 def test_console_and_smoke_expose_dm_workflow():

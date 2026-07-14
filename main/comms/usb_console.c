@@ -1102,12 +1102,18 @@ static void cmd_mesh_status(void)
 {
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
     ok_begin("mesh status");
-    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"note\":\"Public group text TX/RX and signed advert TX/RX enabled for local RF validation\"}\n",
+    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"ack_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,\"duplicate_rows_suppressed\":%lu,\"last_hash\":%lu,\"last_error\":\"%s\"},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch enabled\"}\n",
            d1l_meshcore_service_state_name(status.state), bool_json(status.identity_ready),
            bool_json(status.radio_ready), bool_json(status.companion_framing_ready),
            status.path_hash_bytes, (unsigned long)status.rx_packets,
            (unsigned long)status.rx_adverts, (unsigned long)status.tx_packets,
-           (unsigned long)status.rejected_commands);
+           (unsigned long)status.rejected_commands,
+           (unsigned long)status.ack_tx_queued,
+           (unsigned long)status.ack_tx_done,
+           (unsigned long)status.ack_tx_failed,
+           (unsigned long)status.ack_tx_duplicate_rows_suppressed,
+           (unsigned long)status.ack_tx_last_hash,
+           esp_err_to_name(status.ack_tx_last_error));
 }
 
 static void cmd_mesh_advert(const char *cmd, bool flood)
@@ -3756,12 +3762,15 @@ static void cmd_messages_clear(void)
 
 static void print_dm_entry_json(const d1l_dm_entry_t *e)
 {
-    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"direction\":\"%s\",\"text\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"attempt\":%u,\"delivered\":%s,\"acked\":%s,\"ack_hash\":%lu}",
+    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"direction\":\"%s\",\"text\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"attempt\":%u,\"delivered\":%s,\"acked\":%s,\"ack_hash\":%lu,\"ack_response\":{\"identity_valid\":%s,\"state\":\"%s\",\"dispatch_count\":%u,\"last_kind\":\"%s\",\"last_error\":\"%s\"}}",
            (unsigned long)e->seq, (unsigned long)e->uptime_ms,
            e->contact_fingerprint, e->contact_alias, e->direction, e->text,
            e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
            e->attempt, bool_json(e->delivered), bool_json(e->acked),
-           (unsigned long)e->ack_hash);
+           (unsigned long)e->ack_hash, bool_json(e->identity_digest_valid),
+           d1l_dm_ack_state_name(e->ack_state), e->ack_dispatch_count,
+           d1l_dm_ack_dispatch_kind_name(e->ack_dispatch_kind),
+           esp_err_to_name(e->ack_last_error));
 }
 
 static void cmd_messages_dm(const char *line)

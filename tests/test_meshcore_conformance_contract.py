@@ -159,7 +159,16 @@ def test_production_service_uses_the_codec_exercised_by_the_harness():
     assert '"mesh/meshcore_wire.c"' in cmake
     assert service.count("d1l_meshcore_wire_decode_v1(") == 5
     assert service.count("d1l_meshcore_wire_decode(") == 0
-    assert service.count("d1l_meshcore_wire_write_prefix(") == 3
+    ack_builder = service.split("static esp_err_t build_dm_ack_response", 1)[1].split(
+        "static bool dispatch_bounded_dm_ack", 1
+    )[0]
+    assert service.count("d1l_meshcore_wire_write_prefix(") == 5
+    assert ack_builder.count("d1l_meshcore_wire_write_prefix(") == 2
+    assert (
+        service.count("d1l_meshcore_wire_write_prefix(")
+        - ack_builder.count("d1l_meshcore_wire_write_prefix(")
+        == 3
+    )
     assert "parse_wire_packet" not in service
     for legacy_helper in [
         "path_len_valid",
