@@ -9,7 +9,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Public MeshCore `test` send/receive against local bots.
 - Signed advert receive/transmit.
 - Persisted recent Public messages, bounded Public History/Search, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
-- Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations and thread review.
+- Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations and thread review. The DMs list shows one newest-first row per contact; its unread count comes from that contact's retained read cursor even when the newest row was sent by you. Muted unread is shown separately.
 - Touch Public/DM compose enforces the 138-byte MeshCore UTF-8 limit and shows both decoded characters and encoded bytes. Empty, malformed, control-containing, or oversized input keeps Send disabled; the runtime validates again before RF or retained-store side effects.
 - Tapping a Public message opens a detail sheet with sender, message text, signal, retained path evidence, and a Reply action that opens Public compose without transmitting until Send.
 - Home is a quiet five-destination dashboard: Messages, Network, Map, and More are the task entries, while one Device card summarizes Time, Wi-Fi, Bluetooth, and SD state. Secondary tools such as Packets and diagnostics are grouped under More instead of competing on the Home screen.

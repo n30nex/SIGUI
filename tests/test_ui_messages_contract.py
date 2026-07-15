@@ -84,6 +84,40 @@ def test_messages_hierarchy_is_simple_bounded_and_navigation_is_rf_silent():
         assert "d1l_meshcore_service_" not in action_body
 
 
+def test_direct_list_projects_unique_conversations_with_thread_cursor_truth():
+    cmake = read("main/CMakeLists.txt")
+    app_header = read("main/app/app_model.h")
+    app_source = read("main/app/app_model.c")
+    projector_header = read("main/app/dm_conversation_list.h")
+    projector = read("main/app/dm_conversation_list.c")
+    messages_header = read("main/ui/ui_messages.h")
+    messages = read("main/ui/ui_messages.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    assert '"app/dm_conversation_list.c"' in cmake
+    assert "D1L_DM_CONVERSATION_SOURCE_CAPACITY" in projector_header
+    assert "d1l_dm_conversation_list_project(" in projector_header
+    assert "for (size_t index = row_count; index > first; --index)" in projector
+    assert "newest conversation first" in projector_header
+    assert "conversation_unread_count(" in projector
+    assert "row_unread[index]" in projector
+    assert "d1l_dm_store_copy_recent(" in app_source
+    assert "d1l_read_state_dm_entry_is_unread(" in app_source
+    assert "d1l_dm_conversation_list_project(" in app_source
+    assert "d1l_contact_store_find_by_fingerprint(" in app_source
+    assert "contact.muted" in app_source
+    assert "dm_conversation_count" in app_header
+    assert "recent_dm_unread_count" in app_header
+    assert "recent_dm_muted" in app_header
+    assert "dm_row_unread_count" in messages_header
+    assert "dm_row_muted" in messages_header
+    assert "snapshot->dm_conversation_count" in phase1
+    assert "snapshot->recent_dm_unread_count" in phase1
+    assert "snapshot->recent_dm_muted" in phase1
+    assert '"%lu unread%s | %s"' in messages
+    assert '"%u conversations | %lu unread + %lu muted"' in messages
+
+
 def test_public_conversation_bubbles_align_and_show_truthful_time_and_state():
     source = read("main/ui/ui_messages.c")
     phase1 = read("main/ui/ui_phase1.c")

@@ -4034,7 +4034,7 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     memset(view_model, 0, sizeof(*view_model));
     view_model->mode = s_messages_mode;
     view_model->public_total = snapshot->message_count;
-    view_model->dm_total = snapshot->dm_count;
+    view_model->dm_total = snapshot->dm_conversation_count;
     view_model->public_unread = snapshot->public_unread_count;
     view_model->dm_unread = snapshot->dm_unread_count;
     view_model->muted_dm_unread = snapshot->muted_dm_unread_count;
@@ -4055,6 +4055,12 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
            view_model->dm_row_count * sizeof(view_model->dm_rows[0]));
     memcpy(view_model->dm_row_unread, snapshot->recent_dm_unread,
            view_model->dm_row_count * sizeof(view_model->dm_row_unread[0]));
+    memcpy(view_model->dm_row_unread_count,
+           snapshot->recent_dm_unread_count,
+           view_model->dm_row_count *
+               sizeof(view_model->dm_row_unread_count[0]));
+    memcpy(view_model->dm_row_muted, snapshot->recent_dm_muted,
+           view_model->dm_row_count * sizeof(view_model->dm_row_muted[0]));
 }
 
 static void handle_messages_action(const d1l_ui_messages_action_event_t *event,

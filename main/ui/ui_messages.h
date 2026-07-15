@@ -30,6 +30,8 @@ typedef struct {
     size_t public_row_count;
     d1l_dm_entry_t dm_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
     bool dm_row_unread[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
+    uint32_t dm_row_unread_count[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
+    bool dm_row_muted[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
     size_t dm_row_count;
 } d1l_ui_messages_view_model_t;
 

@@ -429,7 +429,10 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
         return;
     }
     const d1l_dm_entry_t *entry = &controller->rendered.dm_rows[index];
-    const bool unread = controller->rendered.dm_row_unread[index];
+    const uint32_t unread_count =
+        controller->rendered.dm_row_unread_count[index];
+    const bool unread = unread_count > 0U;
+    const bool muted = controller->rendered.dm_row_muted[index];
     lv_obj_t *row = messages_create_panel(parent, 8, y, 408, 72);
     if (!row) {
         return;
@@ -450,58 +453,69 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
     messages_format_snr(snr, sizeof(snr), entry->snr_tenths);
     lv_obj_t *alias = messages_create_label(
         row, entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint,
-        unread ? 0xFBBF24 : (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
+        unread && !muted ? 0xFBBF24 :
+        (muted ? 0x8EA0AE :
+         (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0)));
     messages_set_dot_width(alias, 200);
     if (alias) {
         lv_obj_set_pos(alias, 8, 4);
     }
-    const char *list_state;
+    const char *latest_state;
     if (entry->direction[0] != 't') {
-        list_state = unread ? "New" : "Received";
+        latest_state = "Received";
     } else {
         switch (entry->delivery_state) {
         case D1L_DM_DELIVERY_QUEUED:
-            list_state = "Queued";
+            latest_state = "Queued";
             break;
         case D1L_DM_DELIVERY_WAITING_RADIO:
-            list_state = "Waiting radio";
+            latest_state = "Waiting radio";
             break;
         case D1L_DM_DELIVERY_TX_ACTIVE:
-            list_state = "Sending";
+            latest_state = "Sending";
             break;
         case D1L_DM_DELIVERY_TX_DONE:
-            list_state = "Sent RF";
+            latest_state = "Sent RF";
             break;
         case D1L_DM_DELIVERY_AWAITING_ACK:
-            list_state = "Awaiting ACK";
+            latest_state = "Awaiting ACK";
             break;
         case D1L_DM_DELIVERY_ACKNOWLEDGED:
-            list_state = "Delivered";
+            latest_state = "Delivered";
             break;
         case D1L_DM_DELIVERY_RETRY_WAIT:
-            list_state = "Retry waiting";
+            latest_state = "Retry waiting";
             break;
         case D1L_DM_DELIVERY_RETRY_TX:
-            list_state = "Retrying";
+            latest_state = "Retrying";
             break;
         case D1L_DM_DELIVERY_FAILED_RADIO:
         case D1L_DM_DELIVERY_FAILED_TIMEOUT:
         case D1L_DM_DELIVERY_FAILED_QUEUE:
-            list_state = "Failed";
+            latest_state = "Failed";
             break;
         case D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT:
-            list_state = "Interrupted";
+            latest_state = "Interrupted";
             break;
         case D1L_DM_DELIVERY_CANCELLED:
-            list_state = "Cancelled";
+            latest_state = "Cancelled";
             break;
         case D1L_DM_DELIVERY_NOT_APPLICABLE:
         default:
-            list_state = "Status unknown";
+            latest_state = "Status unknown";
             break;
         }
     }
-    lv_obj_t *state = messages_create_label(row, list_state, 0x8EA0AE);
+    char state_text[96];
+    if (unread) {
+        snprintf(state_text, sizeof(state_text), "%lu unread%s | %s",
+                 (unsigned long)unread_count, muted ? " muted" : "",
+                 latest_state);
+    } else {
+        snprintf(state_text, sizeof(state_text), "%s", latest_state);
+    }
+    lv_obj_t *state = messages_create_label(
+        row, state_text, unread && !muted ? 0xFBBF24 : 0x8EA0AE);
     messages_set_dot_width(state, 168);
     if (state) {
         lv_obj_set_pos(state, 232, 4);
@@ -526,8 +540,10 @@ static void messages_render_root_card(
     int y,
     const char *title_text,
     const char *description,
+    const char *unit,
     size_t total,
     uint32_t unread,
+    uint32_t muted_unread,
     size_t control_index,
     d1l_ui_messages_action_t action,
     uint32_t accent)
@@ -554,8 +570,15 @@ static void messages_render_root_card(
         lv_obj_set_pos(copy, 8, 38);
     }
     char status[96];
-    snprintf(status, sizeof(status), "%u retained | %lu unread",
-             (unsigned)total, (unsigned long)unread);
+    if (muted_unread > 0U) {
+        snprintf(status, sizeof(status), "%u %s | %lu unread + %lu muted",
+                 (unsigned)total, unit ? unit : "retained",
+                 (unsigned long)unread, (unsigned long)muted_unread);
+    } else {
+        snprintf(status, sizeof(status), "%u %s | %lu unread",
+                 (unsigned)total, unit ? unit : "retained",
+                 (unsigned long)unread);
+    }
     lv_obj_t *meta = messages_create_label(
         card, status, unread > 0U ? 0xFBBF24 : 0x8EA0AE);
     messages_set_dot_width(meta, 376);
@@ -579,11 +602,14 @@ static void messages_render_root(d1l_ui_messages_controller_t *controller,
     }
     messages_render_root_card(
         controller, parent, 70, "Public", "Default channel conversation",
-        controller->rendered.public_total, controller->rendered.public_unread,
+        "messages",
+        controller->rendered.public_total, controller->rendered.public_unread, 0U,
         0U, D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC, 0x5EEAD4);
     messages_render_root_card(
         controller, parent, 200, "Direct messages", "Private contact conversations",
+        "conversations",
         controller->rendered.dm_total, controller->rendered.dm_unread,
+        controller->rendered.muted_dm_unread,
         1U, D1L_UI_MESSAGES_ACTION_SHOW_DIRECT, 0xA7F3D0);
 }
 
@@ -656,9 +682,17 @@ static void messages_render_direct(d1l_ui_messages_controller_t *controller,
         lv_obj_set_pos(title, 104, 10);
     }
     char summary[96];
-    snprintf(summary, sizeof(summary), "%u retained messages | %lu unread",
-             (unsigned)controller->rendered.dm_total,
-             (unsigned long)controller->rendered.dm_unread);
+    if (controller->rendered.muted_dm_unread > 0U) {
+        snprintf(summary, sizeof(summary),
+                 "%u conversations | %lu unread + %lu muted",
+                 (unsigned)controller->rendered.dm_total,
+                 (unsigned long)controller->rendered.dm_unread,
+                 (unsigned long)controller->rendered.muted_dm_unread);
+    } else {
+        snprintf(summary, sizeof(summary), "%u conversations | %lu unread",
+                 (unsigned)controller->rendered.dm_total,
+                 (unsigned long)controller->rendered.dm_unread);
+    }
     lv_obj_t *meta = messages_create_label(parent, summary, 0x8EA0AE);
     messages_set_dot_width(meta, 250);
     if (meta) {

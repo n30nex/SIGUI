@@ -97,6 +97,7 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert messages["public_source_count"] == 48
     assert messages["public_rendered_count"] == 0
     assert messages["dm_source_count"] == 32
+    assert messages["dm_conversation_count"] == 32
     assert messages["dm_rendered_count"] == 0
     messages_public = views["messages_public"]["metrics"]
     assert messages_public["messages_mode"] == "public"
@@ -108,8 +109,8 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     messages_dm = views["messages_dm"]["metrics"]
     assert messages_dm["messages_mode"] == "dms"
     assert messages_dm["dm_source_count"] == 32
+    assert messages_dm["dm_conversation_count"] == 32
     assert messages_dm["dm_rendered_count"] <= 5
-
     nodes = views["nodes"]["metrics"]
     assert nodes["contacts_source_count"] == 18
     assert nodes["contacts_rendered_count"] <= 2
@@ -174,6 +175,72 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert public_history["public_history_load_older_available"] is True
     assert "Load Older" in set(views["public_history_sheet"]["labels"])
     assert "Sent over RF" in public_history["public_history_rendered_states"]
+
+
+def test_dm_simulator_projects_one_latest_row_per_conversation() -> None:
+    snapshot = ui_simulator.sample_snapshot()
+    summaries = ui_simulator.dm_conversation_summaries(snapshot.dm_messages)
+
+    assert len(snapshot.dm_messages) == 2
+    assert len(summaries) == 1
+    assert summaries[0].source == "YKF Corebot"
+    assert summaries[0].direction == "tx"
+    assert summaries[0].unread is True
+
+    surface = ui_simulator.Surface("messages_dm")
+    ui_simulator.render_messages_dm(surface, snapshot)
+    assert surface.metrics["dm_conversation_count"] == 1
+    assert surface.metrics["dm_rendered_count"] == 1
+    assert surface.metrics["dm_rendered_states"] == [
+        "1 unread | Awaiting ACK"
+    ]
+
+
+def test_dm_simulator_keeps_exact_ids_distinct_and_muted_unread_separate() -> None:
+    snapshot = ui_simulator.sample_snapshot()
+    base = snapshot.dm_messages[0]
+    first = replace(
+        base,
+        source="Raw A",
+        conversation="Shared Alias",
+        conversation_id="AAAAAAAAAAAAAAAA",
+        unread=True,
+        muted=True,
+        seq=1,
+    )
+    second = replace(
+        base,
+        source="Raw B",
+        conversation="Shared Alias",
+        conversation_id="BBBBBBBBBBBBBBBB",
+        unread=False,
+        muted=False,
+        seq=2,
+    )
+    snapshot = replace(
+        snapshot,
+        dm_messages=(first, second),
+        unread_dm=0,
+        muted_unread_dm=1,
+    )
+
+    summaries = ui_simulator.dm_conversation_summaries(snapshot.dm_messages)
+    assert [summary.conversation_id for summary in summaries] == [
+        "BBBBBBBBBBBBBBBB",
+        "AAAAAAAAAAAAAAAA",
+    ]
+    assert [summary.source for summary in summaries] == [
+        "Shared Alias",
+        "Shared Alias",
+    ]
+
+    surface = ui_simulator.Surface("messages_dm")
+    ui_simulator.render_messages_dm(surface, snapshot)
+    assert surface.metrics["dm_conversation_count"] == 2
+    assert surface.metrics["dm_rendered_states"] == [
+        "Received",
+        "1 unread muted | New",
+    ]
 
 
 def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
