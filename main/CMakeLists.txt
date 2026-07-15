@@ -60,6 +60,7 @@ idf_component_register(
         "ui/ui_keyboard.c"
         "ui/ui_map.c"
         "ui/ui_messages.c"
+        "ui/ui_more_view.c"
         "ui/ui_modal.c"
         "ui/ui_navigation.c"
         "ui/ui_nodes.c"

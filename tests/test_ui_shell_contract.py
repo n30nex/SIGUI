@@ -1501,16 +1501,22 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
     cmake = read("main/CMakeLists.txt")
     settings_module = read("main/ui/ui_settings.c")
     settings_header = read("main/ui/ui_settings.h")
+    more_module = read("main/ui/ui_more_view.c")
+    more_header = read("main/ui/ui_more_view.h")
 
     assert '"ui/ui_settings.c"' in cmake
+    assert '"ui/ui_more_view.c"' in cmake
     assert '#include "ui_settings.h"' in source
     assert "d1l_ui_settings_render" in settings_module
     assert "d1l_ui_settings_render" in settings_header
-    assert "static const d1l_ui_settings_action_t k_action_values" in settings_module
     assert "lv_event_get_user_data(event)" in settings_module
-    assert "(void *)&k_action_values[action]" in settings_module
     assert "(void *)(uintptr_t)action" not in settings_module
     assert "d1l_app_model_" not in settings_module
+    assert "d1l_app_snapshot_t" not in settings_module
+    assert "snapshot->" not in settings_module
+    assert "static d1l_ui_settings_action_handler_t s_action_handler" not in settings_module
+    assert "s_expanded_category" not in settings_module
+    assert "k_action_values" not in settings_module
     assert "lv_obj_clean" not in settings_module
     assert "s_content" not in settings_module
     assert "static lv_obj_t *render_settings_tile" not in source
@@ -1518,7 +1524,10 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
     wrapper = source.split(
         "static void render_settings(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)", 1
     )[1].split("\n}", 1)[0]
-    assert "d1l_ui_settings_render(content, snapshot, handle_settings_action);" in wrapper
+    assert "more_view_input_from_snapshot(snapshot, &input);" in wrapper
+    assert "d1l_ui_more_view(&input, &s_settings_controller.rendered)" in wrapper
+    assert "d1l_ui_more_view_model_t view_model" not in wrapper
+    assert "&s_settings_controller.rendered" in wrapper
     assert "lv_" not in wrapper
 
     action_routes = (
@@ -1533,8 +1542,8 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
         ("D1L_UI_SETTINGS_ACTION_ADVANCED", "open_sheet_event_cb(NULL);"),
     )
     for action, route in action_routes:
-        assert action in settings_header
-        assert f"[{action}] = {action}" in settings_module
+        assert action in more_header
+        assert action in more_module
         route_body = source.split(f"case {action}:", 1)[1].split("break;", 1)[0]
         assert route in route_body
 
@@ -1547,19 +1556,21 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
     ):
         assert style in settings_module
     assert "settings_create_row(parent, 444, 54, item->warning)" in settings_module
-    assert "settings_create_row(group, 444, 48, warning)" in settings_module
+    assert "settings_create_row(group, 444, 48, category->warning)" in settings_module
     assert "settings_category_event_cb" in settings_module
     assert "settings_apply_category_state" in settings_module
-    assert "s_expanded_category == *category_value" in settings_module
-    assert "lv_obj_add_flag(s_category_children[index], LV_OBJ_FLAG_HIDDEN)" in settings_module
-    assert "lv_obj_clear_flag(s_category_children[index], LV_OBJ_FLAG_HIDDEN)" in settings_module
+    assert "binding->generation != controller->generation" in settings_module
+    assert "controller->expanded_category == binding->category" in settings_module
+    assert "lv_obj_add_flag(controller->category_children[index], LV_OBJ_FLAG_HIDDEN)" in settings_module
+    assert "lv_obj_clear_flag(controller->category_children[index], LV_OBJ_FLAG_HIDDEN)" in settings_module
     for category in ("Tools", "Connections", "Storage & maps", "Device", "Support", "Advanced"):
-        assert f'"{category}"' in settings_module
+        assert f'"{category}"' in more_module
 
 
 def test_settings_screen_reports_companion_wireless_state():
     source = read("main/ui/ui_phase1.c")
     settings_module = read("main/ui/ui_settings.c")
+    more_module = read("main/ui/ui_more_view.c")
     connectivity = read("main/ui/ui_connectivity.c")
     header = read("main/app/app_model.h")
     assert "wifi_state" in header
@@ -1575,16 +1586,16 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "wifi_last_error" in header
     assert "ble_transport_supported" in header
     assert "coexistence_policy" in header
-    assert '"More"' in settings_module
-    assert '"Settings and tools"' in settings_module
-    assert '"SD Card"' in settings_module
-    assert '"Map options"' in settings_module
-    assert '"Offline Maps"' not in settings_module
-    assert '"Identity"' in settings_module
-    assert '"Advanced"' in settings_module
-    assert '"About"' in settings_module
-    assert '"Packets"' in settings_module
-    assert '"Bluetooth"' in settings_module
+    assert '"More"' in more_module
+    assert '"Settings and tools"' in more_module
+    assert '"SD Card"' in more_module
+    assert '"Map options"' in more_module
+    assert '"Offline Maps"' not in more_module
+    assert '"Identity"' in more_module
+    assert '"Advanced"' in more_module
+    assert '"About"' in more_module
+    assert '"Packets"' in more_module
+    assert '"Bluetooth"' in more_module
     assert "snapshot->identity_fingerprint" not in settings_module
     assert "format_radio_profile_line" not in settings_module
     assert "static lv_obj_t *s_wifi_sheet" in source
@@ -1639,7 +1650,7 @@ def test_settings_screen_reports_companion_wireless_state():
 
 def test_settings_screen_has_safe_touch_radio_editor():
     source = read("main/ui/ui_phase1.c")
-    settings_module = read("main/ui/ui_settings.c")
+    more_module = read("main/ui/ui_more_view.c")
     model = read("main/app/app_model.c")
 
     assert "static lv_obj_t *s_radio_settings_sheet" in source
@@ -1652,7 +1663,7 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "radio_defaults_event_cb" in source
     assert "radio_edit_from_snapshot" in source
     assert "format_radio_profile_line" in source
-    assert '{"Radio", radio_status' in settings_module
+    assert '"Radio", radio_status' in more_module
     assert '"Radio Settings"' in source
     assert '"Live RF matches saved profile"' in source
     assert '"Saved profile pending next radio start/apply"' in source

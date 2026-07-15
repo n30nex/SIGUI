@@ -1,107 +1,12 @@
 #include "ui_settings.h"
 
-#include <stdio.h>
 #include <string.h>
 
-#include "d1l_config.h"
 #include "lvgl.h"
 
-static d1l_ui_settings_action_handler_t s_action_handler;
-
-static const d1l_ui_settings_action_t k_action_values[D1L_UI_SETTINGS_ACTION_COUNT] = {
-    [D1L_UI_SETTINGS_ACTION_NONE] = D1L_UI_SETTINGS_ACTION_NONE,
-    [D1L_UI_SETTINGS_ACTION_STORAGE] = D1L_UI_SETTINGS_ACTION_STORAGE,
-    [D1L_UI_SETTINGS_ACTION_WIFI] = D1L_UI_SETTINGS_ACTION_WIFI,
-    [D1L_UI_SETTINGS_ACTION_BLE] = D1L_UI_SETTINGS_ACTION_BLE,
-    [D1L_UI_SETTINGS_ACTION_RADIO] = D1L_UI_SETTINGS_ACTION_RADIO,
-    [D1L_UI_SETTINGS_ACTION_MAP_TILES] = D1L_UI_SETTINGS_ACTION_MAP_TILES,
-    [D1L_UI_SETTINGS_ACTION_DISPLAY] = D1L_UI_SETTINGS_ACTION_DISPLAY,
-    [D1L_UI_SETTINGS_ACTION_DIAGNOSTICS] = D1L_UI_SETTINGS_ACTION_DIAGNOSTICS,
-    [D1L_UI_SETTINGS_ACTION_ADVANCED] = D1L_UI_SETTINGS_ACTION_ADVANCED,
-    [D1L_UI_SETTINGS_ACTION_PACKETS] = D1L_UI_SETTINGS_ACTION_PACKETS,
-};
-
-typedef enum {
-    SETTINGS_CATEGORY_NONE = -1,
-    SETTINGS_CATEGORY_TOOLS = 0,
-    SETTINGS_CATEGORY_CONNECTIONS,
-    SETTINGS_CATEGORY_STORAGE_MAPS,
-    SETTINGS_CATEGORY_DEVICE,
-    SETTINGS_CATEGORY_SUPPORT,
-    SETTINGS_CATEGORY_ADVANCED,
-    SETTINGS_CATEGORY_COUNT,
-} settings_category_t;
-
-typedef struct {
-    const char *title;
-    const char *status;
-    uint32_t accent;
-    d1l_ui_settings_action_t action;
-    bool warning;
-} settings_menu_item_t;
-
-static const settings_category_t k_category_values[SETTINGS_CATEGORY_COUNT] = {
-    [SETTINGS_CATEGORY_TOOLS] = SETTINGS_CATEGORY_TOOLS,
-    [SETTINGS_CATEGORY_CONNECTIONS] = SETTINGS_CATEGORY_CONNECTIONS,
-    [SETTINGS_CATEGORY_STORAGE_MAPS] = SETTINGS_CATEGORY_STORAGE_MAPS,
-    [SETTINGS_CATEGORY_DEVICE] = SETTINGS_CATEGORY_DEVICE,
-    [SETTINGS_CATEGORY_SUPPORT] = SETTINGS_CATEGORY_SUPPORT,
-    [SETTINGS_CATEGORY_ADVANCED] = SETTINGS_CATEGORY_ADVANCED,
-};
-
-static settings_category_t s_expanded_category = SETTINGS_CATEGORY_NONE;
-static lv_obj_t *s_category_children[SETTINGS_CATEGORY_COUNT];
-static lv_obj_t *s_category_chevrons[SETTINGS_CATEGORY_COUNT];
-static lv_obj_t *s_menu;
-
-static bool settings_storage_text_equals(const char *value, const char *expected)
-{
-    return value && expected && strcmp(value, expected) == 0;
-}
-
-static bool settings_storage_needs_attention(const d1l_app_snapshot_t *snapshot)
-{
-    if (!snapshot) {
-        return false;
-    }
-    return snapshot->storage_retained_backup_degraded ||
-           snapshot->storage_retained_sd_degraded ||
-           settings_storage_text_equals(snapshot->storage_sd_state, "error") ||
-           settings_storage_text_equals(snapshot->storage_sd_state, "bridge_reported") ||
-           settings_storage_text_equals(snapshot->storage_setup_action,
-                                        "inspect_rp2040_sd_cmd0_firmware_path") ||
-           settings_storage_text_equals(snapshot->storage_setup_action,
-                                        "inspect_rp2040_sd_mount_error_firmware_path");
-}
-
-static bool settings_sd_needs_attention(const d1l_app_snapshot_t *snapshot)
-{
-    if (!snapshot) {
-        return false;
-    }
-    return snapshot->storage_retained_sd_degraded ||
-           settings_storage_text_equals(snapshot->storage_sd_state, "error") ||
-           settings_storage_text_equals(snapshot->storage_sd_state, "bridge_reported") ||
-           settings_storage_text_equals(snapshot->storage_setup_action,
-                                        "inspect_rp2040_sd_cmd0_firmware_path") ||
-           settings_storage_text_equals(snapshot->storage_setup_action,
-                                        "inspect_rp2040_sd_mount_error_firmware_path");
-}
-
-static const char *settings_map_storage_state(const d1l_app_snapshot_t *snapshot)
-{
-    if (settings_sd_needs_attention(snapshot)) {
-        return "Check SD";
-    }
-    if (snapshot->storage_setup_action &&
-        settings_storage_text_equals(snapshot->storage_setup_action, "insert_card")) {
-        return "Insert SD";
-    }
-    if (snapshot->storage_sd_needs_fat32) {
-        return "Needs FAT32";
-    }
-    return "SD starting";
-}
+_Static_assert(sizeof(d1l_ui_settings_controller_t) <=
+                   D1L_UI_SETTINGS_CONTROLLER_MAX_BYTES,
+               "More controller exceeded its persistent-owner size budget");
 
 static lv_obj_t *settings_create_label(lv_obj_t *parent, const char *text, uint32_t color)
 {
@@ -165,52 +70,113 @@ static lv_obj_t *settings_create_row(lv_obj_t *parent, int width, int height, bo
     return row;
 }
 
+static bool settings_binding_action_is_current(
+    const d1l_ui_settings_action_binding_t *binding)
+{
+    if (!binding || !binding->controller) {
+        return false;
+    }
+    const d1l_ui_settings_controller_t *controller = binding->controller;
+    if (!controller->active || !controller->action_handler ||
+        controller->generation == 0U || binding->generation != controller->generation ||
+        binding->action <= D1L_UI_SETTINGS_ACTION_NONE ||
+        binding->action >= D1L_UI_SETTINGS_ACTION_COUNT) {
+        return false;
+    }
+    if (binding->category < D1L_UI_MORE_CATEGORY_TOOLS ||
+        binding->category >= D1L_UI_MORE_CATEGORY_COUNT) {
+        return false;
+    }
+    const size_t category_index = (size_t)binding->category;
+    if (category_index >= controller->rendered.category_count) {
+        return false;
+    }
+    const d1l_ui_more_category_view_t *category =
+        &controller->rendered.categories[category_index];
+    if (category->category != binding->category ||
+        binding->item_index >= category->item_count) {
+        return false;
+    }
+    const d1l_ui_more_item_view_t *item = &category->items[binding->item_index];
+    return item->actionable && item->action == binding->action;
+}
+
 static void settings_action_event_cb(lv_event_t *event)
 {
-    if (!event || !s_action_handler) {
+    if (!event) {
         return;
     }
-    const d1l_ui_settings_action_t *action_value =
-        (const d1l_ui_settings_action_t *)lv_event_get_user_data(event);
-    if (!action_value) {
+    d1l_ui_settings_action_binding_t *binding =
+        (d1l_ui_settings_action_binding_t *)lv_event_get_user_data(event);
+    if (!settings_binding_action_is_current(binding)) {
         return;
     }
-    const d1l_ui_settings_action_t action = *action_value;
-    if (action > D1L_UI_SETTINGS_ACTION_NONE && action < D1L_UI_SETTINGS_ACTION_COUNT) {
-        s_action_handler(action);
-    }
+    binding->controller->action_handler(binding->action,
+                                        binding->controller->action_context);
 }
 
-static void settings_bind_action(lv_obj_t *object, d1l_ui_settings_action_t action)
+static void settings_bind_action(lv_obj_t *object,
+                                 d1l_ui_settings_action_binding_t *binding,
+                                 d1l_ui_settings_controller_t *controller,
+                                 const d1l_ui_more_item_view_t *item,
+                                 d1l_ui_more_category_t category,
+                                 size_t item_index)
 {
-    if (!object || !s_action_handler || action <= D1L_UI_SETTINGS_ACTION_NONE ||
-        action >= D1L_UI_SETTINGS_ACTION_COUNT) {
+    if (!object || !binding || !controller || !item || !controller->active ||
+        !controller->action_handler || !item->actionable ||
+        item->action <= D1L_UI_SETTINGS_ACTION_NONE ||
+        item->action >= D1L_UI_SETTINGS_ACTION_COUNT) {
         return;
     }
+    binding->controller = controller;
+    binding->generation = controller->generation;
+    binding->category = category;
+    binding->item_index = item_index;
+    binding->action = item->action;
     lv_obj_add_flag(object, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(object, settings_action_event_cb, LV_EVENT_CLICKED,
-                        (void *)&k_action_values[action]);
+    lv_obj_add_event_cb(object, settings_action_event_cb, LV_EVENT_CLICKED, binding);
 }
 
-static void settings_apply_category_state(void)
+static void settings_apply_category_state(d1l_ui_settings_controller_t *controller)
 {
-    for (int index = 0; index < SETTINGS_CATEGORY_COUNT; ++index) {
-        const bool expanded = s_expanded_category == (settings_category_t)index;
-        if (s_category_children[index]) {
+    if (!controller || !controller->active) {
+        return;
+    }
+    for (size_t index = 0U; index < D1L_UI_MORE_CATEGORY_COUNT; ++index) {
+        const bool expanded = controller->expanded_category ==
+            (d1l_ui_more_category_t)index;
+        if (controller->category_children[index]) {
             if (expanded) {
-                lv_obj_clear_flag(s_category_children[index], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(controller->category_children[index], LV_OBJ_FLAG_HIDDEN);
             } else {
-                lv_obj_add_flag(s_category_children[index], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(controller->category_children[index], LV_OBJ_FLAG_HIDDEN);
             }
         }
-        if (s_category_chevrons[index]) {
-            lv_label_set_text(s_category_chevrons[index], expanded ? "v" : ">");
+        if (controller->category_chevrons[index]) {
+            lv_label_set_text(controller->category_chevrons[index], expanded ? "v" : ">");
         }
     }
-
-    if (s_menu) {
-        lv_obj_update_layout(s_menu);
+    if (controller->menu) {
+        lv_obj_update_layout(controller->menu);
     }
+}
+
+static bool settings_category_binding_is_current(
+    const d1l_ui_settings_category_binding_t *binding)
+{
+    if (!binding || !binding->controller) {
+        return false;
+    }
+    const d1l_ui_settings_controller_t *controller = binding->controller;
+    if (!controller->active || controller->generation == 0U ||
+        binding->generation != controller->generation ||
+        binding->category < D1L_UI_MORE_CATEGORY_TOOLS ||
+        binding->category >= D1L_UI_MORE_CATEGORY_COUNT) {
+        return false;
+    }
+    const size_t category_index = (size_t)binding->category;
+    return category_index < controller->rendered.category_count &&
+        controller->rendered.categories[category_index].category == binding->category;
 }
 
 static void settings_category_event_cb(lv_event_t *event)
@@ -218,28 +184,32 @@ static void settings_category_event_cb(lv_event_t *event)
     if (!event) {
         return;
     }
-    const settings_category_t *category_value =
-        (const settings_category_t *)lv_event_get_user_data(event);
-    if (!category_value || *category_value < SETTINGS_CATEGORY_TOOLS ||
-        *category_value >= SETTINGS_CATEGORY_COUNT) {
+    d1l_ui_settings_category_binding_t *binding =
+        (d1l_ui_settings_category_binding_t *)lv_event_get_user_data(event);
+    if (!settings_category_binding_is_current(binding)) {
         return;
     }
-    s_expanded_category = s_expanded_category == *category_value
-        ? SETTINGS_CATEGORY_NONE
-        : *category_value;
-    settings_apply_category_state();
+    d1l_ui_settings_controller_t *controller = binding->controller;
+    controller->expanded_category = controller->expanded_category == binding->category
+        ? D1L_UI_MORE_CATEGORY_NONE : binding->category;
+    settings_apply_category_state(controller);
 }
 
-static lv_obj_t *render_menu_item(lv_obj_t *parent, const settings_menu_item_t *item)
+static lv_obj_t *render_menu_item(lv_obj_t *parent,
+                                  const d1l_ui_more_item_view_t *item,
+                                  d1l_ui_settings_action_binding_t *binding,
+                                  d1l_ui_settings_controller_t *controller,
+                                  d1l_ui_more_category_t category,
+                                  size_t item_index)
 {
-    if (!parent || !item) {
+    if (!parent || !item || !binding || !controller) {
         return NULL;
     }
     lv_obj_t *row = settings_create_row(parent, 444, 54, item->warning);
     if (!row) {
         return NULL;
     }
-    settings_bind_action(row, item->action);
+    settings_bind_action(row, binding, controller, item, category, item_index);
 
     lv_obj_t *title = settings_create_label(row, item->title, item->accent);
     settings_set_dot_width(title, 190);
@@ -247,17 +217,15 @@ static lv_obj_t *render_menu_item(lv_obj_t *parent, const settings_menu_item_t *
         lv_obj_set_pos(title, 28, 17);
     }
 
-    const bool actionable = item->action > D1L_UI_SETTINGS_ACTION_NONE &&
-        item->action < D1L_UI_SETTINGS_ACTION_COUNT;
     lv_obj_t *status = settings_create_label(row, item->status,
                                               item->warning ? 0xFCA5A5 : 0xAAB8C4);
-    settings_set_dot_width(status, actionable ? 176 : 202);
+    settings_set_dot_width(status, item->actionable ? 176 : 202);
     if (status) {
         lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_pos(status, actionable ? 220 : 218, 17);
+        lv_obj_set_pos(status, item->actionable ? 220 : 218, 17);
     }
 
-    if (actionable) {
+    if (item->actionable) {
         lv_obj_t *chevron = settings_create_label(row, ">",
                                                    item->warning ? 0xFCA5A5 : 0x8EA0AE);
         if (chevron) {
@@ -267,210 +235,151 @@ static lv_obj_t *render_menu_item(lv_obj_t *parent, const settings_menu_item_t *
     return row;
 }
 
-static void render_category(lv_obj_t *menu,
-                            settings_category_t category,
-                            const char *title,
-                            const char *summary,
-                            const settings_menu_item_t *items,
-                            size_t item_count,
-                            bool warning)
+static bool render_category(d1l_ui_settings_controller_t *controller,
+                            size_t category_index)
 {
-    if (!menu || category < SETTINGS_CATEGORY_TOOLS || category >= SETTINGS_CATEGORY_COUNT ||
-        !title || !summary || !items || item_count == 0) {
-        return;
+    if (!controller || !controller->menu ||
+        category_index >= controller->rendered.category_count ||
+        category_index >= D1L_UI_MORE_CATEGORY_COUNT) {
+        return false;
     }
-    lv_obj_t *group = settings_create_container(menu, 444);
+    const d1l_ui_more_category_view_t *category =
+        &controller->rendered.categories[category_index];
+    lv_obj_t *group = settings_create_container(controller->menu, 444);
     if (!group) {
-        return;
+        return false;
     }
     lv_obj_set_flex_flow(group, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(group, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_flex_align(group, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(group, 4, 0);
 
-    lv_obj_t *category_row = settings_create_row(group, 444, 48, warning);
+    lv_obj_t *category_row = settings_create_row(group, 444, 48, category->warning);
     if (!category_row) {
-        return;
+        return false;
     }
+    d1l_ui_settings_category_binding_t *category_binding =
+        &controller->category_bindings[category_index];
+    category_binding->controller = controller;
+    category_binding->generation = controller->generation;
+    category_binding->category = category->category;
     lv_obj_add_flag(category_row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(category_row, settings_category_event_cb, LV_EVENT_CLICKED,
-                        (void *)&k_category_values[category]);
+                        category_binding);
 
-    lv_obj_t *title_label = settings_create_label(category_row, title,
-                                                   warning ? 0xFCA5A5 : 0xF4F7FB);
+    lv_obj_t *title_label = settings_create_label(category_row, category->title,
+                                                   category->warning ? 0xFCA5A5 : 0xF4F7FB);
     settings_set_dot_width(title_label, 360);
     if (title_label) {
         lv_obj_set_pos(title_label, 16, 4);
     }
-    lv_obj_t *summary_label = settings_create_label(category_row, summary,
-                                                     warning ? 0xD98993 : 0x8EA0AE);
+    lv_obj_t *summary_label = settings_create_label(category_row, category->summary,
+                                                     category->warning ? 0xD98993 : 0x8EA0AE);
     settings_set_dot_width(summary_label, 376);
     if (summary_label) {
         lv_obj_set_pos(summary_label, 16, 25);
     }
-    lv_obj_t *category_chevron = settings_create_label(category_row, ">",
-                                                        warning ? 0xFCA5A5 : 0xAAB8C4);
+    lv_obj_t *category_chevron = settings_create_label(
+        category_row, ">", category->warning ? 0xFCA5A5 : 0xAAB8C4);
     if (category_chevron) {
         lv_obj_set_pos(category_chevron, 418, 14);
     }
-    s_category_chevrons[category] = category_chevron;
+    controller->category_chevrons[category_index] = category_chevron;
 
     lv_obj_t *children = settings_create_container(group, 444);
     if (!children) {
-        return;
+        return false;
     }
     lv_obj_set_flex_flow(children, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(children, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(children, 4, 0);
-    for (size_t index = 0; index < item_count; ++index) {
-        render_menu_item(children, &items[index]);
+    for (size_t item_index = 0U; item_index < category->item_count; ++item_index) {
+        if (!render_menu_item(children, &category->items[item_index],
+                              &controller->action_bindings[category_index][item_index],
+                              controller, category->category, item_index)) {
+            return false;
+        }
     }
-    s_category_children[category] = children;
+    controller->category_children[category_index] = children;
+    return true;
 }
 
-void d1l_ui_settings_render(lv_obj_t *parent,
-                            const d1l_app_snapshot_t *snapshot,
-                            d1l_ui_settings_action_handler_t action_handler)
+bool d1l_ui_settings_render(d1l_ui_settings_controller_t *controller,
+                            lv_obj_t *parent,
+                            const d1l_ui_more_view_model_t *view_model,
+                            uint32_t generation,
+                            d1l_ui_settings_action_handler_t action_handler,
+                            void *action_context)
 {
-    if (!parent || !snapshot) {
-        return;
+    if (!controller || !parent || generation == 0U ||
+        !d1l_ui_more_view_model_is_valid(view_model)) {
+        d1l_ui_settings_deactivate(controller);
+        return false;
     }
-    s_action_handler = action_handler;
-
-    for (int index = 0; index < SETTINGS_CATEGORY_COUNT; ++index) {
-        s_category_children[index] = NULL;
-        s_category_chevrons[index] = NULL;
+    const d1l_ui_more_category_t expanded = controller->active
+        ? controller->expanded_category : D1L_UI_MORE_CATEGORY_NONE;
+    if (view_model != &controller->rendered) {
+        controller->rendered = *view_model;
     }
-    s_menu = NULL;
+    controller->action_handler = action_handler;
+    controller->action_context = action_context;
+    controller->generation = generation;
+    controller->active = true;
+    controller->expanded_category = expanded;
+    memset(controller->action_bindings, 0, sizeof(controller->action_bindings));
+    memset(controller->category_bindings, 0, sizeof(controller->category_bindings));
+    memset(controller->category_children, 0, sizeof(controller->category_children));
+    memset(controller->category_chevrons, 0, sizeof(controller->category_chevrons));
+    controller->menu = NULL;
 
-    lv_obj_t *title = settings_create_label(parent, "More", 0xF4F7FB);
+    lv_obj_t *title = settings_create_label(parent, controller->rendered.title, 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
         lv_obj_set_pos(title, 18, 8);
     }
-    lv_obj_t *subtitle = settings_create_label(parent, "Settings and tools", 0x8EA0AE);
+    lv_obj_t *subtitle = settings_create_label(parent, controller->rendered.subtitle,
+                                                0x8EA0AE);
     settings_set_dot_width(subtitle, 260);
     if (subtitle) {
         lv_obj_set_pos(subtitle, 18, 36);
     }
 
-    char packet_status[32];
-    char about_status[48];
-    snprintf(packet_status, sizeof(packet_status), "%lu saved",
-             (unsigned long)snapshot->packet_count);
-    snprintf(about_status, sizeof(about_status), "Version %s", D1L_FIRMWARE_VERSION);
-
-    const char *wifi_status;
-    if (!snapshot->wifi_build_enabled) {
-        wifi_status = "Unavailable";
-    } else if (snapshot->wifi_connected) {
-        wifi_status = "Connected";
-    } else if (snapshot->wifi_connecting) {
-        wifi_status = "Connecting";
-    } else {
-        wifi_status = snapshot->wifi_enabled ? "On" : "Off";
+    controller->menu = settings_create_container(parent, 444);
+    if (!controller->menu) {
+        d1l_ui_settings_deactivate(controller);
+        return false;
     }
+    lv_obj_set_pos(controller->menu, 18, 54);
+    lv_obj_set_flex_flow(controller->menu, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(controller->menu, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(controller->menu, 4, 0);
 
-    const char *ble_status = !snapshot->ble_build_enabled ||
-        !snapshot->ble_transport_supported
-        ? "Unavailable"
-        : (snapshot->ble_companion_enabled ? "On" : "Off");
-    const char *radio_status = snapshot->radio_apply_pending
-        ? "Applying"
-        : ((snapshot->radio_ready || snapshot->radio_applied) ? "Ready" : "Needs setup");
-    const bool storage_needs_attention = settings_storage_needs_attention(snapshot);
-    const bool sd_needs_attention = settings_sd_needs_attention(snapshot);
-    const bool storage_reconnecting = settings_storage_text_equals(
-        snapshot->storage_setup_action, "wait_for_storage_reconnect");
-    const bool storage_ready = snapshot->storage_data_enabled ||
-                               snapshot->storage_sd_data_root_ready;
-    const char *storage_status = storage_reconnecting
-        ? "Reconnecting"
-        : (sd_needs_attention
-        ? "Needs attention"
-        : (storage_ready
-            ? "Ready"
-            : (snapshot->storage_setup_required
-                ? "Needs setup"
-                : (snapshot->storage_sd_present ? "Detected" : "Internal storage"))));
-    const char *map_status = !snapshot->map_location_set
-        ? "Set location"
-        : (!snapshot->map_tile_cache_ready
-            ? settings_map_storage_state(snapshot)
-            : (!snapshot->wifi_connected
-                ? "Needs Wi-Fi"
-                : (snapshot->map_tile_render_supported ? "Ready" : "Loading")));
-    const char *storage_category_summary =
-        snapshot->storage_retained_backup_degraded && sd_needs_attention
-        ? "Storage needs attention"
-        : (snapshot->storage_retained_backup_degraded
-        ? "Backup needs attention"
-        : (sd_needs_attention
-        ? "SD needs attention"
-        : (storage_reconnecting ? "SD reconnecting" : "SD card and map")));
+    for (size_t category_index = 0U;
+         category_index < controller->rendered.category_count; ++category_index) {
+        if (!render_category(controller, category_index)) {
+            d1l_ui_settings_deactivate(controller);
+            return false;
+        }
+    }
+    settings_apply_category_state(controller);
+    return true;
+}
 
-    const settings_menu_item_t tools[] = {
-        {"Packets", packet_status, 0x93C5FD, D1L_UI_SETTINGS_ACTION_PACKETS, false},
-        {"Diagnostics", "Health & reports", 0xC4B5FD,
-         D1L_UI_SETTINGS_ACTION_DIAGNOSTICS, false},
-    };
-    const settings_menu_item_t connections[] = {
-        {"Wi-Fi", wifi_status,
-         snapshot->wifi_connected ? 0x5EEAD4 : 0xF4F7FB,
-         D1L_UI_SETTINGS_ACTION_WIFI, false},
-        {"Bluetooth", ble_status,
-         snapshot->ble_companion_enabled ? 0x5EEAD4 : 0xF4F7FB,
-         D1L_UI_SETTINGS_ACTION_BLE, false},
-        {"Radio", radio_status,
-         snapshot->radio_ready ? 0x5EEAD4 : 0xF4F7FB,
-         D1L_UI_SETTINGS_ACTION_RADIO, false},
-    };
-    const settings_menu_item_t storage_maps[] = {
-        {"SD Card", storage_status,
-          sd_needs_attention ? 0xF87171 :
-            (storage_reconnecting ? 0xFBBF24 :
-             (storage_ready ? 0x5EEAD4 : 0xF4F7FB)),
-         D1L_UI_SETTINGS_ACTION_STORAGE, sd_needs_attention},
-        {"Map options", map_status,
-         snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xF4F7FB,
-         D1L_UI_SETTINGS_ACTION_MAP_TILES, false},
-    };
-    const settings_menu_item_t device[] = {
-        {"Display", "Brightness & theme", 0xA7F3D0,
-         D1L_UI_SETTINGS_ACTION_DISPLAY, false},
-        {"Identity", snapshot->identity_ready ? "Ready" : "Not set", 0xF4F7FB,
-         D1L_UI_SETTINGS_ACTION_NONE, false},
-    };
-    const settings_menu_item_t support[] = {
-        {"About", about_status, 0xF4F7FB, D1L_UI_SETTINGS_ACTION_NONE, false},
-    };
-    const settings_menu_item_t advanced[] = {
-        {"Mesh advertise", "Broadcast presence", 0xFCA5A5,
-         D1L_UI_SETTINGS_ACTION_ADVANCED, true},
-    };
-
-    s_menu = settings_create_container(parent, 444);
-    if (!s_menu) {
+void d1l_ui_settings_deactivate(d1l_ui_settings_controller_t *controller)
+{
+    if (!controller) {
         return;
     }
-    lv_obj_set_pos(s_menu, 18, 54);
-    lv_obj_set_flex_flow(s_menu, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(s_menu, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(s_menu, 4, 0);
-
-    render_category(s_menu, SETTINGS_CATEGORY_TOOLS, "Tools",
-                    "Packets and diagnostics", tools, 2, false);
-    render_category(s_menu, SETTINGS_CATEGORY_CONNECTIONS, "Connections",
-                    "Wi-Fi, Bluetooth, and radio", connections, 3, false);
-    render_category(s_menu, SETTINGS_CATEGORY_STORAGE_MAPS, "Storage & maps",
-                    storage_category_summary, storage_maps, 2,
-                    storage_needs_attention);
-    render_category(s_menu, SETTINGS_CATEGORY_DEVICE, "Device",
-                    "Display and identity", device, 2, false);
-    render_category(s_menu, SETTINGS_CATEGORY_SUPPORT, "Support",
-                    "About this device", support, 1, false);
-    render_category(s_menu, SETTINGS_CATEGORY_ADVANCED, "Advanced",
-                    "Developer options", advanced, 1, true);
-    settings_apply_category_state();
+    controller->action_handler = NULL;
+    controller->action_context = NULL;
+    controller->generation = 0U;
+    controller->active = false;
+    controller->expanded_category = D1L_UI_MORE_CATEGORY_NONE;
+    controller->menu = NULL;
+    memset(controller->action_bindings, 0, sizeof(controller->action_bindings));
+    memset(controller->category_bindings, 0, sizeof(controller->category_bindings));
+    memset(controller->category_children, 0, sizeof(controller->category_children));
+    memset(controller->category_chevrons, 0, sizeof(controller->category_chevrons));
 }
