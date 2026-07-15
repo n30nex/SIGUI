@@ -93,11 +93,6 @@ static bool s_wifi_scan_loaded;
 static lv_obj_t *s_ble_sheet;
 static lv_obj_t *s_display_sheet;
 static lv_obj_t *s_diagnostics_sheet;
-static lv_obj_t *s_map_location_sheet;
-static lv_obj_t *s_map_lat_textarea;
-static lv_obj_t *s_map_lon_textarea;
-static lv_obj_t *s_map_location_keyboard;
-static lv_obj_t *s_map_options_sheet;
 static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_contact_options_sheet;
 static lv_obj_t *s_contact_forget_sheet;
@@ -132,13 +127,13 @@ static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_settings_controller_t s_settings_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_storage_view_model_t s_storage_view EXT_RAM_BSS_ATTR;
 static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_map_sheets_controller_t s_map_sheets_controller EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
 static d1l_app_radio_profile_edit_t s_radio_edit;
 static int32_t s_map_location_lat_e7;
 static int32_t s_map_location_lon_e7;
-static d1l_ui_map_controls_t s_map_location_controls;
 static bool s_map_location_returns_to_options;
 static d1l_contact_entry_t s_contact_detail_contact;
 static d1l_contact_entry_t s_contact_export_contact;
@@ -332,7 +327,6 @@ static bool s_packet_detail_advanced;
 static bool s_message_detail_advanced;
 static d1l_mesh_roles_page_t s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOT;
 static d1l_storage_page_t s_storage_page = D1L_STORAGE_PAGE_ROOT;
-static d1l_ui_map_options_page_t s_map_options_page = D1L_UI_MAP_OPTIONS_ROOT;
 
 static d1l_ui_content_generation_t content_generation_from_snapshot(
     const d1l_app_snapshot_t *snapshot)
@@ -682,8 +676,8 @@ static bool render_wifi_sheet(void);
 static void render_ble_sheet(void);
 static void render_display_sheet(void);
 static void render_diagnostics_sheet(void);
-static void render_map_location_sheet(void);
-static void render_map_options_sheet(void);
+static bool render_map_location_sheet(void);
+static bool render_map_options_sheet(d1l_ui_map_options_page_t page);
 static void create_contact_edit_sheet(lv_obj_t *screen);
 static void hide_node_detail_sheet(void);
 static void request_tab_event_cb(lv_event_t *event);
@@ -1400,14 +1394,13 @@ static void hide_diagnostics_sheet(void)
 
 static void hide_map_location_sheet(void)
 {
-    d1l_ui_modal_hide(s_map_location_sheet);
+    d1l_ui_map_sheets_hide_location(&s_map_sheets_controller);
     restore_dock_for_active_tab();
 }
 
 static void hide_map_options_sheet(void)
 {
-    d1l_ui_modal_hide(s_map_options_sheet);
-    s_map_options_page = D1L_UI_MAP_OPTIONS_ROOT;
+    d1l_ui_map_sheets_hide_options(&s_map_sheets_controller);
     restore_dock_for_active_tab();
 }
 
@@ -4603,10 +4596,8 @@ static void close_map_location_sheet_event_cb(lv_event_t *event)
     if (s_map_location_returns_to_options) {
         s_map_location_returns_to_options = false;
         d1l_app_model_snapshot(&s_snapshot);
-        s_map_options_page = D1L_UI_MAP_OPTIONS_ROOT;
-        render_map_options_sheet();
-        if (s_map_options_sheet) {
-            show_modal(s_map_options_sheet);
+        if (render_map_options_sheet(D1L_UI_MAP_OPTIONS_ROOT)) {
+            show_modal(d1l_ui_map_options_sheet(&s_map_sheets_controller));
         }
     } else {
         request_content_refresh();
@@ -4615,19 +4606,28 @@ static void close_map_location_sheet_event_cb(lv_event_t *event)
 
 static void map_location_textarea_event_cb(lv_event_t *event)
 {
-    if (d1l_ui_keyboard_focus_textarea_from_event(s_map_location_keyboard, event,
-                                                   s_map_lat_textarea,
-                                                   s_map_lon_textarea)) {
-        lv_obj_clear_flag(s_map_location_keyboard, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_map_location_keyboard);
+    lv_obj_t *keyboard =
+        d1l_ui_map_location_keyboard(&s_map_sheets_controller);
+    lv_obj_t *latitude =
+        d1l_ui_map_latitude_textarea(&s_map_sheets_controller);
+    lv_obj_t *longitude =
+        d1l_ui_map_longitude_textarea(&s_map_sheets_controller);
+    if (d1l_ui_keyboard_focus_textarea_from_event(keyboard, event, latitude,
+                                                   longitude)) {
+        lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(keyboard);
     }
 }
 
 static void map_location_save_event_cb(lv_event_t *event)
 {
     (void)event;
-    const char *lat_text = s_map_lat_textarea ? lv_textarea_get_text(s_map_lat_textarea) : "";
-    const char *lon_text = s_map_lon_textarea ? lv_textarea_get_text(s_map_lon_textarea) : "";
+    lv_obj_t *latitude =
+        d1l_ui_map_latitude_textarea(&s_map_sheets_controller);
+    lv_obj_t *longitude =
+        d1l_ui_map_longitude_textarea(&s_map_sheets_controller);
+    const char *lat_text = latitude ? lv_textarea_get_text(latitude) : "";
+    const char *lon_text = longitude ? lv_textarea_get_text(longitude) : "";
     int32_t lat_e7 = 0;
     int32_t lon_e7 = 0;
     if (!parse_coord_text_e7(lat_text, D1L_MAP_LOCATION_LAT_E7_MIN,
@@ -4672,17 +4672,11 @@ static void map_location_clear_event_cb(lv_event_t *event)
     }
 }
 
-static void render_map_location_sheet(void)
+static bool render_map_location_sheet(void)
 {
-    if (!s_map_location_sheet) {
-        return;
-    }
-    d1l_ui_map_render_location(s_map_location_sheet, &s_snapshot,
-                               s_map_location_lat_e7, s_map_location_lon_e7,
-                               &callbacks, &s_map_location_controls);
-    s_map_lat_textarea = s_map_location_controls.latitude_textarea;
-    s_map_lon_textarea = s_map_location_controls.longitude_textarea;
-    s_map_location_keyboard = s_map_location_controls.location_keyboard;
+    return d1l_ui_map_sheets_render_location(
+        &s_map_sheets_controller, &s_snapshot, s_map_location_lat_e7,
+        s_map_location_lon_e7, &callbacks);
 }
 
 static void open_map_location_sheet_event_cb(lv_event_t *event)
@@ -4712,9 +4706,10 @@ static void open_map_location_sheet_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
-    render_map_location_sheet();
-    if (s_map_location_sheet) {
-        show_modal(s_map_location_sheet);
+    if (render_map_location_sheet()) {
+        show_modal(d1l_ui_map_location_sheet(&s_map_sheets_controller));
+    } else {
+        show_toast_text("Map location unavailable", false);
     }
 }
 
@@ -4724,13 +4719,10 @@ static void open_map_location_from_options_event_cb(lv_event_t *event)
     s_map_location_returns_to_options = true;
 }
 
-static void render_map_options_sheet(void)
+static bool render_map_options_sheet(d1l_ui_map_options_page_t page)
 {
-    if (!s_map_options_sheet) {
-        return;
-    }
-    d1l_ui_map_render_options(s_map_options_sheet, &s_snapshot,
-                              s_map_options_page, &callbacks);
+    return d1l_ui_map_sheets_render_options(
+        &s_map_sheets_controller, &s_snapshot, page, &callbacks);
 }
 
 static void close_map_options_sheet_event_cb(lv_event_t *event)
@@ -4745,23 +4737,24 @@ static void open_map_cache_status_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_app_model_snapshot(&s_snapshot);
-    s_map_options_page = D1L_UI_MAP_OPTIONS_CACHE_STATUS;
-    render_map_options_sheet();
+    if (!render_map_options_sheet(D1L_UI_MAP_OPTIONS_CACHE_STATUS)) {
+        show_toast_text("Map options unavailable", false);
+    }
 }
 
 static void back_to_map_options_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_app_model_snapshot(&s_snapshot);
-    s_map_options_page = D1L_UI_MAP_OPTIONS_ROOT;
-    render_map_options_sheet();
+    if (!render_map_options_sheet(D1L_UI_MAP_OPTIONS_ROOT)) {
+        show_toast_text("Map options unavailable", false);
+    }
 }
 
 static void open_map_options_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_app_model_snapshot(&s_snapshot);
-    s_map_options_page = D1L_UI_MAP_OPTIONS_ROOT;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -4782,9 +4775,10 @@ static void open_map_options_sheet_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
-    render_map_options_sheet();
-    if (s_map_options_sheet) {
-        show_modal(s_map_options_sheet);
+    if (render_map_options_sheet(D1L_UI_MAP_OPTIONS_ROOT)) {
+        show_modal(d1l_ui_map_options_sheet(&s_map_sheets_controller));
+    } else {
+        show_toast_text("Map options unavailable", false);
     }
 }
 
@@ -5449,9 +5443,11 @@ static void map_location_keyboard_event_cb(lv_event_t *event)
     if (code == LV_EVENT_READY) {
         map_location_save_event_cb(event);
     } else if (code == LV_EVENT_CANCEL) {
-        d1l_ui_keyboard_clear_textarea(s_map_location_keyboard);
-        if (s_map_location_keyboard) {
-            lv_obj_add_flag(s_map_location_keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_t *keyboard =
+            d1l_ui_map_location_keyboard(&s_map_sheets_controller);
+        d1l_ui_keyboard_clear_textarea(keyboard);
+        if (keyboard) {
+            lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
@@ -6368,7 +6364,7 @@ static lv_obj_t *scroll_probe_open_map_surface(const char *surface)
     }
     if (strcmp(surface, "map_location") == 0) {
         open_map_location_sheet_event_cb(NULL);
-        return s_map_location_sheet;
+        return d1l_ui_map_location_sheet(&s_map_sheets_controller);
     }
     open_map_options_sheet_event_cb(NULL);
     if (strcmp(surface, "map_cache") == 0) {
@@ -6376,7 +6372,7 @@ static lv_obj_t *scroll_probe_open_map_surface(const char *surface)
     } else if (strcmp(surface, "map_options") != 0) {
         return NULL;
     }
-    return s_map_options_sheet;
+    return d1l_ui_map_options_sheet(&s_map_sheets_controller);
 }
 
 static void measure_scroll_probe_target(lv_obj_t *target,
@@ -6652,9 +6648,9 @@ static void fill_compose_probe_objects(const char *target, lv_obj_t **sheet,
         *textarea = s_onboarding_name_textarea;
         *keyboard = s_onboarding_keyboard;
     } else if (strcmp(target, "map_location") == 0) {
-        *sheet = s_map_location_sheet;
-        *textarea = s_map_lat_textarea;
-        *keyboard = s_map_location_keyboard;
+        *sheet = d1l_ui_map_location_sheet(&s_map_sheets_controller);
+        *textarea = d1l_ui_map_latitude_textarea(&s_map_sheets_controller);
+        *keyboard = d1l_ui_map_location_keyboard(&s_map_sheets_controller);
     } else if (strcmp(target, "wifi_ssid") == 0) {
         *sheet = d1l_ui_wifi_sheet(&s_wifi_controller);
         *textarea = d1l_ui_wifi_ssid_textarea(&s_wifi_controller);
@@ -6763,13 +6759,17 @@ static void open_keyboard_probe_on_ui_task(const char *target)
         }
     } else if (strcmp(target, "map_location") == 0) {
         open_map_location_sheet_event_cb(NULL);
-        if (s_map_lat_textarea) {
-            lv_textarea_set_text(s_map_lat_textarea, "43.6532");
+        lv_obj_t *latitude =
+            d1l_ui_map_latitude_textarea(&s_map_sheets_controller);
+        lv_obj_t *keyboard =
+            d1l_ui_map_location_keyboard(&s_map_sheets_controller);
+        if (latitude) {
+            lv_textarea_set_text(latitude, "43.6532");
         }
-        if (s_map_location_keyboard) {
-            lv_keyboard_set_textarea(s_map_location_keyboard, s_map_lat_textarea);
-            lv_obj_clear_flag(s_map_location_keyboard, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(s_map_location_keyboard);
+        if (keyboard) {
+            lv_keyboard_set_textarea(keyboard, latitude);
+            lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(keyboard);
         }
     } else if (strcmp(target, "wifi_ssid") == 0 ||
                strcmp(target, "wifi_password") == 0) {
@@ -7358,38 +7358,6 @@ static void create_diagnostics_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_diagnostics_sheet);
 }
 
-static void create_map_location_sheet(lv_obj_t *screen)
-{
-    s_map_location_sheet = create_object(screen, "map location sheet");
-    if (!s_map_location_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_map_location_sheet, 480, 424);
-    lv_obj_set_pos(s_map_location_sheet, 0, 56);
-    lv_obj_set_style_radius(s_map_location_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_map_location_sheet, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_width(s_map_location_sheet, 0, 0);
-    lv_obj_set_style_pad_all(s_map_location_sheet, 0, 0);
-    lv_obj_clear_flag(s_map_location_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_map_location_sheet);
-}
-
-static void create_map_options_sheet(lv_obj_t *screen)
-{
-    s_map_options_sheet = create_object(screen, "map options sheet");
-    if (!s_map_options_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_map_options_sheet, 480, 424);
-    lv_obj_set_pos(s_map_options_sheet, 0, 56);
-    lv_obj_set_style_radius(s_map_options_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_map_options_sheet, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_width(s_map_options_sheet, 0, 0);
-    lv_obj_set_style_pad_all(s_map_options_sheet, 0, 0);
-    lv_obj_clear_flag(s_map_options_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_map_options_sheet);
-}
-
 static void create_contact_detail_sheet(lv_obj_t *screen)
 {
     s_contact_detail_sheet = create_object(screen, "contact detail sheet");
@@ -7837,8 +7805,9 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_ble_sheet(s_screen);
     create_display_sheet(s_screen);
     create_diagnostics_sheet(s_screen);
-    create_map_location_sheet(s_screen);
-    create_map_options_sheet(s_screen);
+    if (!d1l_ui_map_sheets_create(&s_map_sheets_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
     create_contact_detail_sheet(s_screen);
     create_contact_options_sheet(s_screen);
     create_contact_forget_sheet(s_screen);
