@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp14_ble_setup_controller_exact_main_aggregate",
+  "generated_utc": "2026-07-15T03:53:22Z",
+  "claim_scope": "Portable retained-PR and exact-main software/artifact evidence for the tenth bounded WP-14 extraction slice. One bounded external-RAM controller owns the BLE setup sheet, its rendered snapshot, generation-guarded close/toggle bindings, and fail-closed create/render/deactivate lifecycle. Unavailable pairing and transport actions remain visibly disabled. The slice is merged and strict-verified on exact main f61d40385594284f9e9f15a92bba81770c8fd24d. This aggregate does not claim live BLE transport or pairing, physical UI, RF, SD, update, WP-14, or release closure.",
+  "exact_pair": {
+    "pull_request": 132,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/132",
+    "base_sha": "2bba1b69900002fbfccd5c2f6d2851cd4ebc3645",
+    "head_sha": "a2f49587e03a578c037c83110cceec81d0ab9d3a",
+    "head_tree_sha": "f0152dbf5b1773fd9db96c614f471ece1ca05f08",
+    "synthetic_merge_sha": "c20857b89ea67b5a0a25da3c562f463904279128",
+    "synthetic_merge_tree_sha": "f0152dbf5b1773fd9db96c614f471ece1ca05f08",
+    "merged_main_sha": "f61d40385594284f9e9f15a92bba81770c8fd24d",
+    "merged_main_parent_sha": "2bba1b69900002fbfccd5c2f6d2851cd4ebc3645",
+    "merged_main_tree_sha": "f0152dbf5b1773fd9db96c614f471ece1ca05f08",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29385169220,
+    "conclusion": "success",
+    "cancelled_duplicate_push_run": 29385167270,
+    "cancelled_duplicate_excluded_from_gate": true,
+    "host_tests_passed": 1068,
+    "checksum_contract_tests_passed": 32,
+    "artifact_archives_verified": 5,
+    "artifact_zip_total_bytes": 23282999,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 74457981,
+    "downloaded_tree_sha256": "bb50d4a7b8b7c2ebc1b69ea7a477c74e390f232f253a4f73a8d5e7b6f11f0399",
+    "application_sha256": "be57655e5644bb7c89b9ec01a2d5fdeaf892d37d0c0e6c471fbb09d76ee2ad17",
+    "full_flash_sha256": "d41cae87f8ce88c0fc261ca1d95441171df4dc85b4ac4331fb7270d7200e510f",
+    "provenance_sha256": "d196f3c7bec5bac54a0822086b701dc0dc9efad11afb55b9d4c5e8d225d478d3",
+    "sbom_sha256": "51e94d61db2709730ba2f3bb4fbee82a7001441e7ef7f0ec31c6a5095df02c00",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "firmware_embedded_source_identity_exact": true,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr132-a2f4958/pr132_strict_gate_a2f49587e03a578c037c83110cceec81d0ab9d3a.json",
+    "strict_receipt_sha256": "0679342d6ffd6b6feb32c74809195a9aad426547005a445a1f85df12c658423b"
+  },
+  "implementation_boundary": {
+    "controller_files": [
+      "main/ui/ui_ble.c",
+      "main/ui/ui_ble.h"
+    ],
+    "integration_files": [
+      "main/ui/ui_connectivity.c",
+      "main/ui/ui_connectivity.h",
+      "main/ui/ui_phase1.c"
+    ],
+    "single_bounded_external_ram_owner": true,
+    "owns_sheet_and_rendered_snapshot": true,
+    "generation_guarded_actions": true,
+    "repeat_create_fail_closed": true,
+    "incomplete_render_fail_closed": true,
+    "unavailable_pair_and_forget_disabled": true,
+    "complete_ble_transport_or_pairing": false,
+    "thousand_transition_acceptance": false,
+    "physical_ui_acceptance": false
+  },
+  "exact_main_gate": {
+    "actions_run": 29385596543,
+    "validated_main_sha": "f61d40385594284f9e9f15a92bba81770c8fd24d",
+    "validated_tree_sha": "f0152dbf5b1773fd9db96c614f471ece1ca05f08",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 1068,
+    "checksum_contract_tests_passed": 32,
+    "artifact_archives_verified": 5,
+    "artifact_zip_total_bytes": 23282965,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 74457987,
+    "downloaded_tree_sha256": "121e38c285e20370bba9bf840d508112b2ac075de785cd8aa1809544f49283c5",
+    "application_sha256": "6aa84749f02a7fa101db9f0c202c86dd7a728db4f8edb29f75f5ae04f0d428bb",
+    "full_flash_sha256": "780bb7094f2bdf664dfaebacbc6df0d10bc13947dd4063fc6c186a48e05d4dbf",
+    "provenance_sha256": "05b12bd15151c0835da70a134a8206e99f0025e2b3da60a27dea4d99bd165f89",
+    "sbom_sha256": "eae97bbf1888be89b5e996dd326428dd9dc622479ed0edf8a1df3a5a9476011d",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "firmware_embedded_source_identity_exact": true,
+    "receipt_path": "F:/SIGUI-artifact-gates/main-f61d403/main_strict_gate_f61d40385594284f9e9f15a92bba81770c8fd24d.json",
+    "receipt_sha256": "f73699d3862e4be6557d396bc6ac1ac77c249f7463bcc7c079fe3ad080de3323",
+    "verdict": "exact_merged_main_tenth_wp14_ble_setup_controller_software_and_artifact_gate_banked"
+  },
+  "residual_wp14_gates": {
+    "closed": false,
+    "remaining": [
+      "complete_ui_runtime_owner_and_command_queue_extraction",
+      "extract_remaining_route_contact_tools_terminal_admin_update_surfaces",
+      "complete_ble_transport_pairing_and_forget_lifecycle",
+      "lifecycle_generation_and_redraw_invariants",
+      "live_wifi_ble_and_location_integration",
+      "one_thousand_automated_navigation_transitions",
+      "exact_candidate_physical_ui_qualification",
+      "required_ui_runtime_safety_artifact"
+    ]
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "sd_hardware_closure_claimed": false,
+    "ui_hardware_closure_claimed": false,
+    "wp14_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "tenth_wp14_ble_setup_controller_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "exact_main_gate_pending": false,
+    "proof_banked": true,
+    "physical_hardware_evidence": false,
+    "wp14_software_implementation_complete": false,
+    "wp14_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
