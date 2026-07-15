@@ -21,7 +21,7 @@ def test_meshcore_service_builds_public_group_text_packets():
     assert "cmd->raw, cmd->raw_len," in source
 
 
-def test_meshcore_service_rejects_139_char_user_text_without_truncation():
+def test_meshcore_service_rejects_139_byte_or_invalid_utf8_text_without_truncation():
     source = read("main/mesh/meshcore_service.c")
     console = read("main/comms/usb_console.c")
     ui = read("main/ui/ui_phase1.c")
@@ -60,8 +60,35 @@ def test_meshcore_service_rejects_139_char_user_text_without_truncation():
     )
 
     assert "MESSAGE_TOO_LONG" in console
-    assert "max 138 characters" in console
+    assert "max 138 UTF-8 bytes" in console
+    assert '"mesh/user_text.c"' in read("main/CMakeLists.txt")
+    assert "d1l_user_text_validate(text)" in source
+    assert "d1l_user_text_copy(" in source
+    assert "s_pending_public_text, sizeof(s_pending_public_text), message" in source
+    assert "s_pending_dm_tx.text," in source
     assert "lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS)" in ui
+
+
+def test_authenticated_inbound_text_is_validated_before_visible_or_ack_side_effects():
+    source = read("main/mesh/meshcore_service.c")
+    public_rx = source.split("static void parse_rx_public_packet", 1)[1].split(
+        "static bool parse_rx_dm_packet", 1
+    )[0]
+    dm_rx = source.split("static bool parse_rx_dm_packet", 1)[1].split(
+        "static void parse_rx_path_packet", 1
+    )[0]
+    public_validate = public_rx.index("d1l_meshcore_text_plaintext_view(")
+    assert public_validate < public_rx.index("s_status.rx_packets++")
+    assert public_validate < public_rx.index("d1l_route_store_upsert_observation")
+    assert public_validate < public_rx.index("append_public_message_store_rx")
+    dm_validate = dm_rx.index("d1l_meshcore_text_plaintext_view(")
+    for side_effect in [
+        "calc_dm_ack_hash",
+        "calc_dm_identity_digest",
+        "d1l_dm_store_append_rx_identity",
+        "dispatch_bounded_dm_ack",
+    ]:
+        assert dm_validate < dm_rx.index(side_effect)
 
 
 def test_meshcore_service_decodes_verified_adverts():

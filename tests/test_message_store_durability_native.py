@@ -29,6 +29,7 @@ def test_public_message_store_late_sd_and_partial_mirror_durability(tmp_path):
         "-I",
         str(ROOT / "main"),
         str(ROOT / "main/mesh/message_store.c"),
+        str(ROOT / "main/mesh/user_text.c"),
         str(ROOT / "tests/native/message_store_durability_test.c"),
         "-o",
         str(executable),

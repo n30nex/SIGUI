@@ -947,6 +947,55 @@ static void test_total_counter_exhaustion_rejects_append_without_writes(void)
     assert(slot_blob(&s_nvs)->total_written == UINT32_MAX);
 }
 
+static void test_utf8_round_trip_and_invalid_input_have_no_side_effects(void)
+{
+    reset_mock(false);
+    assert(d1l_message_store_init() == ESP_OK);
+    const char mixed[] = {
+        'C', 'a', 'f', (char)0xc3, (char)0xa9, ' ',
+        (char)0xe6, (char)0x9d, (char)0xb1,
+        (char)0xe4, (char)0xba, (char)0xac, ' ',
+        (char)0xf0, (char)0x9f, (char)0x98, (char)0x80,
+        ' ', '"', 'x', '\\', 'y', '"', '\0'
+    };
+    assert(d1l_message_store_append_public(
+               "rx", "Node", mixed, -60, 40, 1U, 1U, true) == ESP_OK);
+
+    char exact[D1L_MESSAGE_TEXT_LEN] = {0};
+    for (size_t i = 0U; i < D1L_MESSAGE_MAX_BYTES; i += 3U) {
+        exact[i] = (char)0xe2;
+        exact[i + 1U] = (char)0x82;
+        exact[i + 2U] = (char)0xac;
+    }
+    assert(d1l_message_store_append_public(
+               "tx", "Node", exact, 0, 0, 1U, 0U, false) == ESP_OK);
+
+    const d1l_message_store_stats_t before = d1l_message_store_stats();
+    const uint32_t nvs_writes_before = s_nvs_write_count;
+    const char invalid[] = {(char)0xc0, (char)0xaf, '\0'};
+    assert(d1l_message_store_append_public(
+               "rx", "Node", invalid, -60, 40, 1U, 1U, true) ==
+           ESP_ERR_INVALID_ARG);
+    char oversized[D1L_MESSAGE_TEXT_LEN + 1U];
+    memset(oversized, 'q', sizeof(oversized) - 1U);
+    oversized[sizeof(oversized) - 1U] = '\0';
+    assert(d1l_message_store_append_public(
+               "rx", "Node", oversized, -60, 40, 1U, 1U, true) ==
+           ESP_ERR_INVALID_SIZE);
+    const d1l_message_store_stats_t after = d1l_message_store_stats();
+    assert(after.count == before.count);
+    assert(after.total_written == before.total_written);
+    assert(s_nvs_write_count == nvs_writes_before);
+
+    assert(d1l_message_store_init() == ESP_OK);
+    d1l_message_entry_t rows[2] = {0};
+    assert(d1l_message_store_copy_recent(rows, 2U) == 2U);
+    const bool first_is_exact = strcmp(rows[0].text, exact) == 0;
+    assert(first_is_exact || strcmp(rows[1].text, exact) == 0);
+    assert(memcmp(rows[first_is_exact ? 1U : 0U].text,
+                  mixed, sizeof(mixed)) == 0);
+}
+
 int main(void)
 {
     test_sd_success_nvs_failure_retries_only_nvs();
@@ -972,6 +1021,7 @@ int main(void)
     test_exhausted_sequence_rejects_append_and_clear_rotates_lineage();
     test_higher_epoch_replay_exhaustion_preserves_both_copies();
     test_total_counter_exhaustion_rejects_append_without_writes();
+    test_utf8_round_trip_and_invalid_input_have_no_side_effects();
     puts("native Public message-store durability: ok");
     return 0;
 }

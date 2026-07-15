@@ -415,8 +415,8 @@ static void sanitize_ascii_bounded(char *dest, size_t dest_size,
     dest[out] = '\0';
 }
 
-static bool persisted_text_is_valid(const char *text, size_t capacity,
-                                    bool allow_empty)
+static bool persisted_ascii_is_valid(const char *text, size_t capacity,
+                                     bool allow_empty)
 {
     if (!text || capacity == 0U || memchr(text, '\0', capacity) == NULL ||
         (!allow_empty && text[0] == '\0')) {
@@ -435,13 +435,13 @@ static bool legacy_entry_is_valid(const d1l_dm_entry_v4_t *entry,
                                   uint32_t next_seq)
 {
     return entry && entry->seq > 0U && entry->seq < next_seq &&
-           persisted_text_is_valid(entry->contact_fingerprint,
-                                   sizeof(entry->contact_fingerprint), false) &&
-           persisted_text_is_valid(entry->contact_alias,
-                                   sizeof(entry->contact_alias), false) &&
-           persisted_text_is_valid(entry->direction,
-                                   sizeof(entry->direction), false) &&
-           persisted_text_is_valid(entry->text, sizeof(entry->text), false) &&
+           persisted_ascii_is_valid(entry->contact_fingerprint,
+                                    sizeof(entry->contact_fingerprint), false) &&
+           persisted_ascii_is_valid(entry->contact_alias,
+                                    sizeof(entry->contact_alias), false) &&
+           persisted_ascii_is_valid(entry->direction,
+                                    sizeof(entry->direction), false) &&
+           persisted_ascii_is_valid(entry->text, sizeof(entry->text), false) &&
            entry->path_hash_bytes <= 3U && entry->path_hops <= 63U &&
            (uint16_t)entry->path_hash_bytes * entry->path_hops <= 64U;
 }
@@ -590,13 +590,13 @@ static bool v5_entry_is_valid(const d1l_dm_entry_v5_t *entry,
                               uint32_t next_seq)
 {
     return entry && entry->seq > 0U && entry->seq < next_seq &&
-           persisted_text_is_valid(entry->contact_fingerprint,
-                                   sizeof(entry->contact_fingerprint), false) &&
-           persisted_text_is_valid(entry->contact_alias,
-                                   sizeof(entry->contact_alias), false) &&
-           persisted_text_is_valid(entry->direction,
-                                   sizeof(entry->direction), false) &&
-           persisted_text_is_valid(entry->text, sizeof(entry->text), false) &&
+           persisted_ascii_is_valid(entry->contact_fingerprint,
+                                    sizeof(entry->contact_fingerprint), false) &&
+           persisted_ascii_is_valid(entry->contact_alias,
+                                    sizeof(entry->contact_alias), false) &&
+           persisted_ascii_is_valid(entry->direction,
+                                    sizeof(entry->direction), false) &&
+           persisted_ascii_is_valid(entry->text, sizeof(entry->text), false) &&
            entry->path_hash_bytes <= 3U && entry->path_hops <= 63U &&
            (uint16_t)entry->path_hash_bytes * entry->path_hops <= 64U &&
            v5_ack_metadata_is_valid(entry);
@@ -606,13 +606,15 @@ static bool persisted_entry_is_valid(const d1l_dm_entry_t *entry,
                                      uint32_t next_seq)
 {
     return entry && entry->seq > 0U && entry->seq < next_seq &&
-           persisted_text_is_valid(entry->contact_fingerprint,
-                                   sizeof(entry->contact_fingerprint), false) &&
-           persisted_text_is_valid(entry->contact_alias,
-                                   sizeof(entry->contact_alias), false) &&
-           persisted_text_is_valid(entry->direction,
-                                   sizeof(entry->direction), false) &&
-           persisted_text_is_valid(entry->text, sizeof(entry->text), false) &&
+           persisted_ascii_is_valid(entry->contact_fingerprint,
+                                    sizeof(entry->contact_fingerprint), false) &&
+           persisted_ascii_is_valid(entry->contact_alias,
+                                    sizeof(entry->contact_alias), false) &&
+           persisted_ascii_is_valid(entry->direction,
+                                    sizeof(entry->direction), false) &&
+           d1l_user_text_validate_bounded(entry->text,
+                                          sizeof(entry->text), false).result ==
+               D1L_USER_TEXT_OK &&
            entry->path_hash_bytes <= 3U && entry->path_hops <= 63U &&
            (uint16_t)entry->path_hash_bytes * entry->path_hops <= 64U &&
            ack_metadata_is_valid(entry) &&
@@ -684,14 +686,30 @@ static bool blob_v5_is_valid(const d1l_dm_store_blob_v5_t *blob, size_t len)
     return true;
 }
 
-static bool blob_v2_header_is_valid(const d1l_dm_store_blob_v2_t *blob,
-                                    size_t len)
+static bool blob_v2_is_valid(const d1l_dm_store_blob_v2_t *blob,
+                             size_t len)
 {
-    return blob && len == sizeof(*blob) &&
-           blob->schema == D1L_DM_STORE_SCHEMA_V2 &&
-           blob->head < D1L_DM_STORE_CAPACITY &&
-           blob->count <= D1L_DM_STORE_CAPACITY && blob->next_seq > 0U &&
-           blob->total_written >= blob->count;
+    if (!blob || len != sizeof(*blob) ||
+        blob->schema != D1L_DM_STORE_SCHEMA_V2 ||
+        blob->head >= D1L_DM_STORE_CAPACITY ||
+        blob->count > D1L_DM_STORE_CAPACITY || blob->next_seq == 0U ||
+        blob->total_written < blob->count) {
+        return false;
+    }
+    const size_t oldest = blob->count == 0U ? 0U :
+        (blob->head + D1L_DM_STORE_CAPACITY - blob->count) %
+        D1L_DM_STORE_CAPACITY;
+    uint32_t previous_seq = 0U;
+    for (size_t i = 0U; i < blob->count; ++i) {
+        const d1l_dm_entry_v4_t *entry =
+            &blob->entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        if (!legacy_entry_is_valid(entry, blob->next_seq) ||
+            entry->seq <= previous_seq) {
+            return false;
+        }
+        previous_seq = entry->seq;
+    }
+    return true;
 }
 
 static bool blob_v4_is_valid(const d1l_dm_store_blob_v4_t *blob, size_t len)
@@ -1022,7 +1040,7 @@ static esp_err_t decode_raw_blob(const d1l_dm_store_raw_blob_t *raw, size_t len,
         return ESP_OK;
     }
     if (raw->schema == D1L_DM_STORE_SCHEMA_V2) {
-        if (!blob_v2_header_is_valid(&raw->v2, len)) {
+        if (!blob_v2_is_valid(&raw->v2, len)) {
             return ESP_ERR_INVALID_STATE;
         }
         convert_v2_blob(&raw->v2, out);
@@ -2140,13 +2158,22 @@ static esp_err_t append_internal(const char *contact_fingerprint,
         memset(outcome, 0, sizeof(*outcome));
         outcome->error = ESP_ERR_INVALID_ARG;
     }
+    const d1l_user_text_info_t text_info = d1l_user_text_validate(text);
     if (!contact_fingerprint || contact_fingerprint[0] == '\0' ||
-        !text || text[0] == '\0' || path_hash_bytes > 3U ||
+        (text_info.result != D1L_USER_TEXT_OK &&
+         text_info.result != D1L_USER_TEXT_TOO_LONG) ||
+        path_hash_bytes > 3U ||
         path_hops > 63U ||
         (uint16_t)path_hash_bytes * path_hops > 64U ||
         (identity_digest && (!persist || !direction ||
                              strncmp(direction, "rx", D1L_DM_DIRECTION_LEN) != 0))) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (text_info.result == D1L_USER_TEXT_TOO_LONG) {
+        if (outcome) {
+            outcome->error = ESP_ERR_INVALID_SIZE;
+        }
+        return ESP_ERR_INVALID_SIZE;
     }
     esp_err_t ret = ensure_store_initialized();
     if (ret != ESP_OK) {
@@ -2184,7 +2211,7 @@ static esp_err_t append_internal(const char *contact_fingerprint,
                        contact_alias : contact_fingerprint);
     sanitize_ascii(entry.direction, sizeof(entry.direction),
                    direction && direction[0] ? direction : "rx");
-    sanitize_ascii(entry.text, sizeof(entry.text), text);
+    memcpy(entry.text, text, text_info.byte_count + 1U);
     if (strncmp(entry.direction, "tx", sizeof(entry.direction)) == 0) {
         entry.delivery_state = acked ? D1L_DM_DELIVERY_ACKNOWLEDGED :
                                        D1L_DM_DELIVERY_QUEUED;

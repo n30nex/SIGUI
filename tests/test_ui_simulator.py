@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 49
+    assert len(views) == 53
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -327,7 +327,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     } <= labels_by_view["ble_setup_sheet"]
     assert {"Display", "Screen controls", "Brightness", "Night", "Contrast", "Timeout"} <= labels_by_view["display_settings_sheet"]
     assert {"Diagnostics", "Advanced health", "Health", "Crashlog", "Export", "Soak"} <= labels_by_view["diagnostics_sheet"]
-    assert {"Compose Public", "Public message", "20/138", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
+    assert {"Compose Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
         "Storage",
@@ -642,6 +642,17 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert views["messages"]["metrics"]["messages_navigation_rf_silent"] is True
     assert views["messages_public"]["metrics"]["public_navigation_rf_silent"] is True
     assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
+    assert views["compose_utf8_sheet"]["metrics"]["compose_validation"] == "valid_utf8"
+    assert views["compose_utf8_sheet"]["metrics"]["compose_byte_count"] == 12
+    assert views["compose_utf8_sheet"]["metrics"]["compose_character_count"] == 7
+    assert views["compose_byte_limit_sheet"]["metrics"]["compose_byte_count"] == 138
+    assert views["compose_byte_limit_sheet"]["metrics"]["compose_send_enabled"] is True
+    for invalid_view in ("compose_oversize_sheet", "compose_invalid_sheet"):
+        assert views[invalid_view]["metrics"]["compose_send_enabled"] is False
+        target = actions_by_view[invalid_view]["send_public_text"]
+        assert target["enabled"] is False
+        assert target["rf_tx"] is False
+        assert target["public_rf_tx"] is False
     assert {
         "toggle_more_tools",
         "toggle_more_connections",
