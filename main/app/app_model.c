@@ -334,6 +334,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->message_total_written = messages.total_written;
     snapshot->message_count = messages.count;
     snapshot->dm_total_written = dms.total_written;
+    snapshot->dm_content_revision = dms.content_revision;
     snapshot->dm_count = dms.count;
     snapshot->public_unread_count = read_state.public_unread_count;
     snapshot->dm_unread_count = read_state.dm_unread_count;

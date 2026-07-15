@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 46
+    assert len(views) == 47
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -126,6 +126,12 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert dm_thread["dm_thread_marks_read_on_open"] is True
     assert dm_thread["dm_thread_sticky_reply"] is True
     assert "Load Older" in set(views["dm_thread_sheet"]["labels"])
+    dm_thread_details = views["dm_thread_details_sheet"]["metrics"]
+    assert dm_thread_details["dm_thread_details_expanded"] is True
+    assert dm_thread_details["dm_thread_details_single_row"] is True
+    assert dm_thread_details["dm_thread_details_rendered_lines"] > 0
+    assert dm_thread_details["dm_thread_sticky_reply"] is True
+    assert dm_thread_details["dm_thread_navigation_rf_silent"] is True
     trace = views["route_trace_sheet"]["metrics"]
     assert trace["route_trace_rendered_count"] <= 2
 
@@ -385,6 +391,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert "Read" not in labels_by_view["dm_thread_sheet"]
     assert "DM Thread" not in labels_by_view["dm_thread_sheet"]
     assert "new" not in labels_by_view["dm_thread_sheet"]
+    assert {"YKF Corebot", "Back", "Hide details", "Technical details", "Reply"} <= labels_by_view["dm_thread_details_sheet"]
     assert {"Route Trace", "YKF Corebot", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
@@ -455,6 +462,12 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["dm_thread_sheet"]["close_dm_thread"]["destination"] == "messages_dm"
     assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["visual_box"] == [16, 420, 464, 472]
     assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["height"] >= 48
+    assert actions_by_view["dm_thread_sheet"]["toggle_dm_details"]["destination"] == "dm_thread_details_sheet"
+    assert actions_by_view["dm_thread_details_sheet"]["toggle_dm_details"]["destination"] == "dm_thread_sheet"
+    assert actions_by_view["dm_thread_details_sheet"]["open_dm_reply"]["visual_box"] == [16, 420, 464, 472]
+    assert actions_by_view["dm_thread_details_sheet"]["open_dm_reply"]["height"] >= 48
+    assert views["dm_thread_details_sheet"]["metrics"]["dm_thread_details_expanded"] is True
+    assert views["dm_thread_details_sheet"]["metrics"]["dm_thread_navigation_rf_silent"] is True
     assert "mark_dm_thread_read" not in actions_by_view["dm_thread_sheet"]
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])

@@ -21,6 +21,9 @@ def test_messages_root_has_owned_view_model_action_and_lifetime_boundary():
     assert "d1l_ui_messages_controller_t" in header
     assert "d1l_ui_messages_render" in header
     assert "d1l_ui_messages_deactivate" in header
+    assert '#include "app/app_model.h"' not in header
+    assert '#include "mesh/dm_store.h"' in header
+    assert '#include "mesh/message_store.h"' in header
 
     assert "controller->rendered = *view_model;" in source
     assert "binding->row_index >= controller->rendered.public_row_count" in source
@@ -39,8 +42,8 @@ def test_messages_root_has_owned_view_model_action_and_lifetime_boundary():
     assert "messages_view_model_from_snapshot(snapshot, &s_messages_controller.rendered);" in phase1
     assert "snapshot->recent_message_count" in phase1
     assert "snapshot->recent_dm_count" in phase1
-    assert "D1L_APP_SNAPSHOT_MESSAGE_PREVIEW" in phase1
-    assert "D1L_APP_SNAPSHOT_DM_PREVIEW" in phase1
+    assert "D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS" in phase1
+    assert "D1L_UI_MESSAGES_DM_PREVIEW_ROWS" in phase1
     assert "handle_messages_action" in phase1
     assert "show_message_detail_for(event->public_message);" in phase1
     assert "show_dm_thread_for(event->dm_message->contact_fingerprint" in phase1

@@ -299,6 +299,7 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
     service = read("main/mesh/meshcore_service.c")
     console = read("main/comms/usb_console.c")
     ui = read("main/ui/ui_phase1.c")
+    messages_ui = read("main/ui/ui_messages.c")
     limitations = read("docs/KNOWN_LIMITATIONS.md")
 
     dispatch = service.split("static bool dispatch_bounded_dm_ack", 1)[1].split(
@@ -365,7 +366,7 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
     assert '\\\"dispatch_count\\\":%u' in console
     assert '\\\"last_kind\\\":\\\"%s\\\"' in console
     assert '\\\"last_error\\\":\\\"%s\\\"' in console
-    assert "d1l_dm_ack_state_name(entry->ack_state)" in ui
+    assert "d1l_dm_ack_state_name(entry->ack_state)" in messages_ui
     assert "legacy_unverified" in limitations
     assert "never hydrated into the ACK cache" in limitations
 
@@ -397,7 +398,11 @@ def test_app_model_and_ui_preview_recent_dms():
     source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     messages_ui = read("main/ui/ui_messages.c")
-    thread_render = ui.split("static void render_dm_thread_sheet(void)", 1)[1].split(
+    messages_header = read("main/ui/ui_messages.h")
+    thread_render = messages_ui.split("bool d1l_ui_messages_render_thread(", 1)[1].split(
+        "bool d1l_ui_messages_expand_thread", 1
+    )[0]
+    thread_bridge = ui.split("static bool render_dm_thread_sheet(void)", 1)[1].split(
         "static void show_dm_thread_for", 1
     )[0]
     thread_open = ui.split("static void show_dm_thread_for", 1)[1].split(
@@ -406,6 +411,8 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
     assert "recent_dms" in header
     assert "dm_total_written" in header
+    assert "dm_content_revision" in header
+    assert "snapshot->dm_content_revision = dms.content_revision" in source
     assert "d1l_dm_store_copy_recent" in source
     assert "d1l_app_model_copy_dm_thread_page" in header
     assert "d1l_app_model_copy_dm_thread" in header
@@ -413,16 +420,17 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "d1l_read_state_dm_entry_is_unread(&out_entries[i])" in source
     assert "d1l_app_model_send_dm_text" in source
     assert "messages_render_dm_row" in messages_ui
-    assert "d1l_app_model_copy_dm_thread_page(s_dm_thread_fingerprint" in ui
-    assert "s_dm_thread_entries[D1L_DM_STORE_CAPACITY]" in ui
-    assert "dm_thread_load_older_event_cb" in ui
-    assert 'create_button(body, "Load Older", 0, 0, 424, 48' in thread_render
+    assert "load_dm_thread_rows" in thread_bridge
+    assert "d1l_app_model_copy_dm_thread_page(" in ui
+    assert "thread_entries[D1L_DM_STORE_CAPACITY]" in messages_header
+    assert "d1l_ui_messages_expand_thread" in messages_ui
+    assert 'body, "Load Older", 0, 0, 424, 48' in thread_render
     assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in thread_render
     assert "d1l_app_model_mark_dm_thread_read(fingerprint)" in thread_open
     assert thread_open.index("d1l_app_model_mark_dm_thread_read(fingerprint)") < thread_open.index(
-        "render_dm_thread_sheet();"
+        "render_dm_thread_sheet()"
     )
-    assert 'create_button(s_dm_thread_sheet, "Read"' not in thread_render
+    assert 'sheet, "Read"' not in thread_render
     assert "read_dm_thread_event_cb" not in ui
     assert '"DM"' in ui
     assert "No direct messages" in messages_ui
