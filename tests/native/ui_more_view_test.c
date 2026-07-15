@@ -28,8 +28,8 @@ static void test_default_view_is_owned_bounded_and_truthful(void)
     d1l_ui_more_view_model_t view;
     assert(d1l_ui_more_view(&input, &view));
     assert(d1l_ui_more_view_model_is_valid(&view));
-    assert(strcmp(view.title, "More") == 0);
-    assert(strcmp(view.subtitle, "Settings and tools") == 0);
+    assert(strcmp(view.title, "Tools") == 0);
+    assert(strcmp(view.subtitle, "Settings and utilities") == 0);
     assert(view.category_count == D1L_UI_MORE_CATEGORY_COUNT);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_TOOLS, 0)->status,
                   "0 saved") == 0);

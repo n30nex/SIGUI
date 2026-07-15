@@ -10,6 +10,7 @@
 #include "map/map_point_projection.h"
 #include "map/map_view_service.h"
 #include "mesh/node_store.h"
+#include "ui_chrome.h"
 #include "ui_keyboard.h"
 #include "ui_modal.h"
 
@@ -24,7 +25,8 @@
 #define MAP_COLOR_INFO 0x93C5FDU
 #define MAP_COLOR_WARN 0xFBBF24U
 #define MAP_VIEWPORT_WIDTH 478U
-#define MAP_VIEWPORT_HEIGHT 360U
+#define MAP_VIEWPORT_HEIGHT (D1L_UI_DOCKED_CONTENT_HEIGHT - 2U)
+#define MAP_VIEWPORT_PANEL_HEIGHT (MAP_VIEWPORT_HEIGHT + 2U)
 #define MAP_DRAG_THRESHOLD_PIXELS 24
 #define MAP_DRAG_MAX_X_PIXELS ((int32_t)MAP_VIEWPORT_WIDTH / 3)
 #define MAP_DRAG_MAX_Y_PIXELS ((int32_t)MAP_VIEWPORT_HEIGHT / 3)
@@ -40,6 +42,8 @@
 _Static_assert(sizeof(d1l_ui_map_sheets_controller_t) <=
                    D1L_UI_MAP_SHEETS_CONTROLLER_MAX_BYTES,
                "Map sheets controller exceeded its persistent-owner size budget");
+_Static_assert(MAP_VIEWPORT_PANEL_HEIGHT == D1L_UI_DOCKED_CONTENT_HEIGHT,
+               "Map viewport panel must fill the docked content root");
 
 typedef struct {
     int16_t x1;
@@ -1339,7 +1343,8 @@ void d1l_ui_map_render(lv_obj_t *parent,
     lv_obj_set_scroll_dir(parent, LV_DIR_NONE);
     lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_pad_bottom(parent, 0, 0);
-    lv_obj_t *viewport = map_panel(parent, 0, 0, 480, 362);
+    lv_obj_t *viewport = map_panel(
+        parent, 0, 0, 480, MAP_VIEWPORT_PANEL_HEIGHT);
     if (!viewport) {
         return;
     }

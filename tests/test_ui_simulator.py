@@ -336,9 +336,9 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
 
     assert {
         "Messages",
-        "Network",
+        "Nodes",
         "Map",
-        "More",
+        "Tools",
         "Device status",
         "Settings and support",
         "Time",
@@ -352,8 +352,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert not any(label.startswith("--:--  Mesh") for label in labels_by_view["home"])
     assert ui_simulator.TOP_BAR_H == 56
     assert ui_simulator.HOME_TOP_BAR_H == 16
-    assert ui_simulator.DOCK_Y == 418
-    assert ui_simulator.DOCK_H == 62
+    assert ui_simulator.DOCK_Y == 428
+    assert ui_simulator.DOCK_H == 52
     assert "RX" not in labels_by_view["home"]
     assert "TX" not in labels_by_view["home"]
     assert not any(target["kind"] == "dock_tab" for target in views_by_name["home"]["touch_targets"])
@@ -421,8 +421,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     } <= labels_by_view["map_cache"]
     assert {"Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {
-        "More",
-        "Settings and tools",
+        "Tools",
+        "Settings and utilities",
         "Tools",
         "Packets and diagnostics",
         "Connections",
@@ -431,12 +431,12 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Support",
         "Advanced",
     } <= labels_by_view["settings"]
-    assert {"More", "Tools", "Packets and diagnostics", "Packets", "Diagnostics"} <= labels_by_view["settings_tools_expanded"]
-    assert {"More", "Connections", "Wi-Fi", "Bluetooth", "Radio"} <= labels_by_view["settings_connections_expanded"]
-    assert {"More", "Storage & maps", "SD Card", "Map options"} <= labels_by_view["settings_storage_maps_expanded"]
-    assert {"More", "Device", "Display", "Identity"} <= labels_by_view["settings_device_expanded"]
-    assert {"More", "Support", "About", "Version 1.0.0-rc1"} <= labels_by_view["settings_support_expanded"]
-    assert {"More", "Advanced", "Mesh advertise", "Broadcast presence"} <= labels_by_view["settings_advanced_expanded"]
+    assert {"Tools", "Packets and diagnostics", "Packets", "Diagnostics"} <= labels_by_view["settings_tools_expanded"]
+    assert {"Tools", "Connections", "Wi-Fi", "Bluetooth", "Radio"} <= labels_by_view["settings_connections_expanded"]
+    assert {"Tools", "Storage & maps", "SD Card", "Map options"} <= labels_by_view["settings_storage_maps_expanded"]
+    assert {"Tools", "Device", "Display", "Identity"} <= labels_by_view["settings_device_expanded"]
+    assert {"Tools", "Support", "About", "Version 1.0.0-rc1"} <= labels_by_view["settings_support_expanded"]
+    assert {"Tools", "Advanced", "Mesh advertise", "Broadcast presence"} <= labels_by_view["settings_advanced_expanded"]
     assert {
         "Wi-Fi Setup",
         "Profile and state",
@@ -744,12 +744,29 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         dock_targets = [target for target in views[docked_view]["touch_targets"] if target["kind"] == "dock_tab"]
         assert [target["label"] for target in dock_targets] == [
             "Home tab",
-            "Msg tab",
-            "Network tab",
+            "Messages tab",
+            "Nodes tab",
             "Map tab",
-            "More tab",
+            "Tools tab",
         ], docked_view
-        assert all(target["width"] == 96 for target in dock_targets), docked_view
+        assert all(target["width"] == 88 for target in dock_targets), docked_view
+        assert all(target["height"] == 44 for target in dock_targets), docked_view
+        assert [target["semantic_label"] for target in dock_targets] == [
+            "Home",
+            "Messages",
+            "Nodes",
+            "Map",
+            "Tools",
+        ], docked_view
+        assert [target["icon"] for target in dock_targets] == [
+            "LV_SYMBOL_HOME",
+            "LV_SYMBOL_ENVELOPE",
+            "LV_SYMBOL_LIST",
+            "LV_SYMBOL_IMAGE",
+            "LV_SYMBOL_SETTINGS",
+        ], docked_view
+        assert sum(bool(target["selected"]) for target in dock_targets) == 1, docked_view
+        assert views[docked_view]["metrics"]["docked_content_height"] == 372, docked_view
     assert actions_by_view["home"]["open_messages_root"]["destination"] == "messages"
     assert actions_by_view["home"]["open_nodes"]["destination"] == "nodes"
     assert actions_by_view["home"]["open_map"]["destination"] == "map"
