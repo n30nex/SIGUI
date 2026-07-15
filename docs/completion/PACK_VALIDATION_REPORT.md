@@ -2,7 +2,7 @@
 
 **Validated:** 2026-07-15 (PR #131 exact-main strict-banked)
 
-**Live merged main:** `31e763ce3154c63298414b3667f187b711960b8e` / exact-main Actions `29386120240` in progress; PR #132 / `f61d4038` is green, but both later slices are outside this pack
+**Live merged main:** `31e763ce3154c63298414b3667f187b711960b8e` / exact-main Actions `29386120240` green; PRs #132/#133 remain outside this pack
 
 **Last strict-verified merged checkpoint included in this pack:** `2bba1b69900002fbfccd5c2f6d2851cd4ebc3645` / Actions `29384981503` / receipt `86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d`
 
