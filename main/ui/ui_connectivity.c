@@ -71,16 +71,19 @@ void d1l_ui_connectivity_ble_view(const d1l_ui_ble_view_input_t *input,
     const bool runtime_available =
         input->build_enabled && input->transport_supported;
     out_view->controls_available = runtime_available;
-    out_view->purpose = runtime_available ?
-        "Companion BLE is available for measured local setup." :
-        "BLE companion transport is unavailable in this release.";
-    out_view->runtime_note = runtime_available ?
-        "Pairing controls require a measured BLE runtime artifact." :
-        "No BLE pairing or transport artifact is present for public release.";
-    out_view->toggle_label = runtime_available && input->companion_enabled ?
-        "Disable" : "Enable";
-    out_view->production_note =
-        "USB remains the reliable companion path for production validation.";
+    snprintf(out_view->purpose, sizeof(out_view->purpose), "%s",
+             runtime_available ?
+                 "Companion BLE is available for measured local setup." :
+                 "BLE companion transport is unavailable in this release.");
+    snprintf(out_view->runtime_note, sizeof(out_view->runtime_note), "%s",
+             runtime_available ?
+                 "Pairing controls require a measured BLE runtime artifact." :
+                 "No BLE pairing or transport artifact is present for public release.");
+    snprintf(out_view->toggle_label, sizeof(out_view->toggle_label), "%s",
+             runtime_available && input->companion_enabled ?
+                 "Disable" : "Enable");
+    snprintf(out_view->production_note, sizeof(out_view->production_note), "%s",
+             "USB remains the reliable companion path for production validation.");
     out_view->state_color = runtime_available && input->companion_enabled ?
         0xA7F3D0U : 0xFBBF24U;
 }

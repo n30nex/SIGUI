@@ -1572,6 +1572,8 @@ def test_settings_screen_reports_companion_wireless_state():
     source = read("main/ui/ui_phase1.c")
     wifi_module = read("main/ui/ui_wifi.c")
     wifi_header = read("main/ui/ui_wifi.h")
+    ble_module = read("main/ui/ui_ble.c")
+    ble_header = read("main/ui/ui_ble.h")
     settings_module = read("main/ui/ui_settings.c")
     more_module = read("main/ui/ui_more_view.c")
     connectivity = read("main/ui/ui_connectivity.c")
@@ -1602,11 +1604,11 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "snapshot->identity_fingerprint" not in settings_module
     assert "format_radio_profile_line" not in settings_module
     assert "static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR" in source
-    assert "static lv_obj_t *s_ble_sheet" in source
+    assert "static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR" in source
     assert "static lv_obj_t *s_display_sheet" in source
     assert "static lv_obj_t *s_diagnostics_sheet" in source
     assert "d1l_ui_wifi_create(&s_wifi_controller, s_screen)" in source
-    assert "create_ble_sheet" in source
+    assert "d1l_ui_ble_create(&s_ble_controller, s_screen)" in source
     assert "create_display_sheet" in source
     assert "create_diagnostics_sheet" in source
     assert "render_wifi_sheet" in source
@@ -1619,12 +1621,13 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "open_display_sheet_event_cb" in source
     assert "open_diagnostics_sheet_event_cb" in source
     assert '"Wi-Fi Setup"' in wifi_module
-    assert '"BLE Setup"' in source
+    assert '"BLE Setup"' in ble_module
     assert '"Display"' in source
     assert '"Diagnostics"' in source
     assert "lv_obj_t *ssid_textarea;" in wifi_header
     assert "lv_obj_t *password_textarea;" in wifi_header
     assert "lv_obj_t *keyboard;" in wifi_header
+    assert "d1l_ui_ble_controller_t" in ble_header
     assert "d1l_app_model_save_wifi_profile(" in source
     assert "password && password[0] != '\\0' ? password : NULL" in source
     assert "d1l_app_model_wifi_scan(&s_wifi_scan_result)" in source
@@ -1645,9 +1648,10 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "D1L_UI_WIFI_ACTION_CONNECT" in source
     assert '"BLE companion transport is unavailable in this release."' in connectivity
     assert '"No BLE pairing or transport artifact is present for public release."' in connectivity
-    assert '"Enable unavailable"' in source
-    assert '"Pair unavailable"' in source
-    assert '"Forget unavailable"' in source
+    assert '"Enable unavailable"' in ble_module
+    assert '"Pair unavailable"' in ble_module
+    assert '"Forget unavailable"' in ble_module
+    assert "D1L_UI_BLE_ACTION_TOGGLE" in source
     assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in source
     assert '"Advanced details stay here so normal screens remain simple."' in source
     assert "render_health_line" in source

@@ -47,10 +47,10 @@ typedef struct {
 
 typedef struct {
     char state_line[D1L_UI_CONNECTIVITY_TEXT_LEN];
-    const char *purpose;
-    const char *runtime_note;
-    const char *toggle_label;
-    const char *production_note;
+    char purpose[D1L_UI_CONNECTIVITY_TEXT_LEN];
+    char runtime_note[D1L_UI_CONNECTIVITY_TEXT_LEN];
+    char toggle_label[D1L_UI_CONNECTIVITY_LABEL_LEN];
+    char production_note[D1L_UI_CONNECTIVITY_TEXT_LEN];
     uint32_t state_color;
     bool controls_available;
 } d1l_ui_ble_view_model_t;

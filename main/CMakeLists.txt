@@ -54,6 +54,7 @@ idf_component_register(
         "storage/retained_store_scheduler.c"
         "storage/storage_status.c"
         "storage/storage_status_policy.c"
+        "ui/ui_ble.c"
         "ui/ui_chrome.c"
         "ui/ui_connectivity.c"
         "ui/ui_home.c"
