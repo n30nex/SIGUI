@@ -21,6 +21,7 @@
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
+#include "ui_ble.h"
 #include "ui_chrome.h"
 #include "ui_connectivity.h"
 #include "ui_home.h"
@@ -90,7 +91,6 @@ static lv_obj_t *s_radio_settings_sheet;
 static lv_obj_t *s_storage_sheet;
 static d1l_wifi_scan_result_t s_wifi_scan_result;
 static bool s_wifi_scan_loaded;
-static lv_obj_t *s_ble_sheet;
 static lv_obj_t *s_display_sheet;
 static lv_obj_t *s_diagnostics_sheet;
 static lv_obj_t *s_contact_detail_sheet;
@@ -128,6 +128,7 @@ static d1l_ui_settings_controller_t s_settings_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_storage_view_model_t s_storage_view EXT_RAM_BSS_ATTR;
 static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_map_sheets_controller_t s_map_sheets_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
@@ -673,7 +674,7 @@ static void render_packet_detail_sheet(void);
 static void render_radio_settings_sheet(void);
 static void render_storage_sheet(void);
 static bool render_wifi_sheet(void);
-static void render_ble_sheet(void);
+static bool render_ble_sheet(void);
 static void render_display_sheet(void);
 static void render_diagnostics_sheet(void);
 static bool render_map_location_sheet(void);
@@ -1376,7 +1377,8 @@ static void hide_wifi_sheet(void)
 
 static void hide_ble_sheet(void)
 {
-    d1l_ui_modal_hide(s_ble_sheet);
+    d1l_ui_ble_deactivate(&s_ble_controller);
+    d1l_ui_modal_hide(d1l_ui_ble_sheet(&s_ble_controller));
     restore_dock_for_active_tab();
 }
 
@@ -5352,12 +5354,6 @@ static void open_storage_sheet_event_cb(lv_event_t *event)
     }
 }
 
-static void close_ble_sheet_event_cb(lv_event_t *event)
-{
-    (void)event;
-    hide_ble_sheet();
-}
-
 static void close_display_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -5452,15 +5448,30 @@ static void map_location_keyboard_event_cb(lv_event_t *event)
     }
 }
 
-static void ble_toggle_event_cb(lv_event_t *event)
+static void ble_action_handler(d1l_ui_ble_action_t action, void *context)
 {
-    (void)event;
-    esp_err_t ret = d1l_app_model_set_ble_enabled(!s_snapshot.ble_companion_enabled);
-    show_toast("BLE", ret);
-    if (ret == ESP_OK) {
+    (void)context;
+    switch (action) {
+    case D1L_UI_BLE_ACTION_CLOSE:
+        hide_ble_sheet();
+        return;
+    case D1L_UI_BLE_ACTION_TOGGLE: {
+        esp_err_t ret = d1l_app_model_set_ble_enabled(
+            !s_snapshot.ble_companion_enabled);
+        show_toast("BLE", ret);
+        if (ret != ESP_OK) {
+            return;
+        }
         d1l_app_model_snapshot(&s_snapshot);
-        render_ble_sheet();
+        if (!render_ble_sheet()) {
+            hide_ble_sheet();
+        }
         request_content_refresh();
+        return;
+    }
+    case D1L_UI_BLE_ACTION_NONE:
+    default:
+        return;
     }
 }
 
@@ -5498,68 +5509,25 @@ static bool render_wifi_sheet(void)
     }
     return true;
 }
-static void render_ble_sheet(void)
+static bool render_ble_sheet(void)
 {
-    if (!s_ble_sheet) {
-        return;
+    if (!d1l_ui_ble_sheet(&s_ble_controller)) {
+        return false;
     }
-    lv_obj_clean(s_ble_sheet);
     const d1l_ui_ble_view_input_t view_input = {
         .build_enabled = s_snapshot.ble_build_enabled,
         .transport_supported = s_snapshot.ble_transport_supported,
         .companion_enabled = s_snapshot.ble_companion_enabled,
         .state = s_snapshot.ble_state,
     };
-    d1l_ui_ble_view_model_t view;
+    d1l_ui_ble_view_model_t view = {0};
     d1l_ui_connectivity_ble_view(&view_input, &view);
-
-    lv_obj_t *title = create_label(s_ble_sheet, "BLE Setup", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_pos(title, 8, 4);
-    create_button(s_ble_sheet, "Close", 340, 0, 76, 40, close_ble_sheet_event_cb, NULL);
-
-    lv_obj_t *state = create_label(s_ble_sheet, view.state_line,
-                                   view.state_color);
-    label_set_dot_width(state, 408);
-    lv_obj_set_pos(state, 8, 54);
-
-    lv_obj_t *purpose = create_label(s_ble_sheet, view.purpose, 0xE5EDF5);
-    lv_label_set_long_mode(purpose, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(purpose, 408);
-    lv_obj_set_pos(purpose, 8, 88);
-
-    lv_obj_t *runtime = create_label(s_ble_sheet, view.runtime_note,
-                                     0xFBBF24);
-    lv_label_set_long_mode(runtime, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(runtime, 408);
-    lv_obj_set_pos(runtime, 8, 144);
-
-    if (view.controls_available) {
-        lv_obj_t *enable = create_button(s_ble_sheet,
-                                         view.toggle_label,
-                                         8, 206, 98, 40, ble_toggle_event_cb, NULL);
-        lv_obj_t *pair = create_button(s_ble_sheet, "Pair", 116, 206, 98, 40, NULL, NULL);
-        lv_obj_t *forget = create_button(s_ble_sheet, "Forget", 224, 206, 98, 40, NULL, NULL);
-        if (pair) {
-            lv_obj_add_state(pair, LV_STATE_DISABLED);
-        }
-        if (forget) {
-            lv_obj_add_state(forget, LV_STATE_DISABLED);
-        }
-        (void)enable;
-    } else {
-        lv_obj_t *enable_status = create_label(s_ble_sheet, "Enable unavailable", 0xFBBF24);
-        lv_obj_t *pair = create_label(s_ble_sheet, "Pair unavailable", 0x8EA0AE);
-        lv_obj_t *forget = create_label(s_ble_sheet, "Forget unavailable", 0x8EA0AE);
-        lv_obj_set_pos(enable_status, 8, 206);
-        lv_obj_set_pos(pair, 8, 232);
-        lv_obj_set_pos(forget, 210, 232);
+    if (!d1l_ui_ble_render(&s_ble_controller, &view,
+                           ble_action_handler, NULL)) {
+        ESP_LOGE(TAG, "BLE sheet render rejected invalid state");
+        return false;
     }
-
-    lv_obj_t *note = create_label(s_ble_sheet, view.production_note, 0x8EA0AE);
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(note, 408);
-    lv_obj_set_pos(note, 8, 278);
+    return true;
 }
 
 static void render_display_sheet(void)
@@ -5743,9 +5711,10 @@ static void open_ble_sheet_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
-    render_ble_sheet();
-    if (s_ble_sheet) {
-        show_modal(s_ble_sheet);
+    if (render_ble_sheet()) {
+        show_modal(d1l_ui_ble_sheet(&s_ble_controller));
+    } else {
+        hide_ble_sheet();
     }
 }
 
@@ -7307,23 +7276,6 @@ static void create_storage_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_storage_sheet);
 }
 
-static void create_ble_sheet(lv_obj_t *screen)
-{
-    s_ble_sheet = create_object(screen, "ble setup sheet");
-    if (!s_ble_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_ble_sheet, 448, 320);
-    lv_obj_set_pos(s_ble_sheet, 16, 82);
-    lv_obj_set_style_radius(s_ble_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_ble_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_ble_sheet, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_border_width(s_ble_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_ble_sheet, 12, 0);
-    lv_obj_clear_flag(s_ble_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_ble_sheet);
-}
-
 static void create_display_sheet(lv_obj_t *screen)
 {
     s_display_sheet = create_object(screen, "display settings sheet");
@@ -7802,7 +7754,9 @@ esp_err_t d1l_ui_phase1_show_home(void)
     if (!d1l_ui_wifi_create(&s_wifi_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
     }
-    create_ble_sheet(s_screen);
+    if (!d1l_ui_ble_create(&s_ble_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
     create_display_sheet(s_screen);
     create_diagnostics_sheet(s_screen);
     if (!d1l_ui_map_sheets_create(&s_map_sheets_controller, s_screen)) {
