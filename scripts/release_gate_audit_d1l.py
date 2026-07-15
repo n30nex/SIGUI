@@ -142,6 +142,7 @@ REQUIRED_COMPOSE_CAPTURE_TARGETS = {
     "dm",
     "dm-long",
     "public-search",
+    "dm-search",
     "packet-search",
     "contact-edit",
     "onboarding",
@@ -1692,6 +1693,7 @@ def compose_capture_requires_hidden_dock(expected_target: str) -> bool:
         "dm",
         "dm-long",
         "public-search",
+        "dm-search",
         "packet-search",
         "contact-edit",
         "onboarding",
@@ -1704,7 +1706,7 @@ def compose_capture_requires_hidden_dock(expected_target: str) -> bool:
 def compose_capture_min_keyboard_size(expected_target: str) -> tuple[int, int]:
     if expected_target in {"public", "public-long", "dm", "dm-long"}:
         return (440, 250)
-    if expected_target in {"public-search", "packet-search"}:
+    if expected_target in {"public-search", "dm-search", "packet-search"}:
         return (400, 180)
     if expected_target == "contact-edit":
         return (400, 170)

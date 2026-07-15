@@ -462,7 +462,7 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "messages_render_dm_row" in messages_ui
     assert "load_dm_thread_rows" in thread_bridge
     assert "d1l_app_model_query_dm_thread_page(" in ui
-    assert "thread_entries[D1L_DM_STORE_CAPACITY]" in messages_header
+    assert "thread_entries[D1L_UI_MESSAGES_THREAD_MAX_ROWS]" in messages_header
     assert "d1l_ui_messages_expand_thread" in messages_ui
     assert 'body, "Load Older", 0, 0, 424, 48' in thread_render
     assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in thread_render

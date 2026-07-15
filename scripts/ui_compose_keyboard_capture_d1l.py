@@ -25,6 +25,7 @@ ALL_TARGETS = [
     "dm",
     "dm-long",
     "public-search",
+    "dm-search",
     "packet-search",
     "contact-edit",
     "onboarding",

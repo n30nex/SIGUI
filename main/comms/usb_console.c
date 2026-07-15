@@ -972,7 +972,7 @@ static void cmd_ui_compose_probe(const char *line)
     }
     if (len == 0 || (arg[len] != '\0' && !isspace((unsigned char)arg[len]))) {
         err_result("ui compose-probe", "INVALID_TARGET",
-                   "usage: ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>");
+                   "usage: ui compose-probe <public|public-long|dm|dm-long|public-search|dm-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>");
         return;
     }
 
@@ -980,7 +980,7 @@ static void cmd_ui_compose_probe(const char *line)
     esp_err_t ret = d1l_ui_phase1_compose_probe(target, &probe);
     if (ret != ESP_OK) {
         err_result("ui compose-probe", esp_err_to_name(ret),
-                   "usage: ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>");
+                   "usage: ui compose-probe <public|public-long|dm|dm-long|public-search|dm-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>");
         return;
     }
 
@@ -5495,7 +5495,7 @@ static void cmd_help(void)
            "\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\","
            "\"ui tab <home|messages|nodes|map|packets|settings>\","
            "\"ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map|map_options|map_location|map_cache>\","
-           "\"ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>\","
+           "\"ui compose-probe <public|public-long|dm|dm-long|public-search|dm-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>\","
            "\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\","
            "\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\","
            "\"map center set <lat> <lon>\",\"map center clear\",\"map tiles status\","

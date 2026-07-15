@@ -9,7 +9,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Public MeshCore `test` send/receive against local bots.
 - Signed advert receive/transmit.
 - Persisted recent Public messages, bounded Public History/Search, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
-- Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations and thread review. The DMs list shows one newest-first row per contact; its unread count comes from that contact's retained read cursor even when the newest row was sent by you. Muted unread is shown separately.
+- Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations, thread review, and bounded search inside the exact selected conversation. Applying, clearing, or paging a DM search does not transmit, write retained history, or advance a read cursor. The DMs list shows one newest-first row per contact; its unread count comes from that contact's retained read cursor even when the newest row was sent by you. Muted unread is shown separately.
 - Touch Public/DM compose enforces the 138-byte MeshCore UTF-8 limit and shows both decoded characters and encoded bytes. Empty, malformed, control-containing, oversized, radio-busy, invalid route-policy, or protocol-clock-unavailable input/state keeps Send disabled. DM compose also revalidates the exact contact, local identity health, and any active delivery immediately before Send. A transient failure keeps the draft and offers only an explicit user retry; it never retries or transmits from refresh/navigation.
 - Tapping a Public message opens a detail sheet with sender, message text, signal, retained path evidence, and a Reply action that opens Public compose without transmitting until Send.
 - Home is a quiet five-destination dashboard: Messages, Network, Map, and More are the task entries, while one Device card summarizes Time, Wi-Fi, Bluetooth, and SD state. Secondary tools such as Packets and diagnostics are grouped under More instead of competing on the Home screen.
@@ -82,7 +82,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `ui capture begin`
 - `ui capture chunk <offset> <len>`
 - `ui capture end`
-- `ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>`
+- `ui compose-probe <public|public-long|dm|dm-long|public-search|dm-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>`
 - `ui scroll-probe <...|mesh_roles|mesh_rooms|mesh_repeaters|storage|storage_card|storage_data|map|map_options|map_location|map_cache|...>` (read-only capture aliases; Map probes arm network suppression before opening the Map and never request map tiles)
 - `messages public`
 - `messages public offset 8`

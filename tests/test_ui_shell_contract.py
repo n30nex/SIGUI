@@ -61,7 +61,8 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "d1l_dm_store_copy_recent" in source
     assert "d1l_app_model_copy_dm_thread" in header
     assert "d1l_app_model_copy_dm_thread_page" in header
-    assert "d1l_dm_store_copy_thread_page(fingerprint, out_entries" in source
+    assert "d1l_dm_store_query_thread_page(" in source
+    assert "fingerprint, out_entries, max_entries, skip_newest, query" in source
     assert "d1l_meshcore_service_status" in source
     assert "d1l_health_snapshot" in source
     assert "d1l_connectivity_status" in source
@@ -389,7 +390,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '\\"storage_probe_surfaces\\":[\\"storage\\",\\"storage_card\\",\\"storage_data\\"]' in console
     assert '\\"map_probe_surfaces\\":[\\"map\\",\\"map_options\\",\\"map_location\\",\\"map_cache\\"]' in console
     assert '\\"map_probes_read_only\\":true' in console
-    assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>" in console
+    assert "ui compose-probe <public|public-long|dm|dm-long|public-search|dm-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>" in console
     assert '"ui/ui_keyboard.c"' in cmake
     assert '#include "ui_keyboard.h"' in source
     assert "d1l_ui_keyboard_normalize_probe_target" in source
@@ -420,6 +421,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "d1l_compose_kb_map_lc" not in source
     assert "static void configure_compose_keyboard" not in source
     assert 'strcmp(normalized, "public_search") == 0' in keyboard
+    assert 'strcmp(normalized, "dm_search") == 0' in keyboard
     assert 'strcmp(normalized, "packet_search") == 0' in keyboard
     assert 'strcmp(normalized, "contact_edit") == 0' in keyboard
     assert 'strcmp(normalized, "map_location") == 0' in keyboard
@@ -436,6 +438,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "static int32_t compose_probe_min_keyboard_width" not in source
     assert 'strcmp(normalized, "wifi_password") == 0' not in source
     assert "d1l_ui_keyboard_configure_input(s_public_search_keyboard, s_public_search_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(\n        s_dm_search_keyboard, s_dm_search_textarea" in source
     assert "d1l_ui_keyboard_configure_input(s_packet_search_keyboard, s_packet_search_textarea" in source
     assert "d1l_ui_keyboard_configure_input(" in contact_source
     assert "controller->edit_keyboard, controller->edit_textarea" in contact_source
@@ -449,6 +452,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "s_map_tiles_keyboard" not in source
     assert "d1l_ui_keyboard_focus_textarea_from_event(" in wifi_source
     assert 'strcmp(target, "public_search") == 0' in source
+    assert 'strcmp(target, "dm_search") == 0' in source
     assert 'strcmp(target, "packet_search") == 0' in source
     assert 'strcmp(target, "contact_edit") == 0' in source
     assert "ui data-canary <token>" in console
@@ -970,8 +974,9 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "static bool s_dm_thread_unread" not in source
     assert "static size_t s_dm_thread_limit" not in source
     assert "lv_obj_t *thread_sheet" in messages_header
-    assert "d1l_dm_entry_t thread_entries[D1L_DM_STORE_CAPACITY]" in messages_header
-    assert "bool thread_unread[D1L_DM_STORE_CAPACITY]" in messages_header
+    assert "D1L_UI_MESSAGES_THREAD_MAX_ROWS (D1L_DM_STORE_CAPACITY + 1U)" in messages_header
+    assert "d1l_dm_entry_t thread_entries[D1L_UI_MESSAGES_THREAD_MAX_ROWS]" in messages_header
+    assert "bool thread_unread[D1L_UI_MESSAGES_THREAD_MAX_ROWS]" in messages_header
     assert "D1L_UI_MESSAGES_THREAD_INITIAL_ROWS 5U" in messages_header
     assert "D1L_UI_MESSAGES_THREAD_LOAD_OLDER_STEP 5U" in messages_header
     assert "d1l_ui_messages_create" in source
@@ -983,8 +988,8 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "lv_obj_set_pos(sheet, 0, 56)" in messages_source
     assert 'sheet, "Back", 12, 6, 72, 44' in messages_source
     assert "loader(" in messages_source
-    assert "d1l_app_model_copy_dm_thread_page(" in source
-    assert "controller->thread_limit > D1L_DM_STORE_CAPACITY" in messages_source
+    assert "d1l_app_model_query_dm_thread_page(" in source
+    assert "controller->thread_limit > D1L_UI_MESSAGES_THREAD_MAX_ROWS" in messages_source
     assert 'body, "Load Older", 0, 0, 424, 48' in messages_source
     assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in messages_source
     assert "outgoing ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START" in messages_source
