@@ -5225,8 +5225,18 @@ static void cmd_wifi_status(void)
            (unsigned)status.wifi_last_disconnect_reason);
     print_json_string(status.wifi_last_failure_class ?
                       status.wifi_last_failure_class : "none");
-    printf(",\"retry_task_stack_high_water_bytes\":%lu,\"last_error\":",
-           (unsigned long)status.wifi_retry_task_stack_high_water_bytes);
+    printf(",\"retry_task_stack_high_water_bytes\":%lu,\"boot_guard_ready\":%s,\"boot_guard_recovered\":%s,\"consecutive_crash_boots\":%u,\"crash_loop_detected\":%s,\"last_active_subsystem\":",
+           (unsigned long)status.wifi_retry_task_stack_high_water_bytes,
+           bool_json(status.wifi_boot_guard_ready),
+           bool_json(status.wifi_boot_guard_recovered),
+           (unsigned)status.wifi_consecutive_crash_boots,
+           bool_json(status.wifi_crash_loop_detected));
+    print_json_string(status.wifi_last_active_subsystem ?
+                      status.wifi_last_active_subsystem : "none");
+    printf(",\"boot_guard_error\":");
+    print_json_string(status.wifi_boot_guard_error ?
+                      status.wifi_boot_guard_error : "ESP_ERR_INVALID_STATE");
+    printf(",\"last_error\":");
     print_json_string(status.wifi_last_error ? status.wifi_last_error : "none");
     printf(",\"policy\":\"%s\",\"live_network\":%s}\n",
            status.coexistence_policy, bool_json(status.wifi_stack_active));
@@ -5236,7 +5246,8 @@ static void cmd_wifi_off(void)
 {
     esp_err_t ret = d1l_connectivity_set_wifi_enabled(false);
     if (ret != ESP_OK) {
-        err_result("wifi off", esp_err_to_name(ret), "could not persist Wi-Fi disabled setting");
+        err_result("wifi off", esp_err_to_name(ret),
+                   "could not persist disabled state or clear connectivity crash guard");
         return;
     }
     d1l_connectivity_status_t status = {0};
@@ -5300,7 +5311,8 @@ static void cmd_wifi_save(const char *line)
     }
     esp_err_t ret = d1l_connectivity_save_wifi_profile(ssid, password_to_save);
     if (ret != ESP_OK) {
-        err_result("wifi save", esp_err_to_name(ret), "could not persist Wi-Fi profile");
+        err_result("wifi save", esp_err_to_name(ret),
+                   "could not fully save or apply Wi-Fi profile; inspect wifi status");
         return;
     }
     d1l_connectivity_status_t status = {0};
@@ -5316,7 +5328,8 @@ static void cmd_wifi_clear(void)
 {
     esp_err_t ret = d1l_connectivity_clear_wifi_profile();
     if (ret != ESP_OK) {
-        err_result("wifi clear", esp_err_to_name(ret), "could not clear Wi-Fi profile");
+        err_result("wifi clear", esp_err_to_name(ret),
+                   "could not fully clear Wi-Fi profile, disconnect runtime, or connectivity crash guard");
         return;
     }
     d1l_connectivity_status_t status = {0};
@@ -5401,7 +5414,8 @@ static void cmd_ble_off(void)
 {
     esp_err_t ret = d1l_connectivity_set_ble_enabled(false);
     if (ret != ESP_OK) {
-        err_result("ble off", esp_err_to_name(ret), "could not persist BLE disabled setting");
+        err_result("ble off", esp_err_to_name(ret),
+                   "could not persist BLE disabled setting");
         return;
     }
     d1l_connectivity_status_t status = {0};

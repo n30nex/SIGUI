@@ -34,6 +34,10 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "wifi_retry_task_stack_high_water_bytes" in header
     assert "wifi_last_disconnect_reason" in header
     assert "wifi_last_failure_class" in header
+    assert "wifi_boot_guard_ready" in header
+    assert "wifi_consecutive_crash_boots" in header
+    assert "wifi_crash_loop_detected" in header
+    assert "wifi_last_active_subsystem" in header
     assert '"offline_first_one_companion_radio"' in source
     assert "settings.wifi_enabled = true" in source
     assert "settings.ble_companion_enabled = enabled" in source
@@ -84,6 +88,7 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "esp_netif" in cmake
     assert "esp_event" in cmake
     assert '"comms/connectivity_manager.c"' in cmake
+    assert '"comms/connectivity_boot_guard.c"' in cmake
     assert '"comms/wifi_retry_policy.c"' in cmake
     assert "CONFIG_ESP_WIFI_ENABLED=y" in defaults
     assert "CONFIG_BT_ENABLED=n" in defaults
@@ -139,6 +144,9 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
     rollback = source[source.index("fail_closed_wifi_runtime"):source.index("wifi_boot_recovery_reason")]
     assert "d1l_settings_clear_wifi_profile" not in rollback
     assert "rollback_save_failed" in source
+    assert rollback.index("d1l_settings_save(&safe_settings)") < rollback.index(
+        "clear_boot_guard()"
+    )
     assert "boot_recovery_panic" in source
     assert "boot_recovery_wdt" in source
     assert "boot_recovery_brownout" in source
@@ -147,8 +155,12 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
         source.index("void d1l_connectivity_status")
     ]
     assert "d1l_wifi_retry_policy_enter_safe_mode" in boot_recovery
-    assert "Persisted repeated-crash counting" in boot_recovery
-    assert "last-enabled-subsystem attribution remain a later WP-13" in boot_recovery
+    assert "load_and_advance_boot_guard" in boot_recovery
+    assert "repeated_wifi_crash" in boot_recovery
+    assert "decision.crash_loop_detected" in boot_recovery
+    assert "mark_boot_guard_active" not in boot_recovery
+    assert '"boot_recovery_wifi_crash_loop"' in boot_recovery
+    assert '"boot_guard_unavailable"' in boot_recovery
     assert "safe_settings" not in boot_recovery
     assert "d1l_settings_save" not in boot_recovery.split("#ifdef CONFIG_ESP_WIFI_ENABLED", 1)[1]
     assert "esp_event_handler_instance_unregister" in source
@@ -165,6 +177,108 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
     assert enable.index("ensure_wifi_started()") < enable.index("settings.wifi_enabled = true")
     assert app_main.index("d1l_board_init()") < app_main.index("d1l_connectivity_init()")
     assert app_main.index("d1l_connectivity_init()") < app_main.index("d1l_ui_phase1_start()")
+
+
+def test_connectivity_boot_guard_is_scoped_checksummed_and_not_written_from_events():
+    source = read("main/comms/connectivity_manager.c")
+    guard_header = read("main/comms/connectivity_boot_guard.h")
+    guard_source = read("main/comms/connectivity_boot_guard.c")
+
+    assert "D1L_CONNECTIVITY_BOOT_GUARD_SCHEMA 1U" in guard_header
+    assert "D1L_CONNECTIVITY_BOOT_GUARD_FAILURE_LIMIT 2U" in guard_header
+    assert "consecutive_crash_boots" in guard_header
+    assert "last_active_subsystem" in guard_header
+    assert "record_checksum" in guard_source
+    assert "0xEDB88320U" in guard_source
+    assert "UINT8_MAX" in guard_source
+    assert "UINT32_MAX" in guard_source
+    for subsystem in ["none", "wifi"]:
+        assert f'"{subsystem}"' in guard_source
+
+    assert 'D1L_CONNECTIVITY_GUARD_NAMESPACE "d1l_conn"' in source
+    assert 'D1L_CONNECTIVITY_GUARD_KEY "boot_guard"' in source
+    assert "nvs_get_blob" in source
+    assert "nvs_set_blob" in source
+    assert "nvs_commit" in source
+    assert "ESP_ERR_NVS_INVALID_LENGTH" in source
+    assert "reset_reason_is_crash_like" in source
+    assert "decision.previous_active_subsystem" in source
+    assert "conservative_first_recovery" in source
+    assert "(void)clear_boot_guard()" not in source
+    assert "D1L_CONNECTIVITY_GUARD_LOCK_TIMEOUT_MS 10000U" in source
+    assert "D1L_CONNECTIVITY_GUARD_STABLE_WINDOW_MS 30000U" in source
+    assert "s_boot_guard_lock = xSemaphoreCreateMutex()" in source
+    assert "xSemaphoreTake(s_boot_guard_lock, timeout_ticks)" in source
+    assert "portMAX_DELAY" not in source[
+        source.index("static esp_err_t take_boot_guard_lock"):
+        source.index("static void give_boot_guard_lock")
+    ]
+    assert "d1l_connectivity_boot_guard_acknowledge_stable" in guard_source
+    assert "record->last_active_subsystem = D1L_CONNECTIVITY_SUBSYSTEM_NONE" in guard_source
+
+    event_handler = source[
+        source.index("static void wifi_event_handler"):
+        source.index("static void stop_wifi_runtime")
+    ]
+    assert "nvs_" not in event_handler
+    assert "persist_boot_guard_record" not in event_handler
+    assert "s_boot_guard_stable_ack_due_ms" in event_handler
+    assert "cancel_boot_guard_stable_ack" in event_handler
+    stable_due = source[
+        source.index("static bool take_boot_guard_stable_ack_if_due"):
+        source.index("static uint64_t wifi_now_ms")
+    ]
+    assert "D1L_WIFI_RUNTIME_CONNECTED" in stable_due
+    assert "D1L_WIFI_RUNTIME_SCANNING" in stable_due
+    worker = source[
+        source.index("static void wifi_retry_worker"):
+        source.index("static esp_err_t ensure_wifi_retry_worker")
+    ]
+    assert "take_boot_guard_stable_ack_if_due" in worker
+    assert "acknowledge_boot_guard_stable" in worker
+    connect = source[
+        source.index("esp_err_t d1l_connectivity_wifi_connect"):
+        source.index("esp_err_t d1l_connectivity_wifi_disconnect")
+    ]
+    assert connect.index("mark_boot_guard_active") < connect.index(
+        "ensure_wifi_started()"
+    )
+    assert "cancel_boot_guard_stable_ack" in connect
+    cancelled_connect = connect[connect.index("if (!still_connecting)"):]
+    assert "clear_boot_guard()" in cancelled_connect
+    scan = source[
+        source.index("esp_err_t d1l_connectivity_wifi_scan"):
+        source.index("esp_err_t d1l_connectivity_wifi_connect")
+    ]
+    assert scan.index("d1l_wifi_retry_policy_scan_allowed") < scan.index(
+        "mark_boot_guard_active"
+    )
+    assert scan.index("mark_boot_guard_active") < scan.index(
+        "ensure_wifi_started"
+    ) < scan.index("d1l_wifi_retry_policy_begin_scan")
+    disable = source[
+        source.index("esp_err_t d1l_connectivity_set_wifi_enabled"):
+        source.index("esp_err_t d1l_connectivity_set_ble_enabled")
+    ]
+    assert "clear_boot_guard()" in disable
+    disable_path = disable[disable.index("if (!enabled)"):disable.index(
+        "settings.ble_companion_enabled = false"
+    )]
+    assert disable_path.index("d1l_settings_save(&settings)") < disable_path.index(
+        "stop_wifi_runtime()"
+    ) < disable_path.index("clear_boot_guard()")
+    ble_toggle = source[
+        source.index("esp_err_t d1l_connectivity_set_ble_enabled"):
+        source.index("esp_err_t d1l_connectivity_save_wifi_profile")
+    ]
+    assert ble_toggle.index("stop_wifi_runtime()") < ble_toggle.index(
+        "clear_boot_guard()"
+    )
+    assert "mark_boot_guard_active" not in ble_toggle
+    clear_profile = source[source.index("esp_err_t d1l_connectivity_clear_wifi_profile"):]
+    assert "d1l_connectivity_wifi_disconnect()" in clear_profile
+    assert "(void)d1l_connectivity_wifi_disconnect()" not in clear_profile
+    assert "disconnect_ret != ESP_OK" in clear_profile
 
 
 def test_disconnect_handler_classifies_then_defers_bounded_retry_to_worker():
@@ -307,6 +421,10 @@ def test_console_reports_wifi_ble_status_scan_and_connect_without_password_echo(
     assert "wifi save <ssid> [password]" in console
     assert "wifi connect" in console
     assert "password is not printed" in console
+    assert "could not fully save or apply Wi-Fi profile; inspect wifi status" in console
+    assert "could not persist disabled state or clear connectivity crash guard" in console
+    assert "could not fully clear Wi-Fi profile, disconnect runtime, or connectivity crash guard" in console
+    assert "could not persist BLE disabled setting" in console
     assert "d1l_connectivity_wifi_scan(&scan)" in console
     assert "d1l_connectivity_wifi_connect()" in console
     assert '\\"networks\\":[' in console
@@ -322,6 +440,12 @@ def test_console_reports_wifi_ble_status_scan_and_connect_without_password_echo(
         "last_disconnect_reason",
         "last_failure_class",
         "retry_task_stack_high_water_bytes",
+        "boot_guard_ready",
+        "boot_guard_recovered",
+        "consecutive_crash_boots",
+        "crash_loop_detected",
+        "last_active_subsystem",
+        "boot_guard_error",
     ]:
         assert f'\\"{telemetry}\\"' in console
     assert '\\"coexistence_policy\\"' in console
