@@ -10,6 +10,7 @@
 #include "diagnostics/health_monitor.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
+#include "platform/time_service.h"
 #include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
 
@@ -259,10 +260,16 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     d1l_connectivity_status(&connectivity);
     d1l_storage_status_t storage = {0};
     d1l_storage_status(&storage);
+    d1l_time_service_status_t time_status = {0};
+    d1l_time_service_status(&time_status);
 
     snapshot->board_ready = s_model.board_ready;
     snapshot->ui_ready = s_model.ui_ready;
     snapshot->identity_ready = settings->identity_ready || mesh.identity_ready;
+    snapshot->settings_load_status = d1l_settings_load_status();
+    snapshot->identity_state = d1l_settings_identity_state(settings);
+    snapshot->protocol_tx_ready = time_status.protocol_tx_ready;
+    snapshot->protocol_tx_error = time_status.protocol_tx_error;
     snapshot->radio_ready = mesh.radio_ready;
     snapshot->radio_applied = mesh.radio_applied;
     snapshot->radio_apply_pending = mesh.radio_apply_pending;
@@ -383,6 +390,13 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->dm_total_written = dms.total_written;
     snapshot->dm_content_revision = dms.content_revision;
     snapshot->dm_count = dms.count;
+    snapshot->dm_delivery_state = mesh.dm_delivery_state;
+    const d1l_dm_delivery_state_t delivery_state =
+        (d1l_dm_delivery_state_t)mesh.dm_delivery_state;
+    snapshot->dm_delivery_active =
+        mesh.dm_delivery_session_id != 0U &&
+        d1l_dm_delivery_state_valid(delivery_state) &&
+        !d1l_dm_delivery_state_terminal(delivery_state);
     snapshot->public_unread_count = read_state.public_unread_count;
     snapshot->dm_unread_count = read_state.dm_unread_count;
     snapshot->muted_dm_unread_count = read_state.muted_dm_unread_count;

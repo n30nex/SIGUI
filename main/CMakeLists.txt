@@ -59,6 +59,7 @@ idf_component_register(
         "storage/storage_status_policy.c"
         "ui/ui_ble.c"
         "ui/ui_chrome.c"
+        "ui/ui_compose_eligibility.c"
         "ui/ui_connectivity.c"
         "ui/ui_contact_sheets.c"
         "ui/ui_device_sheets.c"

@@ -24,6 +24,7 @@
 #include "mesh/user_text.h"
 #include "ui_ble.h"
 #include "ui_chrome.h"
+#include "ui_compose_eligibility.h"
 #include "ui_connectivity.h"
 #include "ui_contact_sheets.h"
 #include "ui_device_sheets.h"
@@ -126,6 +127,7 @@ static d1l_ui_contact_sheets_controller_t s_contact_sheets_controller EXT_RAM_BS
 static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
+static esp_err_t s_compose_last_send_error;
 static int32_t s_map_location_lat_e7;
 static int32_t s_map_location_lon_e7;
 static bool s_map_location_returns_to_options;
@@ -1258,6 +1260,7 @@ static void hide_compose_sheet(void)
     s_onboarding_probe_suppressed = false;
     restore_dock_for_active_tab();
     s_compose_dm = false;
+    s_compose_last_send_error = ESP_OK;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     request_full_screen_repaint();
 }
@@ -1981,6 +1984,40 @@ static void render_route_row(lv_obj_t *parent, int y, const d1l_route_entry_t *e
     obj_align_if(signal, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static d1l_ui_compose_eligibility_t compose_eligibility_for_text(
+    const d1l_user_text_info_t *text_info)
+{
+    bool contact_found = !s_compose_dm;
+    bool contact_sendable = !s_compose_dm;
+    if (s_compose_dm && s_compose_contact.fingerprint[0] != '\0') {
+        d1l_contact_entry_t current = {0};
+        contact_found = d1l_app_model_find_contact(
+            s_compose_contact.fingerprint, &current) == ESP_OK;
+        contact_sendable = contact_found &&
+            d1l_contact_store_can_dm(&current);
+        if (contact_sendable) {
+            s_compose_contact = current;
+        }
+    }
+    const d1l_ui_compose_eligibility_input_t input = {
+        .is_dm = s_compose_dm,
+        .text_result = text_info ? text_info->result :
+            D1L_USER_TEXT_INVALID_UTF8,
+        .board_ready = s_snapshot.board_ready,
+        .mesh_state = s_snapshot.mesh_state,
+        .radio_ready = s_snapshot.radio_ready,
+        .path_hash_bytes = s_snapshot.path_hash_bytes,
+        .protocol_tx_ready = s_snapshot.protocol_tx_ready,
+        .settings_load_status = s_snapshot.settings_load_status,
+        .identity_state = s_snapshot.identity_state,
+        .contact_found = contact_found,
+        .contact_sendable = contact_sendable,
+        .dm_delivery_active = s_snapshot.dm_delivery_active,
+        .previous_send_error = s_compose_last_send_error,
+    };
+    return d1l_ui_compose_eligibility(&input);
+}
+
 static void update_compose_counter(void)
 {
     if (!s_compose_counter) {
@@ -1989,10 +2026,17 @@ static void update_compose_counter(void)
     const char *text = s_compose_textarea ? lv_textarea_get_text(s_compose_textarea) : "";
     const size_t used = text ? strlen(text) : 0U;
     const d1l_user_text_info_t info = d1l_user_text_validate(text);
-    const bool eligible = info.result == D1L_USER_TEXT_OK;
-    if (eligible) {
+    const d1l_ui_compose_eligibility_t eligibility =
+        compose_eligibility_for_text(&info);
+    if (info.result == D1L_USER_TEXT_OK &&
+        eligibility.reason == D1L_UI_COMPOSE_READY) {
         label_set_fmt(s_compose_counter, "%u chars | %u/%u B",
                       (unsigned)info.character_count, (unsigned)info.byte_count,
+                      (unsigned)D1L_MESSAGE_MAX_BYTES);
+    } else if (info.result == D1L_USER_TEXT_OK) {
+        label_set_fmt(s_compose_counter, "%s | %u/%u B",
+                      eligibility.status,
+                      (unsigned)info.byte_count,
                       (unsigned)D1L_MESSAGE_MAX_BYTES);
     } else if (info.result == D1L_USER_TEXT_EMPTY) {
         label_set_fmt(s_compose_counter, "0 chars | 0/%u B",
@@ -2004,13 +2048,15 @@ static void update_compose_counter(void)
         label_set_fmt(s_compose_counter, "Invalid text | %u/%u B",
                       (unsigned)used, (unsigned)D1L_MESSAGE_MAX_BYTES);
     }
+    const bool text_error = info.result != D1L_USER_TEXT_OK &&
+        info.result != D1L_USER_TEXT_EMPTY;
     lv_obj_set_style_text_color(s_compose_counter,
-                                lv_color_hex(eligible ? 0x8EA0AE :
-                                             info.result == D1L_USER_TEXT_EMPTY ?
-                                                 0x8EA0AE : 0xF87171),
+                                lv_color_hex(text_error ? 0xF87171 :
+                                             eligibility.retry_available ?
+                                                 0xFBBF24 : 0x8EA0AE),
                                 0);
     if (s_compose_send_button) {
-        if (eligible) {
+        if (eligibility.send_enabled) {
             lv_obj_clear_state(s_compose_send_button, LV_STATE_DISABLED);
         } else {
             lv_obj_add_state(s_compose_send_button, LV_STATE_DISABLED);
@@ -2063,6 +2109,7 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     s_compose_dm = false;
+    s_compose_last_send_error = ESP_OK;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
         lv_label_set_text(s_compose_title, title && title[0] ? title : "Compose Public");
@@ -2120,6 +2167,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     s_compose_dm = true;
+    s_compose_last_send_error = ESP_OK;
     s_compose_contact = selected;
     if (s_compose_title) {
         char title[48];
@@ -3628,6 +3676,10 @@ static void close_compose_event_cb(lv_event_t *event)
 static void clear_compose_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (d1l_ui_compose_error_clears_on_text_change(
+            s_compose_last_send_error)) {
+        s_compose_last_send_error = ESP_OK;
+    }
     if (s_compose_textarea) {
         lv_textarea_set_text(s_compose_textarea, "");
     }
@@ -3641,22 +3693,37 @@ static void send_compose_text(void)
     }
     const char *text = lv_textarea_get_text(s_compose_textarea);
     const d1l_user_text_info_t info = d1l_user_text_validate(text);
-    if (info.result != D1L_USER_TEXT_OK) {
-        const esp_err_t error = info.result == D1L_USER_TEXT_TOO_LONG ?
-            ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
-        show_toast(s_compose_dm ? "DM invalid" : "Public message invalid", error);
+    d1l_app_model_snapshot(&s_snapshot);
+    const d1l_ui_compose_eligibility_t eligibility =
+        compose_eligibility_for_text(&info);
+    if (!eligibility.send_enabled) {
+        show_toast_text(eligibility.status, false);
         update_compose_counter();
         return;
     }
     esp_err_t ret = s_compose_dm ?
                     d1l_app_model_send_dm_text(s_compose_contact.fingerprint, text) :
                     d1l_app_model_send_public_text(text);
-    show_toast(s_compose_dm ? "DM" : "Public message", ret);
     if (ret == ESP_OK) {
+        s_compose_last_send_error = ESP_OK;
+        show_toast(s_compose_dm ? "DM" : "Public message", ret);
         lv_textarea_set_text(s_compose_textarea, "");
         update_compose_counter();
         hide_compose_sheet();
         request_content_refresh();
+    } else {
+        s_compose_last_send_error = ret;
+        if (s_compose_dm) {
+            /* A failed DM command can already have retained a truthful failed
+             * row before RF. Refresh the conversation without claiming that
+             * nothing was sent; the draft remains for explicit user retry. */
+            request_content_refresh();
+        }
+        d1l_app_model_snapshot(&s_snapshot);
+        const d1l_ui_compose_eligibility_t retry =
+            compose_eligibility_for_text(&info);
+        show_toast_text(retry.status, false);
+        update_compose_counter();
     }
 }
 
@@ -3679,6 +3746,10 @@ static void compose_keyboard_event_cb(lv_event_t *event)
 static void compose_textarea_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_VALUE_CHANGED) {
+        if (d1l_ui_compose_error_clears_on_text_change(
+                s_compose_last_send_error)) {
+            s_compose_last_send_error = ESP_OK;
+        }
         update_compose_counter();
     }
 }
@@ -6414,6 +6485,9 @@ static void refresh_timer_cb(lv_timer_t *timer)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     update_onboarding_visibility(&s_snapshot);
+    if (d1l_ui_modal_visible(s_compose_sheet)) {
+        update_compose_counter();
+    }
     const bool map_active = d1l_ui_navigation_active() == D1L_UI_TAB_MAP;
     const bool map_uncovered = map_active &&
         !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
@@ -6556,14 +6630,14 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_set_width(s_compose_title, 210);
     lv_obj_set_pos(s_compose_title, 16, 8);
 
-    s_compose_send_button = create_button(s_compose_sheet, "Send", 252, 8, 62, 40,
+    s_compose_send_button = create_button(s_compose_sheet, "Send", 252, 8, 62, 44,
                                           send_compose_event_cb, NULL);
     if (s_compose_send_button) {
         lv_obj_set_style_opa(s_compose_send_button, LV_OPA_40, LV_STATE_DISABLED);
         lv_obj_add_state(s_compose_send_button, LV_STATE_DISABLED);
     }
-    create_button(s_compose_sheet, "Clear", 322, 8, 62, 40, clear_compose_event_cb, NULL);
-    create_button(s_compose_sheet, "Close", 392, 8, 72, 40, close_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Clear", 322, 8, 62, 44, clear_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Close", 392, 8, 72, 44, close_compose_event_cb, NULL);
 
     s_compose_textarea = create_textarea(s_compose_sheet, "compose textarea");
     if (!s_compose_textarea) {
