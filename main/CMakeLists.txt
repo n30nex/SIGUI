@@ -12,6 +12,7 @@ idf_component_register(
         "app/app_model.c"
         "app/settings_model.c"
         "comms/connectivity_manager.c"
+        "comms/wifi_retry_policy.c"
         "comms/companion_3byte.c"
         "comms/usb_console.c"
         "diagnostics/crash_log.c"

@@ -37,6 +37,9 @@ typedef struct {
     bool wifi_stack_active;
     bool wifi_connected;
     bool wifi_connecting;
+    bool wifi_retry_scheduled;
+    bool wifi_user_cancelled;
+    bool wifi_safe_mode;
     bool ble_stack_active;
     bool wifi_profile_saved;
     bool wifi_password_saved;
@@ -46,7 +49,12 @@ typedef struct {
     const char *wifi_ip;
     int8_t wifi_rssi_dbm;
     uint8_t wifi_channel;
+    uint8_t wifi_retry_attempt;
+    uint16_t wifi_last_disconnect_reason;
+    uint32_t wifi_retry_delay_ms;
+    uint32_t wifi_retry_task_stack_high_water_bytes;
     const char *wifi_last_error;
+    const char *wifi_last_failure_class;
     const char *coexistence_policy;
 } d1l_connectivity_status_t;
 

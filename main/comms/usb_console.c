@@ -5215,8 +5215,18 @@ static void cmd_wifi_status(void)
     print_json_string(status.wifi_state ? status.wifi_state : "off");
     printf(",\"ip\":");
     print_json_string(status.wifi_connected && status.wifi_ip ? status.wifi_ip : "");
-    printf(",\"rssi_dbm\":%d,\"channel\":%u,\"last_error\":",
-           status.wifi_rssi_dbm, (unsigned)status.wifi_channel);
+    printf(",\"rssi_dbm\":%d,\"channel\":%u,\"retry_scheduled\":%s,\"retry_attempt\":%u,\"retry_delay_ms\":%lu,\"user_cancelled\":%s,\"safe_mode\":%s,\"last_disconnect_reason\":%u,\"last_failure_class\":",
+           status.wifi_rssi_dbm, (unsigned)status.wifi_channel,
+           bool_json(status.wifi_retry_scheduled),
+           (unsigned)status.wifi_retry_attempt,
+           (unsigned long)status.wifi_retry_delay_ms,
+           bool_json(status.wifi_user_cancelled),
+           bool_json(status.wifi_safe_mode),
+           (unsigned)status.wifi_last_disconnect_reason);
+    print_json_string(status.wifi_last_failure_class ?
+                      status.wifi_last_failure_class : "none");
+    printf(",\"retry_task_stack_high_water_bytes\":%lu,\"last_error\":",
+           (unsigned long)status.wifi_retry_task_stack_high_water_bytes);
     print_json_string(status.wifi_last_error ? status.wifi_last_error : "none");
     printf(",\"policy\":\"%s\",\"live_network\":%s}\n",
            status.coexistence_policy, bool_json(status.wifi_stack_active));
