@@ -17,9 +17,16 @@ WIDTH = 480
 HEIGHT = 480
 TOP_BAR_H = 56
 HOME_TOP_BAR_H = 16
-DOCK_Y = 418
-DOCK_H = 62
+DOCK_Y = 428
+DOCK_H = 52
 MIN_TOUCH_TARGET = 44
+DOCK_TABS = (
+    ("Home", "Home", "home", "LV_SYMBOL_HOME"),
+    ("Messages", "Messages", "messages", "LV_SYMBOL_ENVELOPE"),
+    ("Nodes", "Nodes", "nodes", "LV_SYMBOL_LIST"),
+    ("Map", "Map", "map", "LV_SYMBOL_IMAGE"),
+    ("Settings", "Tools", "settings", "LV_SYMBOL_SETTINGS"),
+)
 DOCKED_VIEWS = frozenset(
     {
         "messages",
@@ -986,6 +993,9 @@ class Surface:
         destructive: bool = False,
         formats_sd: bool = False,
         enabled: bool = True,
+        semantic_label: str | None = None,
+        icon: str | None = None,
+        selected: bool = False,
     ):
         target = self._minimum_touch_box(box)
         x0, y0, x1, y1 = target
@@ -1019,6 +1029,9 @@ class Surface:
                 "destructive": destructive,
                 "formats_sd": formats_sd,
                 "enabled": enabled,
+                "semantic_label": semantic_label or label,
+                "icon": icon,
+                "selected": selected,
             }
         )
 
@@ -1517,32 +1530,73 @@ def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     s.line(((0, TOP_BAR_H), (WIDTH, TOP_BAR_H)))
 
 
+def draw_dock_icon(
+    s: Surface,
+    icon: str,
+    center: tuple[int, int],
+    color: tuple[int, int, int],
+):
+    """Draw simulator-safe equivalents of the LVGL dock symbols."""
+
+    x, y = center
+    if icon == "LV_SYMBOL_HOME":
+        s.draw.line(((x - 6, y), (x, y - 5), (x + 6, y)), fill=color, width=2)
+        s.draw.rectangle((x - 4, y, x + 4, y + 5), outline=color, width=2)
+    elif icon == "LV_SYMBOL_ENVELOPE":
+        s.draw.rectangle((x - 7, y - 4, x + 7, y + 5), outline=color, width=2)
+        s.draw.line(((x - 6, y - 3), (x, y + 1), (x + 6, y - 3)), fill=color, width=1)
+    elif icon == "LV_SYMBOL_LIST":
+        for offset in (-4, 0, 4):
+            s.draw.ellipse((x - 7, y + offset - 1, x - 5, y + offset + 1), fill=color)
+            s.draw.line(((x - 3, y + offset), (x + 7, y + offset)), fill=color, width=2)
+    elif icon == "LV_SYMBOL_IMAGE":
+        s.draw.rectangle((x - 7, y - 5, x + 7, y + 5), outline=color, width=2)
+        s.draw.ellipse((x + 2, y - 3, x + 4, y - 1), fill=color)
+        s.draw.line(((x - 5, y + 3), (x - 1, y - 1), (x + 2, y + 2), (x + 5, y)), fill=color, width=1)
+    elif icon == "LV_SYMBOL_SETTINGS":
+        s.draw.ellipse((x - 5, y - 5, x + 5, y + 5), outline=color, width=2)
+        s.draw.ellipse((x - 1, y - 1, x + 1, y + 1), fill=color)
+        for x1, y1, x2, y2 in (
+            (x, y - 8, x, y - 5),
+            (x, y + 5, x, y + 8),
+            (x - 8, y, x - 5, y),
+            (x + 5, y, x + 8, y),
+        ):
+            s.draw.line(((x1, y1), (x2, y2)), fill=color, width=2)
+
+
 def draw_dock(s: Surface, active: str):
     if s.view not in DOCKED_VIEWS:
         raise ValueError(f"dock is not allowed on modal view: {s.view}")
     s.dock_rendered = True
     s.rect((0, DOCK_Y, WIDTH, HEIGHT), (10, 16, 25))
-    tabs = (
-        ("Home", "Home", "home"),
-        ("Messages", "Msg", "messages"),
-        ("Nodes", "Network", "nodes"),
-        ("Map", "Map", "map"),
-        ("Settings", "More", "settings"),
-    )
-    w = WIDTH // len(tabs)
-    for i, (name, label, destination) in enumerate(tabs):
+    s.metrics["dock_y"] = DOCK_Y
+    s.metrics["dock_height"] = DOCK_H
+    s.metrics["docked_content_height"] = DOCK_Y - TOP_BAR_H
+    w = WIDTH // len(DOCK_TABS)
+    for i, (name, label, destination, icon) in enumerate(DOCK_TABS):
         x0 = i * w
-        x1 = WIDTH if i == len(tabs) - 1 else (i + 1) * w
+        x1 = WIDTH if i == len(DOCK_TABS) - 1 else (i + 1) * w
         active_tab = name == active
-        if active_tab:
-            s.round_rect((x0 + 8, DOCK_Y + 8, x1 - 8, HEIGHT - 8), (29, 48, 62), (58, 88, 104), 8)
-        s.text(label, (x0 + 6, DOCK_Y + 17, x1 - 6, HEIGHT - 15), 13, TEXT if active_tab else MUTED, active_tab, "center")
+        button_box = (x0 + 4, DOCK_Y + 4, x1 - 4, DOCK_Y + 48)
+        s.round_rect(
+            button_box,
+            (29, 48, 62) if active_tab else (16, 27, 37),
+            ACCENT if active_tab else (16, 27, 37),
+            7,
+        )
+        color = TEXT if active_tab else MUTED
+        draw_dock_icon(s, icon, ((x0 + x1) // 2, DOCK_Y + 14), color)
+        s.text(label, (x0 + 6, DOCK_Y + 25, x1 - 6, DOCK_Y + 44), 11, color, active_tab, "center")
         s.touch_target(
             f"{label} tab",
-            (x0, DOCK_Y, x1, HEIGHT),
+            button_box,
             kind="dock_tab",
             action=f"open_{destination}",
             destination=destination,
+            semantic_label=label,
+            icon=icon,
+            selected=active_tab,
         )
 
 
@@ -1958,7 +2012,7 @@ def draw_home_body(s: Surface, snap: Snapshot):
         (
             (246, 16, 468, 156),
             "signal",
-            "Network",
+            "Nodes",
             "Contacts, nearby nodes, and routing",
             f"{len(snap.contacts)} contacts | {len(snap.heard)} nearby",
             GREEN if snap.contacts else MUTED,
@@ -1978,8 +2032,8 @@ def draw_home_body(s: Surface, snap: Snapshot):
         (
             (246, 164, 468, 304),
             "settings",
-            "More",
-            "Tools, device settings, and support",
+            "Tools",
+            "Device settings, utilities, and support",
             f"{len(snap.packets)} packet{'s' if len(snap.packets) != 1 else ''} captured",
             VIOLET if snap.packets else MUTED,
             "open_settings",
@@ -3507,8 +3561,8 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
 
 def draw_more_header(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
-    s.text("More", (18, 64, 150, 92), 22, TEXT, True)
-    s.text("Settings and tools", (18, 92, 278, 108), 12, MUTED)
+    s.text("Tools", (18, 64, 150, 92), 22, TEXT, True)
+    s.text("Settings and utilities", (18, 92, 278, 108), 12, MUTED)
 
 
 def render_settings(s: Surface, snap: Snapshot):
@@ -5615,9 +5669,9 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "DeskOS",
         "Messages",
-        "Network",
+        "Nodes",
         "Map",
-        "More",
+        "Tools",
         "Device status",
         "Settings and support",
         "Time",
@@ -5704,8 +5758,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "packets": ("Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Packet Feed", "Routes"),
     "settings": (
-        "More",
-        "Settings and tools",
+        "Tools",
+        "Settings and utilities",
         "Tools",
         "Packets and diagnostics",
         "Connections",
@@ -5715,16 +5769,16 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Advanced",
     ),
     "settings_tools_expanded": (
-        "More",
-        "Settings and tools",
+        "Tools",
+        "Settings and utilities",
         "Tools",
         "Packets and diagnostics",
         "Packets",
         "Diagnostics",
     ),
     "settings_connections_expanded": (
-        "More",
-        "Settings and tools",
+        "Tools",
+        "Settings and utilities",
         "Connections",
         "Wi-Fi, Bluetooth, and radio",
         "Wi-Fi",
@@ -5732,31 +5786,31 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Radio",
     ),
     "settings_storage_maps_expanded": (
-        "More",
-        "Settings and tools",
+        "Tools",
+        "Settings and utilities",
         "Storage & maps",
         "SD Card",
         "Map options",
     ),
     "settings_device_expanded": (
-        "More",
-        "Settings and tools",
+        "Tools",
+        "Settings and utilities",
         "Device",
         "Display and identity",
         "Display",
         "Identity",
     ),
     "settings_support_expanded": (
-        "More",
-        "Settings and tools",
+        "Tools",
+        "Settings and utilities",
         "Support",
         "About this device",
         "About",
         "Version 1.0.0-rc1",
     ),
     "settings_advanced_expanded": (
-        "More",
-        "Settings and tools",
+        "Tools",
+        "Settings and utilities",
         "Advanced",
         "Developer options",
         "Mesh advertise",

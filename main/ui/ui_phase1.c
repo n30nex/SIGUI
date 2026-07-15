@@ -81,6 +81,7 @@ static lv_obj_t *s_lock_button;
 static lv_obj_t *s_toast;
 static lv_obj_t *s_sheet;
 static lv_obj_t *s_dock;
+static lv_obj_t *s_dock_buttons[5];
 static lv_obj_t *s_compose_sheet;
 static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
@@ -228,6 +229,24 @@ typedef d1l_ui_screen_t d1l_ui_tab_t;
 #define D1L_UI_TAB_MAP D1L_UI_SCREEN_MAP
 #define D1L_UI_TAB_PACKETS D1L_UI_SCREEN_PACKETS
 #define D1L_UI_TAB_SETTINGS D1L_UI_SCREEN_SETTINGS
+
+typedef struct {
+    d1l_ui_tab_t tab;
+    const char *label;
+    const char *icon;
+} d1l_ui_dock_item_t;
+
+static const d1l_ui_dock_item_t k_dock_items[] = {
+    {D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME},
+    {D1L_UI_TAB_MESSAGES, "Messages", LV_SYMBOL_ENVELOPE},
+    {D1L_UI_TAB_NODES, "Nodes", LV_SYMBOL_LIST},
+    {D1L_UI_TAB_MAP, "Map", LV_SYMBOL_IMAGE},
+    {D1L_UI_TAB_SETTINGS, "Tools", LV_SYMBOL_SETTINGS},
+};
+
+_Static_assert(sizeof(s_dock_buttons) / sizeof(s_dock_buttons[0]) ==
+                   sizeof(k_dock_items) / sizeof(k_dock_items[0]),
+               "dock button and item counts must match");
 
 typedef struct {
     uint32_t rx_packets;
@@ -1197,6 +1216,65 @@ static lv_obj_t *create_button(lv_obj_t *parent, const char *text, int x, int y,
     return button;
 }
 
+static lv_obj_t *create_dock_button(lv_obj_t *parent,
+                                    const d1l_ui_dock_item_t *item,
+                                    int x,
+                                    lv_event_cb_t cb)
+{
+    if (!parent || !item || !item->label || !item->icon) {
+        return NULL;
+    }
+    lv_obj_t *button = lv_btn_create(parent);
+    if (!button) {
+        ESP_LOGE(TAG, "dock button allocation failed");
+        return NULL;
+    }
+    lv_obj_set_size(button, 88, 44);
+    lv_obj_set_pos(button, x, 4);
+    lv_obj_set_style_radius(button, 7, 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x101B25), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x1D303E), LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(button, 0, 0);
+    lv_obj_set_style_border_width(button, 1, LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x5EEAD4), LV_STATE_CHECKED);
+    lv_obj_set_style_shadow_width(button, 0, 0);
+    lv_obj_set_style_pad_all(button, 0, 0);
+
+    /* The symbol is never the only cue: every compact tab keeps visible text. */
+    lv_obj_t *icon = create_label(button, item->icon, 0x8EA0AE);
+    if (icon) {
+        lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, 0);
+        lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 3);
+    }
+    lv_obj_t *label = create_label(button, item->label, 0xF4F7FB);
+    if (label) {
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(label, 82);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -3);
+    }
+    if (cb) {
+        lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, (void *)&item->tab);
+    }
+    return button;
+}
+
+static void update_dock_selected_state(void)
+{
+    const d1l_ui_tab_t active = d1l_ui_navigation_active();
+    for (size_t i = 0; i < sizeof(k_dock_items) / sizeof(k_dock_items[0]); ++i) {
+        if (!s_dock_buttons[i]) {
+            continue;
+        }
+        if (k_dock_items[i].tab == active) {
+            lv_obj_add_state(s_dock_buttons[i], LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(s_dock_buttons[i], LV_STATE_CHECKED);
+        }
+    }
+}
+
 static void style_contact_option_button(lv_obj_t *button, uint32_t accent,
                                         const char *detail)
 {
@@ -1298,6 +1376,7 @@ static void layout_content_for_active_tab(void)
         lv_obj_set_size(s_content, 480, layout.content_height);
         d1l_ui_screen_configure_content_root(s_content, layout.content_scrollable);
     }
+    update_dock_selected_state();
     restore_dock_for_active_tab();
 }
 
@@ -7452,25 +7531,18 @@ static void create_dock(lv_obj_t *screen)
     if (!s_dock) {
         return;
     }
-    lv_obj_set_size(s_dock, 480, 62);
-    lv_obj_set_pos(s_dock, 0, 418);
+    lv_obj_set_size(s_dock, 480, D1L_UI_DOCK_HEIGHT);
+    lv_obj_set_pos(s_dock, 0, D1L_UI_DOCK_Y);
     lv_obj_set_style_bg_color(s_dock, lv_color_hex(0x09131D), 0);
     lv_obj_set_style_border_width(s_dock, 0, 0);
-    lv_obj_set_style_pad_all(s_dock, 5, 0);
+    lv_obj_set_style_pad_all(s_dock, 0, 0);
     lv_obj_clear_flag(s_dock, LV_OBJ_FLAG_SCROLLABLE);
 
-    static const d1l_ui_tab_t tabs[] = {
-        D1L_UI_TAB_HOME,
-        D1L_UI_TAB_MESSAGES,
-        D1L_UI_TAB_NODES,
-        D1L_UI_TAB_MAP,
-        D1L_UI_TAB_SETTINGS,
-    };
-    static const char *const labels[] = {"Home", "Msg", "Network", "Map", "More"};
-    for (size_t i = 0; i < sizeof(tabs) / sizeof(tabs[0]); ++i) {
-        create_button(s_dock, labels[i], 4 + (int)i * 96, 5, 88, 50, dock_event_cb,
-                      (void *)&tabs[i]);
+    for (size_t i = 0; i < sizeof(k_dock_items) / sizeof(k_dock_items[0]); ++i) {
+        s_dock_buttons[i] = create_dock_button(
+            s_dock, &k_dock_items[i], 4 + (int)i * 96, dock_event_cb);
     }
+    update_dock_selected_state();
 }
 
 static void create_toast(lv_obj_t *screen)

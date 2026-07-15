@@ -165,8 +165,10 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert ".dock_visible = false" in chrome
     assert ".header_detail_visible = false" in chrome
     assert ".title = \"DeskOS\"" in chrome
-    assert ".content_y = 56" in chrome
-    assert ".content_height = 362" in chrome
+    assert ".content_y = D1L_UI_DOCKED_CONTENT_Y" in chrome
+    assert ".content_height = D1L_UI_DOCKED_CONTENT_HEIGHT" in chrome
+    assert "D1L_UI_DOCKED_CONTENT_Y 56U" in chrome_header
+    assert "D1L_UI_DOCKED_CONTENT_HEIGHT" in chrome_header
     assert ".content_scrollable = true" in chrome
     assert ".dock_visible = true" in chrome
     assert ".header_detail_visible = true" in chrome
@@ -228,9 +230,9 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "set_object_hidden(s_identity_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_lock_button, !layout.header_detail_visible)" in source
     assert '"Messages"' in home_module
-    assert '"Network"' in home_module
+    assert '"Nodes"' in home_module
     assert '"Map"' in home_module
-    assert '"More"' in home_module
+    assert '"Tools"' in home_module
     assert '"Device status"' in home_module
     assert '"Time"' in home_module
     assert '"Wi-Fi"' in home_module
@@ -1243,7 +1245,9 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert 'viewport, "+", 420, 8, 52, 52' in landing
     assert 'map_label(viewport, "Drag to pan"' in landing
     assert "MAP_VIEWPORT_WIDTH 478U" in map_source
-    assert "MAP_VIEWPORT_HEIGHT 360U" in map_source
+    assert "MAP_VIEWPORT_HEIGHT (D1L_UI_DOCKED_CONTENT_HEIGHT - 2U)" in map_source
+    assert "MAP_VIEWPORT_PANEL_HEIGHT (MAP_VIEWPORT_HEIGHT + 2U)" in map_source
+    assert "parent, 0, 0, 480, MAP_VIEWPORT_PANEL_HEIGHT" in landing
 
     options = map_source.split("static void map_render_options_root", 1)[1].split(
         "static void map_render_cache_status", 1
@@ -1308,13 +1312,20 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert "parse_coord_text_e7" in source
     assert "map_location_save_event_cb" in source
     assert "map_format_coordinate" in map_source
-    assert 'static const char *const labels[] = {"Home", "Msg", "Network", "Map", "More"}' in source
-    assert "static const d1l_ui_tab_t tabs[]" in source
+    assert '{D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME}' in source
+    assert '{D1L_UI_TAB_MESSAGES, "Messages", LV_SYMBOL_ENVELOPE}' in source
+    assert '{D1L_UI_TAB_NODES, "Nodes", LV_SYMBOL_LIST}' in source
+    assert '{D1L_UI_TAB_MAP, "Map", LV_SYMBOL_IMAGE}' in source
+    assert '{D1L_UI_TAB_SETTINGS, "Tools", LV_SYMBOL_SETTINGS}' in source
+    assert "create_dock_button" in source
+    assert "lv_obj_set_size(button, 88, 44)" in source
+    assert "lv_obj_add_state(s_dock_buttons[i], LV_STATE_CHECKED)" in source
+    assert "lv_obj_clear_state(s_dock_buttons[i], LV_STATE_CHECKED)" in source
     assert "D1L_UI_TAB_PACKETS" not in source.split("static void create_dock", 1)[1].split(
         "static void create_toast", 1
     )[0]
     assert "4 + (int)i * 96" in source
-    assert "(void *)&tabs[i]" in source
+    assert "(void *)&item->tab" in source
     assert "(void *)(uintptr_t)i" not in source
     assert "map_tile_download_supported" in header
     assert "map_tile_render_supported" in header
@@ -1659,8 +1670,8 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "wifi_last_error" in header
     assert "ble_transport_supported" in header
     assert "coexistence_policy" in header
-    assert '"More"' in more_module
-    assert '"Settings and tools"' in more_module
+    assert '"Tools"' in more_module
+    assert '"Settings and utilities"' in more_module
     assert '"SD Card"' in more_module
     assert '"Map options"' in more_module
     assert '"Offline Maps"' not in more_module

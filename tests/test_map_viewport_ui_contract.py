@@ -18,12 +18,15 @@ def test_map_ui_uses_bounded_core_viewport_and_visible_attribution():
     math_header = read("main/map/map_math.h")
 
     assert '#include "map/map_view_service.h"' in source
+    assert '#include "ui_chrome.h"' in source
     assert "D1L_MAP_VIEW_DEFAULT_ZOOM 10U" in math_header
     assert "D1L_MAP_VIEW_MIN_ZOOM 8U" in math_header
     assert "D1L_MAP_VIEW_MAX_ZOOM 14U" in math_header
     assert "s_viewport_zoom = D1L_MAP_VIEW_DEFAULT_ZOOM" in source
     assert "MAP_VIEWPORT_WIDTH 478U" in source
-    assert "MAP_VIEWPORT_HEIGHT 360U" in source
+    assert "MAP_VIEWPORT_HEIGHT (D1L_UI_DOCKED_CONTENT_HEIGHT - 2U)" in source
+    assert "MAP_VIEWPORT_PANEL_HEIGHT (MAP_VIEWPORT_HEIGHT + 2U)" in source
+    assert "parent, 0, 0, 480, MAP_VIEWPORT_PANEL_HEIGHT" in source
     assert "d1l_map_view_service_acquire_visible" in source
     assert "d1l_map_view_service_acquire_frame" in source
     assert "d1l_map_view_service_release_frame" in source

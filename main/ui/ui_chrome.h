@@ -5,6 +5,13 @@
 
 #include "ui_navigation.h"
 
+#define D1L_UI_DISPLAY_HEIGHT 480U
+#define D1L_UI_DOCKED_CONTENT_Y 56U
+#define D1L_UI_DOCK_Y 428U
+#define D1L_UI_DOCK_HEIGHT (D1L_UI_DISPLAY_HEIGHT - D1L_UI_DOCK_Y)
+#define D1L_UI_DOCKED_CONTENT_HEIGHT \
+    (D1L_UI_DOCK_Y - D1L_UI_DOCKED_CONTENT_Y)
+
 typedef struct {
     uint16_t content_y;
     uint16_t content_height;

@@ -235,7 +235,7 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
                             controller);
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_NETWORK,
-                            LV_SYMBOL_REFRESH, "Network",
+                            LV_SYMBOL_LIST, "Nodes",
                             "Contacts, nearby nodes, and routing",
                             controller->rendered.network_status,
                             controller->rendered.network_status_color,
@@ -252,7 +252,7 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
                             controller);
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MORE, LV_SYMBOL_SETTINGS,
-                            "More", "Tools, device settings, and support",
+                            "Tools", "Device settings, utilities, and support",
                             controller->rendered.more_status,
                             controller->rendered.more_status_color,
                             D1L_UI_HOME_ACTION_MORE,

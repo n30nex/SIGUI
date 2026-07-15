@@ -155,8 +155,8 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
         return false;
     }
     memset(out_view, 0, sizeof(*out_view));
-    copy_text(out_view->title, sizeof(out_view->title), "More");
-    copy_text(out_view->subtitle, sizeof(out_view->subtitle), "Settings and tools");
+    copy_text(out_view->title, sizeof(out_view->title), "Tools");
+    copy_text(out_view->subtitle, sizeof(out_view->subtitle), "Settings and utilities");
     out_view->category_count = D1L_UI_MORE_CATEGORY_COUNT;
 
     char packet_status[D1L_UI_MORE_STATUS_TEXT_LEN];

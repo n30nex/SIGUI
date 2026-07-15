@@ -13,8 +13,8 @@ d1l_ui_chrome_layout_t d1l_ui_chrome_layout_for_screen(d1l_ui_screen_t screen)
         };
     }
     return (d1l_ui_chrome_layout_t){
-        .content_y = 56,
-        .content_height = 362,
+        .content_y = D1L_UI_DOCKED_CONTENT_Y,
+        .content_height = D1L_UI_DOCKED_CONTENT_HEIGHT,
         .content_scrollable = true,
         .dock_visible = true,
         .header_detail_visible = true,
