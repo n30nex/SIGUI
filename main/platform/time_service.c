@@ -12,6 +12,16 @@
 
 #include "app/settings_model.h"
 
+#ifndef D1L_BUILD_EPOCH_SEC
+#error "D1L_BUILD_EPOCH_SEC must be derived from the exact source commit"
+#endif
+
+_Static_assert(D1L_BUILD_EPOCH_SEC >= D1L_TIME_PROTOCOL_TIMESTAMP_BASE,
+               "build epoch predates the protocol epoch");
+_Static_assert((int64_t)D1L_BUILD_EPOCH_SEC <=
+                   D1L_TIME_SNTP_MAX_PROTOCOL_EPOCH,
+               "build epoch leaves insufficient uint32 protocol headroom");
+
 #define D1L_TIME_NVS_NAMESPACE "d1l_settings"
 #define D1L_TIME_PROTOCOL_LEGACY_KEY "mesh_ts"
 #define D1L_TIME_PROTOCOL_HIGH_WATER_KEY "mesh_hi_v2"
@@ -238,7 +248,13 @@ esp_err_t d1l_time_service_init(void)
         return ESP_ERR_INVALID_STATE;
     }
     if (!s_initialized) {
-        d1l_time_core_init(&s_time_core, monotonic_now_us());
+        const esp_err_t core_ret = d1l_time_core_init(
+            &s_time_core, monotonic_now_us(),
+            (uint32_t)D1L_BUILD_EPOCH_SEC);
+        if (core_ret != ESP_OK) {
+            time_unlock();
+            return core_ret;
+        }
         s_initialized = true;
     }
     esp_err_t ret = ESP_OK;
@@ -261,6 +277,26 @@ uint64_t d1l_time_service_boot_monotonic_us(void)
         d1l_time_core_observe_monotonic(&s_time_core, monotonic_now_us());
     time_unlock();
     return value;
+}
+
+esp_err_t d1l_time_service_preflight_protocol_timestamp(void)
+{
+    esp_err_t ret = d1l_time_service_init();
+    if (ret != ESP_OK && !s_protocol_seed_ready) {
+        return ret;
+    }
+    if (!time_lock()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_protocol_seed_ready) {
+        ret = load_protocol_seed_locked();
+    }
+    if (ret == ESP_OK) {
+        ret = d1l_time_core_preflight_protocol_timestamp(
+            &s_time_core, monotonic_now_us());
+    }
+    time_unlock();
+    return ret;
 }
 
 esp_err_t d1l_time_service_next_protocol_timestamp(uint32_t *out_timestamp)
@@ -293,14 +329,19 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
         return;
     }
     *out_status = (d1l_time_service_status_t) {0};
+    out_status->protocol_persistence_state = s_protocol_persistence_state;
+    out_status->protocol_persistence_error = s_protocol_persistence_error;
     if (!s_initialized && d1l_time_service_init() != ESP_OK && !s_initialized) {
-        out_status->protocol_persistence_error =
-            s_protocol_persistence_error;
+        out_status->protocol_persistence_state =
+            s_protocol_persistence_state;
+        out_status->protocol_persistence_error = s_protocol_persistence_error;
+        out_status->protocol_tx_error = ESP_ERR_INVALID_STATE;
         out_status->sntp_init_error = s_sntp_init_error;
         return;
     }
     if (!time_lock()) {
         out_status->protocol_persistence_error = ESP_ERR_INVALID_STATE;
+        out_status->protocol_tx_error = ESP_ERR_INVALID_STATE;
         out_status->sntp_init_error = s_sntp_init_error;
         return;
     }
@@ -311,6 +352,13 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
     out_status->protocol_persistence_ready =
         s_protocol_seed_ready && s_protocol_persistence_error == ESP_OK;
     out_status->protocol_persistence_error = s_protocol_persistence_error;
+    out_status->protocol_tx_ready =
+        out_status->protocol_persistence_ready &&
+        out_status->clock.protocol_tx_ready;
+    out_status->protocol_tx_error =
+        out_status->protocol_persistence_ready ?
+            out_status->clock.protocol_tx_error :
+            s_protocol_persistence_error;
     out_status->sntp_initialized = s_sntp_initialized;
     out_status->sntp_init_error = s_sntp_init_error;
     time_unlock();
@@ -432,10 +480,20 @@ esp_err_t d1l_time_service_set_companion_time(int64_t epoch_sec,
         .tv_sec = (time_t)epoch_sec,
         .tv_usec = 0,
     };
-    if ((int64_t)value.tv_sec != epoch_sec || settimeofday(&value, NULL) != 0) {
+    const esp_err_t preflight = d1l_time_core_preflight_wall(
+        &s_time_core, epoch_sec,
+        D1L_TIME_VALIDITY_COMPANION_VALIDATED,
+        D1L_TIME_SOURCE_COMPANION_AUTHENTICATED);
+    if ((int64_t)value.tv_sec != epoch_sec || preflight != ESP_OK) {
+        time_unlock();
+        return preflight == ESP_OK ? ESP_ERR_INVALID_ARG : preflight;
+    }
+    if (settimeofday(&value, NULL) != 0) {
         time_unlock();
         return ESP_FAIL;
     }
+    /* The preflight and commit share this mutex, so no generation or source
+     * invariant can change after the system-clock side effect. */
     const esp_err_t ret = d1l_time_core_set_wall(
         &s_time_core, epoch_sec, monotonic_now_us(),
         D1L_TIME_VALIDITY_COMPANION_VALIDATED,

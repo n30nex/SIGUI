@@ -35,11 +35,17 @@ def test_clock_domains_and_truth_states_are_explicit():
         "D1L_TIME_SOURCE_RETAINED_AUTHENTICATED",
         "D1L_TIME_SOURCE_SNTP",
         "D1L_TIME_SOURCE_COMPANION_AUTHENTICATED",
+        "D1L_TIME_PROTOCOL_WALL_SNTP_ADMITTED",
+        "D1L_TIME_PROTOCOL_WALL_SNTP_FORWARD_BLOCKED",
+        "D1L_TIME_PROTOCOL_WALL_COMPANION_AUTHORIZED",
+        "D1L_TIME_PROTOCOL_WALL_UNREPRESENTABLE",
     ):
         assert token in header
     assert "boot_monotonic_us" in header
     assert "wall_anchor_monotonic_us" in header
     assert "protocol_reserved_through" in header
+    assert "build_epoch_sec" in header
+    assert "protocol_tx_ready" in header
     assert "wall_valid = core->wall_set" in source
     assert "certificate_time_valid" in source
 
@@ -91,15 +97,28 @@ def test_legacy_protocol_seed_requires_explicit_migration_and_is_preserved():
     assert "protocol_persistence_state" in read("main/platform/time_service.h")
 
 
-def test_wall_jumps_cannot_rewind_protocol_and_approximate_is_not_tls_valid():
+def test_only_admitted_representable_wall_advances_protocol_and_approximate_is_not_tls_valid():
     core = read("main/platform/time_service_core.c")
+    candidate = body(
+        core,
+        "static esp_err_t protocol_candidate_at",
+        "esp_err_t d1l_time_core_init",
+    )
     allocate = body(
         core,
         "esp_err_t d1l_time_core_next_protocol_timestamp",
         "void d1l_time_core_snapshot",
     )
-    assert "current_wall > (int64_t)candidate" in allocate
-    assert "candidate = (uint32_t)current_wall" in allocate
+    assert "d1l_time_core_certificate_validity(core->wall_validity)" in candidate
+    assert "current_wall > (int64_t)candidate" in candidate
+    assert "D1L_TIME_PROTOCOL_WALL_SNTP_FORWARD_BLOCKED" in candidate
+    assert "D1L_TIME_PROTOCOL_WALL_UNREPRESENTABLE" in candidate
+    assert "return ESP_ERR_INVALID_STATE" in candidate
+    assert "candidate = (uint32_t)current_wall" in candidate
+    assert "protocol_candidate_at(" in allocate
+    assert allocate.index("protocol_candidate_at(") < allocate.index(
+        "reserve(reserve_context, new_reserved_through)"
+    )
     certificate = body(
         core,
         "bool d1l_time_core_certificate_validity",
@@ -108,6 +127,52 @@ def test_wall_jumps_cannot_rewind_protocol_and_approximate_is_not_tls_valid():
     assert "D1L_TIME_VALIDITY_NETWORK_VALIDATED" in certificate
     assert "D1L_TIME_VALIDITY_COMPANION_VALIDATED" in certificate
     assert "D1L_TIME_VALIDITY_APPROXIMATE" not in certificate
+
+
+def test_sntp_admission_uses_bounded_delta_and_intrinsic_u32_headroom_without_wall_eol():
+    header = read("main/platform/time_service_core.h")
+    core = read("main/platform/time_service_core.c")
+    assert "D1L_TIME_SNTP_MAX_FORWARD_SEC INT64_C(2592000)" in header
+    assert "D1L_TIME_SNTP_MIN_PROTOCOL_HEADROOM_SEC INT64_C(316224000)" in header
+    assert "D1L_TIME_SNTP_MAX_PROTOCOL_EPOCH" in header
+    assert "protocol_trust_anchor_at" in core
+    assert "admission_has_continuous_anchor" in core
+    set_wall = body(
+        core,
+        "esp_err_t d1l_time_core_set_wall(",
+        "esp_err_t d1l_time_core_set_wall_if_generation(",
+    )
+    assert "epoch_sec <= (int64_t)ceiling" in set_wall
+    assert "D1L_TIME_PROTOCOL_WALL_SNTP_FORWARD_BLOCKED" in set_wall
+    assert "epoch_sec <= (int64_t)UINT32_MAX" in set_wall
+    assert "D1L_TIME_PROTOCOL_WALL_COMPANION_AUTHORIZED" in set_wall
+    assert "epoch_sec > D1L_TIME_WALL_MAX_EPOCH" not in set_wall
+
+
+def test_exact_git_commit_epoch_is_deterministic_and_fail_closed():
+    root_cmake = read("CMakeLists.txt")
+    cmake = read("main/CMakeLists.txt")
+    provenance = read("cmake/d1l_source_provenance.cmake")
+    attributes = read(".gitattributes")
+    service = read("main/platform/time_service.c")
+    assert root_cmake.index("d1l_resolve_source_provenance(") < root_cmake.index(
+        "foreach(SEEED_BSP_PATCH"
+    )
+    assert "COMMAND git rev-parse --verify HEAD" in provenance
+    assert "COMMAND git show -s --format=%ct HEAD" in provenance
+    assert "COMMAND git status --porcelain=v1 --untracked-files=all" in provenance
+    assert "requires a clean current checkout" in provenance
+    assert "does not match current HEAD" in provenance
+    assert 'set(D1L_ARCHIVE_GIT_COMMIT "$Format:%H$")' in provenance
+    assert 'set(D1L_ARCHIVE_GIT_EPOCH_SEC "$Format:%ct$")' in provenance
+    assert "git-archive export-substituted provenance" in provenance
+    assert "cmake/d1l_source_provenance.cmake text eol=lf export-subst" in attributes
+    assert "D1L_BUILD_EPOCH_SEC=${D1L_BUILD_EPOCH_SEC}ULL" in cmake
+    assert "__DATE__" not in cmake
+    assert "__TIME__" not in cmake
+    assert "D1L_BUILD_EPOCH_SEC must be derived from the exact source commit" in service
+    assert "d1l_time_core_init(" in service
+    assert "(uint32_t)D1L_BUILD_EPOCH_SEC" in service
 
 
 def test_sntp_owner_uses_a_wait_semaphore_and_bounded_cancellation():
@@ -153,13 +218,18 @@ def test_sntp_sample_and_commit_are_generation_ordered_under_the_time_lock():
 
 def test_wall_generation_saturation_cannot_reuse_a_stale_cas_token():
     core = read("main/platform/time_service_core.c")
+    preflight = body(
+        core,
+        "esp_err_t d1l_time_core_preflight_wall(",
+        "esp_err_t d1l_time_core_set_wall(",
+    )
+    assert "core->wall_generation == UINT32_MAX" in preflight
+    assert "ESP_ERR_INVALID_STATE" in preflight
     set_wall = body(
         core,
         "esp_err_t d1l_time_core_set_wall(",
         "esp_err_t d1l_time_core_set_wall_if_generation(",
     )
-    assert "core->wall_generation == UINT32_MAX" in set_wall
-    assert "return ESP_ERR_INVALID_STATE" in set_wall
     assert "core->wall_generation++;" in set_wall
 
 
@@ -180,11 +250,14 @@ def test_map_delegates_certificate_time_without_owning_sntp_or_wall_clock():
 
 def test_future_wall_persistence_timezone_and_transport_stay_owned_by_service():
     header = read("main/platform/time_service.h")
+    console = read("main/comms/usb_console.c")
     assert "persist validated wall" in header
     assert "authenticated companion" in header
     assert "timezone/display conversion" in header
     assert "d1l_time_service_set_companion_time" in header
     assert "d1l_time_service_note_authenticated_lower_bound" in header
+    assert "capability boundary, not user input" in header
+    assert "d1l_time_service_set_companion_time" not in console
 
 
 def test_lower_bound_cannot_replace_a_stronger_or_later_clock():
@@ -201,7 +274,7 @@ def test_lower_bound_cannot_replace_a_stronger_or_later_clock():
     )
 
 
-def test_companion_failure_paths_cannot_mutate_system_time_before_service_lock():
+def test_companion_preflight_and_time_representation_precede_system_clock_mutation():
     service = read("main/platform/time_service.c")
     companion = body(
         service,
@@ -210,10 +283,80 @@ def test_companion_failure_paths_cannot_mutate_system_time_before_service_lock()
     )
     init_at = companion.index("d1l_time_service_init()")
     lock_at = companion.index("time_lock()")
+    preflight_at = companion.index("d1l_time_core_preflight_wall(")
+    representable_at = companion.index("(int64_t)value.tv_sec != epoch_sec")
     system_clock_at = companion.index("settimeofday(&value, NULL)")
     service_truth_at = companion.index("d1l_time_core_set_wall(")
-    assert init_at < lock_at < system_clock_at < service_truth_at
-    failure = companion.split("settimeofday(&value, NULL) != 0", 1)[1].split(
-        "const esp_err_t ret", 1
-    )[0]
-    assert "time_unlock();" in failure
+    assert init_at < lock_at < preflight_at < representable_at < system_clock_at < service_truth_at
+    pre_system = companion[:system_clock_at]
+    assert "preflight != ESP_OK" in pre_system
+    assert "time_unlock();" in pre_system
+
+
+def test_protocol_time_failure_returns_before_message_store_or_rf_side_effects():
+    mesh = read("main/mesh/meshcore_service.c")
+    advert = body(
+        mesh,
+        "static esp_err_t meshcore_service_handle_send_advert(",
+        "static void meshcore_service_finalize_send_advert(",
+    )
+    dm = body(
+        mesh,
+        "static esp_err_t meshcore_service_handle_send_dm(",
+        "static void meshcore_service_reply(",
+    )
+    public = body(
+        mesh,
+        "esp_err_t d1l_meshcore_service_send_public(",
+        "static esp_err_t meshcore_service_send_dm_command(",
+    )
+    assert advert.index("d1l_time_service_preflight_protocol_timestamp") < advert.index(
+        "d1l_meshcore_service_ensure_identity"
+    )
+    assert advert.index("d1l_time_service_preflight_protocol_timestamp") < advert.index(
+        "ensure_radio_started"
+    )
+    assert advert.index("d1l_settings_next_mesh_timestamp") < advert.index(
+        "build_advert_packet"
+    )
+    assert dm.index("d1l_time_service_preflight_protocol_timestamp") < dm.index(
+        "d1l_meshcore_service_ensure_identity"
+    )
+    assert dm.index("d1l_time_service_preflight_protocol_timestamp") < dm.index(
+        "ensure_radio_started"
+    )
+    assert dm.index("d1l_settings_next_mesh_timestamp") < dm.index(
+        "d1l_dm_store_append_tx"
+    )
+    assert public.index("d1l_time_service_preflight_protocol_timestamp") < public.index(
+        "D1L_MESHCORE_SERVICE_CMD_START_RX"
+    )
+    assert public.index("d1l_settings_next_mesh_timestamp") < public.index(
+        "remember_pending_public_tx"
+    )
+
+
+def test_usb_version_exposes_truthful_protocol_admission_and_recovery():
+    console = read("main/comms/usb_console.c")
+    header = read("main/platform/time_service.h")
+    assert '#include "platform/time_service.h"' in console
+    assert '\\"protocol_wall_admission\\"' in console
+    assert '\\"protocol_tx_ready\\"' in console
+    assert '\\"protocol_tx_error\\"' in console
+    assert '\\"protocol_persistence_state\\"' in console
+    assert '\\"protocol_persistence_state_code\\"' in console
+    assert '\\"protocol_persistence_error\\"' in console
+    assert '\\"protocol_persistence_error_code\\"' in console
+    assert '\\"protocol_tx_block\\"' in console
+    assert '\\"protocol_trust_anchor\\"' in console
+    assert '\\"sntp_ceiling\\"' in console
+    assert '"authenticated_companion_or_newer_firmware"' in console
+    assert '"protocol_persistence_migration_or_repair"' in console
+    assert '"protocol_upgrade_required"' in console
+    assert '"representable_authenticated_companion_or_protocol_upgrade"' in console
+    assert '"permanent_u32_ceiling_exhausted"' in console
+    assert '"recoverable_sntp_ahead_rejection"' in console
+    assert '"recoverable_wall_unrepresentable"' in console
+    assert "d1l_time_protocol_persistence_state_name" in console
+    assert "protocol_tx_ready" in header
+    assert "protocol_tx_error" in header

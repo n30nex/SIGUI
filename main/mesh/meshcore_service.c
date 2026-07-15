@@ -32,6 +32,7 @@
 #include "mesh/packet_log.h"
 #include "mesh/route_store.h"
 #include "mesh/store_lock.h"
+#include "platform/time_service.h"
 #include "radio.h"
 #include "sx126x.h"
 
@@ -3472,7 +3473,11 @@ static esp_err_t meshcore_service_handle_send_advert(
         return ESP_ERR_INVALID_ARG;
     }
 
-    esp_err_t ret = d1l_meshcore_service_ensure_identity();
+    esp_err_t ret = d1l_time_service_preflight_protocol_timestamp();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = d1l_meshcore_service_ensure_identity();
     if (ret != ESP_OK) {
         return ret;
     }
@@ -3782,6 +3787,11 @@ static esp_err_t meshcore_service_handle_send_dm(
      * the deadline/retry scheduler will generalize this in the next slice. */
     if (s_pending_dm_tx.delivery.active) {
         return ESP_ERR_INVALID_STATE;
+    }
+
+    ret = d1l_time_service_preflight_protocol_timestamp();
+    if (ret != ESP_OK) {
+        return ret;
     }
 
     d1l_contact_entry_t contact = {0};
@@ -4427,6 +4437,11 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
 {
     esp_err_t ret = validate_user_text(text);
     if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = d1l_time_service_preflight_protocol_timestamp();
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
         return ret;
     }
     d1l_meshcore_service_cmd_t start_cmd = {

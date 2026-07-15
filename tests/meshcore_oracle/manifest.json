@@ -68,7 +68,7 @@
     }
   },
   "production_binding_sources": {
-    "main/CMakeLists.txt": "cc1d7785e20356461c2952e015adafc7d297fa2c53db6397bdb29cc646ae663b",
+    "main/CMakeLists.txt": "a1b417320b7defb2d9521eebbc2c2ac358a5c69519a709a262881d7adcfb4973",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "3f895213e9cb8fdf5da67a01fac26df35aa542c6f2ffcf179d1e0d276a1d9e14",
     "main/mesh/contact_store.h": "2252ef58b703c6721a1fd77f2a1306d6ea4d9f419af5c996666a212a29752750",
@@ -80,7 +80,7 @@
     "main/mesh/meshcore_path_state.c": "f3e4071574a0a65cab1caa4ad285f64943a0770c82ac2df803328212d9db9d77",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
-    "main/mesh/meshcore_service.c": "6c216fc43940da480d6c273366e853083c998da8e06e6ff07911a19d7f5fda1e",
+    "main/mesh/meshcore_service.c": "a2445702cabb03648ac217b2d91751d19cb62ddba49c2919b268a871369ef0bb",
     "main/mesh/meshcore_service.h": "bc8972f0155e3193ababa19bb2cad2ee08ec77d5df6316f06f0407285dcfc85c",
     "main/mesh/meshcore_trace.h": "efc3a08ffb6adda5310ca57eef31535fe7dadeb993aedda9fdb2814b891d41f7",
     "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",

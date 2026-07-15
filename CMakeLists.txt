@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 
+# Resolve provenance before applying the reviewed BSP patches below.  This
+# keeps the release-cleanliness check bound to the exact source checkout while
+# allowing the deterministic submodule patch step to proceed afterwards.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/d1l_source_provenance.cmake")
+d1l_resolve_source_provenance(
+    "${CMAKE_CURRENT_LIST_DIR}"
+    D1L_BUILD_GIT_COMMIT
+    D1L_BUILD_EPOCH_SEC
+)
+
 if(NOT DEFINED PROJECT_VER)
     execute_process(
         COMMAND git rev-parse --short HEAD
