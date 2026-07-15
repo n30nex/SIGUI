@@ -23,6 +23,7 @@
 #include "mesh/packet_log.h"
 #include "mesh/route_store.h"
 #include "mesh/route_store_worker.h"
+#include "platform/time_service.h"
 
 struct d1l_native_semaphore {
     pthread_mutex_t mutex;
@@ -54,7 +55,7 @@ typedef struct {
 
 static pthread_mutex_t s_store_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_store_condition = PTHREAD_COND_INITIALIZER;
-static native_store_t s_stores[5];
+static native_store_t s_stores[6];
 static bool s_block_message;
 static bool s_message_entered;
 static bool s_release_message;
@@ -253,7 +254,7 @@ void d1l_health_monitor_register_retained_task(TaskHandle_t task)
 
 static esp_err_t native_store_flush(size_t index)
 {
-    assert(index < 5U);
+    assert(index < 6U);
     assert(pthread_mutex_lock(&s_store_mutex) == 0);
     native_store_t *store = &s_stores[index];
     store->flush_calls++;
@@ -273,7 +274,7 @@ static esp_err_t native_store_flush(size_t index)
 
 static native_store_t native_store_stats(size_t index)
 {
-    assert(index < 5U);
+    assert(index < 6U);
     assert(pthread_mutex_lock(&s_store_mutex) == 0);
     const native_store_t stats = s_stores[index];
     assert(pthread_mutex_unlock(&s_store_mutex) == 0);
@@ -290,6 +291,28 @@ esp_err_t d1l_route_store_flush(void) { return native_store_flush(3U); }
 esp_err_t d1l_route_store_flush_if_due(void) { return native_store_flush(3U); }
 esp_err_t d1l_contact_store_flush(void) { return native_store_flush(4U); }
 esp_err_t d1l_contact_store_flush_if_due(void) { return native_store_flush(4U); }
+esp_err_t d1l_time_service_wall_checkpoint_flush(void)
+{
+    return native_store_flush(5U);
+}
+esp_err_t d1l_time_service_wall_checkpoint_flush_if_due(void)
+{
+    return native_store_flush(5U);
+}
+
+void d1l_time_service_status(d1l_time_service_status_t *out_status)
+{
+    assert(out_status != NULL);
+    const native_store_t stats = native_store_stats(5U);
+    *out_status = (d1l_time_service_status_t) {
+        .wall_checkpoint = {
+            .revision = (uint32_t)stats.revision,
+        },
+        .wall_checkpoint_write_count = stats.commits,
+        .wall_checkpoint_failure_count = stats.failures,
+        .wall_checkpoint_pending = stats.dirty,
+    };
+}
 
 d1l_message_store_stats_t d1l_message_store_stats(void)
 {
@@ -398,7 +421,7 @@ static uint32_t store_flush_calls(size_t index)
 
 int main(void)
 {
-    for (size_t i = 0U; i < 5U; ++i) {
+    for (size_t i = 0U; i < 6U; ++i) {
         s_stores[i].dirty = true;
         s_stores[i].revision = i + 1U;
     }
@@ -440,6 +463,7 @@ int main(void)
     assert(store_flush_calls(2U) == 0U);
     assert(store_flush_calls(3U) == 0U);
     assert(store_flush_calls(4U) == 0U);
+    assert(store_flush_calls(5U) == 0U);
 
     assert(d1l_route_store_worker_force_flush(1000U) == ESP_OK);
     assert(store_flush_calls(0U) == 2U);
@@ -447,6 +471,7 @@ int main(void)
     assert(store_flush_calls(2U) == 1U);
     assert(store_flush_calls(3U) == 1U);
     assert(store_flush_calls(4U) == 1U);
+    assert(store_flush_calls(5U) == 1U);
 
     /* A quiesce owner holds both request and flush locks. A competing forced
      * caller times out, then quiesce_end releases both for the next request. */
@@ -465,6 +490,7 @@ int main(void)
     assert(store_flush_calls(2U) == 2U);
     assert(store_flush_calls(3U) == 2U);
     assert(store_flush_calls(4U) == 2U);
+    assert(store_flush_calls(5U) == 2U);
 
     puts("native retained-store worker lifecycle: ok");
     return 0;

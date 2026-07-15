@@ -544,7 +544,17 @@ static void cmd_version(void)
            "\"protocol_tx_block\":\"%s\","
            "\"protocol_trust_anchor\":%lu,\"sntp_ceiling\":%lu,"
            "\"protocol_ahead_of_wall_sec\":%" PRId64 ","
-           "\"recovery\":\"%s\"}}\n",
+           "\"recovery\":\"%s\","
+           "\"checkpoint\":{\"state\":\"%s\",\"state_code\":%u,"
+           "\"error\":\"%s\",\"error_code\":%ld,"
+           "\"revision\":%lu,\"epoch_sec\":%" PRId64 ","
+           "\"protocol_reserved_through\":%lu,\"source\":\"%s\","
+           "\"present\":%s,\"recovered\":%s,\"pending\":%s,"
+           "\"write_blocked\":%s,"
+           "\"recovery_error\":\"%s\",\"recovery_error_code\":%ld,"
+           "\"write_count\":%lu,\"skip_count\":%lu,"
+           "\"failure_count\":%lu,\"retry_not_before_us\":%" PRIu64
+           "}}}\n",
            D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION, D1L_BUILD_GIT_COMMIT,
            esp_get_idf_version(),
            (unsigned long)time_status.clock.build_epoch_sec,
@@ -565,7 +575,28 @@ static void cmd_version(void)
            (unsigned long)time_status.clock.protocol_trust_anchor,
            (unsigned long)time_status.clock.protocol_sntp_ceiling,
            time_status.clock.protocol_ahead_of_wall_sec,
-           recovery);
+           recovery,
+           d1l_settings_time_checkpoint_state_name(
+               time_status.wall_checkpoint.state),
+           (unsigned)time_status.wall_checkpoint.state,
+           esp_err_to_name(time_status.wall_checkpoint.error),
+           (long)time_status.wall_checkpoint.error,
+           (unsigned long)time_status.wall_checkpoint.revision,
+           time_status.wall_checkpoint.epoch_sec,
+           (unsigned long)
+               time_status.wall_checkpoint.protocol_reserved_through,
+           d1l_settings_time_checkpoint_source_name(
+               time_status.wall_checkpoint.source),
+           bool_json(time_status.wall_checkpoint.found),
+           bool_json(time_status.wall_checkpoint_recovered),
+           bool_json(time_status.wall_checkpoint_pending),
+           bool_json(time_status.wall_checkpoint_write_blocked),
+           esp_err_to_name(time_status.wall_checkpoint_recovery_error),
+           (long)time_status.wall_checkpoint_recovery_error,
+           (unsigned long)time_status.wall_checkpoint_write_count,
+           (unsigned long)time_status.wall_checkpoint_skip_count,
+           (unsigned long)time_status.wall_checkpoint_failure_count,
+           time_status.wall_checkpoint_retry_not_before_us);
 }
 
 static void cmd_board(void)

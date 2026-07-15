@@ -16,7 +16,9 @@ static bool wall_pair_valid(d1l_time_validity_t validity,
 {
     switch (validity) {
         case D1L_TIME_VALIDITY_APPROXIMATE:
-            return source == D1L_TIME_SOURCE_RETAINED_AUTHENTICATED;
+            return source == D1L_TIME_SOURCE_RETAINED_AUTHENTICATED ||
+                   source ==
+                       D1L_TIME_SOURCE_RETAINED_VALIDATED_CHECKPOINT;
         case D1L_TIME_VALIDITY_NETWORK_VALIDATED:
             return source == D1L_TIME_SOURCE_SNTP;
         case D1L_TIME_VALIDITY_COMPANION_VALIDATED:
@@ -294,6 +296,33 @@ esp_err_t d1l_time_core_note_authenticated_lower_bound(
         D1L_TIME_SOURCE_RETAINED_AUTHENTICATED);
 }
 
+esp_err_t d1l_time_core_recover_retained_checkpoint(
+    d1l_time_service_core_t *core,
+    int64_t epoch_sec,
+    uint32_t protocol_reserved_through_at_commit,
+    uint64_t observed_now_us)
+{
+    if (!core || epoch_sec < D1L_TIME_WALL_MIN_EPOCH ||
+        protocol_reserved_through_at_commit <
+            D1L_TIME_PROTOCOL_TIMESTAMP_BASE ||
+        protocol_reserved_through_at_commit >
+            core->protocol_reserved_through) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    (void)d1l_time_core_observe_monotonic(core, observed_now_us);
+    if (core->wall_set) {
+        const int64_t current_wall = wall_at(core, core->last_monotonic_us);
+        if (d1l_time_core_certificate_validity(core->wall_validity) ||
+            current_wall >= epoch_sec) {
+            return ESP_OK;
+        }
+    }
+    return d1l_time_core_set_wall(
+        core, epoch_sec, core->last_monotonic_us,
+        D1L_TIME_VALIDITY_APPROXIMATE,
+        D1L_TIME_SOURCE_RETAINED_VALIDATED_CHECKPOINT);
+}
+
 esp_err_t d1l_time_core_preflight_protocol_timestamp(
     const d1l_time_service_core_t *core,
     uint64_t observed_now_us)
@@ -401,6 +430,23 @@ bool d1l_time_core_certificate_validity(d1l_time_validity_t validity)
            validity == D1L_TIME_VALIDITY_COMPANION_VALIDATED;
 }
 
+bool d1l_time_core_wall_checkpoint_eligible(
+    const d1l_time_service_core_t *core)
+{
+    if (!core || !core->wall_set) {
+        return false;
+    }
+    return (core->wall_validity == D1L_TIME_VALIDITY_NETWORK_VALIDATED &&
+            core->wall_source == D1L_TIME_SOURCE_SNTP &&
+            core->protocol_wall_admission ==
+                D1L_TIME_PROTOCOL_WALL_SNTP_ADMITTED) ||
+           (core->wall_validity == D1L_TIME_VALIDITY_COMPANION_VALIDATED &&
+            core->wall_source ==
+                D1L_TIME_SOURCE_COMPANION_AUTHENTICATED &&
+            core->protocol_wall_admission ==
+                D1L_TIME_PROTOCOL_WALL_COMPANION_AUTHORIZED);
+}
+
 const char *d1l_time_validity_name(d1l_time_validity_t validity)
 {
     switch (validity) {
@@ -432,6 +478,8 @@ const char *d1l_time_source_name(d1l_time_source_t source)
             return "sntp";
         case D1L_TIME_SOURCE_COMPANION_AUTHENTICATED:
             return "companion_authenticated";
+        case D1L_TIME_SOURCE_RETAINED_VALIDATED_CHECKPOINT:
+            return "retained_validated_checkpoint";
         default:
             return "unknown";
     }

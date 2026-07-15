@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "app/settings_time_checkpoint.h"
 #include "platform/time_service_core.h"
 
 #define D1L_TIME_TLS_WAIT_TIMEOUT_MS 15000U
@@ -17,10 +18,19 @@ typedef struct {
     esp_err_t protocol_persistence_error;
     esp_err_t protocol_tx_error;
     esp_err_t sntp_init_error;
+    d1l_settings_time_checkpoint_status_t wall_checkpoint;
+    esp_err_t wall_checkpoint_recovery_error;
+    uint32_t wall_checkpoint_write_count;
+    uint32_t wall_checkpoint_skip_count;
+    uint32_t wall_checkpoint_failure_count;
+    uint64_t wall_checkpoint_retry_not_before_us;
     bool initialized;
     bool protocol_persistence_ready;
     bool protocol_tx_ready;
     bool sntp_initialized;
+    bool wall_checkpoint_recovered;
+    bool wall_checkpoint_pending;
+    bool wall_checkpoint_write_blocked;
 } d1l_time_service_status_t;
 
 esp_err_t d1l_time_service_init(void);
@@ -42,7 +52,12 @@ esp_err_t d1l_time_service_note_authenticated_lower_bound(
     int64_t epoch_sec,
     bool authenticated);
 
-/* WP-12 follow-up slices retain ownership here: persist validated wall
- * checkpoints without write amplification, wire the authenticated companion
- * transport, and add timezone/display conversion without changing protocol
- * allocation semantics. */
+/* The common retained worker is the only runtime writer. Forced flushes are
+ * used by controlled-reboot quiescence; background passes honor retry
+ * backoff. */
+esp_err_t d1l_time_service_wall_checkpoint_flush(void);
+esp_err_t d1l_time_service_wall_checkpoint_flush_if_due(void);
+
+/* This service now persists validated wall checkpoints without changing
+ * protocol allocation semantics. WP-12 follow-up slices retain ownership of
+ * authenticated companion transport and timezone/display conversion. */

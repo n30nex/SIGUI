@@ -25,6 +25,7 @@ _Static_assert((int64_t)D1L_BUILD_EPOCH_SEC <=
 #define D1L_TIME_NVS_NAMESPACE "d1l_settings"
 #define D1L_TIME_PROTOCOL_LEGACY_KEY "mesh_ts"
 #define D1L_TIME_PROTOCOL_HIGH_WATER_KEY "mesh_hi_v2"
+#define D1L_TIME_CHECKPOINT_RETRY_BACKOFF_US UINT64_C(30000000)
 
 static StaticSemaphore_t s_time_mutex_storage;
 static SemaphoreHandle_t s_time_mutex;
@@ -36,6 +37,21 @@ static d1l_time_protocol_persistence_state_t s_protocol_persistence_state =
     D1L_TIME_PROTOCOL_PERSISTENCE_UNINITIALIZED;
 static esp_err_t s_protocol_persistence_error = ESP_ERR_INVALID_STATE;
 static esp_err_t s_sntp_init_error = ESP_ERR_INVALID_STATE;
+static d1l_settings_time_checkpoint_status_t s_wall_checkpoint_status = {
+    .state = D1L_SETTINGS_TIME_CHECKPOINT_UNINITIALIZED,
+    .error = ESP_ERR_INVALID_STATE,
+};
+static esp_err_t s_wall_checkpoint_recovery_error = ESP_ERR_INVALID_STATE;
+static uint32_t s_wall_checkpoint_write_count;
+static uint32_t s_wall_checkpoint_skip_count;
+static uint32_t s_wall_checkpoint_failure_count;
+static bool s_wall_checkpoint_load_attempted;
+static bool s_wall_checkpoint_recovered;
+static d1l_settings_time_checkpoint_t s_wall_checkpoint_pending;
+static uint64_t s_wall_checkpoint_pending_generation;
+static uint64_t s_wall_checkpoint_retry_not_before_us;
+static bool s_wall_checkpoint_dirty;
+static bool s_wall_checkpoint_write_blocked;
 
 static uint64_t monotonic_now_us(void)
 {
@@ -127,6 +143,145 @@ static esp_err_t load_protocol_seed_locked(void)
     return ret;
 }
 
+static esp_err_t load_wall_checkpoint_locked(void)
+{
+    if (s_wall_checkpoint_load_attempted) {
+        return s_wall_checkpoint_recovery_error;
+    }
+    s_wall_checkpoint_load_attempted = true;
+
+    d1l_settings_time_checkpoint_t checkpoint = {0};
+    d1l_settings_time_checkpoint_status_t status = {0};
+    const esp_err_t load_ret = d1l_settings_time_checkpoint_load(
+        &checkpoint, &status);
+    s_wall_checkpoint_status = status;
+    s_wall_checkpoint_recovery_error = load_ret;
+    if (load_ret != ESP_OK || !status.found) {
+        s_wall_checkpoint_write_blocked =
+            status.state ==
+                D1L_SETTINGS_TIME_CHECKPOINT_QUARANTINED_NEWER_SCHEMA ||
+            status.state ==
+                D1L_SETTINGS_TIME_CHECKPOINT_QUARANTINED_MALFORMED ||
+            status.state ==
+                D1L_SETTINGS_TIME_CHECKPOINT_QUARANTINED_CHECKSUM;
+        return load_ret;
+    }
+
+    const esp_err_t recover_ret =
+        d1l_time_core_recover_retained_checkpoint(
+            &s_time_core, checkpoint.epoch_sec,
+            checkpoint.protocol_reserved_through, monotonic_now_us());
+    s_wall_checkpoint_recovery_error = recover_ret;
+    s_wall_checkpoint_write_blocked = recover_ret != ESP_OK;
+    s_wall_checkpoint_recovered =
+        recover_ret == ESP_OK && s_time_core.wall_set &&
+        s_time_core.wall_source ==
+            D1L_TIME_SOURCE_RETAINED_VALIDATED_CHECKPOINT;
+    return recover_ret;
+}
+
+static esp_err_t queue_validated_wall_checkpoint_locked(
+    int64_t epoch_sec,
+    d1l_settings_time_checkpoint_source_t source)
+{
+    if (s_wall_checkpoint_write_blocked) {
+        return s_wall_checkpoint_status.error != ESP_OK ?
+            s_wall_checkpoint_status.error : ESP_ERR_INVALID_STATE;
+    }
+    if (s_wall_checkpoint_pending_generation == UINT64_MAX) {
+        s_wall_checkpoint_failure_count++;
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_wall_checkpoint_pending = (d1l_settings_time_checkpoint_t) {
+        .epoch_sec = epoch_sec,
+        .protocol_reserved_through =
+            s_time_core.protocol_reserved_through,
+        .source = source,
+    };
+    s_wall_checkpoint_pending_generation++;
+    s_wall_checkpoint_dirty = true;
+    return ESP_OK;
+}
+
+static esp_err_t flush_wall_checkpoint(bool force)
+{
+    if (!s_initialized) {
+        const esp_err_t init_ret = d1l_time_service_init();
+        if (init_ret != ESP_OK && !s_initialized) {
+            return init_ret;
+        }
+    }
+    if (!time_lock()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_wall_checkpoint_dirty) {
+        time_unlock();
+        return ESP_OK;
+    }
+    const uint64_t now_us = monotonic_now_us();
+    if (!force && now_us < s_wall_checkpoint_retry_not_before_us) {
+        time_unlock();
+        return ESP_OK;
+    }
+    const d1l_settings_time_checkpoint_t checkpoint =
+        s_wall_checkpoint_pending;
+    const uint64_t generation = s_wall_checkpoint_pending_generation;
+    time_unlock();
+
+    d1l_settings_time_checkpoint_status_t status = {0};
+    bool written = false;
+    const esp_err_t ret = d1l_settings_time_checkpoint_save(
+        &checkpoint, &written, &status);
+
+    /* NVS I/O above is deliberately outside the time mutex and the adoption
+     * call path. A generation token prevents an in-flight save from clearing
+     * a newer validated candidate. */
+    if (!time_lock()) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    if (status.revision >= s_wall_checkpoint_status.revision ||
+        s_wall_checkpoint_status.state ==
+            D1L_SETTINGS_TIME_CHECKPOINT_UNINITIALIZED) {
+        s_wall_checkpoint_status = status;
+    }
+    if (ret == ESP_OK) {
+        if (written) {
+            s_wall_checkpoint_write_count++;
+        } else {
+            s_wall_checkpoint_skip_count++;
+        }
+        s_wall_checkpoint_retry_not_before_us = 0U;
+        if (generation == s_wall_checkpoint_pending_generation) {
+            s_wall_checkpoint_dirty = false;
+        }
+    } else {
+        s_wall_checkpoint_failure_count++;
+        const bool permanent =
+            status.state ==
+                D1L_SETTINGS_TIME_CHECKPOINT_QUARANTINED_NEWER_SCHEMA ||
+            status.state ==
+                D1L_SETTINGS_TIME_CHECKPOINT_QUARANTINED_MALFORMED ||
+            status.state ==
+                D1L_SETTINGS_TIME_CHECKPOINT_QUARANTINED_CHECKSUM ||
+            status.state ==
+                D1L_SETTINGS_TIME_CHECKPOINT_REVISION_SATURATED;
+        if (permanent) {
+            s_wall_checkpoint_write_blocked = true;
+            if (generation == s_wall_checkpoint_pending_generation) {
+                s_wall_checkpoint_dirty = false;
+            }
+        } else {
+            s_wall_checkpoint_retry_not_before_us =
+                UINT64_MAX - now_us <
+                        D1L_TIME_CHECKPOINT_RETRY_BACKOFF_US ?
+                    UINT64_MAX :
+                    now_us + D1L_TIME_CHECKPOINT_RETRY_BACKOFF_US;
+        }
+    }
+    time_unlock();
+    return ret;
+}
+
 static esp_err_t reserve_protocol_range(void *context,
                                         uint32_t reserved_through)
 {
@@ -194,6 +349,12 @@ static esp_err_t accept_sntp_system_time(uint32_t expected_generation)
         monotonic_now_us(), D1L_TIME_VALIDITY_NETWORK_VALIDATED,
         D1L_TIME_SOURCE_SNTP);
     const bool ready = ret == ESP_OK && snapshot_certificate_valid_locked();
+    const bool checkpoint_admitted =
+        ready && d1l_time_core_wall_checkpoint_eligible(&s_time_core);
+    if (checkpoint_admitted) {
+        (void)queue_validated_wall_checkpoint_locked(
+            (int64_t)now, D1L_SETTINGS_TIME_CHECKPOINT_SOURCE_SNTP);
+    }
     time_unlock();
     return ready ? ESP_OK : (ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret);
 }
@@ -260,6 +421,12 @@ esp_err_t d1l_time_service_init(void)
     esp_err_t ret = ESP_OK;
     if (!s_protocol_seed_ready) {
         ret = load_protocol_seed_locked();
+    }
+    /* A damaged/future checkpoint remains quarantined and observable but is
+     * never allowed to block the independent protocol high-water seed. Its
+     * embedded guard is checked only after that seed is established. */
+    if (s_protocol_seed_ready) {
+        (void)load_wall_checkpoint_locked();
     }
     time_unlock();
     return ret;
@@ -331,18 +498,47 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
     *out_status = (d1l_time_service_status_t) {0};
     out_status->protocol_persistence_state = s_protocol_persistence_state;
     out_status->protocol_persistence_error = s_protocol_persistence_error;
+    out_status->wall_checkpoint = s_wall_checkpoint_status;
+    out_status->wall_checkpoint_recovery_error =
+        s_wall_checkpoint_recovery_error;
     if (!s_initialized && d1l_time_service_init() != ESP_OK && !s_initialized) {
         out_status->protocol_persistence_state =
             s_protocol_persistence_state;
         out_status->protocol_persistence_error = s_protocol_persistence_error;
         out_status->protocol_tx_error = ESP_ERR_INVALID_STATE;
         out_status->sntp_init_error = s_sntp_init_error;
+        out_status->wall_checkpoint_write_count =
+            s_wall_checkpoint_write_count;
+        out_status->wall_checkpoint_skip_count =
+            s_wall_checkpoint_skip_count;
+        out_status->wall_checkpoint_failure_count =
+            s_wall_checkpoint_failure_count;
+        out_status->wall_checkpoint_recovered =
+            s_wall_checkpoint_recovered;
+        out_status->wall_checkpoint_retry_not_before_us =
+            s_wall_checkpoint_retry_not_before_us;
+        out_status->wall_checkpoint_pending = s_wall_checkpoint_dirty;
+        out_status->wall_checkpoint_write_blocked =
+            s_wall_checkpoint_write_blocked;
         return;
     }
     if (!time_lock()) {
         out_status->protocol_persistence_error = ESP_ERR_INVALID_STATE;
         out_status->protocol_tx_error = ESP_ERR_INVALID_STATE;
         out_status->sntp_init_error = s_sntp_init_error;
+        out_status->wall_checkpoint_write_count =
+            s_wall_checkpoint_write_count;
+        out_status->wall_checkpoint_skip_count =
+            s_wall_checkpoint_skip_count;
+        out_status->wall_checkpoint_failure_count =
+            s_wall_checkpoint_failure_count;
+        out_status->wall_checkpoint_recovered =
+            s_wall_checkpoint_recovered;
+        out_status->wall_checkpoint_retry_not_before_us =
+            s_wall_checkpoint_retry_not_before_us;
+        out_status->wall_checkpoint_pending = s_wall_checkpoint_dirty;
+        out_status->wall_checkpoint_write_blocked =
+            s_wall_checkpoint_write_blocked;
         return;
     }
     d1l_time_core_snapshot(&s_time_core, monotonic_now_us(),
@@ -361,6 +557,21 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
             s_protocol_persistence_error;
     out_status->sntp_initialized = s_sntp_initialized;
     out_status->sntp_init_error = s_sntp_init_error;
+    out_status->wall_checkpoint = s_wall_checkpoint_status;
+    out_status->wall_checkpoint_recovery_error =
+        s_wall_checkpoint_recovery_error;
+    out_status->wall_checkpoint_write_count =
+        s_wall_checkpoint_write_count;
+    out_status->wall_checkpoint_skip_count =
+        s_wall_checkpoint_skip_count;
+    out_status->wall_checkpoint_failure_count =
+        s_wall_checkpoint_failure_count;
+    out_status->wall_checkpoint_recovered = s_wall_checkpoint_recovered;
+    out_status->wall_checkpoint_retry_not_before_us =
+        s_wall_checkpoint_retry_not_before_us;
+    out_status->wall_checkpoint_pending = s_wall_checkpoint_dirty;
+    out_status->wall_checkpoint_write_blocked =
+        s_wall_checkpoint_write_blocked;
     time_unlock();
 }
 
@@ -498,6 +709,12 @@ esp_err_t d1l_time_service_set_companion_time(int64_t epoch_sec,
         &s_time_core, epoch_sec, monotonic_now_us(),
         D1L_TIME_VALIDITY_COMPANION_VALIDATED,
         D1L_TIME_SOURCE_COMPANION_AUTHENTICATED);
+    if (ret == ESP_OK &&
+        d1l_time_core_wall_checkpoint_eligible(&s_time_core)) {
+        (void)queue_validated_wall_checkpoint_locked(
+            epoch_sec,
+            D1L_SETTINGS_TIME_CHECKPOINT_SOURCE_COMPANION_AUTHENTICATED);
+    }
     time_unlock();
     return ret;
 }
@@ -519,6 +736,16 @@ esp_err_t d1l_time_service_note_authenticated_lower_bound(
         &s_time_core, epoch_sec, monotonic_now_us());
     time_unlock();
     return ret;
+}
+
+esp_err_t d1l_time_service_wall_checkpoint_flush(void)
+{
+    return flush_wall_checkpoint(true);
+}
+
+esp_err_t d1l_time_service_wall_checkpoint_flush_if_due(void)
+{
+    return flush_wall_checkpoint(false);
 }
 
 /* Compatibility boundary for the current MeshCore command owner.  The

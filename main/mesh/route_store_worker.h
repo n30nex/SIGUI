@@ -23,7 +23,7 @@ typedef struct {
 
 esp_err_t d1l_route_store_worker_start(void);
 /* The timeout is one absolute deadline for queue wait, flush-lock wait and all
- * five stores. Store callbacks are synchronous: a callback already in flight
+ * six stores. Store callbacks are synchronous: a callback already in flight
  * may finish after the caller receives ESP_ERR_TIMEOUT, but no later store is
  * started. `d1l_retained_store_worker_status()` remains running with the
  * active store until that callback returns and the worker releases its lock. */
