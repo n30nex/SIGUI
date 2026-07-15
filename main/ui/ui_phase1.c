@@ -23,6 +23,7 @@
 #include "hal/indicator_board.h"
 #include "mesh/user_text.h"
 #include "ui_ble.h"
+#include "ui_channel_sheets.h"
 #include "ui_chrome.h"
 #include "ui_compose_eligibility.h"
 #include "ui_connectivity.h"
@@ -131,6 +132,7 @@ static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_device_sheets_controller_t s_device_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_radio_settings_controller_t s_radio_settings_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_contact_sheets_controller_t s_contact_sheets_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_channel_sheets_controller_t s_channel_sheets_controller EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
@@ -1440,6 +1442,12 @@ static void hide_contact_export_sheet(void)
     restore_dock_for_active_tab();
 }
 
+static void hide_channel_management_sheets(void)
+{
+    d1l_ui_channel_sheets_hide_all(&s_channel_sheets_controller, true);
+    restore_dock_for_active_tab();
+}
+
 static void hide_node_detail_sheet(void)
 {
     d1l_ui_modal_hide(s_node_detail_sheet);
@@ -2276,6 +2284,7 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
     hide_map_options_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
+    hide_channel_management_sheets();
     hide_route_detail_sheet();
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
@@ -3055,6 +3064,7 @@ static void show_node_detail_view(const d1l_node_view_t *view, bool return_to_ma
     hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
+    hide_channel_management_sheets();
     hide_route_detail_sheet();
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
@@ -4588,6 +4598,313 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     view_model->dm_failure_latched = snapshot->dm_failure_latched;
 }
 
+static bool show_channel_selector_sheet(void)
+{
+    d1l_app_model_snapshot(&s_snapshot);
+    messages_view_model_from_snapshot(
+        &s_snapshot, &s_messages_controller.rendered);
+    if (!d1l_ui_messages_render_channel_selector(
+            &s_messages_controller, handle_messages_action, NULL)) {
+        d1l_ui_messages_hide_channel_selector(&s_messages_controller);
+        return false;
+    }
+    show_modal(d1l_ui_messages_channel_selector_sheet(
+        &s_messages_controller));
+    return true;
+}
+
+static void channel_management_action_handler(
+    const d1l_ui_channel_action_event_t *event,
+    void *context);
+
+static bool show_channel_create_sheet(void)
+{
+    d1l_ui_messages_hide_channel_selector(&s_messages_controller);
+    d1l_ui_channel_sheets_hide_all(&s_channel_sheets_controller, false);
+    if (!d1l_ui_channel_sheets_render_create(
+            &s_channel_sheets_controller,
+            channel_management_action_handler, NULL)) {
+        d1l_ui_channel_sheets_hide_create(&s_channel_sheets_controller);
+        return false;
+    }
+    show_modal(d1l_ui_channel_sheets_create_sheet(
+        &s_channel_sheets_controller));
+    return true;
+}
+
+static bool show_channel_import_sheet(void)
+{
+    d1l_ui_messages_hide_channel_selector(&s_messages_controller);
+    d1l_ui_channel_sheets_hide_all(&s_channel_sheets_controller, false);
+    if (!d1l_ui_channel_sheets_render_import(
+            &s_channel_sheets_controller,
+            channel_management_action_handler, NULL)) {
+        d1l_ui_channel_sheets_hide_import(&s_channel_sheets_controller);
+        return false;
+    }
+    show_modal(d1l_ui_channel_sheets_import_sheet(
+        &s_channel_sheets_controller));
+    return true;
+}
+
+static bool show_channel_options_sheet(void)
+{
+    d1l_ui_messages_hide_channel_selector(&s_messages_controller);
+    d1l_ui_channel_sheets_hide_all(&s_channel_sheets_controller, false);
+    if (!d1l_ui_channel_sheets_render_options(
+            &s_channel_sheets_controller,
+            channel_management_action_handler, NULL)) {
+        d1l_ui_channel_sheets_hide_options(&s_channel_sheets_controller);
+        return false;
+    }
+    show_modal(d1l_ui_channel_sheets_options(
+        &s_channel_sheets_controller));
+    return true;
+}
+
+static bool show_channel_edit_sheet(void)
+{
+    d1l_ui_channel_sheets_hide_all(&s_channel_sheets_controller, false);
+    if (!d1l_ui_channel_sheets_render_edit(
+            &s_channel_sheets_controller,
+            channel_management_action_handler, NULL)) {
+        d1l_ui_channel_sheets_hide_edit(&s_channel_sheets_controller);
+        return false;
+    }
+    show_modal(d1l_ui_channel_sheets_edit(
+        &s_channel_sheets_controller));
+    return true;
+}
+
+static bool show_channel_remove_sheet(void)
+{
+    d1l_ui_channel_sheets_hide_all(&s_channel_sheets_controller, false);
+    if (!d1l_ui_channel_sheets_render_remove(
+            &s_channel_sheets_controller,
+            channel_management_action_handler, NULL)) {
+        d1l_ui_channel_sheets_hide_remove(&s_channel_sheets_controller);
+        return false;
+    }
+    show_modal(d1l_ui_channel_sheets_remove(
+        &s_channel_sheets_controller));
+    return true;
+}
+
+static void show_channel_mutation_result(
+    const char *action,
+    esp_err_t ret,
+    d1l_channel_mutation_result_t result)
+{
+    if (ret == ESP_OK) {
+        show_toast_text(action, true);
+        return;
+    }
+    switch (result) {
+    case D1L_CHANNEL_MUTATION_NAME_COLLISION:
+        show_toast_text("Channel name already exists", false);
+        return;
+    case D1L_CHANNEL_MUTATION_SECRET_COLLISION:
+        show_toast_text("Channel key already exists", false);
+        return;
+    case D1L_CHANNEL_MUTATION_FULL:
+        show_toast_text("All channel slots are in use", false);
+        return;
+    case D1L_CHANNEL_MUTATION_PROTECTED:
+        show_toast_text("Public channel is protected", false);
+        return;
+    case D1L_CHANNEL_MUTATION_NONE:
+    case D1L_CHANNEL_MUTATION_CREATED:
+    case D1L_CHANNEL_MUTATION_UPDATED:
+    case D1L_CHANNEL_MUTATION_REMOVED:
+    case D1L_CHANNEL_MUTATION_EXISTS:
+    default:
+        show_toast(action, ret);
+        return;
+    }
+}
+
+static bool set_managed_channel(const d1l_channel_info_t *channel)
+{
+    return channel && channel->channel_id != 0U &&
+        d1l_ui_channel_sheets_set_channel(
+            &s_channel_sheets_controller, channel);
+}
+
+static bool show_channel_export_sheet(void)
+{
+    const d1l_channel_info_t *channel =
+        d1l_ui_channel_sheets_channel(&s_channel_sheets_controller);
+    char uri[D1L_CHANNEL_SHARE_URI_LEN] = {0};
+    esp_err_t ret = channel ?
+        d1l_app_model_export_channel_share_uri(
+            channel->channel_id, uri, sizeof(uri)) :
+        ESP_ERR_INVALID_STATE;
+    if (ret == ESP_OK && !d1l_ui_channel_sheets_set_export_uri(
+            &s_channel_sheets_controller, uri)) {
+        ret = ESP_ERR_INVALID_STATE;
+    }
+    d1l_app_model_clear_channel_share_uri(uri, sizeof(uri));
+    if (ret != ESP_OK) {
+        d1l_ui_channel_sheets_clear_export_uri(
+            &s_channel_sheets_controller);
+        show_toast("Channel export", ret);
+        return false;
+    }
+    d1l_ui_channel_sheets_hide_options(&s_channel_sheets_controller);
+    if (!d1l_ui_channel_sheets_render_export(
+            &s_channel_sheets_controller,
+            channel_management_action_handler, NULL)) {
+        d1l_ui_channel_sheets_hide_export(&s_channel_sheets_controller);
+        show_toast("Channel export", ESP_ERR_NO_MEM);
+        return false;
+    }
+    show_modal(d1l_ui_channel_sheets_export(
+        &s_channel_sheets_controller));
+    return true;
+}
+
+static void return_to_channel_selector(void)
+{
+    d1l_ui_channel_sheets_hide_all(&s_channel_sheets_controller, true);
+    request_content_refresh();
+    if (!show_channel_selector_sheet()) {
+        show_toast("Channels", ESP_ERR_NO_MEM);
+    }
+}
+
+static size_t bounded_channel_uri_length(const char *text)
+{
+    if (!text) {
+        return 0U;
+    }
+    const char *end = memchr(text, '\0', D1L_CHANNEL_SHARE_URI_LEN);
+    return end ? (size_t)(end - text) : 0U;
+}
+
+static void channel_management_action_handler(
+    const d1l_ui_channel_action_event_t *event,
+    void *context)
+{
+    (void)context;
+    if (!event) {
+        return;
+    }
+    const d1l_channel_info_t *channel = event->channel;
+    d1l_channel_mutation_result_t result = D1L_CHANNEL_MUTATION_NONE;
+    d1l_channel_info_t updated = {0};
+    esp_err_t ret = ESP_OK;
+
+    switch (event->action) {
+    case D1L_UI_CHANNEL_ACTION_CANCEL_CREATE:
+    case D1L_UI_CHANNEL_ACTION_CANCEL_IMPORT:
+        return_to_channel_selector();
+        return;
+    case D1L_UI_CHANNEL_ACTION_SUBMIT_CREATE:
+        ret = d1l_app_model_create_channel(
+            event->text, false, &result, &updated);
+        show_channel_mutation_result("Channel created", ret, result);
+        if (ret == ESP_OK && set_managed_channel(&updated)) {
+            d1l_ui_channel_sheets_hide_create(
+                &s_channel_sheets_controller);
+            if (!show_channel_export_sheet()) {
+                show_channel_options_sheet();
+            }
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_SUBMIT_IMPORT: {
+        const size_t uri_len = bounded_channel_uri_length(event->text);
+        ret = uri_len > 0U ? d1l_app_model_import_channel_uri(
+            event->text, uri_len, &result, &updated) :
+            ESP_ERR_INVALID_ARG;
+        d1l_ui_channel_sheets_hide_import(&s_channel_sheets_controller);
+        show_channel_mutation_result("Channel imported", ret, result);
+        if (ret == ESP_OK && set_managed_channel(&updated)) {
+            show_channel_options_sheet();
+        } else if (ret != ESP_OK && !show_channel_import_sheet()) {
+            return_to_channel_selector();
+        }
+        return;
+    }
+    case D1L_UI_CHANNEL_ACTION_CLOSE_OPTIONS:
+        return_to_channel_selector();
+        return;
+    case D1L_UI_CHANNEL_ACTION_OPEN_EDIT:
+        if (!show_channel_edit_sheet()) {
+            show_toast("Channel edit", ESP_ERR_NO_MEM);
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_CANCEL_EDIT:
+        if (!show_channel_options_sheet()) {
+            return_to_channel_selector();
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_SUBMIT_EDIT:
+        ret = channel ? d1l_app_model_update_channel(
+            channel->channel_id, event->text, channel->enabled,
+            channel->is_default, &result, &updated) :
+            ESP_ERR_INVALID_STATE;
+        show_channel_mutation_result("Channel updated", ret, result);
+        if (ret == ESP_OK && set_managed_channel(&updated)) {
+            show_channel_options_sheet();
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_TOGGLE_ENABLED:
+        ret = channel && channel->channel_id != D1L_CHANNEL_PUBLIC_ID ?
+            d1l_app_model_update_channel(
+                channel->channel_id, channel->name, !channel->enabled,
+                false, &result, &updated) :
+            ESP_ERR_NOT_SUPPORTED;
+        show_channel_mutation_result(
+            channel && channel->enabled ? "Channel disabled" :
+                "Channel enabled",
+            ret, result);
+        if (ret == ESP_OK && set_managed_channel(&updated)) {
+            show_channel_options_sheet();
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_MAKE_DEFAULT:
+        ret = channel && channel->enabled ? d1l_app_model_update_channel(
+            channel->channel_id, channel->name, true, true,
+            &result, &updated) : ESP_ERR_INVALID_STATE;
+        show_channel_mutation_result("Default channel updated", ret, result);
+        if (ret == ESP_OK && set_managed_channel(&updated)) {
+            show_channel_options_sheet();
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_OPEN_EXPORT:
+        show_channel_export_sheet();
+        return;
+    case D1L_UI_CHANNEL_ACTION_CLOSE_EXPORT:
+        d1l_ui_channel_sheets_hide_export(&s_channel_sheets_controller);
+        if (!show_channel_options_sheet()) {
+            return_to_channel_selector();
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_OPEN_REMOVE:
+        if (!show_channel_remove_sheet()) {
+            show_toast("Channel remove", ESP_ERR_NO_MEM);
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_CANCEL_REMOVE:
+        if (!show_channel_options_sheet()) {
+            return_to_channel_selector();
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_CONFIRM_REMOVE:
+        ret = channel ? d1l_app_model_remove_channel(
+            channel->channel_id, true, &result, &updated) :
+            ESP_ERR_INVALID_STATE;
+        show_channel_mutation_result("Channel removed", ret, result);
+        if (ret == ESP_OK) {
+            return_to_channel_selector();
+        }
+        return;
+    case D1L_UI_CHANNEL_ACTION_NONE:
+    default:
+        return;
+    }
+}
+
 static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
                                    void *context)
 {
@@ -4673,11 +4990,7 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
         }
         break;
     case D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR:
-        if (d1l_ui_messages_render_channel_selector(
-                &s_messages_controller, handle_messages_action, NULL)) {
-            show_modal(d1l_ui_messages_channel_selector_sheet(
-                &s_messages_controller));
-        } else {
+        if (!show_channel_selector_sheet()) {
             show_toast("Channels", ESP_ERR_NO_MEM);
             request_content_refresh();
         }
@@ -4685,6 +4998,18 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
     case D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR:
         d1l_ui_messages_hide_channel_selector(&s_messages_controller);
         request_content_refresh();
+        break;
+    case D1L_UI_MESSAGES_ACTION_CREATE_CHANNEL:
+        if (!show_channel_create_sheet()) {
+            show_toast("New channel", ESP_ERR_NO_MEM);
+            return_to_channel_selector();
+        }
+        break;
+    case D1L_UI_MESSAGES_ACTION_IMPORT_CHANNEL:
+        if (!show_channel_import_sheet()) {
+            show_toast("Import channel", ESP_ERR_NO_MEM);
+            return_to_channel_selector();
+        }
         break;
     case D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL:
         if (!event->channel || !event->channel->enabled ||
@@ -4703,6 +5028,16 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
                     &s_messages_controller);
                 request_content_refresh();
             }
+        }
+        break;
+    case D1L_UI_MESSAGES_ACTION_MANAGE_CHANNEL:
+        if (!set_managed_channel(event->channel)) {
+            show_toast("Manage channel", ESP_ERR_INVALID_STATE);
+            break;
+        }
+        if (!show_channel_options_sheet()) {
+            show_toast("Manage channel", ESP_ERR_NO_MEM);
+            return_to_channel_selector();
         }
         break;
     case D1L_UI_MESSAGES_ACTION_NONE:
@@ -6194,6 +6529,7 @@ static void process_pending_tab_switch(void)
     hide_map_options_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
+    hide_channel_management_sheets();
     hide_route_detail_sheet();
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
@@ -6639,6 +6975,7 @@ static void hide_keyboard_probe_sheets(bool include_onboarding)
     hide_map_options_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
+    hide_channel_management_sheets();
     hide_route_detail_sheet();
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
@@ -7736,6 +8073,10 @@ esp_err_t d1l_ui_phase1_show_home(void)
     }
     if (!d1l_ui_contact_sheets_create(
             &s_contact_sheets_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (!d1l_ui_channel_sheets_create(
+            &s_channel_sheets_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
     }
     create_node_detail_sheet(s_screen);

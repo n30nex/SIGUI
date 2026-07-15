@@ -48,7 +48,7 @@ def test_selector_is_bounded_redacted_and_selection_is_fail_closed() -> None:
         "bool d1l_ui_messages_channel_selector_active",
     )
     assert "D1L_CHANNEL_STORE_CAPACITY" in selector
-    assert "8 + (int)i * 52, 416, 44" in selector
+    assert "8 + (int)i * 60, 416, 52" in selector
     assert "channel->name" in selector
     assert "channel->unread_count" in selector
     assert "channel->enabled" in selector
@@ -92,9 +92,107 @@ def test_selector_is_bounded_redacted_and_selection_is_fail_closed() -> None:
     )[1].split(
         "case D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR:", 1
     )[0]
-    failure = open_selector.split("} else {", 1)[1]
-    assert "show_toast(\"Channels\", ESP_ERR_NO_MEM);" in failure
-    assert "request_content_refresh();" in failure
+    assert "if (!show_channel_selector_sheet())" in open_selector
+    assert "show_toast(\"Channels\", ESP_ERR_NO_MEM);" in open_selector
+    assert "request_content_refresh();" in open_selector
+
+
+def test_selector_exposes_bounded_management_entry_points_without_secrets() -> None:
+    header = read("main/ui/ui_messages.h")
+    messages = read("main/ui/ui_messages.c")
+
+    for action in (
+        "D1L_UI_MESSAGES_ACTION_CREATE_CHANNEL",
+        "D1L_UI_MESSAGES_ACTION_IMPORT_CHANNEL",
+        "D1L_UI_MESSAGES_ACTION_MANAGE_CHANNEL",
+    ):
+        assert action in header
+        assert action in messages
+    assert "channel_manage_rows[D1L_CHANNEL_STORE_CAPACITY]" in header
+
+    selector = between(
+        messages,
+        "bool d1l_ui_messages_render_channel_selector",
+        "bool d1l_ui_messages_channel_selector_active",
+    )
+    assert 'sheet, "New"' in selector
+    assert 'sheet, "Import"' in selector
+    assert 'row, "Manage"' in selector
+    assert 'row, "Manage", 310, 0, 96, 44' in selector
+    assert "channel_manage_rows[i]" in selector
+    assert "channel->channel_id" in selector
+    for forbidden in (
+        "secret",
+        "export_share_uri",
+        "copy_protocol_key",
+        "channel_hash",
+        "history_key",
+    ):
+        assert forbidden not in selector
+
+    dispatch = between(
+        messages,
+        "static void messages_dispatch_event_cb",
+        "static lv_obj_t *messages_create_button",
+    )
+    assert "D1L_UI_MESSAGES_ACTION_MANAGE_CHANNEL" in dispatch
+    assert "binding->row_index >= controller->rendered.channel_count" in dispatch
+    assert "action_event.channel" in dispatch
+
+
+def test_channel_management_ui_uses_confirmed_redacted_app_boundary() -> None:
+    phase1 = read("main/ui/ui_phase1.c")
+    actions = between(
+        phase1,
+        "static void channel_management_action_handler(",
+        "static void handle_messages_action(",
+    )
+
+    for app_call in (
+        "d1l_app_model_create_channel(",
+        "d1l_app_model_import_channel_uri(",
+        "d1l_app_model_update_channel(",
+        "d1l_app_model_export_channel_share_uri(",
+        "d1l_app_model_remove_channel(",
+    ):
+        assert app_call in actions
+    confirm_remove = actions.split(
+        "case D1L_UI_CHANNEL_ACTION_CONFIRM_REMOVE:", 1
+    )[1].split("case D1L_UI_CHANNEL_ACTION_NONE:", 1)[0]
+    assert "channel->channel_id, true" in confirm_remove
+    assert "return_to_channel_selector();" in confirm_remove
+
+    export = between(
+        phase1,
+        "static bool show_channel_export_sheet(",
+        "static void return_to_channel_selector(",
+    )
+    assert "char uri[D1L_CHANNEL_SHARE_URI_LEN] = {0};" in export
+    assert "d1l_ui_channel_sheets_set_export_uri(" in export
+    assert "d1l_app_model_clear_channel_share_uri(uri, sizeof(uri));" in export
+    assert "printf(" not in export
+    assert "ESP_LOG" not in export
+
+    assert "bounded_channel_uri_length(event->text)" in actions
+    assert "d1l_ui_channel_sheets_hide_import(" in actions
+    assert "D1L_CHANNEL_PUBLIC_ID" in actions
+    for forbidden in (
+        "d1l_app_model_send_public_text",
+        "d1l_app_model_send_channel_text",
+        "d1l_app_model_send_active_channel_text",
+        "usb_console",
+    ):
+        assert forbidden not in actions
+
+    messages_actions = between(
+        phase1,
+        "static void handle_messages_action(",
+        "static void render_messages(",
+    )
+    assert "case D1L_UI_MESSAGES_ACTION_CREATE_CHANNEL:" in messages_actions
+    assert "case D1L_UI_MESSAGES_ACTION_IMPORT_CHANNEL:" in messages_actions
+    assert "case D1L_UI_MESSAGES_ACTION_MANAGE_CHANNEL:" in messages_actions
+    assert "set_managed_channel(event->channel)" in messages_actions
 
 
 def test_history_read_compose_and_reply_keep_the_captured_channel_id() -> None:

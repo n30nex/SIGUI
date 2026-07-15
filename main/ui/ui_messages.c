@@ -48,6 +48,8 @@ static void messages_deactivate_actions(d1l_ui_messages_controller_t *controller
     memset(controller->thread_rows, 0, sizeof(controller->thread_rows));
     memset(controller->channel_controls, 0, sizeof(controller->channel_controls));
     memset(controller->channel_rows, 0, sizeof(controller->channel_rows));
+    memset(controller->channel_manage_rows, 0,
+           sizeof(controller->channel_manage_rows));
     controller->action_handler = NULL;
     controller->action_context = NULL;
 }
@@ -195,7 +197,8 @@ static void messages_dispatch_event_cb(lv_event_t *event)
             return;
         }
         action_event.dm_message = &controller->thread_entries[binding->row_index];
-    } else if (binding->action == D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL) {
+    } else if (binding->action == D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL ||
+               binding->action == D1L_UI_MESSAGES_ACTION_MANAGE_CHANNEL) {
         if (binding->row_index >= controller->rendered.channel_count) {
             return;
         }
@@ -966,10 +969,20 @@ bool d1l_ui_messages_render_channel_selector(
         messages_bind_channel_control(
             controller, 0U,
             D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR)) != NULL;
+    complete = messages_create_button(
+        sheet, "New", 304, 6, 72, 44,
+        messages_bind_channel_control(
+            controller, 1U,
+            D1L_UI_MESSAGES_ACTION_CREATE_CHANNEL)) != NULL && complete;
+    complete = messages_create_button(
+        sheet, "Import", 216, 6, 80, 44,
+        messages_bind_channel_control(
+            controller, 2U,
+            D1L_UI_MESSAGES_ACTION_IMPORT_CHANNEL)) != NULL && complete;
     lv_obj_t *title = messages_create_label(sheet, "Channels", 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        messages_set_dot_width(title, 340);
+        messages_set_dot_width(title, 190);
         lv_obj_set_pos(title, 16, 10);
     } else {
         complete = false;
@@ -989,7 +1002,7 @@ bool d1l_ui_messages_render_channel_selector(
             const d1l_channel_info_t *channel =
                 &controller->rendered.channels[i];
             lv_obj_t *row = messages_create_panel(
-                body, 8, 8 + (int)i * 52, 416, 44);
+                body, 8, 8 + (int)i * 60, 416, 52);
             if (!row) {
                 complete = false;
                 continue;
@@ -1010,15 +1023,25 @@ bool d1l_ui_messages_render_channel_selector(
                     .generation = controller->generation,
                 };
                 messages_make_clickable(row, binding);
-            } else {
-                lv_obj_add_state(row, LV_STATE_DISABLED);
+            }
+            d1l_ui_messages_action_binding_t *manage_binding =
+                &controller->channel_manage_rows[i];
+            *manage_binding = (d1l_ui_messages_action_binding_t) {
+                .controller = controller,
+                .action = D1L_UI_MESSAGES_ACTION_MANAGE_CHANNEL,
+                .row_index = i,
+                .generation = controller->generation,
+            };
+            if (!messages_create_button(
+                    row, "Manage", 310, 0, 96, 44, manage_binding)) {
+                complete = false;
             }
             lv_obj_t *name = messages_create_label(
                 row, channel->name[0] ? channel->name : "Unnamed channel",
                 channel->enabled ? (active ? 0x5EEAD4 : 0xF4F7FB) :
                     0x8EA0AE);
             if (name) {
-                messages_set_dot_width(name, 250);
+                messages_set_dot_width(name, 184);
                 lv_obj_set_pos(name, 0, 2);
             } else {
                 complete = false;
@@ -1030,8 +1053,8 @@ bool d1l_ui_messages_render_channel_selector(
                      (unsigned long)channel->unread_count);
             lv_obj_t *meta = messages_create_label(row, state, 0x8EA0AE);
             if (meta) {
-                messages_set_dot_width(meta, 136);
-                lv_obj_set_pos(meta, 264, 2);
+                messages_set_dot_width(meta, 108);
+                lv_obj_set_pos(meta, 190, 2);
             } else {
                 complete = false;
             }

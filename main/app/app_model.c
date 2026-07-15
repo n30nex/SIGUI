@@ -12,6 +12,7 @@
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
 #include "platform/time_service.h"
+#include "platform/secure_random.h"
 #include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
 
@@ -582,6 +583,15 @@ static esp_err_t prepare_channel_mutation_outputs(
     return ESP_OK;
 }
 
+static void clear_sensitive_bytes(void *data, size_t data_size)
+{
+    volatile uint8_t *cursor = (volatile uint8_t *)data;
+    while (cursor && data_size > 0U) {
+        *cursor++ = 0U;
+        data_size--;
+    }
+}
+
 esp_err_t d1l_app_model_add_channel(
     const char *name, const uint8_t *secret, uint8_t secret_len,
     bool enabled, bool make_default,
@@ -595,6 +605,30 @@ esp_err_t d1l_app_model_add_channel(
     }
     return d1l_channel_store_add(name, secret, secret_len, enabled,
                                  make_default, out_result, out_channel);
+}
+
+esp_err_t d1l_app_model_create_channel(
+    const char *name, bool make_default,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel)
+{
+    const esp_err_t prepared = prepare_channel_mutation_outputs(
+        out_result, out_channel);
+    if (prepared != ESP_OK) {
+        return prepared;
+    }
+    uint8_t secret[D1L_CHANNEL_SECRET_128_LEN];
+    const esp_err_t random_ret =
+        d1l_secure_random_fill(secret, sizeof(secret));
+    if (random_ret != ESP_OK) {
+        clear_sensitive_bytes(secret, sizeof(secret));
+        return random_ret;
+    }
+    const esp_err_t ret = d1l_channel_store_add(
+        name, secret, (uint8_t)sizeof(secret), true, make_default,
+        out_result, out_channel);
+    clear_sensitive_bytes(secret, sizeof(secret));
+    return ret;
 }
 
 esp_err_t d1l_app_model_import_channel_uri(
@@ -658,11 +692,7 @@ esp_err_t d1l_app_model_export_channel_share_uri(
 
 void d1l_app_model_clear_channel_share_uri(char *dest, size_t dest_size)
 {
-    volatile char *cursor = dest;
-    while (cursor && dest_size > 0U) {
-        *cursor++ = '\0';
-        dest_size--;
-    }
+    clear_sensitive_bytes(dest, dest_size);
 }
 
 size_t d1l_app_model_query_public_messages_page(d1l_message_entry_t *out_entries,

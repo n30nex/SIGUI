@@ -32,6 +32,7 @@ idf_component_register(
         "map/map_view_service.c"
         "platform/time_service.c"
         "platform/time_service_core.c"
+        "platform/secure_random.c"
         "mesh/advert_data.c"
         "mesh/channel_message_coordinator.c"
         "mesh/channel_store.c"
@@ -60,6 +61,7 @@ idf_component_register(
         "storage/storage_status_policy.c"
         "ui/ui_ble.c"
         "ui/ui_chrome.c"
+        "ui/ui_channel_sheets.c"
         "ui/ui_compose_eligibility.c"
         "ui/ui_connectivity.c"
         "ui/ui_contact_sheets.c"
@@ -95,6 +97,7 @@ idf_component_register(
         "ui"
     REQUIRES
         bsp
+        bootloader_support
         driver
         esp_timer
         esp_system
