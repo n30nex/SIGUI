@@ -94,12 +94,32 @@ static void test_unread_count_saturates_instead_of_wrapping(void)
     assert(strstr(view.messages_status, "unread") != NULL);
 }
 
+static void test_muted_unread_stays_separate_from_attention_count(void)
+{
+    d1l_ui_home_view_input_t input = {
+        .public_unread_count = 2U,
+        .dm_unread_count = 1U,
+        .muted_dm_unread_count = 4U,
+    };
+    d1l_ui_home_view_model_t view;
+    d1l_ui_home_view(&input, &view);
+    assert(strcmp(view.messages_status, "3 unread + 4 muted") == 0);
+    assert(view.messages_status_color == 0xFBBF24U);
+
+    input.public_unread_count = 0U;
+    input.dm_unread_count = 0U;
+    d1l_ui_home_view(&input, &view);
+    assert(strcmp(view.messages_status, "4 muted") == 0);
+    assert(view.messages_status_color == 0x8EA0AEU);
+}
+
 int main(void)
 {
     test_default_view_is_bounded_and_truthful();
     test_ready_view_owns_all_rendered_strings();
     test_storage_and_map_fail_closed_states();
     test_unread_count_saturates_instead_of_wrapping();
+    test_muted_unread_stays_separate_from_attention_count();
     puts("native UI home view model: ok");
     return 0;
 }

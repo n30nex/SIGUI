@@ -42,7 +42,10 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "D1L_READ_STATE_SCHEMA_V1 1U" in source
     assert "dm_cursors[D1L_READ_STATE_DM_THREAD_CAPACITY]" in source
     assert "blob_v1_is_valid" in source
-    assert "thread_seq > s_state.last_dm_read_seq ? thread_seq : s_state.last_dm_read_seq" in source
+    assert "thread_seq > s_state.last_dm_read_seq" in source
+    assert "return read_seq >= dm_stats.next_seq ? 0U : read_seq;" in source
+    assert "stats.newest_public_rx_seq <= stats.last_public_read_seq" in source
+    assert "newest_rx_seq <= dm_thread_read_seq(fingerprint)" in source
     assert "build_dm_thread_stats" in source
     assert source.count(
         "s_dm_scratch, D1L_READ_STATE_VISIBLE_DM_CAPACITY"

@@ -449,6 +449,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->muted_dm_unread_count = read_state.muted_dm_unread_count;
     snapshot->last_public_read_seq = read_state.last_public_read_seq;
     snapshot->last_dm_read_seq = read_state.last_dm_read_seq;
+    snapshot->read_state_mark_count = read_state.mark_read_count;
     snapshot->node_total_written = nodes.total_written;
     snapshot->node_count = nodes.count;
     snapshot->contact_total_written = contacts.total_written;

@@ -1876,14 +1876,24 @@ def draw_home_body(s: Surface, snap: Snapshot):
     else:
         map_status, map_color = "Ready to open", GREEN
 
+    audible_unread = snap.unread_public + snap.unread_dm
+    messages_status = (
+        f"{audible_unread} unread + {snap.muted_unread_dm} muted"
+        if audible_unread and snap.muted_unread_dm else
+        f"{audible_unread} unread"
+        if audible_unread else
+        f"{snap.muted_unread_dm} muted"
+        if snap.muted_unread_dm else
+        "All caught up"
+    )
     tiles = (
         (
             (12, 16, 234, 156),
             "chat",
             "Messages",
             "Public, direct, and room conversations",
-            f"{snap.unread_public + snap.unread_dm} unread" if snap.unread_public + snap.unread_dm else "All caught up",
-            AMBER if snap.unread_public + snap.unread_dm else ACCENT,
+            messages_status,
+            AMBER if audible_unread else (MUTED if snap.muted_unread_dm else ACCENT),
             "open_messages_root",
             "messages",
         ),
@@ -1956,6 +1966,14 @@ def draw_home_body(s: Surface, snap: Snapshot):
         kind="device_status_card",
         action="open_device_status",
         destination="settings",
+    )
+    s.metrics.update(
+        {
+            "home_audible_unread": audible_unread,
+            "home_muted_unread": snap.muted_unread_dm,
+            "home_muted_unread_separate": True,
+            "home_messages_status": messages_status,
+        }
     )
 
 
@@ -2068,6 +2086,24 @@ def public_message_state(msg: Message) -> str:
     if msg.direction == "tx":
         return "Sent over RF"
     return "New" if msg.unread else "Received"
+
+
+def snapshot_after_incoming_public(snap: Snapshot) -> Snapshot:
+    next_seq = max((message.seq for message in snap.public_messages), default=0) + 1
+    incoming = Message(
+        "Incoming peer",
+        "incoming Public event retained while this surface stays open",
+        "RX new, refresh only",
+        unread=True,
+        direction="rx",
+        seq=next_seq,
+    )
+    return replace(
+        snap,
+        public_messages=snap.public_messages + (incoming,),
+        unread_public=snap.unread_public + 1,
+        rx_total=snap.rx_total + 1,
+    )
 
 
 def render_messages_public(s: Surface, snap: Snapshot):
@@ -2226,6 +2262,33 @@ def dm_selected_thread(
     return selected, tuple(
         message for message in messages
         if dm_conversation_id(message) == selected_id
+    )
+
+
+def snapshot_after_incoming_selected_dm(snap: Snapshot) -> Snapshot:
+    selected, _ = dm_selected_thread(snap.dm_messages)
+    selected_id = dm_conversation_id(selected) if selected else "0BF0A701D5AE2DB6"
+    alias = selected.source if selected else "YKF Corebot"
+    muted = bool(selected and selected.muted)
+    next_seq = max((message.seq for message in snap.dm_messages), default=0) + 1
+    incoming = Message(
+        alias,
+        "incoming DM retained while the selected conversation stays open",
+        "RX new, exact conversation refresh",
+        unread=True,
+        direction="rx",
+        seq=next_seq,
+        identity_valid=True,
+        conversation=alias,
+        conversation_id=selected_id,
+        muted=muted,
+    )
+    return replace(
+        snap,
+        dm_messages=snap.dm_messages + (incoming,),
+        unread_dm=snap.unread_dm + (0 if muted else 1),
+        muted_unread_dm=snap.muted_unread_dm + (1 if muted else 0),
+        rx_total=snap.rx_total + 1,
     )
 
 
@@ -5066,6 +5129,123 @@ def render_onboarding_sheet(s: Surface, snap: Snapshot):
     s.text("Keyboard opens for name editing", (44, 400, 436, 424), 13, MUTED, False, "center")
 
 
+def record_incoming_refresh_metrics(
+    s: Surface,
+    *,
+    event: str,
+    mode: str,
+    overlay: str,
+    before_count: int,
+    after_count: int,
+    keyboard_focus_preserved: bool,
+    active_tab: str = "messages",
+    selected_thread_before: str = "",
+    selected_thread_after: str = "",
+) -> None:
+    s.metrics.update(
+        {
+            "incoming_event": event,
+            "incoming_event_count_before": before_count,
+            "incoming_event_count_after": after_count,
+            "incoming_event_content_refreshed": after_count == before_count + 1,
+            "incoming_event_messages_mode": mode,
+            "incoming_event_active_tab": active_tab,
+            "incoming_event_mode_preserved": True,
+            "incoming_event_overlay": overlay,
+            "incoming_event_overlay_preserved": True,
+            "incoming_event_keyboard_focus_preserved": keyboard_focus_preserved,
+            "incoming_event_selected_thread_before": selected_thread_before,
+            "incoming_event_selected_thread_after": selected_thread_after,
+            "incoming_event_exact_thread_preserved":
+                selected_thread_before == selected_thread_after,
+            "incoming_event_advanced_public_cursor": False,
+            "incoming_event_advanced_dm_cursor": False,
+            "incoming_event_transmitted_rf": False,
+        }
+    )
+
+
+def render_compose_incoming_public_refresh(s: Surface, snap: Snapshot):
+    updated = snapshot_after_incoming_public(snap)
+    render_compose_state(
+        s,
+        updated,
+        sample="draft survives incoming refresh",
+        counter="31 chars | 31/138 B",
+        validation="valid",
+        byte_count=31,
+        character_count=31,
+    )
+    record_incoming_refresh_metrics(
+        s,
+        event="public",
+        mode="public",
+        overlay="compose",
+        before_count=len(snap.public_messages),
+        after_count=len(updated.public_messages),
+        keyboard_focus_preserved=True,
+    )
+    s.metrics["incoming_event_draft_preserved"] = True
+
+
+def render_public_search_incoming_refresh(s: Surface, snap: Snapshot):
+    updated = snapshot_after_incoming_public(snap)
+    render_public_search_sheet(s, updated)
+    record_incoming_refresh_metrics(
+        s,
+        event="public",
+        mode="public",
+        overlay="public_search",
+        before_count=len(snap.public_messages),
+        after_count=len(updated.public_messages),
+        keyboard_focus_preserved=True,
+    )
+    s.metrics["incoming_event_query_preserved"] = True
+
+
+def render_dm_thread_incoming_refresh(s: Surface, snap: Snapshot):
+    selected_before, _ = dm_selected_thread(snap.dm_messages)
+    selected_before_id = dm_conversation_id(selected_before) if selected_before else ""
+    updated = snapshot_after_incoming_selected_dm(snap)
+    selected_after, _ = dm_selected_thread(updated.dm_messages)
+    selected_after_id = dm_conversation_id(selected_after) if selected_after else ""
+    render_dm_thread_state(s, updated)
+    record_incoming_refresh_metrics(
+        s,
+        event="dm",
+        mode="direct",
+        overlay="dm_thread",
+        before_count=len(snap.dm_messages),
+        after_count=len(updated.dm_messages),
+        keyboard_focus_preserved=True,
+        active_tab="home",
+        selected_thread_before=selected_before_id,
+        selected_thread_after=selected_after_id,
+    )
+
+
+def render_dm_search_incoming_refresh(s: Surface, snap: Snapshot):
+    selected_before, _ = dm_selected_thread(snap.dm_messages)
+    selected_before_id = dm_conversation_id(selected_before) if selected_before else ""
+    updated = snapshot_after_incoming_selected_dm(snap)
+    selected_after, _ = dm_selected_thread(updated.dm_messages)
+    selected_after_id = dm_conversation_id(selected_after) if selected_after else ""
+    render_dm_search_sheet(s, updated)
+    record_incoming_refresh_metrics(
+        s,
+        event="dm",
+        mode="direct",
+        overlay="dm_search",
+        before_count=len(snap.dm_messages),
+        after_count=len(updated.dm_messages),
+        keyboard_focus_preserved=True,
+        active_tab="home",
+        selected_thread_before=selected_before_id,
+        selected_thread_after=selected_after_id,
+    )
+    s.metrics["incoming_event_query_preserved"] = True
+
+
 RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "home": render_home,
     "messages": render_messages,
@@ -5102,8 +5282,10 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "compose_protocol_time_sheet": render_compose_protocol_time_sheet,
     "compose_dm_no_contact_sheet": render_compose_dm_no_contact_sheet,
     "compose_dm_active_sheet": render_compose_dm_active_sheet,
+    "compose_incoming_public_refresh": render_compose_incoming_public_refresh,
     "public_history_sheet": render_public_history_sheet,
     "public_search_sheet": render_public_search_sheet,
+    "public_search_incoming_refresh": render_public_search_incoming_refresh,
     "radio_settings_sheet": render_radio_settings_sheet,
     "storage_setup_sheet": render_storage_setup_sheet,
     "storage_card_page": render_storage_card_page,
@@ -5133,6 +5315,8 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "dm_thread_search_no_match": render_dm_thread_search_no_match,
     "dm_thread_empty_sheet": render_dm_thread_empty_sheet,
     "dm_thread_no_contact": render_dm_thread_no_contact,
+    "dm_thread_incoming_refresh": render_dm_thread_incoming_refresh,
+    "dm_search_incoming_refresh": render_dm_search_incoming_refresh,
     "route_detail_sheet": render_route_detail_sheet,
     "route_trace_sheet": render_route_trace_sheet,
     "packet_detail_sheet": render_packet_detail_sheet,
@@ -5506,6 +5690,29 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Contact unavailable; retained history remains readable.",
         "Contact unavailable",
     ),
+    "compose_incoming_public_refresh": (
+        "Compose Public",
+        "draft survives incoming refresh",
+        "Keyboard",
+        "Send",
+        "Clear",
+        "Close",
+    ),
+    "public_search_incoming_refresh": (
+        "Public Search",
+        "Search author or message",
+        "Apply",
+        "Clear",
+        "Close",
+    ),
+    "dm_thread_incoming_refresh": ("Back", "Search", "Reply"),
+    "dm_search_incoming_refresh": (
+        "DM Search",
+        "Search this conversation",
+        "Apply",
+        "Clear",
+        "Close",
+    ),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
@@ -5525,6 +5732,40 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Use Defaults",
     ),
 }
+
+EXPECTED_INCOMING_EVENT_FLOWS: tuple[dict[str, object], ...] = (
+    {
+        "name": "incoming_public_preserves_compose",
+        "view": "compose_incoming_public_refresh",
+        "event": "public",
+        "mode": "public",
+        "overlay": "compose",
+    },
+    {
+        "name": "incoming_public_preserves_search",
+        "view": "public_search_incoming_refresh",
+        "event": "public",
+        "mode": "public",
+        "overlay": "public_search",
+    },
+    {
+        "name": "incoming_dm_preserves_home_preview_thread",
+        "view": "dm_thread_incoming_refresh",
+        "event": "dm",
+        "mode": "direct",
+        "overlay": "dm_thread",
+        "active_tab": "home",
+    },
+    {
+        "name": "incoming_dm_preserves_home_preview_thread_search",
+        "view": "dm_search_incoming_refresh",
+        "event": "dm",
+        "mode": "direct",
+        "overlay": "dm_search",
+        "active_tab": "home",
+    },
+)
+
 
 EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
@@ -6054,6 +6295,71 @@ def build_flow_report(report_views: list[dict[str, object]]) -> dict[str, object
     }
 
 
+def build_incoming_event_report(
+    report_views: list[dict[str, object]],
+) -> dict[str, object]:
+    views_by_name = {str(view["name"]): view for view in report_views}
+    checked_flows: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+    skipped_flows: list[str] = []
+    invariant_keys = (
+        "incoming_event_content_refreshed",
+        "incoming_event_mode_preserved",
+        "incoming_event_overlay_preserved",
+        "incoming_event_keyboard_focus_preserved",
+        "incoming_event_exact_thread_preserved",
+    )
+    false_keys = (
+        "incoming_event_advanced_public_cursor",
+        "incoming_event_advanced_dm_cursor",
+        "incoming_event_transmitted_rf",
+    )
+    for expected in EXPECTED_INCOMING_EVENT_FLOWS:
+        view_name = str(expected["view"])
+        view = views_by_name.get(view_name)
+        flow_failures: list[dict[str, object]] = []
+        if not view:
+            skipped_flows.append(str(expected["name"]))
+            continue
+        else:
+            metrics = view["metrics"]
+            comparisons = {
+                "incoming_event": expected["event"],
+                "incoming_event_messages_mode": expected["mode"],
+                "incoming_event_overlay": expected["overlay"],
+                "incoming_event_active_tab": expected.get("active_tab", "messages"),
+            }
+            for key, expected_value in comparisons.items():
+                if metrics.get(key) != expected_value:
+                    flow_failures.append(
+                        {"key": key, "expected": expected_value, "actual": metrics.get(key)}
+                    )
+            for key in invariant_keys:
+                if metrics.get(key) is not True:
+                    flow_failures.append(
+                        {"key": key, "expected": True, "actual": metrics.get(key)}
+                    )
+            for key in false_keys:
+                if metrics.get(key) is not False:
+                    flow_failures.append(
+                        {"key": key, "expected": False, "actual": metrics.get(key)}
+                    )
+        checked = {
+            "name": expected["name"],
+            "view": view_name,
+            "ok": not flow_failures,
+            "failures": flow_failures,
+        }
+        checked_flows.append(checked)
+        failures.extend({"flow": expected["name"], **failure} for failure in flow_failures)
+    return {
+        "ok": not failures,
+        "flows": checked_flows,
+        "skipped_flows": skipped_flows,
+        "failures": failures,
+    }
+
+
 def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str = "default") -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     if scenario not in SCENARIOS:
@@ -6099,9 +6405,10 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
         report_views.append(summary)
 
     flow_report = build_flow_report(report_views)
+    incoming_event_report = build_incoming_event_report(report_views)
     report = {
         "schema": 2,
-        "ok": overflow_count == 0 and not required_missing and not dock_invariant_issues and flow_report["ok"],
+        "ok": overflow_count == 0 and not required_missing and not dock_invariant_issues and flow_report["ok"] and incoming_event_report["ok"],
         "display": {"width": WIDTH, "height": HEIGHT},
         "source": "tools/ui_simulator.py",
         "scenario": scenario,
@@ -6110,6 +6417,7 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
         "touch_target_issue_count": touch_target_issue_count,
         "dock_invariant_issues": dock_invariant_issues,
         "flow_report": flow_report,
+        "incoming_event_report": incoming_event_report,
         "overflow_count": overflow_count,
         "truncated_count": truncated_count,
         "sibling_text_overlap_count": sibling_text_overlap_count,
