@@ -1,0 +1,124 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def read(relative: str) -> str:
+    return (ROOT / relative).read_text(encoding="utf-8")
+
+
+def body(source: str, start: str, end: str) -> str:
+    assert start in source, start
+    assert end in source, end
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
+def test_device_sheets_have_one_small_persistent_owner():
+    cmake = read("main/CMakeLists.txt")
+    header = read("main/ui/ui_device_sheets.h")
+    source = read("main/ui/ui_device_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    assert '"ui/ui_device_sheets.c"' in cmake
+    assert '#include "ui_device_sheets.h"' in phase1
+    assert "D1L_UI_DEVICE_SHEETS_CONTROLLER_MAX_BYTES 96U" in header
+    assert "_Static_assert(sizeof(d1l_ui_device_sheets_controller_t)" in source
+    assert "s_device_sheets_controller EXT_RAM_BSS_ATTR" in phase1
+    assert "static lv_obj_t *s_display_sheet" not in phase1
+    assert "static lv_obj_t *s_diagnostics_sheet" not in phase1
+    assert "create_display_sheet" not in phase1
+    assert "create_diagnostics_sheet" not in phase1
+
+
+def test_device_sheet_create_replaces_both_and_rolls_back_partial_failure():
+    source = read("main/ui/ui_device_sheets.c")
+    delete = body(source, "static void delete_sheet", "static void destroy_sheets")
+    destroy = body(source, "static void destroy_sheets", "bool d1l_ui_device_sheets_create")
+    create = body(source, "bool d1l_ui_device_sheets_create", "static void invalidate_sheet")
+
+    assert delete.index("d1l_ui_modal_hide(*sheet);") < delete.index(
+        "lv_obj_del(*sheet);"
+    )
+    assert "delete_sheet(&controller->display_sheet);" in destroy
+    assert "delete_sheet(&controller->diagnostics_sheet);" in destroy
+    assert "memset(controller, 0, sizeof(*controller));" in destroy
+    assert create.index("destroy_sheets(controller);") < create.index(
+        "controller->display_sheet = create_sheet(parent, false);"
+    )
+    assert "controller->diagnostics_sheet = create_sheet(parent, true);" in create
+    assert create.count("destroy_sheets(controller);") >= 3
+    assert "lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);" in source
+    assert "lv_obj_set_scrollbar_mode(sheet, LV_SCROLLBAR_MODE_AUTO);" in source
+
+
+def test_device_sheet_actions_are_generation_guarded_and_app_free():
+    header = read("main/ui/ui_device_sheets.h")
+    source = read("main/ui/ui_device_sheets.c")
+    phase1 = read("main/ui/ui_phase1.c")
+
+    for action in ("CLOSE_DISPLAY", "CLOSE_DIAGNOSTICS"):
+        assert f"D1L_UI_DEVICE_SHEETS_ACTION_{action}" in header
+        assert f"D1L_UI_DEVICE_SHEETS_ACTION_{action}" in phase1
+    assert "binding->generation == binding->controller->generation" in source
+    assert "controller->generation++" in source
+    assert "controller->generation == 0U" in source
+    assert "controller->action_handler = NULL" in source
+    assert "memset(controller->bindings, 0" in source
+    assert "d1l_app_model_" not in source
+    assert "request_content_refresh" not in source
+
+
+def test_display_render_is_truthful_disabled_and_fails_closed():
+    source = read("main/ui/ui_device_sheets.c")
+    render = body(
+        source,
+        "bool d1l_ui_device_sheets_render_display",
+        "static lv_obj_t *create_diagnostic_line",
+    )
+
+    for label in ("Brightness", "Night", "Contrast", "Timeout"):
+        assert f'"{label}"' in render
+    assert render.count("D1L_UI_DEVICE_SHEETS_ACTION_NONE") == 4
+    assert "LV_STATE_DISABLED" in render
+    assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in render
+    assert "if (!complete)" in render
+    assert "invalidate_sheet(controller, sheet);" in render
+
+
+def test_diagnostics_render_is_snapshot_only_and_read_only():
+    source = read("main/ui/ui_device_sheets.c")
+    render = body(
+        source,
+        "bool d1l_ui_device_sheets_render_diagnostics",
+        "void d1l_ui_device_sheets_hide_display",
+    )
+
+    for line in (
+        "reset %s  heap %luK/%luK  ui stk %lu",
+        "uptime %lus  mesh %s",
+        "heap %luK free  min %luK  largest %luK",
+        "LVGL free %lu  largest %lu  used %u%%",
+        "ui stack %lu words  console stack %lu",
+        "packets rx %lu tx %lu  rejected %lu",
+    ):
+        assert f'"{line}"' in render
+    for label in ("Crashlog", "Export", "Soak"):
+        assert f'"{label}"' in render
+    assert render.count("D1L_UI_DEVICE_SHEETS_ACTION_NONE") == 3
+    assert "LV_STATE_DISABLED" in render
+    assert "if (!snapshot" in render
+    assert "if (!complete)" in render
+    assert "d1l_app_model_snapshot" not in source
+
+
+def test_phase1_shows_only_successfully_rendered_owned_sheets():
+    phase1 = read("main/ui/ui_phase1.c")
+
+    assert "if (render_display_sheet())" in phase1
+    assert "if (render_diagnostics_sheet())" in phase1
+    assert "d1l_ui_device_sheets_display(&s_device_sheets_controller)" in phase1
+    assert "d1l_ui_device_sheets_diagnostics(&s_device_sheets_controller)" in phase1
+    assert "d1l_ui_device_sheets_hide_display(&s_device_sheets_controller)" in phase1
+    assert "d1l_ui_device_sheets_hide_diagnostics(&s_device_sheets_controller)" in phase1
+    assert "if (!d1l_ui_device_sheets_create(&s_device_sheets_controller, s_screen))" in phase1

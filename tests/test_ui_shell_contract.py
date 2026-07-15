@@ -856,10 +856,11 @@ def test_first_boot_onboarding_sheet_is_touch_backed_and_persisted():
 
 def test_ui_allocation_wrappers_and_stack_budget_are_hardened():
     source = read("main/ui/ui_phase1.c")
+    device_sheets = read("main/ui/ui_device_sheets.c")
     assert "#define D1L_UI_TASK_STACK_BYTES 6144U" in source
     assert "#define D1L_TOUCH_TASK_STACK_BYTES 4096U" in source
     assert 'xTaskCreatePinnedToCore(ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES' in source
-    assert "ui_task_stack_free_words" in source
+    assert "ui_task_stack_free_words" in device_sheets
     assert "create_screen_object" in source
     assert "create_object" in source
     assert "create_label_object" in source
@@ -1574,6 +1575,8 @@ def test_settings_screen_reports_companion_wireless_state():
     wifi_header = read("main/ui/ui_wifi.h")
     ble_module = read("main/ui/ui_ble.c")
     ble_header = read("main/ui/ui_ble.h")
+    device_sheets = read("main/ui/ui_device_sheets.c")
+    device_sheets_header = read("main/ui/ui_device_sheets.h")
     settings_module = read("main/ui/ui_settings.c")
     more_module = read("main/ui/ui_more_view.c")
     connectivity = read("main/ui/ui_connectivity.c")
@@ -1605,12 +1608,10 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "format_radio_profile_line" not in settings_module
     assert "static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR" in source
     assert "static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR" in source
-    assert "static lv_obj_t *s_display_sheet" in source
-    assert "static lv_obj_t *s_diagnostics_sheet" in source
+    assert "static d1l_ui_device_sheets_controller_t s_device_sheets_controller EXT_RAM_BSS_ATTR" in source
     assert "d1l_ui_wifi_create(&s_wifi_controller, s_screen)" in source
     assert "d1l_ui_ble_create(&s_ble_controller, s_screen)" in source
-    assert "create_display_sheet" in source
-    assert "create_diagnostics_sheet" in source
+    assert "d1l_ui_device_sheets_create(&s_device_sheets_controller, s_screen)" in source
     assert "render_wifi_sheet" in source
     assert "d1l_ui_wifi_render(&s_wifi_controller" in source
     assert "render_ble_sheet" in source
@@ -1622,12 +1623,13 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "open_diagnostics_sheet_event_cb" in source
     assert '"Wi-Fi Setup"' in wifi_module
     assert '"BLE Setup"' in ble_module
-    assert '"Display"' in source
-    assert '"Diagnostics"' in source
+    assert '"Display"' in device_sheets
+    assert '"Diagnostics"' in device_sheets
     assert "lv_obj_t *ssid_textarea;" in wifi_header
     assert "lv_obj_t *password_textarea;" in wifi_header
     assert "lv_obj_t *keyboard;" in wifi_header
     assert "d1l_ui_ble_controller_t" in ble_header
+    assert "d1l_ui_device_sheets_controller_t" in device_sheets_header
     assert "d1l_app_model_save_wifi_profile(" in source
     assert "password && password[0] != '\\0' ? password : NULL" in source
     assert "d1l_app_model_wifi_scan(&s_wifi_scan_result)" in source
@@ -1652,10 +1654,9 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
-    assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in source
-    assert '"Advanced details stay here so normal screens remain simple."' in source
-    assert "render_health_line" in source
-    assert '"reset %s  heap %luK/%luK  ui stk %lu"' in source
+    assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in device_sheets
+    assert '"Advanced details stay here so normal screens remain simple."' in device_sheets
+    assert '"reset %s  heap %luK/%luK  ui stk %lu"' in device_sheets
 
 
 def test_settings_screen_has_safe_touch_radio_editor():
