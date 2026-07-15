@@ -297,19 +297,77 @@ static void messages_format_snr(char *dest, size_t dest_size, int snr_tenths)
              absolute / 10, absolute % 10);
 }
 
+static lv_obj_t *messages_create_scroll_body(lv_obj_t *parent,
+                                             int x,
+                                             int y,
+                                             int width,
+                                             int height)
+{
+    lv_obj_t *body = messages_create_panel(parent, x, y, width, height);
+    if (!body) {
+        return NULL;
+    }
+    lv_obj_set_style_pad_all(body, 0, 0);
+    lv_obj_add_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
+    return body;
+}
+
+static void messages_make_clickable(
+    lv_obj_t *object,
+    d1l_ui_messages_action_binding_t *binding)
+{
+    if (!object || !binding) {
+        return;
+    }
+    lv_obj_add_flag(object, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(object, messages_dispatch_event_cb, LV_EVENT_CLICKED,
+                        binding);
+}
+
+static const char *messages_public_time_label(const d1l_message_entry_t *entry)
+{
+    /* Retained rows have uptime but no persisted boot epoch.  Never present
+     * that value as wall-clock or relative time across reboot. */
+    (void)entry;
+    return "time unknown";
+}
+
+static const char *messages_public_state(const d1l_message_entry_t *entry,
+                                         bool unread)
+{
+    if (!entry) {
+        return "Status unknown";
+    }
+    if (entry->direction[0] == 't') {
+        /* Public rows are retained only after the radio reports TxDone. */
+        return "Sent over RF";
+    }
+    return unread ? "New" : "Received";
+}
+
 static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
-                                       lv_obj_t *parent,
+                                       lv_obj_t *body,
                                        int y,
                                        size_t index)
 {
-    if (!controller || !parent || index >= controller->rendered.public_row_count) {
+    if (!controller || !body || index >= controller->rendered.public_row_count) {
         return;
     }
     const d1l_message_entry_t *entry = &controller->rendered.public_rows[index];
-    lv_obj_t *row = messages_create_panel(parent, 18, y, 424, 72);
-    if (!row) {
+    const bool outgoing = entry->direction[0] == 't';
+    const bool unread = !outgoing &&
+        entry->seq > controller->rendered.last_public_read_seq;
+    lv_obj_t *bubble = messages_create_panel(body, outgoing ? 76 : 8, y, 332, 82);
+    if (!bubble) {
         return;
     }
+    lv_obj_set_style_bg_color(
+        bubble, lv_color_hex(outgoing ? 0x19263A : 0x122D2A), 0);
+    lv_obj_set_style_border_color(
+        bubble, lv_color_hex(outgoing ? 0x3B5B86 : 0x28635A), 0);
+    lv_obj_set_style_pad_all(bubble, 8, 0);
     d1l_ui_messages_action_binding_t *binding = &controller->public_rows[index];
     *binding = (d1l_ui_messages_action_binding_t) {
         .controller = controller,
@@ -317,42 +375,48 @@ static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
         .row_index = index,
         .generation = controller->generation,
     };
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, messages_dispatch_event_cb, LV_EVENT_CLICKED, binding);
-    lv_obj_set_style_pad_all(row, 8, 0);
+    messages_make_clickable(bubble, binding);
 
-    const bool unread = entry->direction[0] == 'r' &&
-                        entry->seq > controller->rendered.last_public_read_seq;
+    char state_and_time[64];
     char snr[16];
-    char meta[96];
+    char technical[96];
+    snprintf(state_and_time, sizeof(state_and_time), "%s | %s",
+             messages_public_state(entry, unread),
+             messages_public_time_label(entry));
     messages_format_snr(snr, sizeof(snr), entry->snr_tenths);
-    lv_obj_t *author = messages_create_label(row,
-                                             entry->author[0] ? entry->author : "unknown",
-                                             unread ? 0xFBBF24 :
-                                             (entry->direction[0] == 't' ? 0x93C5FD : 0x5EEAD4));
-    messages_set_dot_width(author, 250);
+    if (outgoing) {
+        snprintf(technical, sizeof(technical), "path bytes %u | details >",
+                 entry->path_hash_bytes);
+    } else {
+        snprintf(technical, sizeof(technical),
+                 "rssi %d | snr %s | hops %u | details >",
+                 entry->rssi_dbm, snr, entry->path_hops);
+    }
+
+    lv_obj_t *author = messages_create_label(
+        bubble, outgoing ? "You" :
+        (entry->author[0] ? entry->author : "Unknown sender"),
+        unread ? 0xFBBF24 : (outgoing ? 0x93C5FD : 0x5EEAD4));
+    messages_set_dot_width(author, 132);
     if (author) {
-        lv_obj_set_pos(author, 8, 4);
+        lv_obj_set_pos(author, 8, 2);
     }
-    lv_obj_t *state = messages_create_label(row,
-                                            unread ? "new" :
-                                            (entry->direction[0] == 't' ? "queued" : "received"),
-                                            0x8EA0AE);
-    messages_set_dot_width(state, 118);
+    lv_obj_t *state = messages_create_label(bubble, state_and_time, 0x8EA0AE);
+    messages_set_dot_width(state, 168);
     if (state) {
-        lv_obj_set_pos(state, 292, 4);
+        lv_obj_set_pos(state, 148, 2);
     }
-    lv_obj_t *text = messages_create_label(row, entry->text[0] ? entry->text : "-", 0xE5EDF5);
-    messages_set_dot_width(text, 392);
+    lv_obj_t *text = messages_create_label(
+        bubble, entry->text[0] ? entry->text : "No message text", 0xE5EDF5);
     if (text) {
-        lv_obj_set_pos(text, 8, 28);
+        lv_obj_set_pos(text, 8, 26);
+        lv_obj_set_size(text, 308, 32);
+        lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
     }
-    snprintf(meta, sizeof(meta), "rssi %d  snr %s  hops %u",
-             entry->rssi_dbm, snr, entry->path_hops);
-    lv_obj_t *details = messages_create_label(row, meta, 0x8EA0AE);
-    messages_set_dot_width(details, 392);
+    lv_obj_t *details = messages_create_label(bubble, technical, 0x8EA0AE);
+    messages_set_dot_width(details, 308);
     if (details) {
-        lv_obj_set_pos(details, 8, 50);
+        lv_obj_set_pos(details, 8, 60);
     }
 }
 
@@ -366,7 +430,7 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
     }
     const d1l_dm_entry_t *entry = &controller->rendered.dm_rows[index];
     const bool unread = controller->rendered.dm_row_unread[index];
-    lv_obj_t *row = messages_create_panel(parent, 18, y, 424, 72);
+    lv_obj_t *row = messages_create_panel(parent, 8, y, 408, 72);
     if (!row) {
         return;
     }
@@ -456,6 +520,166 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
     }
 }
 
+static void messages_render_root_card(
+    d1l_ui_messages_controller_t *controller,
+    lv_obj_t *parent,
+    int y,
+    const char *title_text,
+    const char *description,
+    size_t total,
+    uint32_t unread,
+    size_t control_index,
+    d1l_ui_messages_action_t action,
+    uint32_t accent)
+{
+    lv_obj_t *card = messages_create_panel(parent, 18, y, 424, 118);
+    if (!card) {
+        return;
+    }
+    messages_make_clickable(
+        card, messages_bind_control(controller, control_index, action));
+    lv_obj_t *title = messages_create_label(card, title_text, accent);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        messages_set_dot_width(title, 300);
+        lv_obj_set_pos(title, 8, 4);
+    }
+    lv_obj_t *arrow = messages_create_label(card, ">", 0x8EA0AE);
+    if (arrow) {
+        lv_obj_set_pos(arrow, 382, 8);
+    }
+    lv_obj_t *copy = messages_create_label(card, description, 0xC5D1DC);
+    messages_set_dot_width(copy, 376);
+    if (copy) {
+        lv_obj_set_pos(copy, 8, 38);
+    }
+    char status[96];
+    snprintf(status, sizeof(status), "%u retained | %lu unread",
+             (unsigned)total, (unsigned long)unread);
+    lv_obj_t *meta = messages_create_label(
+        card, status, unread > 0U ? 0xFBBF24 : 0x8EA0AE);
+    messages_set_dot_width(meta, 376);
+    if (meta) {
+        lv_obj_set_pos(meta, 8, 72);
+    }
+}
+
+static void messages_render_root(d1l_ui_messages_controller_t *controller,
+                                 lv_obj_t *parent)
+{
+    lv_obj_t *title = messages_create_label(parent, "Messages", 0xF4F7FB);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_obj_set_pos(title, 18, 10);
+    }
+    lv_obj_t *copy = messages_create_label(
+        parent, "Choose a conversation type", 0x8EA0AE);
+    if (copy) {
+        lv_obj_set_pos(copy, 18, 40);
+    }
+    messages_render_root_card(
+        controller, parent, 70, "Public", "Default channel conversation",
+        controller->rendered.public_total, controller->rendered.public_unread,
+        0U, D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC, 0x5EEAD4);
+    messages_render_root_card(
+        controller, parent, 200, "Direct messages", "Private contact conversations",
+        controller->rendered.dm_total, controller->rendered.dm_unread,
+        1U, D1L_UI_MESSAGES_ACTION_SHOW_DIRECT, 0xA7F3D0);
+}
+
+static void messages_render_public(d1l_ui_messages_controller_t *controller,
+                                   lv_obj_t *parent)
+{
+    messages_create_button(
+        parent, "Back", 18, 8, 72, 44,
+        messages_bind_control(controller, 0U,
+                              D1L_UI_MESSAGES_ACTION_SHOW_ROOT));
+    lv_obj_t *title = messages_create_label(parent, "Public", 0x5EEAD4);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        messages_set_dot_width(title, 200);
+        lv_obj_set_pos(title, 104, 10);
+    }
+    char summary[96];
+    snprintf(summary, sizeof(summary), "%u messages | %lu unread",
+             (unsigned)controller->rendered.public_total,
+             (unsigned long)controller->rendered.public_unread);
+    lv_obj_t *meta = messages_create_label(parent, summary, 0x8EA0AE);
+    messages_set_dot_width(meta, 250);
+    if (meta) {
+        lv_obj_set_pos(meta, 104, 36);
+    }
+    messages_create_button(
+        parent, "Mark read", 18, 60, 96, 44,
+        messages_bind_control(controller, 1U,
+                              D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ));
+    messages_create_button(
+        parent, "History", 122, 60, 96, 44,
+        messages_bind_control(controller, 2U,
+                              D1L_UI_MESSAGES_ACTION_OPEN_HISTORY));
+    lv_obj_t *body = messages_create_scroll_body(parent, 18, 112, 424, 184);
+    if (!body) {
+        return;
+    }
+    for (size_t i = 0; i < controller->rendered.public_row_count; ++i) {
+        messages_render_public_row(controller, body, 8 + (int)i * 90, i);
+    }
+    if (controller->rendered.public_row_count > 0U) {
+        lv_obj_update_layout(body);
+        lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);
+    }
+    if (controller->rendered.public_row_count == 0U) {
+        lv_obj_t *empty = messages_create_label(
+            body, "No Public messages yet", 0x8EA0AE);
+        if (empty) {
+            lv_obj_set_pos(empty, 16, 16);
+        }
+    }
+    messages_create_button(
+        parent, "Compose", 18, 304, 424, 50,
+        messages_bind_control(controller, 3U,
+                              D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC));
+}
+
+static void messages_render_direct(d1l_ui_messages_controller_t *controller,
+                                   lv_obj_t *parent)
+{
+    messages_create_button(
+        parent, "Back", 18, 8, 72, 44,
+        messages_bind_control(controller, 0U,
+                              D1L_UI_MESSAGES_ACTION_SHOW_ROOT));
+    lv_obj_t *title = messages_create_label(
+        parent, "Direct messages", 0xA7F3D0);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        messages_set_dot_width(title, 250);
+        lv_obj_set_pos(title, 104, 10);
+    }
+    char summary[96];
+    snprintf(summary, sizeof(summary), "%u retained messages | %lu unread",
+             (unsigned)controller->rendered.dm_total,
+             (unsigned long)controller->rendered.dm_unread);
+    lv_obj_t *meta = messages_create_label(parent, summary, 0x8EA0AE);
+    messages_set_dot_width(meta, 250);
+    if (meta) {
+        lv_obj_set_pos(meta, 104, 36);
+    }
+    lv_obj_t *body = messages_create_scroll_body(parent, 18, 68, 424, 286);
+    if (!body) {
+        return;
+    }
+    for (size_t i = 0; i < controller->rendered.dm_row_count; ++i) {
+        messages_render_dm_row(controller, body, 8 + (int)i * 80, i);
+    }
+    if (controller->rendered.dm_row_count == 0U) {
+        lv_obj_t *empty = messages_create_label(
+            body, "No direct messages yet", 0x8EA0AE);
+        if (empty) {
+            lv_obj_set_pos(empty, 16, 16);
+        }
+    }
+}
+
 void d1l_ui_messages_render(d1l_ui_messages_controller_t *controller,
                             lv_obj_t *parent,
                             const d1l_ui_messages_view_model_t *view_model,
@@ -468,85 +692,27 @@ void d1l_ui_messages_render(d1l_ui_messages_controller_t *controller,
     }
     messages_begin_actions(controller, action_handler, action_context);
     controller->rendered = *view_model;
-    if (controller->rendered.public_row_count > D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS) {
-        controller->rendered.public_row_count = D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS;
+    if (controller->rendered.public_row_count >
+        D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS) {
+        controller->rendered.public_row_count =
+            D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS;
     }
-    if (controller->rendered.dm_row_count > D1L_UI_MESSAGES_DM_PREVIEW_ROWS) {
+    if (controller->rendered.dm_row_count >
+        D1L_UI_MESSAGES_DM_PREVIEW_ROWS) {
         controller->rendered.dm_row_count = D1L_UI_MESSAGES_DM_PREVIEW_ROWS;
     }
-    lv_obj_t *header = messages_create_panel(parent, 18, 16, 424, 108);
-    if (!header) {
-        return;
-    }
-    lv_obj_t *title = messages_create_label(header, "Messages", 0xF4F7FB);
-    if (title) {
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        messages_set_dot_width(title, 170);
-        lv_obj_set_pos(title, 8, 4);
-    }
-    char summary[128];
-    snprintf(summary, sizeof(summary), "public %u new %lu  dm %u new %lu muted %lu",
-             (unsigned)controller->rendered.public_total,
-             (unsigned long)controller->rendered.public_unread,
-             (unsigned)controller->rendered.dm_total,
-             (unsigned long)controller->rendered.dm_unread,
-             (unsigned long)controller->rendered.muted_dm_unread);
-    lv_obj_t *meta = messages_create_label(header, summary, 0x8EA0AE);
-    messages_set_dot_width(meta, 392);
-    if (meta) {
-        lv_obj_set_pos(meta, 8, 34);
-    }
 
-    messages_create_button(header, "Read", 8, 62, 54, 40,
-                           messages_bind_control(controller, 0U,
-                                                 D1L_UI_MESSAGES_ACTION_MARK_READ));
-    messages_create_button(header, "Compose", 70, 62, 88, 40,
-                           messages_bind_control(controller, 1U,
-                                                 D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC));
-    messages_create_button(header, "History", 166, 62, 80, 40,
-                           messages_bind_control(controller, 2U,
-                                                 D1L_UI_MESSAGES_ACTION_OPEN_HISTORY));
-    messages_create_button(header, "Test", 254, 62, 64, 40,
-                           messages_bind_control(controller, 3U,
-                                                 D1L_UI_MESSAGES_ACTION_SEND_PUBLIC_TEST));
-    messages_create_button(parent, "Public", 18, 136, 96, 40,
-                           messages_bind_control(controller, 4U,
-                                                 D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC));
-    messages_create_button(parent, "DMs", 122, 136, 80, 40,
-                           messages_bind_control(controller, 5U,
-                                                 D1L_UI_MESSAGES_ACTION_SHOW_DIRECT));
-
-    const bool show_direct = controller->rendered.mode == D1L_UI_MESSAGES_MODE_DIRECT;
-    lv_obj_t *mode_label = messages_create_label(parent,
-                                                 show_direct ? "DM Conversations" : "Public Channel",
-                                                 show_direct ? 0xA7F3D0 : 0x5EEAD4);
-    if (mode_label) {
-        lv_obj_set_pos(mode_label, 26, 190);
-    }
-
-    int y = 218;
-    if (show_direct) {
-        for (size_t i = 0; i < controller->rendered.dm_row_count; ++i) {
-            messages_render_dm_row(controller, parent, y, i);
-            y += 80;
-        }
-        if (controller->rendered.dm_row_count == 0U) {
-            lv_obj_t *empty = messages_create_label(parent, "No direct messages", 0x8EA0AE);
-            if (empty) {
-                lv_obj_set_pos(empty, 26, y);
-            }
-        }
-    } else {
-        for (size_t i = 0; i < controller->rendered.public_row_count; ++i) {
-            messages_render_public_row(controller, parent, y, i);
-            y += 80;
-        }
-        if (controller->rendered.public_row_count == 0U) {
-            lv_obj_t *empty = messages_create_label(parent, "No Public messages", 0x8EA0AE);
-            if (empty) {
-                lv_obj_set_pos(empty, 26, y);
-            }
-        }
+    switch (controller->rendered.mode) {
+    case D1L_UI_MESSAGES_MODE_PUBLIC:
+        messages_render_public(controller, parent);
+        break;
+    case D1L_UI_MESSAGES_MODE_DIRECT:
+        messages_render_direct(controller, parent);
+        break;
+    case D1L_UI_MESSAGES_MODE_ROOT:
+    default:
+        messages_render_root(controller, parent);
+        break;
     }
 }
 

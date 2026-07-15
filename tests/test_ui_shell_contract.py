@@ -274,21 +274,18 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     dm_row = messages_source.split("static void messages_render_dm_row", 1)[1].split(
         "void d1l_ui_messages_render", 1
     )[0]
-    assert "messages_create_panel(parent, 18, y, 424, 72)" in message_row
-    assert "messages_create_panel(parent, 18, y, 424, 72)" in dm_row
-    assert "lv_obj_set_pos(text, 8, 28)" in message_row
-    assert "lv_obj_set_pos(details, 8, 50)" in message_row
+    assert "messages_create_panel(body, outgoing ? 76 : 8, y, 332, 82)" in message_row
+    assert "messages_create_panel(parent, 8, y, 408, 72)" in dm_row
+    assert "lv_obj_set_pos(text, 8, 26)" in message_row
+    assert "lv_obj_set_pos(details, 8, 60)" in message_row
     assert "lv_obj_set_pos(text, 8, 28)" in dm_row
     assert "lv_obj_set_pos(details, 8, 50)" in dm_row
 
-    messages = messages_source.split("void d1l_ui_messages_render", 1)[1].split(
-        "void d1l_ui_messages_deactivate", 1
-    )[0]
-    assert "messages_create_panel(parent, 18, 16, 424, 108)" in messages
-    assert "s_content" not in messages
-    assert 'messages_create_button(header, "Compose", 70, 62, 88, 40' in messages
-    assert "controller->rendered.public_row_count" in messages
-    assert "controller->rendered.dm_row_count" in messages
+    assert "messages_create_scroll_body(parent, 18, 112, 424, 184)" in messages_source
+    assert "messages_create_scroll_body(parent, 18, 68, 424, 286)" in messages_source
+    assert 'parent, "Compose", 18, 304, 424, 50' in messages_source
+    assert "controller->rendered.public_row_count" in messages_source
+    assert "controller->rendered.dm_row_count" in messages_source
 
     nested_body = source.split("static lv_obj_t *create_nested_page_body", 1)[1].split(
         "static lv_obj_t *create_nested_page_label", 1
@@ -307,7 +304,10 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert detail.index('entry->text[0] ? entry->text : "-"') < detail.index('"Technical details"')
     assert '"Hide technical details" : "Technical details"' in detail
     assert '"Sequence  %lu  uptime %lums  direction %s"' in detail
-    assert '"Path hash  %u byte  delivered %s"' in detail
+    assert '"Path hash  %u byte%s  retained after %s"' in detail
+    assert 'return "sent over RF";' in source
+    assert '"Signal  not measured for retained Public TxDone"' in detail
+    assert '"Path hops  not measured for retained Public TxDone"' in detail
 
     compose = source.split("static void create_compose_sheet", 1)[1].split(
         "static void create_public_history_sheet", 1
@@ -563,7 +563,7 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
     assert "request_full_screen_repaint();" in compose_hide
 
     public_compose = source.split("static void show_public_compose_sheet", 1)[1].split(
-        "static void public_test_event_cb", 1
+        "static void open_compose_event_cb", 1
     )[0]
     dm_compose = source.split("static void open_dm_compose_for_contact", 1)[1].split(
         "static bool contact_from_node_view", 1
@@ -695,7 +695,7 @@ def test_touch_ui_actions_route_through_app_model():
     source = read("main/ui/ui_phase1.c")
     header = read("main/app/app_model.h")
     model = read("main/app/app_model.c")
-    assert "d1l_app_model_send_public_test()" in source
+    assert "d1l_app_model_send_public_test()" not in source
     assert "d1l_app_model_send_public_text(text)" in source
     assert "d1l_app_model_send_dm_text(s_compose_contact.fingerprint, text)" in source
     assert "d1l_app_model_request_advert(false)" in source
@@ -710,7 +710,7 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_app_model_set_contact_flags" in header
     assert "d1l_app_model_export_contact_uri" in header
     assert "d1l_app_model_copy_route_trace" in header
-    assert 'd1l_meshcore_service_send_public("test")' in model
+    assert 'd1l_meshcore_service_send_public("test")' not in model
     assert "d1l_meshcore_service_send_public(text)" in model
     assert "d1l_meshcore_service_send_dm(fingerprint, text)" in model
     assert "d1l_contact_store_find_by_fingerprint(fingerprint, out_contact)" in model
@@ -743,6 +743,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "first_boot_onboarding",
         "lock_overlay_unlock",
         "home_launcher_navigation",
+        "messages_hierarchy_navigation",
         "public_compose_and_send",
         "public_history_search",
         "dm_thread_open_and_reply",
@@ -762,7 +763,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_public_compose": "open_compose_event_cb",
         "edit_public_message": "s_compose_textarea",
         "send_public_text": "send_compose_text",
-        "mark_messages_read": "D1L_UI_MESSAGES_ACTION_MARK_READ",
+        "mark_public_read": "D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ",
+        "open_messages_root": "D1L_UI_MESSAGES_ACTION_SHOW_ROOT",
         "open_messages_public": "D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC",
         "open_messages_dm": "D1L_UI_MESSAGES_ACTION_SHOW_DIRECT",
         "open_public_history": "open_public_history_event_cb",
@@ -912,7 +914,7 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "LV_EVENT_READY" in source
     assert "LV_EVENT_CANCEL" in source
     assert "hide_compose_sheet()" in source
-    assert '"Test"' in messages_source
+    assert '"Test"' not in messages_source
 
 
 def test_dm_composer_opens_from_contact_rows():
@@ -1061,7 +1063,9 @@ def test_public_message_detail_sheet_opens_from_public_rows():
     assert 'snprintf(placeholder, sizeof(placeholder), "Reply to %.48s"' in source
     assert "show_public_compose_sheet(title, placeholder)" in source
     assert '"Signal  rssi %d  snr %s%d.%d"' in render
+    assert '"Signal  not measured for retained Public TxDone"' in render
     assert '"Path  %u hop%s"' in render
+    assert '"Path hops  not measured for retained Public TxDone"' in render
     assert '"Hide technical details" : "Technical details"' in render
     assert '"Sequence  %lu  uptime %lums  direction %s"' in source
     assert "message_delivery_label" in source
@@ -1299,21 +1303,24 @@ def test_messages_screen_renders_bounded_preview_rows():
     header = read("main/app/app_model.h")
     assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in header
     assert "#define D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
-    assert "static bool s_messages_show_dms" in source
-    assert "set_messages_mode(false)" in source
-    assert "set_messages_mode(true)" in source
-    assert '"Public Channel"' in messages_source
-    assert '"DM Conversations"' in messages_source
+    assert "static d1l_ui_messages_mode_t s_messages_mode" in source
+    assert "set_messages_mode(D1L_UI_MESSAGES_MODE_ROOT)" in source
+    assert "set_messages_mode(D1L_UI_MESSAGES_MODE_PUBLIC)" in source
+    assert "set_messages_mode(D1L_UI_MESSAGES_MODE_DIRECT)" in source
+    assert '"Choose a conversation type"' in messages_source
+    assert '"Default channel conversation"' in messages_source
+    assert '"Direct messages"' in messages_source
     assert "for (size_t i = 0; i < controller->rendered.public_row_count; ++i)" in messages_source
     assert "for (size_t i = 0; i < controller->rendered.dm_row_count; ++i)" in messages_source
-    assert "y += 80" in messages_source
+    assert "8 + (int)i * 90" in messages_source
+    assert "8 + (int)i * 80" in messages_source
     assert "public_rows[D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS]" in messages_header
     assert "dm_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS]" in messages_header
     assert "snapshot->message_count" in source
     assert "snapshot->dm_count" in source
     assert "snapshot->public_unread_count" in source
     assert "snapshot->dm_unread_count" in source
-    assert 'messages_create_button(header, "History"' in messages_source
+    assert "D1L_UI_MESSAGES_ACTION_OPEN_HISTORY" in messages_source
     assert "static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]" in source
     assert "static size_t s_public_history_limit" in source
     assert "render_public_history_sheet" in source

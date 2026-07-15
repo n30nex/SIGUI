@@ -227,7 +227,6 @@ typedef struct {
 
 d1l_app_model_t *d1l_app_model_get(void);
 void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot);
-esp_err_t d1l_app_model_send_public_test(void);
 esp_err_t d1l_app_model_send_public_text(const char *text);
 esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
                                       size_t max_channels,
@@ -265,7 +264,7 @@ size_t d1l_app_model_copy_route_trace(const char *fingerprint, d1l_route_entry_t
                                       size_t max_entries);
 size_t d1l_app_model_query_nodes(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
                                  size_t max_entries);
-esp_err_t d1l_app_model_mark_messages_read(void);
+esp_err_t d1l_app_model_mark_public_read(void);
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);

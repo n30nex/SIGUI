@@ -84,7 +84,7 @@ def test_storage_retained_sd_degradation_is_copied_into_touch_snapshot():
     snapshot_copy = function_slice(
         source,
         "void d1l_app_model_snapshot",
-        "esp_err_t d1l_app_model_send_public_test",
+        "esp_err_t d1l_app_model_send_public_text",
     )
 
     assert "bool storage_retained_sd_degraded;" in snapshot_struct
