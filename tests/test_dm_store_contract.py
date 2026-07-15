@@ -473,7 +473,7 @@ def test_app_model_and_ui_preview_recent_dms():
     assert 'sheet, "Read"' not in thread_render
     assert "read_dm_thread_event_cb" not in ui
     assert '"DM"' in ui
-    assert "No direct messages" in messages_ui
+    assert "No direct-message history yet." in messages_ui
 
 
 def test_dm_thread_search_bridge_is_observational_only():

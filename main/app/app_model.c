@@ -29,6 +29,39 @@ static bool
     s_dm_conversation_source_unread[D1L_DM_CONVERSATION_SOURCE_CAPACITY];
 static d1l_dm_conversation_summary_t
     s_dm_conversation_summaries[D1L_APP_SNAPSHOT_DM_PREVIEW];
+static d1l_contact_entry_t
+    s_dm_capable_contact_source[D1L_CONTACT_STORE_CAPACITY];
+
+static size_t count_dm_capable_contacts(void)
+{
+    memset(s_dm_capable_contact_source, 0,
+           sizeof(s_dm_capable_contact_source));
+    const size_t source_count = d1l_contact_store_copy_recent(
+        s_dm_capable_contact_source, D1L_CONTACT_STORE_CAPACITY);
+    size_t capable_count = 0U;
+    for (size_t i = 0U; i < source_count; ++i) {
+        if (d1l_contact_store_can_dm(&s_dm_capable_contact_source[i])) {
+            capable_count++;
+        }
+    }
+    return capable_count;
+}
+
+static bool retained_store_persistence_degraded(
+    const d1l_storage_status_t *storage,
+    d1l_retained_blob_store_id_t store_id)
+{
+    if (!storage || store_id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return true;
+    }
+    const d1l_retained_blob_store_sd_stats_t *stats =
+        &storage->retained_sd_stats[store_id];
+    return !d1l_retained_blob_store_nvs_ready() ||
+        d1l_retained_blob_store_nvs_error() != ESP_OK ||
+        d1l_retained_blob_store_nvs_migration_error() != ESP_OK ||
+        stats->nvs_mirror_last_error != ESP_OK ||
+        stats->sd_degraded_latched;
+}
 
 static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t src_len)
 {
@@ -186,6 +219,9 @@ static void populate_dm_conversation_summaries(d1l_app_snapshot_t *snapshot)
            sizeof(s_dm_conversation_summaries));
     const size_t source_count = d1l_dm_store_copy_recent(
         s_dm_conversation_source, D1L_DM_CONVERSATION_SOURCE_CAPACITY);
+    snapshot->dm_failure_latched =
+        d1l_dm_conversation_list_has_retained_failure(
+            s_dm_conversation_source, source_count);
     for (size_t i = 0U; i < source_count; ++i) {
         s_dm_conversation_source_unread[i] =
             d1l_read_state_dm_entry_is_unread(
@@ -315,6 +351,14 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->storage_response_truncated = storage.response_truncated;
     snapshot->storage_retained_sd_degraded = storage.retained_sd_degraded;
     snapshot->storage_retained_backup_degraded = storage.retained_backup_degraded;
+    snapshot->message_store_loaded = messages.loaded;
+    snapshot->dm_store_loaded = dms.loaded;
+    snapshot->message_store_persistence_degraded =
+        retained_store_persistence_degraded(
+            &storage, D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES);
+    snapshot->dm_store_persistence_degraded =
+        retained_store_persistence_degraded(
+            &storage, D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
     snapshot->map_page_supported = true;
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
     snapshot->map_tile_render_supported = D1L_MAP_TILE_RENDER_SUPPORTED;
@@ -397,6 +441,9 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
         mesh.dm_delivery_session_id != 0U &&
         d1l_dm_delivery_state_valid(delivery_state) &&
         !d1l_dm_delivery_state_terminal(delivery_state);
+    snapshot->dm_retry_active = snapshot->dm_delivery_active &&
+        (delivery_state == D1L_DM_DELIVERY_RETRY_WAIT ||
+         delivery_state == D1L_DM_DELIVERY_RETRY_TX);
     snapshot->public_unread_count = read_state.public_unread_count;
     snapshot->dm_unread_count = read_state.dm_unread_count;
     snapshot->muted_dm_unread_count = read_state.muted_dm_unread_count;
@@ -406,6 +453,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->node_count = nodes.count;
     snapshot->contact_total_written = contacts.total_written;
     snapshot->contact_count = contacts.count;
+    snapshot->dm_capable_contact_count = count_dm_capable_contacts();
     snapshot->route_total_written = routes.total_written;
     snapshot->route_count = routes.count;
     snapshot->packet_total_written = packets.total_written;

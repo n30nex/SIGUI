@@ -124,7 +124,9 @@ def test_dm_bubbles_wrap_align_and_disclose_exact_persisted_technical_state():
         assert f"entry->{field}" in bubble or (
             field == "snr_tenths" and "messages_format_snr" in bubble
         )
-    assert "Retry control is not exposed yet; Reply sends a new message." in bubble
+    assert "Bounded delivery retry is active; no manual resend is needed." in bubble
+    assert "Final delivery failure is retained." in bubble
+    assert "no automatic retry is pending." in bubble
     detail_format = bubble.split("if (outgoing) {", 1)[1].split(
         "if (!messages_create_wrapped_label(bubble, technical", 1
     )[0]

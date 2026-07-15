@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 67
+    assert len(views) == 75
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -296,7 +296,14 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         {
             "messages",
             "messages_public",
-            "messages_dm",
+                "messages_dm",
+                "messages_loading",
+                "messages_public_storage_degraded",
+                "messages_dm_storage_unavailable",
+                "messages_dm_no_contact",
+                "messages_dm_no_history",
+                "messages_dm_retry",
+                "messages_dm_failure",
             "nodes",
             "map",
             "packets",

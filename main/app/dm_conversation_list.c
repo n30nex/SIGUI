@@ -8,6 +8,37 @@ static bool same_fingerprint(const char *left, const char *right)
         strncmp(left, right, D1L_NODE_FINGERPRINT_LEN) == 0;
 }
 
+static bool delivery_failure_latched(d1l_dm_delivery_state_t state)
+{
+    switch (state) {
+    case D1L_DM_DELIVERY_FAILED_RADIO:
+    case D1L_DM_DELIVERY_FAILED_TIMEOUT:
+    case D1L_DM_DELIVERY_FAILED_QUEUE:
+    case D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool d1l_dm_conversation_list_has_retained_failure(
+    const d1l_dm_entry_t *rows, size_t row_count)
+{
+    if (!rows) {
+        return false;
+    }
+    const size_t first = row_count > D1L_DM_CONVERSATION_SOURCE_CAPACITY ?
+        row_count - D1L_DM_CONVERSATION_SOURCE_CAPACITY : 0U;
+    for (size_t index = first; index < row_count; ++index) {
+        if (strncmp(rows[index].direction, "tx",
+                    sizeof(rows[index].direction)) == 0 &&
+            delivery_failure_latched(rows[index].delivery_state)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static uint32_t conversation_unread_count(
     const d1l_dm_entry_t *rows, const bool *row_unread,
     size_t first, size_t row_count, const char *fingerprint)

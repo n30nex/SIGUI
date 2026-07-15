@@ -1344,8 +1344,8 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert '"Direct messages"' in messages_source
     assert "for (size_t i = 0; i < controller->rendered.public_row_count; ++i)" in messages_source
     assert "for (size_t i = 0; i < controller->rendered.dm_row_count; ++i)" in messages_source
-    assert "8 + (int)i * 90" in messages_source
-    assert "8 + (int)i * 80" in messages_source
+    assert "row_y + (int)i * 90" in messages_source
+    assert "row_y + (int)i * 80" in messages_source
     assert "public_rows[D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS]" in messages_header
     assert "dm_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS]" in messages_header
     assert "snapshot->message_count" in source

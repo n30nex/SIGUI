@@ -106,6 +106,10 @@ typedef struct {
     bool storage_response_truncated;
     bool storage_retained_sd_degraded;
     bool storage_retained_backup_degraded;
+    bool message_store_loaded;
+    bool dm_store_loaded;
+    bool message_store_persistence_degraded;
+    bool dm_store_persistence_degraded;
     bool time_available;
     bool protocol_tx_ready;
     esp_err_t protocol_tx_error;
@@ -188,6 +192,8 @@ typedef struct {
     size_t dm_conversation_count;
     uint8_t dm_delivery_state;
     bool dm_delivery_active;
+    bool dm_retry_active;
+    bool dm_failure_latched;
     uint32_t public_unread_count;
     uint32_t dm_unread_count;
     uint32_t muted_dm_unread_count;
@@ -197,6 +203,7 @@ typedef struct {
     size_t node_count;
     uint32_t contact_total_written;
     size_t contact_count;
+    size_t dm_capable_contact_count;
     uint32_t route_total_written;
     size_t route_count;
     uint32_t packet_total_written;

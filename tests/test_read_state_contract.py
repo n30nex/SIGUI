@@ -106,5 +106,5 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert show_thread.index("d1l_app_model_mark_dm_thread_read(fingerprint)") < show_thread.index(
         "render_dm_thread_sheet()"
     )
-    assert "messages_render_dm_row(controller, body, 8 + (int)i * 80, i)" in messages_ui
+    assert "messages_render_dm_row(controller, body, row_y + (int)i * 80, i)" in messages_ui
     assert "d1l_ui_messages_delivery_label(entry, unread)" in messages_ui

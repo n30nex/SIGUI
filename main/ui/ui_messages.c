@@ -556,6 +556,7 @@ static void messages_render_root_card(
     size_t total,
     uint32_t unread,
     uint32_t muted_unread,
+    d1l_ui_messages_store_state_t store_state,
     size_t control_index,
     d1l_ui_messages_action_t action,
     uint32_t accent)
@@ -581,8 +582,16 @@ static void messages_render_root_card(
     if (copy) {
         lv_obj_set_pos(copy, 8, 38);
     }
-    char status[96];
-    if (muted_unread > 0U) {
+    char status[112];
+    if (store_state == D1L_UI_MESSAGES_STORE_LOADING) {
+        snprintf(status, sizeof(status), "Loading retained history");
+    } else if (store_state == D1L_UI_MESSAGES_STORE_UNAVAILABLE) {
+        snprintf(status, sizeof(status), "%u readable in RAM | storage unavailable",
+                 (unsigned)total);
+    } else if (store_state == D1L_UI_MESSAGES_STORE_DEGRADED) {
+        snprintf(status, sizeof(status), "%u %s | storage degraded",
+                 (unsigned)total, unit ? unit : "retained");
+    } else if (muted_unread > 0U) {
         snprintf(status, sizeof(status), "%u %s | %lu unread + %lu muted",
                  (unsigned)total, unit ? unit : "retained",
                  (unsigned long)unread, (unsigned long)muted_unread);
@@ -592,7 +601,10 @@ static void messages_render_root_card(
                  (unsigned long)unread);
     }
     lv_obj_t *meta = messages_create_label(
-        card, status, unread > 0U ? 0xFBBF24 : 0x8EA0AE);
+        card, status,
+        unread > 0U || store_state == D1L_UI_MESSAGES_STORE_DEGRADED ||
+                store_state == D1L_UI_MESSAGES_STORE_UNAVAILABLE ?
+            0xFBBF24 : 0x8EA0AE);
     messages_set_dot_width(meta, 376);
     if (meta) {
         lv_obj_set_pos(meta, 8, 72);
@@ -616,13 +628,61 @@ static void messages_render_root(d1l_ui_messages_controller_t *controller,
         controller, parent, 70, "Public", "Default channel conversation",
         "messages",
         controller->rendered.public_total, controller->rendered.public_unread, 0U,
+        controller->rendered.public_store_state,
         0U, D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC, 0x5EEAD4);
     messages_render_root_card(
         controller, parent, 200, "Direct messages", "Private contact conversations",
         "conversations",
         controller->rendered.dm_total, controller->rendered.dm_unread,
         controller->rendered.muted_dm_unread,
+        controller->rendered.dm_store_state,
         1U, D1L_UI_MESSAGES_ACTION_SHOW_DIRECT, 0xA7F3D0);
+}
+
+static int messages_render_notice(lv_obj_t *parent,
+                                  int y,
+                                  const char *text,
+                                  uint32_t color)
+{
+    if (!parent || !text || text[0] == '\0') {
+        return y;
+    }
+    lv_obj_t *panel = messages_create_panel(parent, 8, y, 408, 44);
+    if (!panel) {
+        return y;
+    }
+    lv_obj_set_style_pad_all(panel, 8, 0);
+    lv_obj_t *label = messages_create_label(panel, text, color);
+    messages_set_dot_width(label, 390);
+    if (label) {
+        lv_obj_set_pos(label, 0, 4);
+    }
+    return y + 52;
+}
+
+static int messages_render_store_notice(
+    lv_obj_t *parent,
+    int y,
+    d1l_ui_messages_store_state_t state)
+{
+    switch (state) {
+    case D1L_UI_MESSAGES_STORE_LOADING:
+        return messages_render_notice(
+            parent, y, "Loading retained history...", 0x93C5FD);
+    case D1L_UI_MESSAGES_STORE_DEGRADED:
+        return messages_render_notice(
+            parent, y,
+            "Storage degraded; readable RAM history remains.",
+            0xFBBF24);
+    case D1L_UI_MESSAGES_STORE_UNAVAILABLE:
+        return messages_render_notice(
+            parent, y,
+            "Persistence unavailable; readable RAM history remains.",
+            0xF87171);
+    case D1L_UI_MESSAGES_STORE_READY:
+    default:
+        return y;
+    }
 }
 
 static void messages_render_public(d1l_ui_messages_controller_t *controller,
@@ -659,18 +719,33 @@ static void messages_render_public(d1l_ui_messages_controller_t *controller,
     if (!body) {
         return;
     }
+    int row_y = messages_render_store_notice(
+        body, 8, controller->rendered.public_store_state);
     for (size_t i = 0; i < controller->rendered.public_row_count; ++i) {
-        messages_render_public_row(controller, body, 8 + (int)i * 90, i);
+        messages_render_public_row(controller, body, row_y + (int)i * 90, i);
     }
     if (controller->rendered.public_row_count > 0U) {
         lv_obj_update_layout(body);
-        lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);
+        if (controller->rendered.public_store_state ==
+            D1L_UI_MESSAGES_STORE_READY) {
+            lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);
+        } else {
+            lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
+        }
     }
     if (controller->rendered.public_row_count == 0U) {
+        const char *empty_text =
+            controller->rendered.public_store_state ==
+                    D1L_UI_MESSAGES_STORE_LOADING ?
+                "Loading retained Public history..." :
+            controller->rendered.public_store_state ==
+                    D1L_UI_MESSAGES_STORE_UNAVAILABLE ?
+                "No readable Public history in RAM." :
+                "No Public messages yet";
         lv_obj_t *empty = messages_create_label(
-            body, "No Public messages yet", 0x8EA0AE);
+            body, empty_text, 0x8EA0AE);
         if (empty) {
-            lv_obj_set_pos(empty, 16, 16);
+            lv_obj_set_pos(empty, 16, row_y + 8);
         }
     }
     messages_create_button(
@@ -714,14 +789,39 @@ static void messages_render_direct(d1l_ui_messages_controller_t *controller,
     if (!body) {
         return;
     }
+    int row_y = messages_render_store_notice(
+        body, 8, controller->rendered.dm_store_state);
+    if (controller->rendered.dm_retry_active) {
+        row_y = messages_render_notice(
+            body, row_y, "A bounded delivery retry is in progress.",
+            0x93C5FD);
+    }
+    if (controller->rendered.dm_failure_latched) {
+        row_y = messages_render_notice(
+            body, row_y,
+            "A final delivery failure is retained; open it for details.",
+            0xF87171);
+    }
     for (size_t i = 0; i < controller->rendered.dm_row_count; ++i) {
-        messages_render_dm_row(controller, body, 8 + (int)i * 80, i);
+        messages_render_dm_row(controller, body, row_y + (int)i * 80, i);
     }
     if (controller->rendered.dm_row_count == 0U) {
+        const char *empty_text;
+        if (controller->rendered.dm_store_state ==
+            D1L_UI_MESSAGES_STORE_LOADING) {
+            empty_text = "Loading retained direct-message history...";
+        } else if (controller->rendered.dm_store_state ==
+                   D1L_UI_MESSAGES_STORE_UNAVAILABLE) {
+            empty_text = "No readable direct-message history in RAM.";
+        } else if (controller->rendered.dm_capable_contact_count == 0U) {
+            empty_text = "No DM contacts available. Add a verified chat contact.";
+        } else {
+            empty_text = "No direct-message history yet.";
+        }
         lv_obj_t *empty = messages_create_label(
-            body, "No direct messages yet", 0x8EA0AE);
+            body, empty_text, 0x8EA0AE);
         if (empty) {
-            lv_obj_set_pos(empty, 16, 16);
+            lv_obj_set_pos(empty, 16, row_y + 8);
         }
     }
 }
@@ -962,13 +1062,22 @@ static bool messages_render_thread_bubble(
     if (!messages_create_wrapped_label(bubble, technical, 0x8EA0AE)) {
         return false;
     }
-    if (outgoing && messages_delivery_failed_or_interrupted(
-            entry->delivery_state) &&
-        !messages_create_wrapped_label(
-            bubble,
-            "Retry control is not exposed yet; Reply sends a new message.",
-            0xFBBF24)) {
-        return false;
+    if (outgoing && d1l_ui_messages_delivery_retry_active(
+            entry->delivery_state)) {
+        if (!messages_create_wrapped_label(
+                bubble,
+                "Bounded delivery retry is active; no manual resend is needed.",
+                0x93C5FD)) {
+            return false;
+        }
+    } else if (outgoing && messages_delivery_failed_or_interrupted(
+                   entry->delivery_state)) {
+        if (!messages_create_wrapped_label(
+                bubble,
+                "Final delivery failure is retained. Reply starts a new explicit message; no automatic retry is pending.",
+                0xFBBF24)) {
+            return false;
+        }
     }
     return true;
 }
@@ -1006,6 +1115,7 @@ bool d1l_ui_messages_render_thread(
     d1l_ui_messages_controller_t *controller,
     d1l_ui_messages_thread_loader_t loader,
     void *loader_context,
+    bool reply_available,
     d1l_ui_messages_action_handler_t action_handler,
     void *action_context)
 {
@@ -1059,6 +1169,14 @@ bool d1l_ui_messages_render_thread(
     if (!body) {
         complete = false;
     } else {
+        (void)messages_render_store_notice(
+            body, 0, controller->rendered.dm_store_state);
+        if (!reply_available) {
+            (void)messages_render_notice(
+                body, 0,
+                "Contact unavailable; retained history remains readable.",
+                0xFBBF24);
+        }
         char meta_text[160];
         if (controller->thread_search_text[0]) {
             snprintf(meta_text, sizeof(meta_text),
@@ -1072,8 +1190,8 @@ bool d1l_ui_messages_render_thread(
                      (unsigned)controller->thread_row_count,
                      (unsigned)controller->thread_total_matches);
         }
-        complete = messages_create_wrapped_label(body, meta_text, 0x8EA0AE) != NULL &&
-            complete;
+        lv_obj_t *meta = messages_create_wrapped_label(body, meta_text, 0x8EA0AE);
+        complete = meta != NULL && complete;
         if (controller->thread_row_count < controller->thread_total_matches &&
             controller->thread_limit < D1L_UI_MESSAGES_THREAD_MAX_ROWS) {
             lv_obj_t *older = messages_create_button(
@@ -1089,7 +1207,10 @@ bool d1l_ui_messages_render_thread(
         }
         if (controller->thread_row_count == 0U) {
             complete = messages_create_wrapped_label(
-                body, controller->thread_search_text[0] ?
+                body, controller->rendered.dm_store_state ==
+                        D1L_UI_MESSAGES_STORE_LOADING ?
+                    "Loading retained messages..." :
+                controller->thread_search_text[0] ?
                     "No retained messages match this search." :
                     "No retained messages in this conversation.",
                 0x8EA0AE) != NULL && complete;
@@ -1100,7 +1221,13 @@ bool d1l_ui_messages_render_thread(
         }
         if (controller->thread_row_count > 0U) {
             lv_obj_update_layout(body);
-            lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);
+            if (controller->rendered.dm_store_state ==
+                    D1L_UI_MESSAGES_STORE_READY &&
+                reply_available) {
+                lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);
+            } else {
+                lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
+            }
         }
     }
     complete = messages_create_button(
@@ -1109,11 +1236,17 @@ bool d1l_ui_messages_render_thread(
             controller, 3U,
             D1L_UI_MESSAGES_ACTION_OPEN_DM_SEARCH)) != NULL &&
         complete;
-    complete = messages_create_button(
-        sheet, "Reply", 16, 360, 448, 52,
-        messages_bind_thread_control(
-            controller, 2U, D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD)) != NULL &&
-        complete;
+    lv_obj_t *reply = reply_available ?
+        messages_create_button(
+            sheet, "Reply", 16, 360, 448, 52,
+            messages_bind_thread_control(
+                controller, 2U, D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD)) :
+        messages_create_button(
+            sheet, "Contact unavailable", 16, 360, 448, 52, NULL);
+    if (reply && !reply_available) {
+        lv_obj_add_state(reply, LV_STATE_DISABLED);
+    }
+    complete = reply != NULL && complete;
     if (!complete) {
         messages_deactivate_actions(controller);
         lv_obj_clean(sheet);

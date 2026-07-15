@@ -18,6 +18,13 @@ typedef enum {
     D1L_UI_MESSAGES_MODE_DIRECT,
 } d1l_ui_messages_mode_t;
 
+typedef enum {
+    D1L_UI_MESSAGES_STORE_LOADING = 0,
+    D1L_UI_MESSAGES_STORE_READY,
+    D1L_UI_MESSAGES_STORE_DEGRADED,
+    D1L_UI_MESSAGES_STORE_UNAVAILABLE,
+} d1l_ui_messages_store_state_t;
+
 typedef struct {
     d1l_ui_messages_mode_t mode;
     size_t public_total;
@@ -33,6 +40,11 @@ typedef struct {
     uint32_t dm_row_unread_count[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
     bool dm_row_muted[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
     size_t dm_row_count;
+    size_t dm_capable_contact_count;
+    d1l_ui_messages_store_state_t public_store_state;
+    d1l_ui_messages_store_state_t dm_store_state;
+    bool dm_retry_active;
+    bool dm_failure_latched;
 } d1l_ui_messages_view_model_t;
 
 typedef enum {
@@ -124,6 +136,38 @@ static inline bool d1l_ui_messages_thread_row_index_valid(
         index < D1L_UI_MESSAGES_THREAD_MAX_ROWS;
 }
 
+static inline d1l_ui_messages_store_state_t d1l_ui_messages_store_state(
+    bool loaded,
+    bool persistence_available,
+    bool persistence_degraded)
+{
+    if (!loaded) {
+        return persistence_available ? D1L_UI_MESSAGES_STORE_LOADING :
+            D1L_UI_MESSAGES_STORE_UNAVAILABLE;
+    }
+    if (!persistence_available) {
+        return D1L_UI_MESSAGES_STORE_UNAVAILABLE;
+    }
+    return persistence_degraded ? D1L_UI_MESSAGES_STORE_DEGRADED :
+        D1L_UI_MESSAGES_STORE_READY;
+}
+
+static inline bool d1l_ui_messages_delivery_retry_active(
+    d1l_dm_delivery_state_t state)
+{
+    return state == D1L_DM_DELIVERY_RETRY_WAIT ||
+        state == D1L_DM_DELIVERY_RETRY_TX;
+}
+
+static inline bool d1l_ui_messages_delivery_failure_latched(
+    d1l_dm_delivery_state_t state)
+{
+    return state == D1L_DM_DELIVERY_FAILED_RADIO ||
+        state == D1L_DM_DELIVERY_FAILED_TIMEOUT ||
+        state == D1L_DM_DELIVERY_FAILED_QUEUE ||
+        state == D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT;
+}
+
 bool d1l_ui_messages_create(d1l_ui_messages_controller_t *controller,
                             lv_obj_t *parent);
 void d1l_ui_messages_render(d1l_ui_messages_controller_t *controller,
@@ -138,6 +182,7 @@ bool d1l_ui_messages_render_thread(
     d1l_ui_messages_controller_t *controller,
     d1l_ui_messages_thread_loader_t loader,
     void *loader_context,
+    bool reply_available,
     d1l_ui_messages_action_handler_t action_handler,
     void *action_context);
 bool d1l_ui_messages_expand_thread(d1l_ui_messages_controller_t *controller);
