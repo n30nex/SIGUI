@@ -24,7 +24,7 @@ def test_compose_runtime_eligibility_is_live_fail_closed_and_rf_silent() -> None
     assert "dm_delivery_active" in app_header
     assert "d1l_time_service_status(&time_status)" in app_source
     assert "d1l_settings_load_status()" in app_source
-    assert "d1l_settings_identity_state(settings)" in app_source
+    assert "d1l_settings_persisted_identity_state()" in app_source
     assert "d1l_dm_delivery_state_terminal(delivery_state)" in app_source
 
     assert "previous_send_error" in helper_header

@@ -139,12 +139,12 @@ def test_wifi_memory_policy_and_failed_start_are_fail_closed():
         assert setting in defaults
 
     assert "fail_closed_wifi_runtime" in source
-    assert "safe_settings = *current" in source
+    assert "d1l_settings_public_snapshot(&safe_settings)" in source
     assert "safe_settings.wifi_enabled = false" in source
     rollback = source[source.index("fail_closed_wifi_runtime"):source.index("wifi_boot_recovery_reason")]
     assert "d1l_settings_clear_wifi_profile" not in rollback
     assert "rollback_save_failed" in source
-    assert rollback.index("d1l_settings_save(&safe_settings)") < rollback.index(
+    assert rollback.index("d1l_settings_update_fields(") < rollback.index(
         "clear_boot_guard()"
     )
     assert "boot_recovery_panic" in source
@@ -264,7 +264,7 @@ def test_connectivity_boot_guard_is_scoped_checksummed_and_not_written_from_even
     disable_path = disable[disable.index("if (!enabled)"):disable.index(
         "settings.ble_companion_enabled = false"
     )]
-    assert disable_path.index("d1l_settings_save(&settings)") < disable_path.index(
+    assert disable_path.index("d1l_settings_update_fields(") < disable_path.index(
         "stop_wifi_runtime()"
     ) < disable_path.index("clear_boot_guard()")
     ble_toggle = source[
@@ -362,7 +362,23 @@ def test_user_cancel_transient_retry_and_credentials_are_explicitly_bounded():
         source.index("esp_err_t d1l_connectivity_wifi_connect"):
         source.index("esp_err_t d1l_connectivity_wifi_disconnect")
     ]
-    assert "memset(&config, 0, sizeof(config))" in connect
+    assert "wipe_wifi_config(&config)" in connect
+    wipe_config = source.split("static void wipe_wifi_config", 1)[1].split(
+        "static void finish_wifi_scan_policy", 1
+    )[0]
+    assert "volatile uint8_t *bytes" in wipe_config
+    assert "d1l_settings_public_snapshot(&settings)" in connect
+    assert "d1l_settings_wifi_secret_snapshot(&wifi_secret)" in connect
+    assert "d1l_settings_wifi_secret_wipe(&wifi_secret)" in connect
+    assert "settings.wifi_password" not in connect
+    secret_snapshot = connect.index("d1l_settings_wifi_secret_snapshot")
+    password_copy = connect.index("wifi_secret.wifi_password")
+    wipe_after_copy = connect.index(
+        "d1l_settings_wifi_secret_wipe", password_copy
+    )
+    assert secret_snapshot < password_copy < wipe_after_copy < connect.index(
+        "mark_boot_guard_active"
+    )
     assert "d1l_wifi_retry_policy_begin_manual_connect" in connect
     assert "d1l_wifi_retry_policy_on_disconnect" in connect
     assert "wifi_password" not in policy
@@ -421,6 +437,24 @@ def test_console_reports_wifi_ble_status_scan_and_connect_without_password_echo(
     assert "wifi save <ssid> [password]" in console
     assert "wifi connect" in console
     assert "password is not printed" in console
+    wifi_save = console.split("static void cmd_wifi_save", 1)[1].split(
+        "static void cmd_wifi_clear", 1
+    )[0]
+    save_call = wifi_save.index("d1l_connectivity_save_wifi_profile")
+    password_wipe = wifi_save.index(
+        "wipe_console_bytes(password, sizeof(password))"
+    )
+    error_branch = wifi_save.index("if (ret != ESP_OK)")
+    assert save_call < password_wipe < error_branch
+    assert "const char *password_to_save = password" in wifi_save
+    wipe_helper = console.split("static void wipe_console_bytes", 1)[1].split(
+        "static uint32_t deadline_remaining_ms", 1
+    )[0]
+    assert "volatile uint8_t *bytes" in wipe_helper
+    console_loop = console.split("void d1l_usb_console_run(void)", 1)[1]
+    assert console_loop.count("wipe_console_bytes(line, sizeof(line))") >= 4
+    assert 'err_result("unknown", "UNKNOWN_COMMAND"' in console
+    assert "err_result(line, \"UNKNOWN_COMMAND\"" not in console
     assert "could not fully save or apply Wi-Fi profile; inspect wifi status" in console
     assert "could not persist disabled state or clear connectivity crash guard" in console
     assert "could not fully clear Wi-Fi profile, disconnect runtime, or connectivity crash guard" in console

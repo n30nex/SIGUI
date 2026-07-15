@@ -200,8 +200,10 @@ def test_meshcore_service_builds_private_text_packets_from_contacts():
     assert "D1L_MESHCORE_PAYLOAD_MULTIPART 0x0AU" in wire
     assert "D1L_MESHCORE_HEADER_DM_TEXT_FLOOD" in source
     assert "D1L_MESHCORE_HEADER_DM_TEXT_DIRECT" in source
-    assert "ed25519_key_exchange(secret, dest_pub, settings->identity_private_key)" in source
-    assert "ed25519_key_exchange(secret, sender_pub, settings->identity_private_key)" in source
+    assert "derive_local_identity_shared_secret" in source
+    assert "d1l_settings_identity_secret_snapshot(&identity)" in source
+    assert "d1l_settings_identity_secret_wipe(&identity)" in source
+    assert "settings->identity_private_key" not in source
     assert "build_dm_text_packet" in source
     assert "calc_dm_ack_hash" in source
     assert "parse_rx_ack_packet" in source

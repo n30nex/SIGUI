@@ -1,24 +1,41 @@
 #include "settings_model.h"
 
+#include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ed_25519.h"
 #include "nvs.h"
 
 #include "d1l_config.h"
+#include "mesh/store_lock.h"
+#include "settings_envelope.h"
 
 #define D1L_SETTINGS_NAMESPACE "d1l_settings"
 #define D1L_SETTINGS_KEY "settings"
+#define D1L_SETTINGS_MAX_PERSISTED_BLOB_SIZE 4096U
 
 static d1l_settings_t s_current;
 static bool s_loaded;
 static esp_err_t s_load_status = ESP_ERR_INVALID_STATE;
+static esp_err_t s_save_status = ESP_ERR_INVALID_STATE;
+static uint32_t s_persistence_revision;
+static bool s_persistence_write_blocked;
+static d1l_settings_persistence_state_t s_persistence_state =
+    D1L_SETTINGS_PERSISTENCE_UNINITIALIZED;
+static d1l_store_lock_t s_settings_owner_lock = D1L_STORE_LOCK_INITIALIZER;
 
 _Static_assert(D1L_IDENTITY_PUBLIC_KEY_LEN == D1L_IDENTITY_STATE_PUBLIC_KEY_LEN,
                "identity public key lengths must match");
 _Static_assert(D1L_IDENTITY_PRIVATE_KEY_LEN == D1L_IDENTITY_STATE_PRIVATE_KEY_LEN,
                "identity private key lengths must match");
+_Static_assert(offsetof(d1l_settings_t, wifi_password) <
+                   offsetof(d1l_settings_t, frequency_hz),
+               "public settings copy requires password before radio fields");
+_Static_assert(offsetof(d1l_settings_t, frequency_hz) <
+                   offsetof(d1l_settings_t, identity_private_key),
+               "public settings copy requires private key after public fields");
 
 static bool identity_bytes_all_zero(const uint8_t *bytes, size_t length)
 {
@@ -44,13 +61,40 @@ static bool identity_bytes_uniform(const uint8_t *bytes, size_t length)
     return differences == 0U;
 }
 
+static void wipe_sensitive_bytes(void *bytes, size_t length)
+{
+    volatile uint8_t *cursor = bytes;
+    if (!cursor) {
+        return;
+    }
+    for (size_t i = 0; i < length; ++i) {
+        cursor[i] = 0U;
+    }
+}
+
+static void copy_public_settings(d1l_settings_t *destination,
+                                 const d1l_settings_t *source)
+{
+    if (!destination || !source) {
+        return;
+    }
+    const size_t password_offset =
+        offsetof(d1l_settings_t, wifi_password);
+    const size_t after_password_offset =
+        offsetof(d1l_settings_t, frequency_hz);
+    const size_t private_key_offset =
+        offsetof(d1l_settings_t, identity_private_key);
+    wipe_sensitive_bytes(destination, sizeof(*destination));
+    memcpy(destination, source, password_offset);
+    memcpy((uint8_t *)destination + after_password_offset,
+           (const uint8_t *)source + after_password_offset,
+           private_key_offset - after_password_offset);
+}
+
 static void wipe_derived_identity_key(
     uint8_t key[D1L_IDENTITY_STATE_PUBLIC_KEY_LEN])
 {
-    volatile uint8_t *cursor = key;
-    for (size_t i = 0; i < D1L_IDENTITY_STATE_PUBLIC_KEY_LEN; ++i) {
-        cursor[i] = 0U;
-    }
+    wipe_sensitive_bytes(key, D1L_IDENTITY_STATE_PUBLIC_KEY_LEN);
 }
 
 d1l_identity_state_t d1l_identity_state_classify(
@@ -261,6 +305,27 @@ static void sanitize_printable(char *text, size_t size, bool allow_quotes)
     }
 }
 
+static void zero_text_tail(char *text, size_t size, bool sensitive)
+{
+    if (!text || size == 0U) {
+        return;
+    }
+    size_t length = 0U;
+    while (length < size && text[length] != '\0') {
+        length++;
+    }
+    if (length + 1U >= size) {
+        return;
+    }
+    void *tail = &text[length + 1U];
+    const size_t tail_length = size - length - 1U;
+    if (sensitive) {
+        wipe_sensitive_bytes(tail, tail_length);
+    } else {
+        memset(tail, 0, tail_length);
+    }
+}
+
 void d1l_settings_defaults(d1l_settings_t *settings)
 {
     if (settings == NULL) {
@@ -310,12 +375,20 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
         snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk");
     }
     sanitize_printable(settings->node_name, sizeof(settings->node_name), false);
+    settings->wifi_ssid[sizeof(settings->wifi_ssid) - 1U] = '\0';
+    settings->wifi_password[sizeof(settings->wifi_password) - 1U] = '\0';
     sanitize_printable(settings->wifi_ssid, sizeof(settings->wifi_ssid), false);
     sanitize_printable(settings->wifi_password, sizeof(settings->wifi_password), true);
     settings->wifi_profile_saved = settings->wifi_profile_saved ? true : false;
-    if (settings->wifi_ssid[0] == '\0') {
+    if (!settings->wifi_profile_saved || settings->wifi_ssid[0] == '\0') {
         settings->wifi_profile_saved = false;
-        settings->wifi_password[0] = '\0';
+        memset(settings->wifi_ssid, 0, sizeof(settings->wifi_ssid));
+        wipe_sensitive_bytes(settings->wifi_password,
+                             sizeof(settings->wifi_password));
+    } else {
+        zero_text_tail(settings->wifi_ssid, sizeof(settings->wifi_ssid), false);
+        zero_text_tail(settings->wifi_password,
+                       sizeof(settings->wifi_password), true);
     }
     if (settings->role != D1L_ROLE_DESK_COMPANION) {
         settings->role = D1L_ROLE_DESK_COMPANION;
@@ -569,166 +642,298 @@ static void migrate_v4_settings(d1l_settings_t *dest, const d1l_settings_v4_t *s
     d1l_settings_sanitize(dest);
 }
 
-esp_err_t d1l_settings_load(void)
+static esp_err_t persist_settings_envelope(nvs_handle_t handle,
+                                           const d1l_settings_t *settings,
+                                           uint32_t revision)
+{
+    uint8_t blob[sizeof(d1l_settings_envelope_header_t) +
+                 sizeof(d1l_settings_t)] = {0};
+    size_t blob_length = 0U;
+    if (!d1l_settings_envelope_build(blob, sizeof(blob), settings,
+                                     sizeof(*settings), revision,
+                                     &blob_length)) {
+        wipe_sensitive_bytes(blob, sizeof(blob));
+        return ESP_ERR_INVALID_SIZE;
+    }
+    esp_err_t ret = nvs_set_blob(handle, D1L_SETTINGS_KEY, blob, blob_length);
+    if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
+    wipe_sensitive_bytes(blob, sizeof(blob));
+    return ret;
+}
+
+static bool migrate_legacy_settings_blob(d1l_settings_t *destination,
+                                         const uint8_t *blob,
+                                         size_t blob_length,
+                                         bool *schema_newer)
+{
+    if (schema_newer) {
+        *schema_newer = false;
+    }
+    if (!destination || !blob || blob_length < sizeof(uint32_t)) {
+        return false;
+    }
+
+    uint32_t schema_version = 0U;
+    memcpy(&schema_version, blob, sizeof(schema_version));
+    if (schema_version > D1L_SETTINGS_SCHEMA_VERSION) {
+        if (schema_newer) {
+            *schema_newer = true;
+        }
+        return false;
+    }
+
+    switch (schema_version) {
+    case D1L_SETTINGS_SCHEMA_VERSION:
+        if (blob_length != sizeof(d1l_settings_t)) {
+            return false;
+        }
+        memcpy(destination, blob, sizeof(*destination));
+        d1l_settings_sanitize(destination);
+        return true;
+    case 6U:
+        if (blob_length != sizeof(d1l_settings_v6_t)) {
+            return false;
+        }
+        {
+            d1l_settings_v6_t legacy = {0};
+            memcpy(&legacy, blob, sizeof(legacy));
+            migrate_v6_settings(destination, &legacy);
+            wipe_sensitive_bytes(&legacy, sizeof(legacy));
+        }
+        return true;
+    case 5U:
+        if (blob_length != sizeof(d1l_settings_v5_t)) {
+            return false;
+        }
+        {
+            d1l_settings_v5_t legacy = {0};
+            memcpy(&legacy, blob, sizeof(legacy));
+            migrate_v5_settings(destination, &legacy);
+            wipe_sensitive_bytes(&legacy, sizeof(legacy));
+        }
+        return true;
+    case 4U:
+        if (blob_length != sizeof(d1l_settings_v4_t)) {
+            return false;
+        }
+        {
+            d1l_settings_v4_t legacy = {0};
+            memcpy(&legacy, blob, sizeof(legacy));
+            migrate_v4_settings(destination, &legacy);
+            wipe_sensitive_bytes(&legacy, sizeof(legacy));
+        }
+        return true;
+    case 3U:
+        if (blob_length != sizeof(d1l_settings_v3_t)) {
+            return false;
+        }
+        {
+            d1l_settings_v3_t legacy = {0};
+            memcpy(&legacy, blob, sizeof(legacy));
+            migrate_v3_settings(destination, &legacy);
+            wipe_sensitive_bytes(&legacy, sizeof(legacy));
+        }
+        return true;
+    case 2U:
+        if (blob_length != sizeof(d1l_settings_v2_t)) {
+            return false;
+        }
+        {
+            d1l_settings_v2_t legacy = {0};
+            memcpy(&legacy, blob, sizeof(legacy));
+            migrate_v2_settings(destination, &legacy);
+            wipe_sensitive_bytes(&legacy, sizeof(legacy));
+        }
+        return true;
+    default:
+        return false;
+    }
+}
+
+static esp_err_t quarantine_settings(
+    d1l_settings_persistence_state_t state, esp_err_t error)
+{
+    s_loaded = false;
+    s_persistence_revision = 0U;
+    s_persistence_write_blocked = true;
+    s_persistence_state = state;
+    return error;
+}
+
+static bool settings_owner_take(void)
+{
+    SemaphoreHandle_t handle = d1l_store_lock_handle(&s_settings_owner_lock);
+    return handle && xSemaphoreTake(handle, portMAX_DELAY) == pdTRUE;
+}
+
+static void settings_owner_give(void)
+{
+    d1l_store_lock_give(&s_settings_owner_lock);
+}
+
+static esp_err_t settings_load_locked(void)
 {
     s_load_status = ESP_ERR_INVALID_STATE;
+    s_save_status = ESP_ERR_INVALID_STATE;
+    s_loaded = false;
+    s_persistence_revision = 0U;
+    s_persistence_write_blocked = false;
+    s_persistence_state = D1L_SETTINGS_PERSISTENCE_UNINITIALIZED;
     d1l_settings_defaults(&s_current);
 
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_SETTINGS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
-        s_loaded = false;
+        s_persistence_state = D1L_SETTINGS_PERSISTENCE_IO_ERROR;
         s_load_status = ret;
         return ret;
     }
 
-    size_t len = 0;
+    size_t len = 0U;
     ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, NULL, &len);
-    bool should_save = false;
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
         d1l_settings_defaults(&s_current);
-        should_save = true;
-        ret = ESP_OK;
-    } else if (ret == ESP_OK && len == sizeof(s_current)) {
-        /*
-         * Schema 5 and schema 7 have the same ABI size on this target.  The
-         * blob length therefore cannot identify the schema: inspect the
-         * stored header before treating the bytes as the current layout.
-         */
-        d1l_settings_t loaded = {0};
-        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &loaded, &len);
+        ret = persist_settings_envelope(handle, &s_current, 1U);
         if (ret == ESP_OK) {
-            switch (loaded.schema_version) {
-            case D1L_SETTINGS_SCHEMA_VERSION:
-                s_current = loaded;
-                d1l_settings_sanitize(&s_current);
-                break;
-            case 5U: {
-                d1l_settings_v5_t old_v5 = {0};
-                memcpy(&old_v5, &loaded, sizeof(old_v5));
-                migrate_v5_settings(&s_current, &old_v5);
-                should_save = true;
-                break;
-            }
-            case 4U: {
-                d1l_settings_v4_t old_v4 = {0};
-                memcpy(&old_v4, &loaded, sizeof(old_v4));
-                migrate_v4_settings(&s_current, &old_v4);
-                should_save = true;
-                break;
-            }
-            case 3U: {
-                d1l_settings_v3_t old_v3 = {0};
-                memcpy(&old_v3, &loaded, sizeof(old_v3));
-                migrate_v3_settings(&s_current, &old_v3);
-                should_save = true;
-                break;
-            }
-            case 2U: {
-                d1l_settings_v2_t old_v2 = {0};
-                memcpy(&old_v2, &loaded, sizeof(old_v2));
-                migrate_v2_settings(&s_current, &old_v2);
-                should_save = true;
-                break;
-            }
-            default:
-                /* Unknown same-size blobs are never sanitized as v7. */
-                d1l_settings_defaults(&s_current);
-                should_save = true;
-                break;
-            }
+            s_persistence_revision = 1U;
+            s_persistence_state =
+                D1L_SETTINGS_PERSISTENCE_INITIALIZED_DEFAULTS;
         }
-    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v6_t)) {
-        d1l_settings_v6_t old_settings = {0};
-        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
-        if (ret == ESP_OK) {
-            migrate_v6_settings(&s_current, &old_settings);
-            should_save = true;
-        }
-    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v5_t)) {
-        d1l_settings_v5_t old_settings = {0};
-        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
-        if (ret == ESP_OK) {
-            if (old_settings.schema_version == 5U) {
-                migrate_v5_settings(&s_current, &old_settings);
-            } else if (old_settings.schema_version == 4U) {
-                d1l_settings_v4_t old_v4 = {0};
-                memcpy(&old_v4, &old_settings, sizeof(old_v4));
-                migrate_v4_settings(&s_current, &old_v4);
-            } else if (old_settings.schema_version == 3U) {
-                d1l_settings_v3_t old_v3 = {0};
-                memcpy(&old_v3, &old_settings, sizeof(old_v3));
-                migrate_v3_settings(&s_current, &old_v3);
-            } else if (old_settings.schema_version == 2U) {
-                d1l_settings_v2_t old_v2 = {0};
-                memcpy(&old_v2, &old_settings, sizeof(old_v2));
-                migrate_v2_settings(&s_current, &old_v2);
-            } else {
-                d1l_settings_defaults(&s_current);
-            }
-            should_save = true;
-        }
-    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v4_t)) {
-        d1l_settings_v4_t old_settings = {0};
-        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
-        if (ret == ESP_OK) {
-            if (old_settings.schema_version == 4U) {
-                migrate_v4_settings(&s_current, &old_settings);
-            } else if (old_settings.schema_version == 3U) {
-                d1l_settings_v3_t old_v3 = {0};
-                memcpy(&old_v3, &old_settings, sizeof(old_v3));
-                migrate_v3_settings(&s_current, &old_v3);
-            } else if (old_settings.schema_version == 2U) {
-                d1l_settings_v2_t old_v2 = {0};
-                memcpy(&old_v2, &old_settings, sizeof(old_v2));
-                migrate_v2_settings(&s_current, &old_v2);
-            } else {
-                d1l_settings_defaults(&s_current);
-            }
-            should_save = true;
-        }
-    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v3_t)) {
-        d1l_settings_v3_t old_settings = {0};
-        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
-        if (ret == ESP_OK) {
-            if (old_settings.schema_version == 3U) {
-                migrate_v3_settings(&s_current, &old_settings);
-            } else if (old_settings.schema_version == 2U) {
-                d1l_settings_v2_t old_v2 = {0};
-                memcpy(&old_v2, &old_settings, sizeof(old_v2));
-                migrate_v2_settings(&s_current, &old_v2);
-            } else {
-                d1l_settings_defaults(&s_current);
-            }
-            should_save = true;
-        }
-    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v2_t)) {
-        d1l_settings_v2_t old_settings = {0};
-        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
-        if (ret == ESP_OK) {
-            migrate_v2_settings(&s_current, &old_settings);
-            should_save = true;
-        }
+    } else if (ret == ESP_OK &&
+               (len == 0U || len > D1L_SETTINGS_MAX_PERSISTED_BLOB_SIZE)) {
+        ret = quarantine_settings(
+            D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED,
+            ESP_ERR_INVALID_SIZE);
     } else if (ret == ESP_OK) {
-        d1l_settings_defaults(&s_current);
-        should_save = true;
-    }
-    if (ret == ESP_OK && should_save) {
-        ret = nvs_set_blob(handle, D1L_SETTINGS_KEY, &s_current, sizeof(s_current));
-        if (ret == ESP_OK) {
-            ret = nvs_commit(handle);
+        uint8_t *blob = malloc(len);
+        if (!blob) {
+            ret = ESP_ERR_NO_MEM;
+        } else {
+            size_t read_length = len;
+            ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, blob, &read_length);
+            if (ret == ESP_OK && read_length != len) {
+                ret = ESP_ERR_INVALID_SIZE;
+            }
+            if (ret == ESP_OK) {
+                d1l_settings_envelope_header_t header = {0};
+                const uint8_t *payload = NULL;
+                const d1l_settings_envelope_validation_t validation =
+                    d1l_settings_envelope_validate(
+                        blob, len, sizeof(d1l_settings_t), &header, &payload);
+                if (validation == D1L_SETTINGS_ENVELOPE_VALID) {
+                    d1l_settings_t loaded = {0};
+                    memcpy(&loaded, payload, sizeof(loaded));
+                    if (loaded.schema_version > D1L_SETTINGS_SCHEMA_VERSION) {
+                        ret = quarantine_settings(
+                            D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA,
+                            ESP_ERR_NOT_SUPPORTED);
+                    } else if (loaded.schema_version !=
+                               D1L_SETTINGS_SCHEMA_VERSION) {
+                        ret = quarantine_settings(
+                            D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED,
+                            ESP_ERR_INVALID_SIZE);
+                    } else {
+                        s_current = loaded;
+                        d1l_settings_sanitize(&s_current);
+                        s_persistence_revision = header.revision;
+                        s_persistence_state =
+                            D1L_SETTINGS_PERSISTENCE_READY;
+                    }
+                    wipe_sensitive_bytes(&loaded, sizeof(loaded));
+                } else if (validation ==
+                           D1L_SETTINGS_ENVELOPE_SCHEMA_NEWER) {
+                    ret = quarantine_settings(
+                        D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA,
+                        ESP_ERR_NOT_SUPPORTED);
+                } else if (validation ==
+                           D1L_SETTINGS_ENVELOPE_CHECKSUM_MISMATCH) {
+                    ret = quarantine_settings(
+                        D1L_SETTINGS_PERSISTENCE_QUARANTINED_CHECKSUM,
+                        ESP_FAIL);
+                } else if (validation ==
+                           D1L_SETTINGS_ENVELOPE_MALFORMED) {
+                    ret = quarantine_settings(
+                        D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED,
+                        ESP_ERR_INVALID_SIZE);
+                } else {
+                    bool schema_newer = false;
+                    d1l_settings_t migrated = {0};
+                    if (migrate_legacy_settings_blob(
+                            &migrated, blob, len, &schema_newer)) {
+                        ret = persist_settings_envelope(
+                            handle, &migrated, 1U);
+                        if (ret == ESP_OK) {
+                            s_current = migrated;
+                            s_persistence_revision = 1U;
+                            s_persistence_state =
+                                D1L_SETTINGS_PERSISTENCE_MIGRATED_LEGACY;
+                        }
+                    } else if (schema_newer) {
+                        ret = quarantine_settings(
+                            D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA,
+                            ESP_ERR_NOT_SUPPORTED);
+                    } else {
+                        ret = quarantine_settings(
+                            D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED,
+                            ESP_ERR_INVALID_SIZE);
+                    }
+                    wipe_sensitive_bytes(&migrated, sizeof(migrated));
+                }
+            }
+            wipe_sensitive_bytes(blob, len);
+            free(blob);
         }
     }
     nvs_close(handle);
+    if (ret != ESP_OK && !s_persistence_write_blocked) {
+        s_persistence_state = D1L_SETTINGS_PERSISTENCE_IO_ERROR;
+    }
     s_loaded = (ret == ESP_OK);
     s_load_status = ret;
     return ret;
 }
 
-esp_err_t d1l_settings_save(const d1l_settings_t *settings)
+esp_err_t d1l_settings_load(void)
+{
+    if (!settings_owner_take()) {
+        s_loaded = false;
+        s_load_status = ESP_ERR_NO_MEM;
+        s_persistence_state = D1L_SETTINGS_PERSISTENCE_IO_ERROR;
+        return s_load_status;
+    }
+    const esp_err_t ret = settings_load_locked();
+    settings_owner_give();
+    return ret;
+}
+
+static esp_err_t settings_save_locked(const d1l_settings_t *settings)
 {
     if (settings == NULL) {
-        return ESP_ERR_INVALID_ARG;
+        s_save_status = ESP_ERR_INVALID_ARG;
+        return s_save_status;
+    }
+    if (s_persistence_write_blocked) {
+        s_save_status = s_load_status;
+        return s_save_status;
+    }
+    if (!s_loaded) {
+        s_save_status = ESP_ERR_INVALID_STATE;
+        return s_save_status;
+    }
+    if (settings->schema_version != D1L_SETTINGS_SCHEMA_VERSION) {
+        s_save_status = ESP_ERR_NOT_SUPPORTED;
+        return s_save_status;
+    }
+
+    uint32_t next_revision = 0U;
+    if (!d1l_settings_envelope_next_revision(
+            s_persistence_revision, &next_revision)) {
+        s_persistence_state =
+            D1L_SETTINGS_PERSISTENCE_REVISION_SATURATED;
+        s_save_status = ESP_ERR_INVALID_STATE;
+        return s_save_status;
     }
 
     d1l_settings_t copy = *settings;
@@ -737,17 +942,245 @@ esp_err_t d1l_settings_save(const d1l_settings_t *settings)
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_SETTINGS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        wipe_sensitive_bytes(&copy, sizeof(copy));
+        s_save_status = ret;
         return ret;
     }
-    ret = nvs_set_blob(handle, D1L_SETTINGS_KEY, &copy, sizeof(copy));
-    if (ret == ESP_OK) {
-        ret = nvs_commit(handle);
-    }
+    ret = persist_settings_envelope(handle, &copy, next_revision);
     nvs_close(handle);
     if (ret == ESP_OK) {
         s_current = copy;
         s_loaded = true;
+        s_persistence_revision = next_revision;
+        s_persistence_state = D1L_SETTINGS_PERSISTENCE_READY;
     }
+    wipe_sensitive_bytes(&copy, sizeof(copy));
+    s_save_status = ret;
+    return ret;
+}
+
+static void apply_settings_update_fields(
+    d1l_settings_t *destination, const d1l_settings_t *values,
+    d1l_settings_update_mask_t update_mask)
+{
+    if ((update_mask & D1L_SETTINGS_UPDATE_NODE_NAME) != 0U) {
+        memcpy(destination->node_name, values->node_name,
+               sizeof(destination->node_name));
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_ROLE) != 0U) {
+        destination->role = values->role;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_WIFI_ENABLED) != 0U) {
+        destination->wifi_enabled = values->wifi_enabled;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_BLE_ENABLED) != 0U) {
+        destination->ble_companion_enabled = values->ble_companion_enabled;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_OBSERVER) != 0U) {
+        destination->observer_enabled = values->observer_enabled;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_HIGH_CONTRAST) != 0U) {
+        destination->high_contrast = values->high_contrast;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_NIGHT_MODE) != 0U) {
+        destination->night_mode = values->night_mode;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_ONBOARDING) != 0U) {
+        destination->onboarding_complete = values->onboarding_complete;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_PATH_HASH) != 0U) {
+        destination->path_hash_bytes = values->path_hash_bytes;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_FREQUENCY) != 0U) {
+        destination->frequency_hz = values->frequency_hz;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_BANDWIDTH) != 0U) {
+        destination->bandwidth_tenths_khz = values->bandwidth_tenths_khz;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_SPREADING) != 0U) {
+        destination->spreading_factor = values->spreading_factor;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_CODING_RATE) != 0U) {
+        destination->coding_rate = values->coding_rate;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_TX_POWER) != 0U) {
+        destination->tx_power_dbm = values->tx_power_dbm;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_RX_BOOST) != 0U) {
+        destination->rx_boost = values->rx_boost;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_TCXO) != 0U) {
+        destination->tcxo_mode = values->tcxo_mode;
+    }
+    if ((update_mask & D1L_SETTINGS_UPDATE_MAP_LOCATION) != 0U) {
+        destination->map_location_set = values->map_location_set;
+        destination->map_lat_e7 = values->map_lat_e7;
+        destination->map_lon_e7 = values->map_lon_e7;
+    }
+}
+
+static esp_err_t settings_replace_all(const d1l_settings_t *settings)
+{
+    if (!settings_owner_take()) {
+        s_save_status = ESP_ERR_NO_MEM;
+        return s_save_status;
+    }
+    const esp_err_t ret = settings_save_locked(settings);
+    settings_owner_give();
+    return ret;
+}
+
+esp_err_t d1l_settings_public_snapshot(d1l_settings_t *settings)
+{
+    if (!settings) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!settings_owner_take()) {
+        d1l_settings_defaults(settings);
+        return ESP_ERR_NO_MEM;
+    }
+    const esp_err_t ret = s_loaded ? ESP_OK : s_load_status;
+    if (s_loaded) {
+        copy_public_settings(settings, &s_current);
+    } else {
+        d1l_settings_defaults(settings);
+    }
+    settings_owner_give();
+    return ret;
+}
+
+void d1l_settings_wifi_secret_wipe(d1l_settings_wifi_secret_t *secret)
+{
+    wipe_sensitive_bytes(secret, secret ? sizeof(*secret) : 0U);
+}
+
+esp_err_t d1l_settings_wifi_secret_snapshot(
+    d1l_settings_wifi_secret_t *secret)
+{
+    if (!secret) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_settings_wifi_secret_wipe(secret);
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    const esp_err_t ret = s_loaded ? ESP_OK : s_load_status;
+    if (s_loaded) {
+        secret->wifi_enabled = s_current.wifi_enabled;
+        secret->wifi_profile_saved = s_current.wifi_profile_saved;
+        memcpy(secret->wifi_ssid, s_current.wifi_ssid,
+               sizeof(secret->wifi_ssid));
+        memcpy(secret->wifi_password, s_current.wifi_password,
+               sizeof(secret->wifi_password));
+    }
+    settings_owner_give();
+    return ret;
+}
+
+bool d1l_settings_wifi_password_saved(void)
+{
+    if (!settings_owner_take()) {
+        return false;
+    }
+    const bool saved = s_loaded && s_current.wifi_profile_saved &&
+                       s_current.wifi_password[0] != '\0';
+    settings_owner_give();
+    return saved;
+}
+
+d1l_identity_state_t d1l_settings_persisted_identity_state(void)
+{
+    if (!settings_owner_take()) {
+        return D1L_IDENTITY_STATE_INCONSISTENT;
+    }
+    const d1l_identity_state_t state = s_loaded ?
+        d1l_settings_identity_state(&s_current) :
+        D1L_IDENTITY_STATE_INCONSISTENT;
+    settings_owner_give();
+    return state;
+}
+
+void d1l_settings_identity_secret_wipe(
+    d1l_settings_identity_secret_t *secret)
+{
+    wipe_sensitive_bytes(secret, secret ? sizeof(*secret) : 0U);
+}
+
+esp_err_t d1l_settings_identity_secret_snapshot(
+    d1l_settings_identity_secret_t *secret)
+{
+    if (!secret) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_settings_identity_secret_wipe(secret);
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    const esp_err_t ret = s_loaded ? ESP_OK : s_load_status;
+    if (s_loaded) {
+        secret->identity_ready = s_current.identity_ready;
+        memcpy(secret->identity_public_key, s_current.identity_public_key,
+               sizeof(secret->identity_public_key));
+        memcpy(secret->identity_private_key, s_current.identity_private_key,
+               sizeof(secret->identity_private_key));
+    }
+    settings_owner_give();
+    return ret;
+}
+
+esp_err_t d1l_settings_update_fields(
+    const d1l_settings_t *settings, d1l_settings_update_mask_t update_mask)
+{
+    if (!settings || update_mask == 0U ||
+        (update_mask & ~D1L_SETTINGS_UPDATE_ALL) != 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!settings_owner_take()) {
+        s_save_status = ESP_ERR_NO_MEM;
+        return s_save_status;
+    }
+    d1l_settings_t updated = s_current;
+    apply_settings_update_fields(&updated, settings, update_mask);
+    const esp_err_t ret = settings_save_locked(&updated);
+    wipe_sensitive_bytes(&updated, sizeof(updated));
+    settings_owner_give();
+    return ret;
+}
+
+esp_err_t d1l_settings_save_identity_if_absent(
+    const uint8_t public_key[D1L_IDENTITY_PUBLIC_KEY_LEN],
+    const uint8_t private_key[D1L_IDENTITY_PRIVATE_KEY_LEN])
+{
+    if (!public_key || !private_key) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t ret = ESP_OK;
+    const d1l_identity_state_t current_state =
+        d1l_settings_identity_state(&s_current);
+    if (!s_loaded) {
+        ret = s_persistence_write_blocked ? s_load_status
+                                          : ESP_ERR_INVALID_STATE;
+    } else if (current_state == D1L_IDENTITY_STATE_INCONSISTENT) {
+        ret = ESP_ERR_INVALID_STATE;
+    } else if (current_state == D1L_IDENTITY_STATE_ABSENT) {
+        d1l_settings_t updated = s_current;
+        updated.identity_ready = true;
+        memcpy(updated.identity_public_key, public_key,
+               sizeof(updated.identity_public_key));
+        memcpy(updated.identity_private_key, private_key,
+               sizeof(updated.identity_private_key));
+        if (d1l_settings_identity_state(&updated) !=
+            D1L_IDENTITY_STATE_CONSISTENT) {
+            ret = ESP_ERR_INVALID_ARG;
+        } else {
+            ret = settings_save_locked(&updated);
+        }
+        wipe_sensitive_bytes(&updated, sizeof(updated));
+    }
+    settings_owner_give();
     return ret;
 }
 
@@ -755,7 +1188,7 @@ esp_err_t d1l_settings_reset(void)
 {
     d1l_settings_t defaults;
     d1l_settings_defaults(&defaults);
-    return d1l_settings_save(&defaults);
+    return settings_replace_all(&defaults);
 }
 
 esp_err_t d1l_settings_save_wifi_profile(const char *ssid, const char *password)
@@ -767,29 +1200,51 @@ esp_err_t d1l_settings_save_wifi_profile(const char *ssid, const char *password)
         (password && strlen(password) >= D1L_WIFI_PASSWORD_LEN)) {
         return ESP_ERR_INVALID_SIZE;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    d1l_settings_t settings = s_current;
+    memset(settings.wifi_ssid, 0, sizeof(settings.wifi_ssid));
     snprintf(settings.wifi_ssid, sizeof(settings.wifi_ssid), "%s", ssid);
     if (password) {
+        wipe_sensitive_bytes(settings.wifi_password,
+                             sizeof(settings.wifi_password));
         snprintf(settings.wifi_password, sizeof(settings.wifi_password), "%s", password);
+    } else {
+        zero_text_tail(settings.wifi_password,
+                       sizeof(settings.wifi_password), true);
     }
     settings.wifi_profile_saved = true;
-    return d1l_settings_save(&settings);
+    const esp_err_t ret = settings_save_locked(&settings);
+    wipe_sensitive_bytes(&settings, sizeof(settings));
+    settings_owner_give();
+    return ret;
 }
 
 esp_err_t d1l_settings_clear_wifi_profile(void)
 {
-    d1l_settings_t settings = *d1l_settings_current();
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    d1l_settings_t settings = s_current;
     settings.wifi_profile_saved = false;
-    settings.wifi_ssid[0] = '\0';
-    settings.wifi_password[0] = '\0';
+    memset(settings.wifi_ssid, 0, sizeof(settings.wifi_ssid));
+    wipe_sensitive_bytes(settings.wifi_password,
+                         sizeof(settings.wifi_password));
     settings.wifi_enabled = false;
-    return d1l_settings_save(&settings);
+    const esp_err_t ret = settings_save_locked(&settings);
+    wipe_sensitive_bytes(&settings, sizeof(settings));
+    settings_owner_give();
+    return ret;
 }
 
 esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enabled,
                                            bool ble_companion_enabled, bool observer_enabled)
 {
-    d1l_settings_t settings = *d1l_settings_current();
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    d1l_settings_t settings = s_current;
     if (node_name && node_name[0] != '\0') {
         snprintf(settings.node_name, sizeof(settings.node_name), "%s", node_name);
     }
@@ -798,32 +1253,99 @@ esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enab
     settings.ble_companion_enabled = wifi_enabled ? false : ble_companion_enabled;
     settings.observer_enabled = observer_enabled;
     settings.onboarding_complete = true;
-    return d1l_settings_save(&settings);
+    const esp_err_t ret = settings_save_locked(&settings);
+    wipe_sensitive_bytes(&settings, sizeof(settings));
+    settings_owner_give();
+    return ret;
 }
 
 esp_err_t d1l_settings_reset_onboarding(void)
 {
-    d1l_settings_t settings = *d1l_settings_current();
-    settings.onboarding_complete = false;
-    return d1l_settings_save(&settings);
-}
-
-const d1l_settings_t *d1l_settings_current(void)
-{
-    if (!s_loaded) {
-        d1l_settings_defaults(&s_current);
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
     }
-    return &s_current;
+    d1l_settings_t settings = s_current;
+    settings.onboarding_complete = false;
+    const esp_err_t ret = settings_save_locked(&settings);
+    wipe_sensitive_bytes(&settings, sizeof(settings));
+    settings_owner_give();
+    return ret;
 }
 
 esp_err_t d1l_settings_load_status(void)
 {
-    return s_load_status;
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    const esp_err_t status = s_load_status;
+    settings_owner_give();
+    return status;
+}
+
+esp_err_t d1l_settings_save_status(void)
+{
+    if (!settings_owner_take()) {
+        return ESP_ERR_NO_MEM;
+    }
+    const esp_err_t status = s_save_status;
+    settings_owner_give();
+    return status;
+}
+
+uint32_t d1l_settings_persistence_revision(void)
+{
+    if (!settings_owner_take()) {
+        return 0U;
+    }
+    const uint32_t revision = s_persistence_revision;
+    settings_owner_give();
+    return revision;
+}
+
+d1l_settings_persistence_state_t d1l_settings_persistence_state(void)
+{
+    if (!settings_owner_take()) {
+        return D1L_SETTINGS_PERSISTENCE_IO_ERROR;
+    }
+    const d1l_settings_persistence_state_t state = s_persistence_state;
+    settings_owner_give();
+    return state;
+}
+
+const char *d1l_settings_persistence_state_name(
+    d1l_settings_persistence_state_t state)
+{
+    switch (state) {
+    case D1L_SETTINGS_PERSISTENCE_READY:
+        return "ready";
+    case D1L_SETTINGS_PERSISTENCE_INITIALIZED_DEFAULTS:
+        return "initialized_defaults";
+    case D1L_SETTINGS_PERSISTENCE_MIGRATED_LEGACY:
+        return "migrated_legacy";
+    case D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA:
+        return "quarantined_newer_schema";
+    case D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED:
+        return "quarantined_malformed";
+    case D1L_SETTINGS_PERSISTENCE_QUARANTINED_CHECKSUM:
+        return "quarantined_checksum";
+    case D1L_SETTINGS_PERSISTENCE_IO_ERROR:
+        return "io_error";
+    case D1L_SETTINGS_PERSISTENCE_REVISION_SATURATED:
+        return "revision_saturated";
+    case D1L_SETTINGS_PERSISTENCE_UNINITIALIZED:
+    default:
+        return "uninitialized";
+    }
 }
 
 d1l_radio_profile_t d1l_settings_radio_profile(const d1l_settings_t *settings)
 {
-    const d1l_settings_t *src = settings ? settings : d1l_settings_current();
+    d1l_settings_t snapshot = {0};
+    const d1l_settings_t *src = settings;
+    if (!src) {
+        (void)d1l_settings_public_snapshot(&snapshot);
+        src = &snapshot;
+    }
     d1l_radio_profile_t profile = {
         .profile_id = D1L_RADIO_PROFILE_ID,
         .region_label = D1L_RADIO_REGION_LABEL,
@@ -835,6 +1357,7 @@ d1l_radio_profile_t d1l_settings_radio_profile(const d1l_settings_t *settings)
         .tcxo = d1l_settings_tcxo_name(src->tcxo_mode),
         .rx_boost = src->rx_boost,
     };
+    wipe_sensitive_bytes(&snapshot, sizeof(snapshot));
     return profile;
 }
 

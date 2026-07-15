@@ -48,7 +48,7 @@ typedef struct {
     bool wifi_password_saved;
     const char *wifi_state;
     const char *ble_state;
-    const char *wifi_ssid;
+    char wifi_ssid[D1L_WIFI_SSID_LEN];
     const char *wifi_ip;
     int8_t wifi_rssi_dbm;
     uint8_t wifi_channel;
