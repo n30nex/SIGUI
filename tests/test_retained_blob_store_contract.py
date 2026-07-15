@@ -29,6 +29,16 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_retained_blob_store_nvs_initialized_this_boot" in header
     assert "d1l_retained_blob_store_nvs_migrated_keys" in header
     assert "d1l_retained_blob_store_nvs_migration_error" in header
+    assert "d1l_retained_blob_store_nvs_store_telemetry_t" in header
+    assert "d1l_retained_blob_store_nvs_telemetry_t" in header
+    assert "d1l_retained_blob_store_nvs_telemetry" in header
+    assert "write_attempt_count" in header
+    assert "write_commit_count" in header
+    assert "write_bytes_attempted" in header
+    assert "write_bytes_committed" in header
+    assert "erase_attempt_count" in header
+    assert "capacity_valid" in header
+    assert "available_entries" in header
     assert "d1l_retained_blob_store_is_available" in header
     assert "d1l_retained_blob_store_uses_sd" in header
     assert "d1l_retained_blob_store_backend_state_t" in header
@@ -103,9 +113,22 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "nvs_flash_init_partition(" in source
     assert "nvs_open_from_partition(" in source
     assert "migrate_known_legacy_nvs_keys();" in source
+    assert "note_nvs_write_attempt(config, len)" in source
+    assert "note_nvs_write_result(config, len, ret)" in source
+    assert "note_nvs_erase_attempt(config)" in source
+    assert "note_nvs_erase_result(config, ret)" in source
+    assert "nvs_get_stats(D1L_RETAINED_NVS_PARTITION, &stats)" in source
+    assert "UINT64_MAX - *value < increment" in source
+    assert "physical flash program/erase cycles" in header
     assert '\\"retained_nvs\\":{\\"partition\\":\\"d1l_retained\\"' in read(
         "main/comms/usb_console.c"
     )
+    console = read("main/comms/usb_console.c")
+    assert '\\"telemetry\\":' in console
+    assert '\\"scope\\":\\"boot_runtime_api_calls\\"' in console
+    assert '\\"physical_flash_cycles_measured\\":false' in console
+    assert '\\"write_amplification\\"' in console
+    assert '\\"capacity\\"' in console
     assert "bool d1l_retained_blob_store_backend_state(" in source
     assert "out_state->enabled = s_store_sd_enabled[config->id]" in source
     assert "out_state->generation = s_store_backend_generation[config->id]" in source
@@ -225,3 +248,7 @@ def test_release_docs_require_external_provenance_for_ambiguous_retained_bytes()
     assert "firmware must not delete it automatically" in test_plan
     assert "direct scoped first-upgrade erase" not in combined
     assert "triple absence directly" not in combined
+    assert "storage status.retained_nvs.telemetry" in combined
+    assert 'scope="boot_runtime_api_calls"' in combined
+    assert "physical_flash_cycles_measured=false" in combined
+    assert "API-level" in combined
