@@ -100,88 +100,89 @@ def test_storage_retained_sd_degradation_is_copied_into_touch_snapshot():
 
 
 def test_storage_touch_ui_prioritizes_all_attention_states():
-    source = read("main/ui/ui_phase1.c")
+    source = read("main/ui/ui_storage_view.c")
     attention = function_slice(
         source,
-        "static bool storage_snapshot_needs_attention",
-        "static const char *storage_card_state_friendly",
+        "static bool storage_needs_attention",
+        "static const char *card_state",
     )
     state = function_slice(
         source,
-        "static const char *storage_card_state_friendly",
-        "static const char *storage_filesystem_friendly",
+        "static const char *card_state",
+        "static const char *filesystem",
     )
     readiness = function_slice(
         source,
-        "static const char *storage_readiness_friendly",
-        "static uint32_t storage_card_value_accent",
+        "static const char *readiness",
+        "static uint32_t card_value_accent",
     )
     hero = function_slice(
         source,
-        "static storage_hero_copy_t storage_hero_copy",
-        "static void render_storage_header",
+        "static void set_hero",
+        "static void set_location",
     )
 
     for attention_signal in (
-        "snapshot->storage_retained_sd_degraded",
-        'snapshot->storage_sd_state, "error"',
-        'snapshot->storage_sd_state, "bridge_reported"',
-        'snapshot->storage_setup_action,\n                               "inspect_rp2040_sd_cmd0_firmware_path"',
-        'snapshot->storage_setup_action,\n                               "inspect_rp2040_sd_mount_error_firmware_path"',
+        "input->retained_sd_degraded",
+        'input->sd_state, "error"',
+        'input->sd_state, "bridge_reported"',
+        'input->setup_action,\n                       "inspect_rp2040_sd_cmd0_firmware_path"',
+        'input->setup_action,\n                       "inspect_rp2040_sd_mount_error_firmware_path"',
     ):
         assert attention_signal in attention
-    assert state.index("storage_snapshot_needs_attention(snapshot)") < state.index(
-        "snapshot->storage_sd_mounted && snapshot->storage_sd_data_root_ready"
+    assert state.index("storage_needs_attention(input)") < state.index(
+        "input->sd_mounted && input->sd_data_root_ready"
     )
-    assert readiness.index("storage_snapshot_needs_attention(snapshot)") < readiness.index(
-        "snapshot->storage_sd_mounted && snapshot->storage_sd_data_root_ready"
+    assert readiness.index("storage_needs_attention(input)") < readiness.index(
+        "input->sd_mounted && input->sd_data_root_ready"
     )
-    assert hero.index("snapshot->storage_retained_backup_degraded") < hero.index(
-        "if (snapshot->storage_retained_sd_degraded)",
-        hero.index("snapshot->storage_retained_sd_degraded") + 1,
+    assert hero.index("input->retained_backup_degraded") < hero.index(
+        "if (input->retained_sd_degraded)",
+        hero.index("input->retained_sd_degraded") + 1,
     )
-    assert hero.index('storage_text_equals(action, "wait_for_storage_reconnect")') < hero.rindex(
-        "} else if (snapshot->storage_data_enabled)"
+    assert hero.index('text_equals(input->setup_action, "wait_for_storage_reconnect")') < hero.rindex(
+        "} else if (input->data_enabled)"
     )
-    assert 'copy.state = "Card reader reconnecting";' in hero
+    assert 'state = "Card reader reconnecting";' in hero
     assert '"Last confirmed SD remains active briefly."' in hero
     assert '"Internal fallback takes over if status retries fail."' in hero
-    assert 'copy.accent = 0xFCA5A5;' in hero
+    assert "accent = COLOR_RED;" in hero
 
 
 def test_storage_hero_distinguishes_retained_fallback_from_card_errors():
-    source = read("main/ui/ui_phase1.c")
+    source = read("main/ui/ui_storage_view.c")
     hero = function_slice(
         source,
-        "static storage_hero_copy_t storage_hero_copy",
-        "static void render_storage_header",
+        "static void set_hero",
+        "static void set_location",
     )
 
-    backup = hero.index("snapshot->storage_retained_backup_degraded")
+    backup = hero.index("input->retained_backup_degraded")
     retained = hero.index(
-        "if (snapshot->storage_retained_sd_degraded)",
-        hero.index("snapshot->storage_retained_sd_degraded") + 1,
+        "if (input->retained_sd_degraded)",
+        hero.index("input->retained_sd_degraded") + 1,
     )
-    general_attention = hero.index("storage_snapshot_needs_attention(snapshot)")
-    ready = hero.rindex("} else if (snapshot->storage_data_enabled)")
+    general_attention = hero.index("storage_needs_attention(input)")
+    ready = hero.rindex("} else if (input->data_enabled)")
     assert backup < retained < general_attention < ready
 
     backup_branch = hero[backup:retained]
-    assert 'copy.guidance = "Internal backup needs attention.";' in backup_branch
-    assert 'copy.detail = "Internal saved-data storage is unavailable.";' in backup_branch
+    assert 'guidance = "Internal backup needs attention.";' in backup_branch
+    assert 'detail = "Internal saved-data storage is unavailable.";' in backup_branch
 
     retained_branch = hero[retained:general_attention]
-    assert 'copy.state = "SD needs attention";' in retained_branch
-    assert 'copy.guidance = "Saved data remains available.";' in retained_branch
+    assert 'state = "SD needs attention";' in retained_branch
+    assert 'guidance = "Saved data remains available.";' in retained_branch
 
-    media_branch = hero[general_attention:hero.index('if (storage_text_equals(action, "bridge_unavailable"))')]
-    assert 'copy.state = "Card needs attention";' in media_branch
-    assert 'copy.detail = "Internal storage is active.";' in media_branch
-    assert 'copy.guidance = "Technical details are available over USB.";' in media_branch
+    media_branch = hero[general_attention:hero.index('if (text_equals(input->setup_action, "bridge_unavailable"))')]
+    assert 'state = "Card needs attention";' in media_branch
+    assert 'detail = "Internal storage is active.";' in media_branch
+    assert 'guidance = "Technical details are available over USB.";' in media_branch
 
 
 def test_storage_backup_degradation_redraws_and_avoids_false_internal_claims():
     source = read("main/ui/ui_phase1.c")
+    view = read("main/ui/ui_storage_view.c")
     generation = function_slice(
         source,
         "static d1l_ui_content_generation_t content_generation_from_snapshot",
@@ -193,9 +194,9 @@ def test_storage_backup_degradation_redraws_and_avoids_false_internal_claims():
         "static void remember_rendered_content_generation",
     )
     friendly = function_slice(
-        source,
-        "static const char *storage_retained_backend_friendly",
-        "static const char *storage_map_backend_friendly",
+        view,
+        "static const char *retained_backend",
+        "static const char *map_backend",
     )
 
     assert "snapshot->storage_retained_backup_degraded" in generation
@@ -206,16 +207,16 @@ def test_storage_backup_degradation_redraws_and_avoids_false_internal_claims():
 
 
 def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():
-    source = read("main/ui/ui_phase1.c")
+    source = read("main/ui/ui_storage_view.c")
     uses_sd = function_slice(
         source,
-        "static bool storage_backend_uses_sd",
-        "static const char *storage_retained_backend_friendly",
+        "static bool backend_uses_sd",
+        "static const char *retained_backend",
     )
     summary = function_slice(
         source,
-        "static const char *storage_data_summary",
-        "static uint32_t storage_backend_accent",
+        "static const char *data_summary",
+        "static void set_hero",
     )
 
     for backend in (
@@ -226,10 +227,9 @@ def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():
         "map_tile_backend",
         "export_backend",
     ):
-        assert f"snapshot->{backend}" in summary
-    assert summary.count("storage_backend_uses_sd(") == 6
-    assert 'return "SD + internal";' in summary
-    assert 'return "Internal";' in summary
+        assert f"input->{backend}" in summary
+    assert summary.count("backend_uses_sd(") == 6
+    assert 'uses_sd ? "SD + internal" : "Internal"' in summary
     assert "sd_pending_store_migration" not in uses_sd
 
 

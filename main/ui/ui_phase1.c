@@ -34,6 +34,7 @@
 #include "ui_packets.h"
 #include "ui_screen.h"
 #include "ui_settings.h"
+#include "ui_storage_view.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "d1l_ui";
@@ -132,6 +133,7 @@ static d1l_ui_messages_controller_t s_messages_controller;
 static d1l_ui_nodes_controller_t s_nodes_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_settings_controller_t s_settings_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_storage_view_model_t s_storage_view EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
@@ -1605,6 +1607,39 @@ static void more_view_input_from_snapshot(
         .storage_sd_state = snapshot->storage_sd_state,
         .storage_setup_action = snapshot->storage_setup_action,
         .firmware_version = D1L_FIRMWARE_VERSION,
+    };
+}
+
+static void storage_view_input_from_snapshot(
+    const d1l_app_snapshot_t *snapshot,
+    d1l_ui_storage_view_input_t *out_input)
+{
+    if (!snapshot || !out_input) {
+        return;
+    }
+    *out_input = (d1l_ui_storage_view_input_t) {
+        .rp2040_bridge_required = snapshot->storage_rp2040_bridge_required,
+        .rp2040_bridge_ready = snapshot->storage_rp2040_bridge_ready,
+        .rp2040_sd_protocol_supported =
+            snapshot->storage_rp2040_sd_protocol_supported,
+        .sd_present = snapshot->storage_sd_present,
+        .sd_mounted = snapshot->storage_sd_mounted,
+        .sd_data_root_ready = snapshot->storage_sd_data_root_ready,
+        .sd_needs_fat32 = snapshot->storage_sd_needs_fat32,
+        .data_enabled = snapshot->storage_data_enabled,
+        .retained_sd_degraded = snapshot->storage_retained_sd_degraded,
+        .retained_backup_degraded = snapshot->storage_retained_backup_degraded,
+        .capacity_kb = snapshot->storage_capacity_kb,
+        .free_kb = snapshot->storage_free_kb,
+        .sd_state = snapshot->storage_sd_state,
+        .sd_filesystem = snapshot->storage_sd_filesystem,
+        .setup_action = snapshot->storage_setup_action,
+        .message_store_backend = snapshot->message_store_backend,
+        .dm_store_backend = snapshot->dm_store_backend,
+        .packet_log_backend = snapshot->packet_log_backend,
+        .route_store_backend = snapshot->route_store_backend,
+        .map_tile_backend = snapshot->map_tile_backend,
+        .export_backend = snapshot->export_backend,
     };
 }
 
@@ -5110,348 +5145,6 @@ static void open_storage_data_locations_event_cb(lv_event_t *event)
     show_modal(s_storage_sheet);
 }
 
-static bool storage_text_equals(const char *value, const char *expected)
-{
-    return value && expected && strcmp(value, expected) == 0;
-}
-
-static bool storage_snapshot_needs_attention(const d1l_app_snapshot_t *snapshot)
-{
-    if (!snapshot) {
-        return false;
-    }
-    return snapshot->storage_retained_sd_degraded ||
-           storage_text_equals(snapshot->storage_sd_state, "error") ||
-           storage_text_equals(snapshot->storage_sd_state, "bridge_reported") ||
-           storage_text_equals(snapshot->storage_setup_action,
-                               "inspect_rp2040_sd_cmd0_firmware_path") ||
-           storage_text_equals(snapshot->storage_setup_action,
-                               "inspect_rp2040_sd_mount_error_firmware_path");
-}
-
-static const char *storage_card_state_friendly(const d1l_app_snapshot_t *snapshot)
-{
-    if (!snapshot) {
-        return "Status unavailable";
-    }
-    if (storage_snapshot_needs_attention(snapshot)) {
-        return "Card needs attention";
-    }
-    if (storage_text_equals(snapshot->storage_setup_action,
-                            "wait_for_storage_reconnect")) {
-        return "Card reader reconnecting";
-    }
-    if (storage_text_equals(snapshot->storage_setup_action, "run_storage_mount") ||
-        storage_text_equals(snapshot->storage_setup_action, "wait_for_storage_mount")) {
-        return "Checking card";
-    }
-    if (snapshot->storage_rp2040_bridge_required &&
-        !snapshot->storage_rp2040_bridge_ready) {
-        return "Card reader unavailable";
-    }
-    if (snapshot->storage_rp2040_bridge_required &&
-        !snapshot->storage_rp2040_sd_protocol_supported) {
-        return "Card reader starting";
-    }
-    if (!snapshot->storage_sd_present) {
-        return "No card inserted";
-    }
-    if (snapshot->storage_sd_needs_fat32 ||
-        storage_text_equals(snapshot->storage_sd_state, "not_fat32_or_unmountable")) {
-        return "FAT32 card required";
-    }
-    if (storage_text_equals(snapshot->storage_sd_state, "deskos_manifest_invalid")) {
-        return "DeskOS files need attention";
-    }
-    if (storage_text_equals(snapshot->storage_sd_state, "checking") ||
-        storage_text_equals(snapshot->storage_sd_state, "mount_pending")) {
-        return "Checking card";
-    }
-    if (storage_text_equals(snapshot->storage_sd_state, "creating_deskos_files") ||
-        (snapshot->storage_sd_mounted && !snapshot->storage_sd_data_root_ready)) {
-        return "Preparing DeskOS folders";
-    }
-    if (snapshot->storage_sd_mounted && snapshot->storage_sd_data_root_ready) {
-        return "Ready";
-    }
-    return "Card detected, not ready";
-}
-
-static const char *storage_filesystem_friendly(const d1l_app_snapshot_t *snapshot)
-{
-    if (!snapshot || !snapshot->storage_sd_present) {
-        return "Not available";
-    }
-    if (snapshot->storage_sd_needs_fat32) {
-        return "FAT32 required";
-    }
-    if (storage_text_equals(snapshot->storage_sd_filesystem, "fat32") ||
-        storage_text_equals(snapshot->storage_sd_filesystem, "fatfs")) {
-        return "FAT32";
-    }
-    if (storage_text_equals(snapshot->storage_sd_filesystem, "exfat")) {
-        return "exFAT (not supported)";
-    }
-    return snapshot->storage_sd_mounted ? "Detected" : "Not available";
-}
-
-static const char *storage_readiness_friendly(const d1l_app_snapshot_t *snapshot)
-{
-    if (!snapshot) {
-        return "Not available";
-    }
-    const char *action = snapshot->storage_setup_action;
-    if (storage_snapshot_needs_attention(snapshot) ||
-        storage_text_equals(snapshot->storage_sd_state, "deskos_manifest_invalid")) {
-        return "Needs attention";
-    }
-    if (storage_text_equals(action, "wait_for_storage_reconnect")) {
-        return "Reconnecting";
-    }
-    if (storage_text_equals(action, "run_storage_mount") ||
-        storage_text_equals(action, "wait_for_storage_mount")) {
-        return "Checking";
-    }
-    if (storage_text_equals(action, "bridge_unavailable") ||
-        storage_text_equals(action, "bridge_protocol_pending")) {
-        return "Not available";
-    }
-    if (storage_text_equals(action, "insert_card") || !snapshot->storage_sd_present) {
-        return "No card";
-    }
-    if (snapshot->storage_sd_needs_fat32) {
-        return "Needs FAT32";
-    }
-    if (storage_text_equals(snapshot->storage_sd_state, "checking") ||
-        storage_text_equals(snapshot->storage_sd_state, "mount_pending")) {
-        return "Checking";
-    }
-    if (snapshot->storage_sd_mounted && snapshot->storage_sd_data_root_ready) {
-        return "Ready";
-    }
-    if (snapshot->storage_sd_present || snapshot->storage_sd_mounted) {
-        return "Setup incomplete";
-    }
-    return "Not ready";
-}
-
-static uint32_t storage_card_value_accent(const char *value)
-{
-    if (storage_text_equals(value, "Ready")) {
-        return 0xA7F3D0;
-    }
-    if (storage_text_equals(value, "Needs attention") ||
-        storage_text_equals(value, "Card needs attention") ||
-        storage_text_equals(value, "DeskOS files need attention")) {
-        return 0xFCA5A5;
-    }
-    if (storage_text_equals(value, "Not available") ||
-        storage_text_equals(value, "No card") ||
-        storage_text_equals(value, "No card inserted") ||
-        storage_text_equals(value, "Status unavailable") ||
-        storage_text_equals(value, "Card reader unavailable")) {
-        return 0x93C5FD;
-    }
-    return 0xFBBF24;
-}
-
-static void format_storage_kb(char *dest, size_t dest_size, uint32_t kb, bool known)
-{
-    if (!dest || dest_size == 0U) {
-        return;
-    }
-    if (!known) {
-        snprintf(dest, dest_size, "%s", "Not reported");
-    } else if (kb >= 1024U * 1024U) {
-        const uint32_t whole = kb / (1024U * 1024U);
-        const uint32_t tenth = ((kb % (1024U * 1024U)) * 10U) / (1024U * 1024U);
-        snprintf(dest, dest_size, "%lu.%lu GB",
-                 (unsigned long)whole, (unsigned long)tenth);
-    } else if (kb >= 1024U) {
-        snprintf(dest, dest_size, "%lu MB", (unsigned long)(kb / 1024U));
-    } else {
-        snprintf(dest, dest_size, "%lu KB", (unsigned long)kb);
-    }
-}
-
-static bool storage_backend_uses_sd(const char *backend)
-{
-    return storage_text_equals(backend, "sd") ||
-           storage_text_equals(backend, "mixed") ||
-           storage_text_equals(backend, "sd_map_tiles_ready") ||
-           storage_text_equals(backend, "sd_diagnostic_exports_ready");
-}
-
-static const char *storage_retained_backend_friendly(
-    const d1l_app_snapshot_t *snapshot, const char *backend)
-{
-    if (storage_text_equals(backend, "sd") || storage_text_equals(backend, "mixed")) {
-        return snapshot && snapshot->storage_retained_backup_degraded ?
-            "SD; backup degraded" : "SD + internal backup";
-    }
-    if (storage_text_equals(backend, "nvs")) {
-        return snapshot && snapshot->storage_retained_backup_degraded ?
-            "Internal issue" : "Internal";
-    }
-    return "Unavailable";
-}
-
-static const char *storage_map_backend_friendly(const char *backend)
-{
-    if (storage_text_equals(backend, "sd_map_tiles_ready")) {
-        return "SD card";
-    }
-    if (storage_text_equals(backend, "sd_pending_store_migration")) {
-        return "Pending";
-    }
-    return "Unavailable";
-}
-
-static const char *storage_export_backend_friendly(const char *backend)
-{
-    if (storage_text_equals(backend, "sd_diagnostic_exports_ready")) {
-        return "SD card";
-    }
-    return "USB only";
-}
-
-static const char *storage_data_summary(const d1l_app_snapshot_t *snapshot)
-{
-    const bool uses_sd = snapshot &&
-        (storage_backend_uses_sd(snapshot->message_store_backend) ||
-         storage_backend_uses_sd(snapshot->dm_store_backend) ||
-         storage_backend_uses_sd(snapshot->packet_log_backend) ||
-         storage_backend_uses_sd(snapshot->route_store_backend) ||
-         storage_backend_uses_sd(snapshot->map_tile_backend) ||
-         storage_backend_uses_sd(snapshot->export_backend));
-    if (snapshot && snapshot->storage_retained_backup_degraded) {
-        return uses_sd ? "SD; backup issue" : "Storage issue";
-    }
-    if (uses_sd) {
-        return "SD + internal";
-    }
-    return "Internal";
-}
-
-static uint32_t storage_backend_accent(const char *backend)
-{
-    if (storage_backend_uses_sd(backend)) {
-        return 0xA7F3D0;
-    }
-    if (storage_text_equals(backend, "sd_pending_store_migration")) {
-        return 0xFBBF24;
-    }
-    return 0x93C5FD;
-}
-
-typedef struct {
-    const char *state;
-    const char *detail;
-    const char *guidance;
-    uint32_t accent;
-} storage_hero_copy_t;
-
-static storage_hero_copy_t storage_hero_copy(const d1l_app_snapshot_t *snapshot)
-{
-    storage_hero_copy_t copy = {
-        .state = "Storage starting",
-        .detail = "Checking saved-data storage.",
-        .guidance = "Status updates automatically.",
-        .accent = 0xFBBF24,
-    };
-    if (!snapshot) {
-        return copy;
-    }
-
-    if (snapshot->storage_retained_backup_degraded) {
-        if (snapshot->storage_retained_sd_degraded) {
-            copy.state = "Saved storage needs attention";
-            copy.detail = "SD and internal backup reported errors.";
-            copy.guidance = "See USB diagnostics before relying on saved history.";
-            copy.accent = 0xFCA5A5;
-        } else if (snapshot->storage_data_enabled) {
-            copy.state = "SD card ready";
-            copy.detail = "Saved data is using SD.";
-            copy.guidance = "Internal backup needs attention.";
-            copy.accent = 0xFBBF24;
-        } else {
-            copy.state = "Storage needs attention";
-            copy.detail = "Internal saved-data storage is unavailable.";
-            copy.guidance = "See USB diagnostics before relying on saved history.";
-            copy.accent = 0xFCA5A5;
-        }
-        return copy;
-    }
-
-    if (snapshot->storage_retained_sd_degraded) {
-        copy.state = "SD needs attention";
-        copy.detail = "Internal storage is active.";
-        copy.guidance = "Saved data remains available.";
-        copy.accent = 0xFCA5A5;
-        return copy;
-    }
-
-    const char *action = snapshot->storage_setup_action;
-    if (storage_snapshot_needs_attention(snapshot)) {
-        copy.state = "Card needs attention";
-        copy.detail = "Internal storage is active.";
-        copy.guidance = "Technical details are available over USB.";
-        copy.accent = 0xFCA5A5;
-        return copy;
-    }
-    if (storage_text_equals(action, "wait_for_storage_reconnect")) {
-        copy.state = "Card reader reconnecting";
-        copy.detail = snapshot->storage_data_enabled ?
-            "Last confirmed SD remains active briefly." :
-            "Internal storage is active.";
-        copy.guidance = snapshot->storage_data_enabled ?
-            "Internal fallback takes over if status retries fail." :
-            "SD access resumes after a valid status reply.";
-    } else if (storage_text_equals(action, "bridge_unavailable")) {
-        copy.detail = "SD support is unavailable.";
-        copy.guidance = "Internal storage remains active.";
-    } else if (storage_text_equals(action, "bridge_protocol_pending")) {
-        copy.detail = "SD support is starting.";
-    } else if (storage_text_equals(action, "run_storage_mount") ||
-               storage_text_equals(action, "wait_for_storage_mount")) {
-        copy.state = "Checking SD card";
-        copy.detail = "Using internal storage for now.";
-        copy.guidance = "The card check finishes automatically.";
-    } else if (storage_text_equals(action, "insert_card")) {
-        copy.state = "No SD card";
-        copy.detail = "Internal storage is active.";
-        copy.guidance = "Insert a FAT32 card for more space.";
-    } else if (storage_text_equals(action, "prepare_fat32_on_computer")) {
-        copy.state = "Card needs FAT32";
-        copy.detail = "Prepare it on a computer.";
-        copy.guidance = "Prepare as FAT32, then reinsert the card.";
-    } else if (storage_text_equals(action, "backup_reformat_fat32_on_computer")) {
-        copy.state = "Card needs FAT32";
-        copy.detail = "Prepare it on a computer.";
-        copy.guidance = "Prepare as FAT32, then reinsert the card.";
-    } else if (storage_text_equals(action, "retry_storage_mount") ||
-               storage_text_equals(action, "use_nvs_fallback")) {
-        copy.state = "Card setup incomplete";
-        copy.detail = "Internal storage is active.";
-        copy.guidance = "Reinsert the card to finish DeskOS folders.";
-    } else if (storage_text_equals(action, "forced_nvs")) {
-        copy.state = "Internal storage only";
-        copy.detail = "SD storage is paused.";
-        copy.guidance = "Internal storage remains active.";
-    } else if (snapshot->storage_data_enabled) {
-        copy.state = "SD card ready";
-        copy.detail = "SD is used with internal backup.";
-        copy.guidance = "Saved data stays mirrored internally.";
-        copy.accent = 0xA7F3D0;
-    } else if (snapshot->storage_sd_data_root_ready) {
-        copy.state = "SD card ready";
-        copy.detail = "Using internal storage.";
-        copy.guidance = "SD is ready; saved data stays internal.";
-        copy.accent = 0xA7F3D0;
-    }
-    return copy;
-}
-
 static void render_storage_header(const char *title, lv_event_cb_t back_cb)
 {
     create_button(s_storage_sheet, "Back", 12, 8, 76, 44, back_cb, NULL);
@@ -5490,7 +5183,7 @@ static void render_storage_detail_row(lv_obj_t *parent, int y,
 
 static void render_storage_root(void)
 {
-    const storage_hero_copy_t hero = storage_hero_copy(&s_snapshot);
+    const d1l_ui_storage_hero_view_t *hero = &s_storage_view.hero;
     render_storage_header("Storage", close_storage_sheet_event_cb);
     lv_obj_t *subtitle = create_label(s_storage_sheet,
                                       "Card and saved-data overview", 0x8EA0AE);
@@ -5503,12 +5196,12 @@ static void render_storage_root(void)
         lv_obj_set_style_pad_all(hero_panel, 0, 0);
         lv_obj_t *eyebrow = create_label(hero_panel, "Current storage", 0x8EA0AE);
         lv_obj_set_pos(eyebrow, 12, 8);
-        lv_obj_t *state = create_label(hero_panel, hero.state, hero.accent);
+        lv_obj_t *state = create_label(hero_panel, hero->state, hero->accent);
         lv_obj_set_style_text_font(state, &lv_font_montserrat_24, 0);
         lv_label_set_long_mode(state, LV_LABEL_LONG_DOT);
         lv_obj_set_width(state, 424);
         lv_obj_set_pos(state, 12, 28);
-        lv_obj_t *detail = create_label(hero_panel, hero.detail, 0x8EA0AE);
+        lv_obj_t *detail = create_label(hero_panel, hero->detail, 0x8EA0AE);
         lv_label_set_long_mode(detail, LV_LABEL_LONG_DOT);
         lv_obj_set_width(detail, 424);
         lv_obj_set_pos(detail, 12, 64);
@@ -5517,18 +5210,18 @@ static void render_storage_root(void)
     lv_obj_t *card = create_button(s_storage_sheet, "Card status",
                                     16, 168, 448, 68,
                                     open_storage_card_status_event_cb, NULL);
-    style_contact_option_button(card, hero.accent,
-                                storage_card_state_friendly(&s_snapshot));
+    style_contact_option_button(card, hero->accent,
+                                s_storage_view.card_summary);
 
     lv_obj_t *data = create_button(s_storage_sheet, "Data locations",
                                     16, 248, 448, 68,
                                     open_storage_data_locations_event_cb, NULL);
-    style_contact_option_button(data, 0x93C5FD, storage_data_summary(&s_snapshot));
+    style_contact_option_button(data, 0x93C5FD, s_storage_view.data_summary);
 
     lv_obj_t *guidance = create_panel(s_storage_sheet, 16, 324, 448, 40);
     if (guidance) {
         lv_obj_set_style_pad_all(guidance, 0, 0);
-        lv_obj_t *copy = create_label(guidance, hero.guidance, hero.accent);
+        lv_obj_t *copy = create_label(guidance, hero->guidance, hero->accent);
         lv_label_set_long_mode(copy, LV_LABEL_LONG_DOT);
         lv_obj_set_width(copy, 424);
         lv_obj_set_pos(copy, 12, 10);
@@ -5537,16 +5230,7 @@ static void render_storage_root(void)
 
 static void render_storage_card_status(void)
 {
-    char capacity[24];
-    char free_space[24];
-    const char *state = storage_card_state_friendly(&s_snapshot);
-    const char *readiness = storage_readiness_friendly(&s_snapshot);
-    const bool capacity_known = s_snapshot.storage_sd_present &&
-                                s_snapshot.storage_capacity_kb > 0U;
-    format_storage_kb(capacity, sizeof(capacity), s_snapshot.storage_capacity_kb,
-                      capacity_known);
-    format_storage_kb(free_space, sizeof(free_space), s_snapshot.storage_free_kb,
-                      capacity_known);
+    const d1l_ui_storage_card_view_t *card = &s_storage_view.card;
 
     render_storage_header("Card status", storage_subpage_back_event_cb);
     lv_obj_t *subtitle = create_label(s_storage_sheet,
@@ -5558,14 +5242,14 @@ static void render_storage_card_status(void)
         return;
     }
     lv_obj_set_style_pad_all(panel, 0, 0);
-    render_storage_detail_row(panel, 18, "State", state,
-                              storage_card_value_accent(state));
+    render_storage_detail_row(panel, 18, "State", card->state,
+                              card->state_accent);
     render_storage_detail_row(panel, 70, "Filesystem",
-                              storage_filesystem_friendly(&s_snapshot), 0x93C5FD);
-    render_storage_detail_row(panel, 122, "Capacity", capacity, 0xC4B5FD);
-    render_storage_detail_row(panel, 174, "Free space", free_space, 0xC4B5FD);
-    render_storage_detail_row(panel, 226, "Readiness", readiness,
-                              storage_card_value_accent(readiness));
+                              card->filesystem, 0x93C5FD);
+    render_storage_detail_row(panel, 122, "Capacity", card->capacity, 0xC4B5FD);
+    render_storage_detail_row(panel, 174, "Free space", card->free_space, 0xC4B5FD);
+    render_storage_detail_row(panel, 226, "Readiness", card->readiness,
+                              card->readiness_accent);
 }
 
 static void render_storage_location_row(lv_obj_t *parent, int y,
@@ -5609,24 +5293,12 @@ static void render_storage_data_locations(void)
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
 
-    render_storage_location_row(list, 0, "Messages",
-                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.message_store_backend),
-                                storage_backend_accent(s_snapshot.message_store_backend));
-    render_storage_location_row(list, 56, "Direct messages",
-                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.dm_store_backend),
-                                storage_backend_accent(s_snapshot.dm_store_backend));
-    render_storage_location_row(list, 112, "Packets",
-                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.packet_log_backend),
-                                storage_backend_accent(s_snapshot.packet_log_backend));
-    render_storage_location_row(list, 168, "Routes",
-                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.route_store_backend),
-                                storage_backend_accent(s_snapshot.route_store_backend));
-    render_storage_location_row(list, 224, "Map tiles",
-                                storage_map_backend_friendly(s_snapshot.map_tile_backend),
-                                storage_backend_accent(s_snapshot.map_tile_backend));
-    render_storage_location_row(list, 280, "Exports",
-                                storage_export_backend_friendly(s_snapshot.export_backend),
-                                storage_backend_accent(s_snapshot.export_backend));
+    for (size_t index = 0U; index < s_storage_view.location_count; ++index) {
+        const d1l_ui_storage_location_view_t *location =
+            &s_storage_view.locations[index];
+        render_storage_location_row(list, (int)(index * 56U), location->name,
+                                    location->value, location->accent);
+    }
 }
 
 static void render_storage_sheet(void)
@@ -5635,6 +5307,11 @@ static void render_storage_sheet(void)
         return;
     }
     d1l_app_model_snapshot(&s_snapshot);
+    d1l_ui_storage_view_input_t input = {0};
+    storage_view_input_from_snapshot(&s_snapshot, &input);
+    if (!d1l_ui_storage_view(&input, &s_storage_view)) {
+        return;
+    }
     lv_obj_clean(s_storage_sheet);
 
     switch (s_storage_page) {

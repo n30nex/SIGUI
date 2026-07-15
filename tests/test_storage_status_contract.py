@@ -598,6 +598,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     ui = read("main/ui/ui_phase1.c")
     settings_ui = read("main/ui/ui_settings.c")
     more_ui = read("main/ui/ui_more_view.c")
+    storage_view = read("main/ui/ui_storage_view.c")
     simulator = read("tools/ui_simulator.py")
     rp2040_header = read("main/hal/rp2040_bridge.h")
     rp2040_source = read("main/hal/rp2040_bridge.c")
@@ -705,10 +706,11 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage setup" in SMOKE_COMMANDS
     assert not any(command.startswith("storage map-tile-canary") for command in SMOKE_COMMANDS)
     assert not any(command.startswith("storage export-canary") for command in SMOKE_COMMANDS)
-    assert "storage_card_state_friendly" in ui
-    assert "storage_retained_backend_friendly" in ui
-    assert "storage_map_backend_friendly" in ui
-    assert "storage_export_backend_friendly" in ui
+    assert "static const char *card_state" in storage_view
+    assert "static const char *retained_backend" in storage_view
+    assert "static const char *map_backend" in storage_view
+    assert "static const char *export_backend" in storage_view
+    assert "d1l_ui_storage_view(&input, &s_storage_view)" in ui
     assert "static lv_obj_t *s_storage_sheet" in ui
     assert "render_storage_sheet" in ui
     assert "open_storage_sheet_event_cb" in ui
