@@ -51,10 +51,11 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "last_public_read_seq" in app_header
     assert "last_dm_read_seq" in app_header
     assert "recent_dm_unread[D1L_APP_SNAPSHOT_DM_PREVIEW]" in app_header
-    assert "d1l_app_model_mark_messages_read" in app_header
+    assert "d1l_app_model_mark_public_read" in app_header
     assert "d1l_app_model_mark_dm_thread_read" in app_header
     assert "d1l_read_state_stats()" in app_source
-    assert "d1l_read_state_mark_all_read()" in app_source
+    assert "d1l_read_state_mark_public_read()" in app_source
+    assert "d1l_read_state_mark_all_read()" not in app_source
     assert "d1l_read_state_dm_entry_is_unread(&snapshot->recent_dms[i])" in app_source
     assert "d1l_read_state_mark_dm_thread_read(fingerprint)" in app_source
 
@@ -80,9 +81,11 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert "dm_thread_count" in console
     assert "messages unread" in SMOKE_COMMANDS
 
-    assert "mark_messages_read_event_cb" in ui
-    assert 'messages_create_button(header, "Read"' in messages_ui
-    assert 'unread ? "new"' in messages_ui
+    assert "mark_public_read_event_cb" in ui
+    assert "d1l_app_model_mark_public_read()" in ui
+    assert "d1l_app_model_mark_messages_read" not in ui
+    assert 'parent, "Mark read", 18, 60, 96, 44' in messages_ui
+    assert 'return unread ? "New" : "Received";' in messages_ui
     assert "snapshot->muted_dm_unread_count" in ui
     assert "read_dm_thread_event_cb" not in ui
     assert 'create_button(s_dm_thread_sheet, "Read"' not in ui
@@ -93,5 +96,5 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert show_thread.index("d1l_app_model_mark_dm_thread_read(fingerprint)") < show_thread.index(
         "render_dm_thread_sheet()"
     )
-    assert "messages_render_dm_row(controller, parent, y, i)" in messages_ui
+    assert "messages_render_dm_row(controller, body, 8 + (int)i * 80, i)" in messages_ui
     assert "d1l_ui_messages_delivery_label(entry, unread)" in messages_ui

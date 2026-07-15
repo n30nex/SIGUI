@@ -114,7 +114,7 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "static lv_obj_t *s_public_search_sheet" in ui
     assert "d1l_app_model_query_public_messages_page(s_public_history_entries" in ui
     assert "public_history_load_older_event_cb" in ui
-    assert 'messages_create_button(header, "History"' in messages_ui
+    assert "D1L_UI_MESSAGES_ACTION_OPEN_HISTORY" in messages_ui
     assert "create_public_history_sheet" in ui
     assert "create_public_search_sheet" in ui
     assert 'lv_textarea_set_placeholder_text(s_public_search_textarea, "Search author or message")' in ui

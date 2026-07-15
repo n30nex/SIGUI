@@ -108,7 +108,7 @@ static bool s_onboarding_probe_suppressed;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
-static bool s_messages_show_dms;
+static d1l_ui_messages_mode_t s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
 static d1l_ui_home_controller_t s_home_controller;
 static d1l_ui_messages_controller_t s_messages_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_nodes_controller_t s_nodes_controller EXT_RAM_BSS_ATTR;
@@ -1805,6 +1805,7 @@ static void handle_home_action(d1l_ui_home_action_t action, void *context)
     (void)context;
     switch (action) {
     case D1L_UI_HOME_ACTION_MESSAGES:
+        s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
         request_tab_switch(D1L_UI_TAB_MESSAGES);
         break;
     case D1L_UI_HOME_ACTION_NETWORK:
@@ -2054,23 +2055,17 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
     request_full_screen_repaint();
 }
 
-static void public_test_event_cb(lv_event_t *event)
-{
-    (void)event;
-    show_toast("Public test", d1l_app_model_send_public_test());
-}
-
 static void open_compose_event_cb(lv_event_t *event)
 {
     (void)event;
     show_public_compose_sheet("Compose Public", "Public message");
 }
 
-static void mark_messages_read_event_cb(lv_event_t *event)
+static void mark_public_read_event_cb(lv_event_t *event)
 {
     (void)event;
-    esp_err_t ret = d1l_app_model_mark_messages_read();
-    show_toast("Read", ret);
+    esp_err_t ret = d1l_app_model_mark_public_read();
+    show_toast("Public read", ret);
     if (ret == ESP_OK) {
         request_content_refresh();
     }
@@ -2890,7 +2885,7 @@ static const char *message_delivery_label(const d1l_message_entry_t *entry)
         return "unknown";
     }
     if (entry->direction[0] == 't') {
-        return entry->delivered ? "delivered" : "queued";
+        return "sent over RF";
     }
     return entry->seq > s_snapshot.last_public_read_seq ? "new" : "received";
 }
@@ -2987,17 +2982,30 @@ static void render_message_detail_sheet(void)
     }
 
     if (s_message_detail_advanced) {
-        const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
         lv_obj_t *signal = create_nested_page_label(body, "", 0x8EA0AE, true);
         if (signal) {
-            label_set_fmt(signal, "Signal  rssi %d  snr %s%d.%d",
-                          entry->rssi_dbm,
-                          entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
+            if (entry->direction[0] == 't') {
+                lv_label_set_text(signal,
+                                  "Signal  not measured for retained Public TxDone");
+            } else {
+                const int snr_abs = entry->snr_tenths < 0 ?
+                    -entry->snr_tenths : entry->snr_tenths;
+                label_set_fmt(signal, "Signal  rssi %d  snr %s%d.%d",
+                              entry->rssi_dbm,
+                              entry->snr_tenths < 0 ? "-" : "",
+                              snr_abs / 10, snr_abs % 10);
+            }
         }
         lv_obj_t *path = create_nested_page_label(body, "", 0x8EA0AE, true);
         if (path) {
-            label_set_fmt(path, "Path  %u hop%s",
-                          entry->path_hops, entry->path_hops == 1 ? "" : "s");
+            if (entry->direction[0] == 't') {
+                lv_label_set_text(path,
+                                  "Path hops  not measured for retained Public TxDone");
+            } else {
+                label_set_fmt(path, "Path  %u hop%s",
+                              entry->path_hops,
+                              entry->path_hops == 1 ? "" : "s");
+            }
         }
         lv_obj_t *seq = create_nested_page_label(body, "", 0x8EA0AE, true);
         if (seq) {
@@ -3008,8 +3016,10 @@ static void render_message_detail_sheet(void)
         }
         lv_obj_t *hash = create_nested_page_label(body, "", 0x8EA0AE, true);
         if (hash) {
-            label_set_fmt(hash, "Path hash  %u byte  delivered %s",
-                          entry->path_hash_bytes, entry->delivered ? "yes" : "no");
+            label_set_fmt(hash, "Path hash  %u byte%s  retained after %s",
+                          entry->path_hash_bytes,
+                          entry->path_hash_bytes == 1 ? "" : "s",
+                          entry->direction[0] == 't' ? "TxDone" : "receive");
         }
     }
 
@@ -3686,7 +3696,7 @@ static const char *public_row_state(const d1l_message_entry_t *entry)
     if (entry->direction[0] == 'r' && entry->seq > s_snapshot.last_public_read_seq) {
         return "new";
     }
-    return entry->direction[0] == 't' ? "queued" : "received";
+    return entry->direction[0] == 't' ? "sent over RF" : "received";
 }
 
 static void close_public_history_event_cb(lv_event_t *event)
@@ -3966,9 +3976,14 @@ static void open_home_dm_preview_event_cb(lv_event_t *event)
     show_dm_thread_for(entry->target_fingerprint, entry->sender);
 }
 
-static void set_messages_mode(bool show_dms)
+static void set_messages_mode(d1l_ui_messages_mode_t mode)
 {
-    s_messages_show_dms = show_dms;
+    if (mode != D1L_UI_MESSAGES_MODE_ROOT &&
+        mode != D1L_UI_MESSAGES_MODE_PUBLIC &&
+        mode != D1L_UI_MESSAGES_MODE_DIRECT) {
+        mode = D1L_UI_MESSAGES_MODE_ROOT;
+    }
+    s_messages_mode = mode;
     if (d1l_ui_navigation_active() == D1L_UI_TAB_MESSAGES) {
         request_content_refresh();
         return;
@@ -3983,8 +3998,7 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
         return;
     }
     memset(view_model, 0, sizeof(*view_model));
-    view_model->mode = s_messages_show_dms ?
-        D1L_UI_MESSAGES_MODE_DIRECT : D1L_UI_MESSAGES_MODE_PUBLIC;
+    view_model->mode = s_messages_mode;
     view_model->public_total = snapshot->message_count;
     view_model->dm_total = snapshot->dm_count;
     view_model->public_unread = snapshot->public_unread_count;
@@ -4017,8 +4031,8 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
         return;
     }
     switch (event->action) {
-    case D1L_UI_MESSAGES_ACTION_MARK_READ:
-        mark_messages_read_event_cb(NULL);
+    case D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ:
+        mark_public_read_event_cb(NULL);
         break;
     case D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC:
         open_compose_event_cb(NULL);
@@ -4026,14 +4040,14 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
     case D1L_UI_MESSAGES_ACTION_OPEN_HISTORY:
         open_public_history_event_cb(NULL);
         break;
-    case D1L_UI_MESSAGES_ACTION_SEND_PUBLIC_TEST:
-        public_test_event_cb(NULL);
+    case D1L_UI_MESSAGES_ACTION_SHOW_ROOT:
+        set_messages_mode(D1L_UI_MESSAGES_MODE_ROOT);
         break;
     case D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC:
-        set_messages_mode(false);
+        set_messages_mode(D1L_UI_MESSAGES_MODE_PUBLIC);
         break;
     case D1L_UI_MESSAGES_ACTION_SHOW_DIRECT:
-        set_messages_mode(true);
+        set_messages_mode(D1L_UI_MESSAGES_MODE_DIRECT);
         break;
     case D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE:
         show_message_detail_for(event->public_message);
@@ -5261,6 +5275,9 @@ esp_err_t d1l_ui_phase1_request_tab(const char *name)
     if (tab == D1L_UI_TAB_MAP) {
         d1l_ui_map_viewport_suppress_next_acquire();
     }
+    if (tab == D1L_UI_TAB_MESSAGES) {
+        s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
+    }
     request_tab_switch(tab);
     return ESP_OK;
 }
@@ -5537,6 +5554,9 @@ static void request_tab_event_cb(lv_event_t *event)
     const d1l_ui_tab_t *tab = (const d1l_ui_tab_t *)lv_event_get_user_data(event);
     if (tab) {
         set_map_interactive_touch_authorized(*tab == D1L_UI_TAB_MAP);
+        if (*tab == D1L_UI_TAB_MESSAGES) {
+            s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
+        }
         request_tab_switch(*tab);
     }
 }
@@ -5767,13 +5787,13 @@ static void measure_scroll_probe_target(lv_obj_t *target,
 static lv_obj_t *scroll_probe_open_surface(const char *surface)
 {
     if (strcmp(surface, "public_messages") == 0) {
-        s_messages_show_dms = false;
+        s_messages_mode = D1L_UI_MESSAGES_MODE_PUBLIC;
         render_active_tab();
         show_public_history_sheet();
         return scroll_probe_find_target(s_public_history_sheet);
     }
     if (strcmp(surface, "dm_thread") == 0) {
-        s_messages_show_dms = true;
+        s_messages_mode = D1L_UI_MESSAGES_MODE_DIRECT;
         render_active_tab();
         d1l_app_model_snapshot(&s_snapshot);
         if (s_snapshot.recent_dm_count == 0 ||
@@ -6034,7 +6054,8 @@ static void open_compose_probe_on_ui_task(const char *target)
     request_tab_switch(D1L_UI_TAB_MESSAGES);
     process_pending_tab_switch();
     s_onboarding_probe_suppressed = true;
-    s_messages_show_dms = d1l_ui_keyboard_probe_target_is_dm(target);
+    s_messages_mode = d1l_ui_keyboard_probe_target_is_dm(target) ?
+        D1L_UI_MESSAGES_MODE_DIRECT : D1L_UI_MESSAGES_MODE_PUBLIC;
     render_active_tab();
     hide_onboarding_sheet();
 
@@ -6081,7 +6102,7 @@ static void open_keyboard_probe_on_ui_task(const char *target)
     }
 
     if (strcmp(target, "public_search") == 0) {
-        s_messages_show_dms = false;
+        s_messages_mode = D1L_UI_MESSAGES_MODE_PUBLIC;
         render_active_tab();
         hide_onboarding_sheet();
         open_public_search_event_cb(NULL);

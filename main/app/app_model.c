@@ -391,11 +391,6 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     populate_home_repeaters(snapshot);
 }
 
-esp_err_t d1l_app_model_send_public_test(void)
-{
-    return d1l_meshcore_service_send_public("test");
-}
-
 esp_err_t d1l_app_model_send_public_text(const char *text)
 {
     return d1l_meshcore_service_send_public(text);
@@ -543,9 +538,9 @@ size_t d1l_app_model_query_nodes(const d1l_node_query_t *query, d1l_node_view_t 
     return d1l_node_store_query(query, out_entries, max_entries);
 }
 
-esp_err_t d1l_app_model_mark_messages_read(void)
+esp_err_t d1l_app_model_mark_public_read(void)
 {
-    return d1l_read_state_mark_all_read();
+    return d1l_read_state_mark_public_read();
 }
 
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint)

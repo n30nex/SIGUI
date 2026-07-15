@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 47
+    assert len(views) == 49
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -93,10 +93,18 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     for name in ui_simulator.CONTACT_HIERARCHY_VIEWS:
         assert views[name]["truncated_labels"] == [], name
     messages = views["messages"]["metrics"]
+    assert messages["messages_mode"] == "root"
     assert messages["public_source_count"] == 48
-    assert messages["public_rendered_count"] <= 5
+    assert messages["public_rendered_count"] == 0
     assert messages["dm_source_count"] == 32
     assert messages["dm_rendered_count"] == 0
+    messages_public = views["messages_public"]["metrics"]
+    assert messages_public["messages_mode"] == "public"
+    assert messages_public["public_source_count"] == 48
+    assert messages_public["public_rendered_count"] <= 2
+    assert messages_public["public_sticky_compose"] is True
+    assert messages_public["public_directional_bubbles"] is True
+    assert messages_public["public_navigation_rf_silent"] is True
     messages_dm = views["messages_dm"]["metrics"]
     assert messages_dm["messages_mode"] == "dms"
     assert messages_dm["dm_source_count"] == 32
@@ -165,6 +173,7 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert public_history["public_history_page_limit"] == 5
     assert public_history["public_history_load_older_available"] is True
     assert "Load Older" in set(views["public_history_sheet"]["labels"])
+    assert "Sent over RF" in public_history["public_history_rendered_states"]
 
 
 def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
@@ -174,6 +183,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     expected_docked_views = frozenset(
         {
             "messages",
+            "messages_public",
             "messages_dm",
             "nodes",
             "map",
@@ -214,6 +224,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert not any(target["kind"] == "dock_tab" for target in views_by_name["home"]["touch_targets"])
     for view_name in (
         "messages",
+        "messages_public",
         "messages_dm",
         "nodes",
         "map",
@@ -227,8 +238,22 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "settings_advanced_expanded",
     ):
         assert any(target["kind"] == "dock_tab" for target in views_by_name[view_name]["touch_targets"])
-    assert {"Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"} <= labels_by_view["messages"]
-    assert {"Messages", "Public", "DMs", "DM Conversations"} <= labels_by_view["messages_dm"]
+    assert {
+        "Messages",
+        "Choose a conversation type",
+        "Public",
+        "Default channel conversation",
+        "Direct messages",
+        "Private contact conversations",
+    } <= labels_by_view["messages"]
+    assert {"Public", "Back", "Mark read", "History", "Compose"} <= labels_by_view["messages_public"]
+    assert {"Direct messages", "Back"} <= labels_by_view["messages_dm"]
+    public_metrics = views_by_name["messages_public"]["metrics"]
+    assert public_metrics["public_outgoing_bubbles"] == 1
+    assert public_metrics["public_incoming_bubbles"] == 1
+    assert public_metrics["public_rendered_states"] == ["New", "Sent over RF"]
+    assert public_metrics["public_time_validity_truthful"] is True
+    assert public_metrics["public_sticky_compose"] is True
     assert {"Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
     assert {"Map", "Options", "(c) OpenStreetMap contributors"} <= labels_by_view["map"]
     assert {
@@ -417,6 +442,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "first_boot_onboarding",
         "lock_overlay_unlock",
         "home_launcher_navigation",
+        "messages_hierarchy_navigation",
         "public_compose_and_send",
         "public_history_search",
         "public_message_detail",
@@ -439,14 +465,16 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "settings_display_and_diagnostics",
     } <= flow_names
 
-    assert actions_by_view["messages"]["open_public_compose"]["destination"] == "compose_sheet"
-    assert actions_by_view["messages"]["open_messages_public"]["destination"] == "messages"
+    assert actions_by_view["messages"]["open_messages_public"]["destination"] == "messages_public"
     assert actions_by_view["messages"]["open_messages_dm"]["destination"] == "messages_dm"
-    assert actions_by_view["messages"]["open_public_history"]["destination"] == "public_history_sheet"
-    assert actions_by_view["messages"]["open_message_detail"]["destination"] == "message_detail_sheet"
+    assert actions_by_view["messages_public"]["open_messages_root"]["destination"] == "messages"
+    assert actions_by_view["messages_public"]["open_public_compose"]["destination"] == "compose_sheet"
+    assert actions_by_view["messages_public"]["open_public_history"]["destination"] == "public_history_sheet"
+    assert actions_by_view["messages_public"]["open_message_detail"]["destination"] == "message_detail_sheet"
+    assert actions_by_view["messages_dm"]["open_messages_root"]["destination"] == "messages"
     assert actions_by_view["messages_dm"]["open_dm_thread"]["destination"] == "dm_thread_sheet"
     assert actions_by_view["messages_dm"]["open_dm_thread"]["marks_read"] is True
-    assert actions_by_view["message_detail_sheet"]["close_message_detail"]["destination"] == "messages"
+    assert actions_by_view["message_detail_sheet"]["close_message_detail"]["destination"] == "messages_public"
     assert actions_by_view["message_detail_sheet"]["toggle_message_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["message_detail_sheet"]["toggle_message_detail_advanced"]["destination"] == "message_detail_technical_page"
     assert actions_by_view["message_detail_technical_page"]["toggle_message_detail_advanced"]["destination"] == "message_detail_sheet"
@@ -459,6 +487,13 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert views["message_detail_technical_page"]["metrics"]["message_technical_details_expanded"] is True
     assert views["message_detail_technical_page"]["metrics"]["message_body_scrollable"] is True
     assert views["message_detail_technical_page"]["metrics"]["message_sticky_reply"] is True
+    tx_detail = views["public_tx_detail_technical_page"]["metrics"]
+    assert tx_detail["message_direction"] == "tx"
+    assert tx_detail["message_delivery_state"] == "Sent over RF"
+    assert tx_detail["message_signal_measured"] is False
+    assert tx_detail["message_path_hops_measured"] is False
+    assert tx_detail["message_reply_available"] is False
+    assert tx_detail["message_navigation_rf_silent"] is True
     assert actions_by_view["dm_thread_sheet"]["close_dm_thread"]["destination"] == "messages_dm"
     assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["visual_box"] == [16, 420, 464, 472]
     assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["height"] >= 48
@@ -471,7 +506,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert "mark_dm_thread_read" not in actions_by_view["dm_thread_sheet"]
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])
-    assert actions_by_view["home"]["open_messages_public"]["visual_box"] == [12, 16, 234, 156]
+    assert actions_by_view["home"]["open_messages_root"]["visual_box"] == [12, 16, 234, 156]
     assert actions_by_view["home"]["open_nodes"]["visual_box"] == [246, 16, 468, 156]
     assert actions_by_view["home"]["open_map"]["visual_box"] == [12, 164, 234, 304]
     assert actions_by_view["home"]["open_settings"]["visual_box"] == [246, 164, 468, 304]
@@ -479,6 +514,8 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["home"]["open_device_status"]["kind"] == "device_status_card"
     for docked_view in (
         "messages",
+        "messages_public",
+        "messages_dm",
         "nodes",
         "map",
         "packets",
@@ -499,7 +536,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
             "More tab",
         ], docked_view
         assert all(target["width"] == 96 for target in dock_targets), docked_view
-    assert actions_by_view["home"]["open_messages_public"]["destination"] == "messages"
+    assert actions_by_view["home"]["open_messages_root"]["destination"] == "messages"
     assert actions_by_view["home"]["open_nodes"]["destination"] == "nodes"
     assert actions_by_view["home"]["open_map"]["destination"] == "map"
     assert actions_by_view["home"]["open_settings"]["destination"] == "settings"
@@ -601,7 +638,9 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert views["forget_contact_confirm_page"]["metrics"]["contact_forget_confirmation"] is True
     assert views["forget_contact_confirm_page"]["metrics"]["contact_warning_complete"] is True
     assert all(views[name]["dock_rendered"] is False for name in ui_simulator.CONTACT_HIERARCHY_VIEWS)
-    assert actions_by_view["messages"]["send_public_test"]["public_rf_tx"] is True
+    assert "send_public_test" not in actions_by_view["messages"]
+    assert views["messages"]["metrics"]["messages_navigation_rf_silent"] is True
+    assert views["messages_public"]["metrics"]["public_navigation_rf_silent"] is True
     assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
     assert {
         "toggle_more_tools",

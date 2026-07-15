@@ -23,6 +23,7 @@ MIN_TOUCH_TARGET = 44
 DOCKED_VIEWS = frozenset(
     {
         "messages",
+        "messages_public",
         "messages_dm",
         "nodes",
         "map",
@@ -221,9 +222,12 @@ def sample_snapshot() -> Snapshot:
         contacts=(bot, room),
         heard=(bot, room, repeater),
         public_messages=(
-            Message("D1L Desk", "test", "TX queued, seq 31"),
             Message("YKF Corebot", "Public test reply received", "RX new, RSSI -41", True),
             Message("Local Meshcorebot", "test ack on Public", "RX new, 1 hop", True),
+            Message(
+                "D1L Desk", "test", "TX done, seq 31",
+                direction="tx", delivery_state="tx_done",
+            ),
         ),
         dm_messages=(
             Message(
@@ -358,8 +362,14 @@ def large_mesh_snapshot() -> Snapshot:
         Message(
             "Public" if i % 3 else f"Long Alias Sender {i:02d}",
             f"large simulated public message {i:02d} with enough text to truncate safely",
-            f"RX seq {200 + i}, RSSI -{40 + (i % 9)}, hop {i % 4}",
+            (
+                f"TX done seq {200 + i}, path retained"
+                if i % 3 == 1 else
+                f"RX seq {200 + i}, RSSI -{40 + (i % 9)}, hop {i % 4}"
+            ),
             unread=i % 4 == 0,
+            direction="tx" if i % 3 == 1 else "rx",
+            delivery_state="tx_done" if i % 3 == 1 else "not_applicable",
         )
         for i in range(48)
     )
@@ -1717,7 +1727,7 @@ def draw_home_body(s: Surface, snap: Snapshot):
             "Public, direct, and room conversations",
             f"{snap.unread_public + snap.unread_dm} unread" if snap.unread_public + snap.unread_dm else "All caught up",
             AMBER if snap.unread_public + snap.unread_dm else ACCENT,
-            "open_messages_public",
+            "open_messages_root",
             "messages",
         ),
         (
@@ -1797,69 +1807,162 @@ def render_home(s: Surface, snap: Snapshot):
     draw_home_body(s, snap)
 
 
-def render_messages_mode(s: Surface, snap: Snapshot, *, show_dms: bool = False):
+def render_messages(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
-    s.round_rect((16, 64, 464, 172), SURFACE, BORDER, 8)
-    s.text("Messages", (28, 72, 210, 98), 22, TEXT, True)
-    s.text(
-        f"public {len(snap.public_messages)} new {snap.unread_public}  dm {len(snap.dm_messages)} new {snap.unread_dm}",
-        (28, 102, 452, 120),
-        11,
-        MUTED,
-        True,
+    s.text("Messages", (18, 66, 220, 96), 24, TEXT, True)
+    s.text("Choose a conversation type", (18, 98, 340, 118), 12, MUTED)
+    cards = (
+        (
+            (18, 126, 442, 244),
+            "Public",
+            "Default channel conversation",
+            len(snap.public_messages),
+            snap.unread_public,
+            ACCENT,
+            "open_messages_public",
+            "messages_public",
+        ),
+        (
+            (18, 256, 442, 374),
+            "Direct messages",
+            "Private contact conversations",
+            len(snap.dm_messages),
+            snap.unread_dm,
+            GREEN,
+            "open_messages_dm",
+            "messages_dm",
+        ),
     )
-    draw_button(s, (28, 126, 82, 166), "Read", GREEN, action="mark_messages_read")
-    draw_button(s, (90, 126, 178, 166), "Compose", ACCENT, action="open_public_compose", destination="compose_sheet")
-    draw_button(s, (186, 126, 266, 166), "History", BLUE, action="open_public_history", destination="public_history_sheet")
-    draw_button(s, (274, 126, 338, 166), "Test", AMBER, action="send_public_test", public_rf_tx=True)
-    draw_button(s, (16, 184, 126, 224), "Public", GREEN if not show_dms else MUTED, action="open_messages_public", destination="messages")
-    draw_button(s, (138, 184, 236, 224), "DMs", GREEN if show_dms else MUTED, action="open_messages_dm", destination="messages_dm")
-    if show_dms:
-        render_messages_dm_list(s, snap)
-    else:
-        render_messages_public_list(s, snap)
+    for box, title, detail, total, unread, color, action, destination in cards:
+        s.round_rect(box, SURFACE, BORDER, 8)
+        s.text(title, (box[0] + 14, box[1] + 12, box[2] - 42, box[1] + 38), 18, color, True)
+        s.text(">", (box[2] - 34, box[1] + 12, box[2] - 14, box[1] + 38), 18, MUTED, True, "center")
+        s.text(detail, (box[0] + 14, box[1] + 48, box[2] - 14, box[1] + 68), 12, TEXT)
+        s.text(
+            f"{total} retained | {unread} unread",
+            (box[0] + 14, box[1] + 82, box[2] - 14, box[1] + 104),
+            12,
+            AMBER if unread else MUTED,
+            True,
+        )
+        s.touch_target(title, box, kind="destination_card", action=action, destination=destination)
+    s.metrics.update(
+        {
+            "messages_mode": "root",
+            "public_source_count": len(snap.public_messages),
+            "public_rendered_count": 0,
+            "dm_source_count": len(snap.dm_messages),
+            "dm_rendered_count": 0,
+            "messages_root_simple_destinations": True,
+            "messages_navigation_rf_silent": True,
+        }
+    )
     draw_dock(s, "Messages")
 
 
-def render_messages_public_list(s: Surface, snap: Snapshot):
-    s.text("Public Channel", (28, 236, 230, 256), 14, MUTED, True)
-    y = 264
-    public_rendered = 0
-    for msg in snap.public_messages:
-        if y + 58 > DOCK_Y:
-            break
-        s.round_rect((28, y, 452, y + 58), SURFACE, BORDER, 8)
-        s.text(msg.source, (40, y + 6, 300, y + 24), 12, AMBER if msg.unread else ACCENT, True)
-        s.text("new" if msg.unread else "received", (330, y + 6, 440, y + 24), 11, MUTED if not msg.unread else AMBER, True, "right")
-        s.text(msg.text, (40, y + 26, 440, y + 42), 12, TEXT, True)
-        s.text(msg.meta, (40, y + 42, 440, y + 56), 10, MUTED, True)
-        s.touch_target(
-            f"Public row {msg.source}",
-            (28, y, 452, y + 58),
-            kind="row",
-            action="open_message_detail",
-            destination="message_detail_sheet",
+def public_message_state(msg: Message) -> str:
+    if msg.direction == "tx":
+        return "Sent over RF"
+    return "New" if msg.unread else "Received"
+
+
+def render_messages_public(s: Surface, snap: Snapshot):
+    draw_top_bar(s, snap)
+    draw_button(s, (18, 64, 90, 108), "Back", MUTED, action="open_messages_root", destination="messages")
+    s.text("Public", (104, 66, 304, 92), 20, ACCENT, True)
+    s.text(
+        f"{len(snap.public_messages)} messages | {snap.unread_public} unread",
+        (104, 92, 360, 112),
+        11,
+        MUTED,
+    )
+    draw_button(s, (18, 116, 114, 160), "Mark read", GREEN, action="mark_public_read")
+    draw_button(
+        s, (122, 116, 218, 160), "History", BLUE,
+        action="open_public_history", destination="public_history_sheet",
+    )
+    body = (18, 168, 442, 352)
+    s.round_rect(body, (7, 16, 24), BORDER, 8)
+    visible = snap.public_messages[-2:]
+    y = 176
+    outgoing_bubbles = 0
+    incoming_bubbles = 0
+    rendered_states: list[str] = []
+    for msg in visible:
+        outgoing = msg.direction == "tx"
+        state = public_message_state(msg)
+        rendered_states.append(state)
+        bubble = (94, y, 426, y + 78) if outgoing else (26, y, 358, y + 78)
+        s.round_rect(
+            bubble,
+            (25, 38, 58) if outgoing else (18, 45, 42),
+            (59, 91, 134) if outgoing else (40, 99, 90),
+            8,
         )
-        y += 66
-        public_rendered += 1
+        s.text(
+            "You" if outgoing else msg.source,
+            (bubble[0] + 8, y + 6, bubble[0] + 142, y + 24),
+            11,
+            ACCENT if outgoing else (AMBER if msg.unread else GREEN),
+            True,
+        )
+        s.text(
+            f"{state} | time unknown",
+            (bubble[0] + 142, y + 6, bubble[2] - 8, y + 24),
+            9,
+            MUTED,
+            True,
+            "right",
+        )
+        s.wrapped_text(msg.text, (bubble[0] + 8, y + 28, bubble[2] - 8, y + 58), 11, TEXT, line_height=14)
+        s.text(
+            ("path retained | details >" if outgoing else f"{msg.meta} | details >"),
+            (bubble[0] + 8, y + 60, bubble[2] - 8, y + 76),
+            9,
+            MUTED,
+            True,
+        )
+        s.touch_target(
+            f"Public bubble {msg.source}", bubble, kind="conversation_bubble",
+            action="open_message_detail", destination="message_detail_sheet",
+        )
+        outgoing_bubbles += int(outgoing)
+        incoming_bubbles += int(not outgoing)
+        y += 86
+    if not visible:
+        s.text("No Public messages yet", (34, 188, 320, 212), 13, MUTED)
+    draw_button(
+        s, (18, 360, 442, 410), "Compose", ACCENT,
+        action="open_public_compose", destination="compose_sheet",
+    )
     s.metrics.update(
         {
             "messages_mode": "public",
             "public_source_count": len(snap.public_messages),
-            "public_rendered_count": public_rendered,
+            "public_rendered_count": len(visible),
             "dm_source_count": len(snap.dm_messages),
             "dm_rendered_count": 0,
+            "public_body_scrollable": True,
+            "public_sticky_compose": True,
+            "public_directional_bubbles": True,
+            "public_outgoing_bubbles": outgoing_bubbles,
+            "public_incoming_bubbles": incoming_bubbles,
+            "public_rendered_states": rendered_states,
+            "public_time_validity_truthful": True,
+            "public_navigation_rf_silent": True,
         }
     )
+    draw_dock(s, "Messages")
 
 
 def render_messages_dm_list(s: Surface, snap: Snapshot):
-    s.text("DM Conversations", (28, 236, 250, 256), 14, MUTED, True)
-    y = 264
+    body = (16, 124, 464, 410)
+    s.round_rect(body, (7, 16, 24), BORDER, 8)
+    y = 134
     dm_rendered = 0
     dm_rendered_states: list[str] = []
     for msg in snap.dm_messages:
-        if y + 58 > DOCK_Y:
+        if y + 58 > 402:
             break
         s.round_rect((28, y, 452, y + 58), SURFACE, BORDER, 8)
         state = dm_list_delivery_label(msg)
@@ -1903,12 +2006,18 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
     )
 
 
-def render_messages(s: Surface, snap: Snapshot):
-    render_messages_mode(s, snap, show_dms=False)
-
-
 def render_messages_dm(s: Surface, snap: Snapshot):
-    render_messages_mode(s, snap, show_dms=True)
+    draw_top_bar(s, snap)
+    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="open_messages_root", destination="messages")
+    s.text("Direct messages", (112, 66, 360, 92), 20, GREEN, True)
+    s.text(
+        f"{len(snap.dm_messages)} retained messages | {snap.unread_dm} unread",
+        (112, 92, 420, 112),
+        11,
+        MUTED,
+    )
+    render_messages_dm_list(s, snap)
+    draw_dock(s, "Messages")
 
 
 def render_nodes(s: Surface, snap: Snapshot):
@@ -2779,7 +2888,7 @@ def render_compose_sheet(s: Surface, snap: Snapshot):
     s.text("Compose Public", (16, 64, 240, 96), 22, TEXT, True)
     draw_button(s, (252, 64, 314, 104), "Send", GREEN, action="send_public_text", public_rf_tx=True)
     draw_button(s, (322, 64, 384, 104), "Clear", ACCENT, action="clear_public_message")
-    draw_button(s, (392, 64, 464, 104), "Close", MUTED, action="close_compose", destination="messages")
+    draw_button(s, (392, 64, 464, 104), "Close", MUTED, action="close_compose", destination="messages_public")
     s.round_rect((16, 114, 464, 192), SURFACE_2, BORDER, 8)
     s.touch_target("Public message", (16, 114, 464, 192), kind="text_field", action="edit_public_message")
     s.text("Public message", (28, 122, 220, 144), 13, MUTED, True)
@@ -2824,13 +2933,19 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
     )
     draw_button(s, (204, 94, 282, 134), "Search", BLUE, action="open_public_search", destination="public_search_sheet")
     draw_button(s, (292, 94, 356, 134), "Clear", ACCENT, action="clear_public_search")
-    draw_button(s, (366, 94, 436, 134), "Close", MUTED, action="close_public_history", destination="messages")
+    draw_button(s, (366, 94, 436, 134), "Close", MUTED, action="close_public_history", destination="messages_public")
     s.round_rect((44, 154, 436, 318), SURFACE, BORDER, 8)
     s.text("Public scrollback", (56, 162, 260, 184), 13, MUTED, True)
     visible_messages = snap.public_messages[-3:]
     y = 194
+    rendered_states: list[str] = []
     for msg in visible_messages:
-        draw_row(s, (56, y, 424, y + 34), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
+        state = public_message_state(msg)
+        rendered_states.append(state)
+        draw_row(
+            s, (56, y, 424, y + 34), f"{msg.source}: {msg.text}",
+            msg.meta, state,
+        )
         y += 40
     if load_older_available:
         draw_button(s, (44, 332, 178, 376), "Load Older", BLUE, action="load_older_public_history")
@@ -2840,6 +2955,7 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
             "public_history_page_limit": public_page_limit,
             "public_history_rendered_count": len(visible_messages),
             "public_history_load_older_available": load_older_available,
+            "public_history_rendered_states": rendered_states,
         }
     )
 
@@ -2862,7 +2978,7 @@ def render_message_detail_page(s: Surface, snap: Snapshot, *, technical_details:
     message_text = SAMPLE_LONG_PUBLIC_MESSAGE if technical_details else msg.text
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
-    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="close_message_detail", destination="messages")
+    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="close_message_detail", destination="messages_public")
     s.text("Message Detail", (112, 62, 464, 90), 22, TEXT, True)
     s.text(msg.source, (112, 90, 464, 112), 12, MUTED)
 
@@ -2917,6 +3033,45 @@ def render_message_detail_sheet(s: Surface, snap: Snapshot):
 
 def render_message_detail_technical_page(s: Surface, snap: Snapshot):
     render_message_detail_page(s, snap, technical_details=True)
+
+
+def render_public_tx_detail_technical_page(s: Surface, snap: Snapshot):
+    msg = next(
+        (entry for entry in reversed(snap.public_messages) if entry.direction == "tx"),
+        Message("You", "No retained outbound message", "", direction="tx"),
+    )
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(
+        s, (16, 64, 96, 108), "Back", MUTED,
+        action="close_message_detail", destination="messages_public",
+    )
+    s.text("Message Detail", (112, 62, 464, 90), 22, TEXT, True)
+    s.text("You", (112, 90, 180, 112), 12, ACCENT)
+    s.text("Sent over RF", (188, 90, 320, 112), 12, MUTED)
+    s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
+    s.text("Message", (28, 132, 160, 152), 13, MUTED, True)
+    s.wrapped_text(msg.text, (28, 156, 452, 206), 15, TEXT, line_height=22)
+    s.text("Technical details", (28, 220, 300, 244), 14, BLUE, True)
+    s.text(
+        "Signal not measured for retained Public TxDone",
+        (28, 252, 452, 278), 12, MUTED,
+    )
+    s.text(
+        "Path hops not measured for retained Public TxDone",
+        (28, 286, 452, 312), 12, MUTED,
+    )
+    s.text("Path hash retained | result TxDone", (28, 320, 452, 346), 12, MUTED)
+    s.metrics.update(
+        {
+            "message_direction": "tx",
+            "message_delivery_state": "Sent over RF",
+            "message_signal_measured": False,
+            "message_path_hops_measured": False,
+            "message_reply_available": False,
+            "message_navigation_rf_silent": True,
+        }
+    )
 
 
 def draw_contact_page_header(
@@ -4026,6 +4181,7 @@ def render_onboarding_sheet(s: Surface, snap: Snapshot):
 RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "home": render_home,
     "messages": render_messages,
+    "messages_public": render_messages_public,
     "messages_dm": render_messages_dm,
     "nodes": render_nodes,
     "map": render_map,
@@ -4060,6 +4216,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "forget_contact_confirm_page": render_forget_contact_confirm_page,
     "message_detail_sheet": render_message_detail_sheet,
     "message_detail_technical_page": render_message_detail_technical_page,
+    "public_tx_detail_technical_page": render_public_tx_detail_technical_page,
     "dm_thread_sheet": render_dm_thread_sheet,
     "dm_thread_details_sheet": render_dm_thread_details_sheet,
     "route_detail_sheet": render_route_detail_sheet,
@@ -4087,8 +4244,16 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "BLE",
         "SD",
     ),
-    "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"),
-    "messages_dm": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "DM Conversations"),
+    "messages": (
+        "Messages",
+        "Choose a conversation type",
+        "Public",
+        "Default channel conversation",
+        "Direct messages",
+        "Private contact conversations",
+    ),
+    "messages_public": ("Public", "Back", "Mark read", "History", "Compose"),
+    "messages_dm": ("Direct messages", "Back"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"),
     "map": (
         "Options",
@@ -4323,6 +4488,15 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Reply",
         SAMPLE_LONG_PUBLIC_MESSAGE,
     ),
+    "public_tx_detail_technical_page": (
+        "Message Detail",
+        "Back",
+        "Sent over RF",
+        "Message",
+        "Technical details",
+        "Signal not measured for retained Public TxDone",
+        "Path hops not measured for retained Public TxDone",
+    ),
     "dm_thread_sheet": ("Back", "Reply"),
     "dm_thread_details_sheet": ("Back", "Hide details", "Technical details", "Reply"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
@@ -4361,7 +4535,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "home_launcher_navigation",
         "steps": (
-            {"view": "home", "action": "open_messages_public", "destination": "messages"},
+            {"view": "home", "action": "open_messages_root", "destination": "messages"},
             {"view": "home", "action": "open_nodes", "destination": "nodes"},
             {"view": "home", "action": "open_map", "destination": "map"},
             {"view": "home", "action": "open_settings", "destination": "settings"},
@@ -4434,20 +4608,30 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "messages_hierarchy_navigation",
+        "steps": (
+            {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
+            {"view": "messages_public", "action": "open_messages_root", "destination": "messages"},
+            {"view": "messages", "action": "open_messages_dm", "destination": "messages_dm"},
+            {"view": "messages_dm", "action": "open_messages_root", "destination": "messages"},
+        ),
+    },
+    {
         "name": "public_compose_and_send",
         "steps": (
-            {"view": "messages", "action": "open_public_compose", "destination": "compose_sheet"},
+            {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
+            {"view": "messages_public", "action": "open_public_compose", "destination": "compose_sheet"},
             {"view": "compose_sheet", "action": "edit_public_message"},
             {"view": "compose_sheet", "action": "send_public_text", "public_rf_tx": True},
-            {"view": "compose_sheet", "action": "close_compose", "destination": "messages"},
+            {"view": "compose_sheet", "action": "close_compose", "destination": "messages_public"},
         ),
     },
     {
         "name": "public_history_search",
         "steps": (
-            {"view": "messages", "action": "mark_messages_read"},
-            {"view": "messages", "action": "open_messages_public", "destination": "messages"},
-            {"view": "messages", "action": "open_public_history", "destination": "public_history_sheet"},
+            {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
+            {"view": "messages_public", "action": "mark_public_read"},
+            {"view": "messages_public", "action": "open_public_history", "destination": "public_history_sheet"},
             {"view": "public_history_sheet", "action": "open_public_search", "destination": "public_search_sheet"},
             {"view": "public_search_sheet", "action": "edit_public_search"},
             {"view": "public_search_sheet", "action": "apply_public_search", "destination": "public_history_sheet"},
@@ -4456,7 +4640,8 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "public_message_detail",
         "steps": (
-            {"view": "messages", "action": "open_message_detail", "destination": "message_detail_sheet"},
+            {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
+            {"view": "messages_public", "action": "open_message_detail", "destination": "message_detail_sheet"},
             {
                 "view": "message_detail_sheet",
                 "action": "toggle_message_detail_advanced",
@@ -4467,13 +4652,14 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
                 "action": "toggle_message_detail_advanced",
                 "destination": "message_detail_sheet",
             },
-            {"view": "message_detail_sheet", "action": "close_message_detail", "destination": "messages"},
+            {"view": "message_detail_sheet", "action": "close_message_detail", "destination": "messages_public"},
         ),
     },
     {
         "name": "public_message_reply",
         "steps": (
-            {"view": "messages", "action": "open_message_detail", "destination": "message_detail_sheet"},
+            {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
+            {"view": "messages_public", "action": "open_message_detail", "destination": "message_detail_sheet"},
             {"view": "message_detail_sheet", "action": "open_public_reply", "destination": "compose_sheet"},
         ),
     },
