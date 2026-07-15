@@ -49,10 +49,11 @@ void d1l_ui_connectivity_wifi_view(const d1l_ui_wifi_view_input_t *input,
                  "Scan to list nearby 2.4 GHz networks");
     }
     out_view->controls_available = input->build_enabled;
-    out_view->toggle_label = input->build_enabled && input->enabled ?
-        "Disable" : "Enable";
-    out_view->password_placeholder = input->password_saved ?
-        "Saved; enter to replace" : "Optional";
+    snprintf(out_view->toggle_label, sizeof(out_view->toggle_label), "%s",
+             input->build_enabled && input->enabled ? "Disable" : "Enable");
+    snprintf(out_view->password_placeholder,
+             sizeof(out_view->password_placeholder), "%s",
+             input->password_saved ? "Saved; enter to replace" : "Optional");
     out_view->state_color = input->build_enabled && input->enabled ?
         0x5EEAD4U : 0xFBBF24U;
 }

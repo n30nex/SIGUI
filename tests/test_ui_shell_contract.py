@@ -337,6 +337,7 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
 
 def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     source = read("main/ui/ui_phase1.c")
+    wifi_source = read("main/ui/ui_wifi.c")
     map_source = read("main/ui/ui_map.c")
     nodes_source = read("main/ui/ui_nodes.c")
     header = read("main/ui/ui_phase1.h")
@@ -441,10 +442,10 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "controls->latitude_textarea" in map_source
     assert "tile_source_keyboard" not in map_source
     assert "tile_url_textarea" not in map_source
-    assert "d1l_ui_keyboard_configure_input(s_wifi_keyboard, s_wifi_ssid_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(controller->keyboard" in wifi_source
     assert "d1l_ui_keyboard_focus_textarea_from_event(s_map_location_keyboard, event" in source
     assert "s_map_tiles_keyboard" not in source
-    assert "d1l_ui_keyboard_focus_textarea_from_event(s_wifi_keyboard, event" in source
+    assert "d1l_ui_keyboard_focus_textarea_from_event(" in wifi_source
     assert 'strcmp(target, "public_search") == 0' in source
     assert 'strcmp(target, "packet_search") == 0' in source
     assert 'strcmp(target, "contact_edit") == 0' in source
@@ -719,7 +720,7 @@ def test_touch_ui_actions_route_through_app_model():
 
 
 def test_ui_simulator_flow_names_match_lvgl_handlers():
-    source = read("main/ui/ui_phase1.c")
+    source = read("main/ui/ui_phase1.c") + read("main/ui/ui_wifi.c")
     actions = {
         step["action"]
         for flow in ui_simulator.EXPECTED_FLOWS
@@ -811,8 +812,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "radio_cycle_bandwidth": "radio_edit_adjust_event_cb",
         "save_radio_profile": "radio_save_event_cb",
         "open_storage_setup": "open_storage_sheet_event_cb",
-        "wifi_scan": "wifi_scan_event_cb",
-        "wifi_connect": "wifi_connect_event_cb",
+        "wifi_scan": "D1L_UI_WIFI_ACTION_SCAN",
+        "wifi_connect": "D1L_UI_WIFI_ACTION_CONNECT",
         "open_display_settings": "open_display_sheet_event_cb",
         "open_diagnostics": "open_diagnostics_sheet_event_cb",
         "open_advert_sheet": "open_sheet_event_cb",
@@ -1569,6 +1570,8 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
 
 def test_settings_screen_reports_companion_wireless_state():
     source = read("main/ui/ui_phase1.c")
+    wifi_module = read("main/ui/ui_wifi.c")
+    wifi_header = read("main/ui/ui_wifi.h")
     settings_module = read("main/ui/ui_settings.c")
     more_module = read("main/ui/ui_more_view.c")
     connectivity = read("main/ui/ui_connectivity.c")
@@ -1598,15 +1601,16 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Bluetooth"' in more_module
     assert "snapshot->identity_fingerprint" not in settings_module
     assert "format_radio_profile_line" not in settings_module
-    assert "static lv_obj_t *s_wifi_sheet" in source
+    assert "static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR" in source
     assert "static lv_obj_t *s_ble_sheet" in source
     assert "static lv_obj_t *s_display_sheet" in source
     assert "static lv_obj_t *s_diagnostics_sheet" in source
-    assert "create_wifi_sheet" in source
+    assert "d1l_ui_wifi_create(&s_wifi_controller, s_screen)" in source
     assert "create_ble_sheet" in source
     assert "create_display_sheet" in source
     assert "create_diagnostics_sheet" in source
     assert "render_wifi_sheet" in source
+    assert "d1l_ui_wifi_render(&s_wifi_controller" in source
     assert "render_ble_sheet" in source
     assert "render_display_sheet" in source
     assert "render_diagnostics_sheet" in source
@@ -1614,29 +1618,31 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "open_ble_sheet_event_cb" in source
     assert "open_display_sheet_event_cb" in source
     assert "open_diagnostics_sheet_event_cb" in source
-    assert '"Wi-Fi Setup"' in source
+    assert '"Wi-Fi Setup"' in wifi_module
     assert '"BLE Setup"' in source
     assert '"Display"' in source
     assert '"Diagnostics"' in source
-    assert "static lv_obj_t *s_wifi_ssid_textarea" in source
-    assert "static lv_obj_t *s_wifi_password_textarea" in source
-    assert "static lv_obj_t *s_wifi_keyboard" in source
-    assert "d1l_app_model_save_wifi_profile(ssid, password && password[0] ? password : NULL)" in source
+    assert "lv_obj_t *ssid_textarea;" in wifi_header
+    assert "lv_obj_t *password_textarea;" in wifi_header
+    assert "lv_obj_t *keyboard;" in wifi_header
+    assert "d1l_app_model_save_wifi_profile(" in source
+    assert "password && password[0] != '\\0' ? password : NULL" in source
     assert "d1l_app_model_wifi_scan(&s_wifi_scan_result)" in source
     assert "d1l_app_model_wifi_connect()" in source
     assert "d1l_app_model_clear_wifi_profile()" in source
     assert "d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled)" in source
     assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false" in header
     assert "snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED" in read("main/app/app_model.c")
-    assert "if (view.controls_available)" in source
-    assert "lv_textarea_set_max_length(s_wifi_ssid_textarea, D1L_WIFI_SSID_LEN - 1U)" in source
-    assert "lv_textarea_set_max_length(s_wifi_password_textarea, D1L_WIFI_PASSWORD_LEN - 1U)" in source
-    assert '"Network name"' in source
-    assert '"Password"' in source
+    assert "if (!controller->rendered.controls_available)" in wifi_module
+    assert "lv_textarea_set_max_length(" in wifi_module
+    assert "D1L_WIFI_SSID_LEN - 1U" in wifi_module
+    assert "D1L_WIFI_PASSWORD_LEN - 1U" in wifi_module
+    assert '"Network name"' in wifi_module
+    assert '"Password"' in wifi_module
     assert '"Scan to list nearby 2.4 GHz networks"' in connectivity
-    assert '"Connect"' in source
-    assert "wifi_scan_event_cb" in source
-    assert "wifi_connect_event_cb" in source
+    assert '"Connect"' in wifi_module
+    assert "D1L_UI_WIFI_ACTION_SCAN" in source
+    assert "D1L_UI_WIFI_ACTION_CONNECT" in source
     assert '"BLE companion transport is unavailable in this release."' in connectivity
     assert '"No BLE pairing or transport artifact is present for public release."' in connectivity
     assert '"Enable unavailable"' in source

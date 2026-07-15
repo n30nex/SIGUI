@@ -5,6 +5,7 @@
 
 #define D1L_UI_CONNECTIVITY_TEXT_LEN 96U
 #define D1L_UI_CONNECTIVITY_SSID_LEN 33U
+#define D1L_UI_CONNECTIVITY_LABEL_LEN 32U
 
 typedef struct {
     bool build_enabled;
@@ -31,8 +32,8 @@ typedef struct {
     char profile_line[D1L_UI_CONNECTIVITY_TEXT_LEN];
     char scan_line[D1L_UI_CONNECTIVITY_TEXT_LEN];
     char ssid[D1L_UI_CONNECTIVITY_SSID_LEN];
-    const char *toggle_label;
-    const char *password_placeholder;
+    char toggle_label[D1L_UI_CONNECTIVITY_LABEL_LEN];
+    char password_placeholder[D1L_UI_CONNECTIVITY_LABEL_LEN];
     uint32_t state_color;
     bool controls_available;
 } d1l_ui_wifi_view_model_t;

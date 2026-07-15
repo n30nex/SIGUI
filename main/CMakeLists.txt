@@ -70,6 +70,7 @@ idf_component_register(
         "ui/ui_screen.c"
         "ui/ui_settings.c"
         "ui/ui_storage_view.c"
+        "ui/ui_wifi.c"
     INCLUDE_DIRS
         "."
         "app"
