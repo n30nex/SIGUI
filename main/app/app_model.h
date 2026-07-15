@@ -212,6 +212,7 @@ typedef struct {
     uint32_t channel_store_revision;
     esp_err_t channel_store_load_status;
     bool channel_store_loaded;
+    bool channel_message_reconcile_pending;
     uint64_t active_channel_id;
     d1l_channel_info_t channels[D1L_APP_SNAPSHOT_CHANNEL_PREVIEW];
     size_t channel_count;
@@ -245,6 +246,9 @@ typedef struct {
 d1l_app_model_t *d1l_app_model_get(void);
 void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot);
 esp_err_t d1l_app_model_send_public_text(const char *text);
+esp_err_t d1l_app_model_send_channel_text(uint64_t channel_id,
+                                          const char *text);
+esp_err_t d1l_app_model_send_active_channel_text(const char *text);
 esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
                                       size_t max_channels,
                                       size_t *out_count,
@@ -259,6 +263,10 @@ size_t d1l_app_model_query_public_messages_page(d1l_message_entry_t *out_entries
                                                 size_t *out_total_matches);
 size_t d1l_app_model_query_public_messages(d1l_message_entry_t *out_entries,
                                            size_t max_entries, const char *query);
+size_t d1l_app_model_query_channel_messages_page(
+    uint64_t channel_id, d1l_message_entry_t *out_entries,
+    size_t max_entries, size_t skip_newest, const char *query,
+    size_t *out_total_matches);
 esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text);
 esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
                                                      char *out_token,
@@ -291,6 +299,7 @@ size_t d1l_app_model_copy_route_trace(const char *fingerprint, d1l_route_entry_t
 size_t d1l_app_model_query_nodes(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
                                  size_t max_entries);
 esp_err_t d1l_app_model_mark_public_read(void);
+esp_err_t d1l_app_model_mark_channel_read(uint64_t channel_id);
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);

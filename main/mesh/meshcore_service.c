@@ -16,6 +16,8 @@
 #include "mbedtls/md.h"
 #include "ed_25519.h"
 #include "mesh/advert_data.h"
+#include "mesh/channel_message_coordinator.h"
+#include "mesh/channel_store.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/ed25519_canonical.h"
@@ -92,8 +94,11 @@ static bool s_service_initialized;
 static bool s_radio_started;
 static volatile bool s_tx_busy;
 static volatile bool s_active_tx_ack_response;
-static bool s_pending_public_tx;
-static char s_pending_public_text[D1L_MESSAGE_TEXT_LEN];
+static bool s_pending_channel_tx;
+static uint64_t s_pending_channel_id;
+static uint64_t s_pending_channel_operation_id;
+static char s_pending_channel_text[D1L_MESSAGE_TEXT_LEN];
+static uint32_t s_channel_send_admission;
 static uint32_t s_last_path_probe_ms;
 static char s_last_path_probe_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static bool s_radio_profile_applied;
@@ -196,6 +201,7 @@ typedef enum {
 
 typedef struct {
     d1l_meshcore_service_cmd_type_t type;
+    d1l_mesh_tx_operation_kind_t requested_tx_kind;
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
     uint8_t raw_len;
     uint16_t delay_ms;
@@ -237,15 +243,6 @@ typedef enum {
 
 static volatile uint32_t s_latched_terminal_state;
 static d1l_meshcore_service_cmd_t s_latched_terminal_event;
-
-static const uint8_t s_public_secret[D1L_MESHCORE_PUB_KEY_SIZE] = {
-    0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a,
-    0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-static uint8_t s_public_channel_hash;
 
 static void d1l_meshcore_start_rx(void);
 static esp_err_t meshcore_service_start_task(void);
@@ -866,11 +863,76 @@ static bool append_packet_log(const char *direction, const char *kind, int rssi,
         payload_len, raw, raw_len, note, false);
 }
 
-static void append_public_message_store_rx(const char *message, int rssi, int snr_quarters,
-                                           uint8_t path_hash_bytes, uint8_t path_hops)
+static void secure_zero_channel_key(d1l_channel_protocol_key_t *key)
 {
-    char author[D1L_MESSAGE_AUTHOR_LEN] = "Public";
+    volatile uint8_t *bytes = (volatile uint8_t *)key;
+    size_t remaining = key ? sizeof(*key) : 0U;
+    while (remaining > 0U) {
+        *bytes++ = 0U;
+        remaining--;
+    }
+}
+
+static bool channel_metadata(uint64_t channel_id, d1l_channel_info_t *out_info)
+{
+    if (!out_info) {
+        return false;
+    }
+    memset(out_info, 0, sizeof(*out_info));
+    return d1l_channel_store_find(channel_id, out_info) &&
+           out_info->enabled;
+}
+
+static const char *channel_packet_kind(uint64_t channel_id)
+{
+    return channel_id == D1L_CHANNEL_PUBLIC_ID ?
+        "public_text" : "channel_text";
+}
+
+static void channel_route_target(uint64_t channel_id, char dest[17])
+{
+    if (channel_id == D1L_CHANNEL_PUBLIC_ID) {
+        (void)snprintf(dest, 17U, "public");
+    } else {
+        (void)snprintf(dest, 17U, "%016llx",
+                       (unsigned long long)channel_id);
+    }
+}
+
+static void reconcile_channel_messages(uint32_t message_seq)
+{
+    if (message_seq == 0U) {
+        return;
+    }
+    const esp_err_t ret = d1l_channel_message_reconcile();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "channel retained cursor reconciliation failed: %s",
+                 esp_err_to_name(ret));
+    }
+}
+
+static bool channel_message_generation_ready(void)
+{
+    if (!d1l_channel_message_reconcile_pending()) {
+        return true;
+    }
+    const esp_err_t ret = d1l_channel_message_reconcile();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "channel operation blocked by pending retained cursor reconciliation: %s",
+                 esp_err_to_name(ret));
+        return false;
+    }
+    return true;
+}
+
+static void append_channel_message_store_rx(
+    uint64_t channel_id, const char *channel_name, const char *message,
+    int rssi, int snr_quarters, uint8_t path_hash_bytes, uint8_t path_hops)
+{
+    char author[D1L_MESSAGE_AUTHOR_LEN] = {0};
     char body[D1L_MESSAGE_TEXT_LEN] = {0};
+    sanitize_note(author, sizeof(author),
+                  channel_name && channel_name[0] ? channel_name : "Channel");
     const char *body_src = message;
     const char *colon = message ? strchr(message, ':') : NULL;
     const size_t author_len = colon ? (size_t)(colon - message) : 0;
@@ -887,24 +949,32 @@ static void append_public_message_store_rx(const char *message, int rssi, int sn
     }
     if (d1l_user_text_copy(body, sizeof(body), body_src) !=
         D1L_USER_TEXT_OK) {
-        ESP_LOGW(TAG, "message store rejected invalid Public text");
+        ESP_LOGW(TAG, "message store rejected invalid channel text");
         return;
     }
-    esp_err_t ret = d1l_message_store_append_public("rx", author, body, rssi,
-                                                    (snr_quarters * 10) / 4,
-                                                    path_hash_bytes, path_hops, true);
+    uint32_t message_seq = 0U;
+    esp_err_t ret = d1l_message_store_append_channel(
+        channel_id, "rx", author, body, rssi, (snr_quarters * 10) / 4,
+        path_hash_bytes, path_hops, true, &message_seq);
+    reconcile_channel_messages(message_seq);
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "message store append rx failed: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "channel message append rx failed: %s",
+                 esp_err_to_name(ret));
     }
 }
 
-static void append_public_message_store_tx(const char *message)
+static void append_channel_message_store_tx(uint64_t channel_id,
+                                            const char *message)
 {
     const d1l_settings_t *settings = d1l_settings_current();
-    esp_err_t ret = d1l_message_store_append_public("tx", settings->node_name, message, 0, 0,
-                                                    settings->path_hash_bytes, 0, false);
+    uint32_t message_seq = 0U;
+    esp_err_t ret = d1l_message_store_append_channel(
+        channel_id, "tx", settings->node_name, message, 0, 0,
+        settings->path_hash_bytes, 0, false, &message_seq);
+    reconcile_channel_messages(message_seq);
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "message store append tx failed: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "channel message append tx failed: %s",
+                 esp_err_to_name(ret));
     }
 }
 
@@ -1103,32 +1173,44 @@ static esp_err_t record_detached_dm_queue_failure(
     return ret;
 }
 
-static esp_err_t remember_pending_public_tx(const char *message)
+static void clear_pending_channel_tx(void)
 {
+    s_pending_channel_tx = false;
+    s_pending_channel_id = 0U;
+    s_pending_channel_operation_id = 0U;
+    s_pending_channel_text[0] = '\0';
+}
+
+static esp_err_t remember_pending_channel_tx(uint64_t channel_id,
+                                             const char *message)
+{
+    if (channel_id == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
     const d1l_user_text_result_t result = d1l_user_text_copy(
-        s_pending_public_text, sizeof(s_pending_public_text), message);
-    s_pending_public_tx = result == D1L_USER_TEXT_OK;
-    if (!s_pending_public_tx) {
-        s_pending_public_text[0] = '\0';
+        s_pending_channel_text, sizeof(s_pending_channel_text), message);
+    s_pending_channel_tx = result == D1L_USER_TEXT_OK;
+    if (!s_pending_channel_tx) {
+        clear_pending_channel_tx();
         return result == D1L_USER_TEXT_TOO_LONG ?
             ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
     }
+    s_pending_channel_id = channel_id;
     return ESP_OK;
 }
 
-static void flush_pending_public_tx(void)
+static void flush_pending_channel_tx(
+    const d1l_mesh_tx_operation_identity_t *operation)
 {
-    if (!s_pending_public_tx) {
+    if (!operation || operation->kind != D1L_MESH_TX_OPERATION_PUBLIC ||
+        !s_pending_channel_tx || s_pending_channel_id == 0U ||
+        s_pending_channel_operation_id == 0U ||
+        operation->operation_id != s_pending_channel_operation_id) {
         return;
     }
-    append_public_message_store_tx(s_pending_public_text);
-    s_pending_public_tx = false;
-    s_pending_public_text[0] = '\0';
-}
-
-static void flush_pending_tx(void)
-{
-    flush_pending_public_tx();
+    append_channel_message_store_tx(s_pending_channel_id,
+                                    s_pending_channel_text);
+    clear_pending_channel_tx();
 }
 
 static void write_le32(uint8_t *dest, uint32_t value)
@@ -1686,11 +1768,15 @@ static size_t meshcore_decrypt_after_mac(const uint8_t *secret, uint8_t *dest, s
     return enc_len;
 }
 
-static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_bytes,
-                                          uint32_t tx_timestamp, uint8_t *raw,
-                                          size_t raw_size, uint8_t *out_len)
+static esp_err_t build_channel_text_packet(
+    const d1l_channel_protocol_key_t *channel, const char *text,
+    uint8_t path_hash_bytes, uint32_t tx_timestamp, uint8_t *raw,
+    size_t raw_size, uint8_t *out_len)
 {
-    if (!raw || !out_len) {
+    if (!channel || channel->channel_id == 0U ||
+        (channel->secret_len != D1L_CHANNEL_SECRET_128_LEN &&
+         channel->secret_len != D1L_CHANNEL_SECRET_256_LEN) ||
+        !raw || !out_len) {
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t text_ret = validate_user_text(text);
@@ -1715,11 +1801,12 @@ static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_by
             raw, raw_size, &i) || i >= raw_size) {
         return ESP_ERR_INVALID_SIZE;
     }
-    raw[i++] = s_public_channel_hash;
+    raw[i++] = channel->channel_hash;
 
     size_t mac_cipher_len = 0;
-    esp_err_t ret = meshcore_encrypt_then_mac(s_public_secret, &raw[i], raw_size - i,
-                                              plain, plain_len, &mac_cipher_len);
+    esp_err_t ret = meshcore_encrypt_then_mac(
+        channel->secret, &raw[i], raw_size - i, plain, plain_len,
+        &mac_cipher_len);
     if (ret != ESP_OK) {
         return ret;
     }
@@ -2194,22 +2281,43 @@ static bool dispatch_bounded_dm_ack(
     return true;
 }
 
-static void parse_rx_public_packet(const uint8_t *payload, uint16_t size,
-                                   int16_t rssi, int8_t snr)
+static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
+                                    int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
     if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_GROUP_TEXT ||
-        packet.payload_len < 3U ||
-        packet.payload[0] != s_public_channel_hash) {
+        packet.payload_len < 3U) {
+        return;
+    }
+    if (!channel_message_generation_ready()) {
+        s_status.channel_rx_reconcile_blocked++;
+        return;
+    }
+
+    d1l_channel_protocol_key_t channel_key = {0};
+    const esp_err_t resolve_ret = d1l_channel_store_find_unique_hash(
+        packet.payload[0], &channel_key);
+    if (resolve_ret != ESP_OK) {
+        if (resolve_ret == ESP_ERR_NOT_FOUND) {
+            s_status.channel_rx_unknown_hash++;
+        } else if (resolve_ret == ESP_ERR_INVALID_STATE) {
+            /* A one-byte hash is routing metadata, never identity. Any
+             * collision must be rejected before trying either secret. */
+            s_status.channel_rx_hash_collision++;
+        }
+        secure_zero_channel_key(&channel_key);
         return;
     }
 
     uint8_t plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
-    const size_t plain_len = meshcore_decrypt_after_mac(s_public_secret, plain, sizeof(plain) - 1U,
-                                                        &packet.payload[1],
-                                                        packet.payload_len - 1U);
+    const size_t plain_len = meshcore_decrypt_after_mac(
+        channel_key.secret, plain, sizeof(plain) - 1U, &packet.payload[1],
+        packet.payload_len - 1U);
+    const uint64_t channel_id = channel_key.channel_id;
+    secure_zero_channel_key(&channel_key);
     if (plain_len < 6U || (plain[4] >> 2) != 0) {
+        s_status.channel_rx_decrypt_failed++;
         return;
     }
     d1l_meshcore_text_plaintext_view_t text_view = {0};
@@ -2219,18 +2327,27 @@ static void parse_rx_public_packet(const uint8_t *payload, uint16_t size,
     }
     plain[5U + text_view.text_length] = '\0';
     const char *message = (const char *)text_view.text;
-    s_status.rx_packets++;
-    esp_err_t route_ret = d1l_route_store_upsert_observation("public", "Public", "public_text",
-                                                             route_name(packet.route), "rx", rssi,
-                                                             (snr * 10) / 4,
-                                                             packet.path_hash_bytes,
-                                                             packet.path_hops, size);
-    if (route_ret != ESP_OK) {
-        ESP_LOGW(TAG, "route store public rx failed: %s", esp_err_to_name(route_ret));
+    d1l_channel_info_t channel = {0};
+    if (!channel_metadata(channel_id, &channel)) {
+        return;
     }
-    append_packet_log("rx", "public_text", rssi, snr, packet.path_hash_bytes,
+    char route_target[17] = {0};
+    channel_route_target(channel_id, route_target);
+    const char *packet_kind = channel_packet_kind(channel_id);
+    s_status.rx_packets++;
+    esp_err_t route_ret = d1l_route_store_upsert_observation(
+        route_target, channel.name, packet_kind, route_name(packet.route),
+        "rx", rssi, (snr * 10) / 4, packet.path_hash_bytes,
+        packet.path_hops, size);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store channel rx failed: %s",
+                 esp_err_to_name(route_ret));
+    }
+    append_packet_log("rx", packet_kind, rssi, snr, packet.path_hash_bytes,
                       packet.path_hops, size, payload, size, message);
-    append_public_message_store_rx(message, rssi, snr, packet.path_hash_bytes, packet.path_hops);
+    append_channel_message_store_rx(
+        channel_id, channel.name, message, rssi, snr, packet.path_hash_bytes,
+        packet.path_hops);
 }
 
 static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
@@ -3134,8 +3251,8 @@ static void meshcore_service_handle_radio_tx_done(
             fail_pending_dm_ack_timeout(ESP_ERR_INVALID_STATE);
         }
         finalize_pending_dm_radio_result(true, ESP_OK);
-    } else {
-        flush_pending_tx();
+    } else if (event->tx_operation.kind == D1L_MESH_TX_OPERATION_PUBLIC) {
+        flush_pending_channel_tx(&event->tx_operation);
     }
 }
 
@@ -3172,9 +3289,10 @@ static void meshcore_service_handle_radio_tx_timeout(
                 s_pending_dm_tx.delivery.state)) {
             clear_pending_dm_tx();
         }
-    } else {
-        s_pending_public_tx = false;
-        s_pending_public_text[0] = '\0';
+    } else if (event->tx_operation.kind == D1L_MESH_TX_OPERATION_PUBLIC &&
+               s_pending_channel_operation_id ==
+                   event->tx_operation.operation_id) {
+        clear_pending_channel_tx();
     }
 }
 
@@ -3211,13 +3329,19 @@ static void meshcore_service_handle_radio_tx_watchdog(void)
 
 static void meshcore_service_run_owner_maintenance(void)
 {
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
     meshcore_service_handle_radio_tx_watchdog();
     reconcile_pending_dm_ack_persistence();
+    const esp_err_t channel_reconcile_ret =
+        d1l_channel_message_reconcile_if_due((uint32_t)(now_us / 1000ULL));
+    if (channel_reconcile_ret != ESP_OK) {
+        ESP_LOGW(TAG, "channel retained cursor retry failed: %s",
+                 esp_err_to_name(channel_reconcile_ret));
+    }
     if (!s_pending_dm_tx.delivery.active ||
         s_pending_dm_tx.delivery.state != D1L_DM_DELIVERY_AWAITING_ACK) {
         return;
     }
-    const uint64_t now_us = (uint64_t)esp_timer_get_time();
     const d1l_meshcore_dm_ack_deadline_action_t action =
         d1l_meshcore_dm_ack_deadline_take_due_when_idle(
             &s_pending_dm_tx.ack_deadline, now_us,
@@ -3238,7 +3362,7 @@ static void meshcore_service_run_owner_maintenance(void)
 static void meshcore_service_handle_radio_rx_done(
     const uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
-    parse_rx_public_packet(payload, size, rssi, snr);
+    parse_rx_channel_packet(payload, size, rssi, snr);
     const bool ack_queued = parse_rx_dm_packet(payload, size, rssi, snr);
     parse_rx_path_packet(payload, size, rssi, snr);
     parse_rx_ack_packet(payload, size, rssi, snr);
@@ -3380,14 +3504,6 @@ static esp_err_t configure_radio_profile(const d1l_radio_profile_t *profile)
 
 static esp_err_t ensure_radio_started(void)
 {
-    uint8_t hash[32] = {0};
-    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (md == NULL || mbedtls_md(md, s_public_secret, 16, hash) != 0) {
-        s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
-        return ESP_FAIL;
-    }
-    s_public_channel_hash = hash[0];
-
     if (!indicator_io_expander || !bsp_sx126x_spi_handle_get()) {
         s_status.state = D1L_MESHCORE_SERVICE_WAITING_FOR_RADIO;
         s_status.radio_ready = false;
@@ -3403,7 +3519,7 @@ static esp_err_t ensure_radio_started(void)
     mark_radio_apply_result(&profile, ret);
     if (ret != ESP_OK) {
         s_status.radio_ready = false;
-        ESP_LOGW(TAG, "unsupported radio profile for MeshCore public RX/TX");
+        ESP_LOGW(TAG, "unsupported radio profile for MeshCore channel RX/TX");
         return ret;
     }
     s_status.radio_ready = true;
@@ -3469,17 +3585,30 @@ static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd
         return ret;
     }
 
-    d1l_mesh_tx_operation_kind_t operation_kind =
-        D1L_MESH_TX_OPERATION_GENERIC;
-    if (cmd->ack_response) {
-        operation_kind = D1L_MESH_TX_OPERATION_ACK_RESPONSE;
-    } else if (cmd->type == D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT) {
-        operation_kind = D1L_MESH_TX_OPERATION_ADVERT;
-    } else if (s_pending_public_tx) {
-        operation_kind = D1L_MESH_TX_OPERATION_PUBLIC;
+    const d1l_mesh_tx_operation_kind_t operation_kind =
+        cmd->requested_tx_kind;
+    if ((cmd->ack_response &&
+         operation_kind != D1L_MESH_TX_OPERATION_ACK_RESPONSE) ||
+        (!cmd->ack_response &&
+         operation_kind == D1L_MESH_TX_OPERATION_ACK_RESPONSE) ||
+        (cmd->type == D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT &&
+         operation_kind != D1L_MESH_TX_OPERATION_ADVERT) ||
+        (cmd->type == D1L_MESHCORE_SERVICE_CMD_SEND_RAW &&
+         operation_kind != D1L_MESH_TX_OPERATION_GENERIC &&
+         operation_kind != D1L_MESH_TX_OPERATION_PUBLIC &&
+         operation_kind != D1L_MESH_TX_OPERATION_ACK_RESPONSE)) {
+        return ESP_ERR_INVALID_ARG;
     }
     if (!meshcore_radio_tx_operation_begin(operation_kind, NULL)) {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (operation_kind == D1L_MESH_TX_OPERATION_PUBLIC) {
+        if (!s_pending_channel_tx || s_pending_channel_id == 0U) {
+            meshcore_radio_tx_operation_clear();
+            return ESP_ERR_INVALID_STATE;
+        }
+        s_pending_channel_operation_id =
+            s_active_radio_tx.operation_id;
     }
     s_active_tx_ack_response = cmd->ack_response;
     s_tx_busy = true;
@@ -4171,19 +4300,32 @@ esp_err_t d1l_meshcore_service_start_rx_async(void)
     return ESP_OK;
 }
 
-static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
-                                           uint8_t raw_len,
-                                           uint32_t timeout_ms)
+static esp_err_t meshcore_service_send_raw_kind(
+    const uint8_t *raw,
+    uint8_t raw_len,
+    uint32_t timeout_ms,
+    d1l_mesh_tx_operation_kind_t operation_kind)
 {
-    if (!raw || raw_len == 0U) {
+    if (!raw || raw_len == 0U ||
+        (operation_kind != D1L_MESH_TX_OPERATION_GENERIC &&
+         operation_kind != D1L_MESH_TX_OPERATION_PUBLIC)) {
         return ESP_ERR_INVALID_ARG;
     }
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+        .requested_tx_kind = operation_kind,
         .raw_len = raw_len,
     };
     memcpy(cmd.raw, raw, raw_len);
     return meshcore_service_send_command(&cmd, timeout_ms);
+}
+
+static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
+                                           uint8_t raw_len,
+                                           uint32_t timeout_ms)
+{
+    return meshcore_service_send_raw_kind(
+        raw, raw_len, timeout_ms, D1L_MESH_TX_OPERATION_GENERIC);
 }
 
 static esp_err_t meshcore_service_queue_raw_response(
@@ -4194,6 +4336,7 @@ static esp_err_t meshcore_service_queue_raw_response(
     }
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+        .requested_tx_kind = D1L_MESH_TX_OPERATION_GENERIC,
         .raw_len = raw_len,
         .delay_ms = delay_ms,
     };
@@ -4242,6 +4385,7 @@ static esp_err_t meshcore_service_send_ack_async(
                             raw_len);
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+        .requested_tx_kind = D1L_MESH_TX_OPERATION_ACK_RESPONSE,
         .raw_len = raw_len,
         .delay_ms = (uint16_t)plan->delay_ms,
         .ack_response = true,
@@ -4300,8 +4444,8 @@ void d1l_meshcore_service_init(void)
     s_radio_started = false;
     s_tx_busy = false;
     s_active_tx_ack_response = false;
-    s_pending_public_tx = false;
-    s_pending_public_text[0] = '\0';
+    __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
+    clear_pending_channel_tx();
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
     clear_pending_ack_tx();
     clear_boot_routes();
@@ -4451,20 +4595,58 @@ esp_err_t d1l_meshcore_service_request_advert(bool flood)
 {
     d1l_meshcore_service_cmd_t cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
+        .requested_tx_kind = D1L_MESH_TX_OPERATION_ADVERT,
         .flood = flood,
     };
     return meshcore_service_send_command(
         &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
 }
 
-esp_err_t d1l_meshcore_service_send_public(const char *text)
+static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
+                                                     const char *text)
 {
+    if (channel_id == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!channel_message_generation_ready()) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_err_t ret = validate_user_text(text);
     if (ret != ESP_OK) {
         return ret;
     }
+    d1l_channel_protocol_key_t channel_key = {0};
+    ret = d1l_channel_store_copy_protocol_key(channel_id, &channel_key);
+    if (ret != ESP_OK || channel_key.channel_id != channel_id) {
+        secure_zero_channel_key(&channel_key);
+        s_status.rejected_commands++;
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    d1l_channel_info_t channel = {0};
+    if (!channel_metadata(channel_id, &channel) ||
+        channel.channel_hash != channel_key.channel_hash) {
+        secure_zero_channel_key(&channel_key);
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_channel_protocol_key_t unique_key = {0};
+    ret = d1l_channel_store_find_unique_hash(channel_key.channel_hash,
+                                             &unique_key);
+    const bool unique_exact = ret == ESP_OK &&
+        unique_key.channel_id == channel_key.channel_id &&
+        unique_key.secret_len == channel_key.secret_len &&
+        memcmp(unique_key.secret, channel_key.secret,
+               sizeof(unique_key.secret)) == 0;
+    secure_zero_channel_key(&unique_key);
+    if (!unique_exact) {
+        secure_zero_channel_key(&channel_key);
+        s_status.rejected_commands++;
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
     ret = d1l_time_service_preflight_protocol_timestamp();
     if (ret != ESP_OK) {
+        secure_zero_channel_key(&channel_key);
         s_status.rejected_commands++;
         return ret;
     }
@@ -4473,10 +4655,12 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
     };
     ret = meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     if (ret != ESP_OK) {
+        secure_zero_channel_key(&channel_key);
         s_status.rejected_commands++;
         return ret;
     }
     if (s_tx_busy) {
+        secure_zero_channel_key(&channel_key);
         s_status.rejected_commands++;
         return ESP_ERR_INVALID_STATE;
     }
@@ -4487,38 +4671,77 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
     uint32_t tx_timestamp = 0;
     ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
     if (ret != ESP_OK) {
+        secure_zero_channel_key(&channel_key);
         s_status.rejected_commands++;
         return ret;
     }
-    ret = build_public_text_packet(text, settings->path_hash_bytes, tx_timestamp,
-                                   raw, sizeof(raw), &raw_len);
+    ret = build_channel_text_packet(
+        &channel_key, text, settings->path_hash_bytes, tx_timestamp, raw,
+        sizeof(raw), &raw_len);
+    secure_zero_channel_key(&channel_key);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;
     }
 
-    ret = remember_pending_public_tx(text);
+    ret = remember_pending_channel_tx(channel_id, text);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;
     }
-    ret = meshcore_service_send_raw(raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    ret = meshcore_service_send_raw_kind(
+        raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS,
+        D1L_MESH_TX_OPERATION_PUBLIC);
     if (ret != ESP_OK) {
-        s_pending_public_tx = false;
-        s_pending_public_text[0] = '\0';
+        clear_pending_channel_tx();
         s_status.rejected_commands++;
         return ret;
     }
-    esp_err_t route_ret =
-        d1l_route_store_upsert_observation("public", "Public", "public_text",
-                                           route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx",
-                                           0, 0, settings->path_hash_bytes, 0, raw_len);
+    char route_target[17] = {0};
+    channel_route_target(channel_id, route_target);
+    const char *packet_kind = channel_packet_kind(channel_id);
+    esp_err_t route_ret = d1l_route_store_upsert_observation(
+        route_target, channel.name, packet_kind,
+        route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx", 0, 0,
+        settings->path_hash_bytes, 0, raw_len);
     if (route_ret != ESP_OK) {
-        ESP_LOGW(TAG, "route store public tx failed: %s", esp_err_to_name(route_ret));
+        ESP_LOGW(TAG, "route store channel tx failed: %s",
+                 esp_err_to_name(route_ret));
     }
-    append_packet_log("tx", "public_text", 0, 0, settings->path_hash_bytes, 0, raw_len,
+    append_packet_log("tx", packet_kind, 0, 0, settings->path_hash_bytes, 0, raw_len,
                       raw, raw_len, text);
     return ESP_OK;
+}
+
+esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
+                                            const char *text)
+{
+    uint32_t expected = 0U;
+    if (!__atomic_compare_exchange_n(
+            &s_channel_send_admission, &expected, 1U, false,
+            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t ret =
+        meshcore_service_send_channel_owned(channel_id, text);
+    __atomic_store_n(&s_channel_send_admission, 0U, __ATOMIC_RELEASE);
+    return ret;
+}
+
+esp_err_t d1l_meshcore_service_send_active_channel(const char *text)
+{
+    d1l_channel_info_t active = {0};
+    if (!d1l_channel_store_find_default(&active)) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
+    return d1l_meshcore_service_send_channel(active.channel_id, text);
+}
+
+esp_err_t d1l_meshcore_service_send_public(const char *text)
+{
+    return d1l_meshcore_service_send_channel(D1L_CHANNEL_PUBLIC_ID, text);
 }
 
 static esp_err_t meshcore_service_send_dm_command(

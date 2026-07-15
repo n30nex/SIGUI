@@ -19,13 +19,15 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     assert "D1L_MESSAGE_MAX_BYTES D1L_USER_TEXT_MAX_BYTES" in header
     assert "D1L_MESSAGE_MAX_CHARS D1L_MESSAGE_MAX_BYTES" in header
     assert "D1L_MESSAGE_TEXT_LEN (D1L_MESSAGE_MAX_BYTES + 1U)" in header
-    assert "D1L_MESSAGE_STORE_SCHEMA 4U" in source
+    assert "D1L_MESSAGE_STORE_SCHEMA 5U" in source
+    assert "D1L_MESSAGE_STORE_SCHEMA_V4 4U" in source
     assert "D1L_MESSAGE_STORE_SCHEMA_V3 3U" in source
     assert "D1L_MESSAGE_STORE_SCHEMA_V2 2U" in source
     assert "D1L_MESSAGE_STORE_SCHEMA_V1 1U" in source
     assert "convert_v2_blob" in source
     assert "convert_v1_blob" in source
     assert "convert_v3_blob" in source
+    assert "convert_v4_blob" in source
     assert 'D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE "d1l_messages"' in blob_store
     assert 'D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR "stores/messages/public"' in blob_store
     assert "D1L_MESSAGE_STORE_ID D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
@@ -63,7 +65,9 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     assert "static d1l_message_store_blob_t s_blob_scratch" in source
     assert "d1l_message_entry_t incoming[D1L_MESSAGE_STORE_CAPACITY]" not in source
     assert "d1l_message_store_copy_recent" in source
+    assert "d1l_message_store_copy_channel_recent" in source
     assert "d1l_message_store_query_page" in header
+    assert "d1l_message_store_query_channel_page" in header
     assert "d1l_message_store_query" in header
     assert "skip_newest" in source
     assert "out_total_matches" in source
@@ -74,15 +78,19 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     assert "d1l_user_text_validate_bounded(entry->text" in source
     assert "legacy_entry_is_valid" in source
     assert "memcpy(entry.text, text, text_info.byte_count + 1U)" in source
+    assert "entry->channel_id != 0U" in source
+    assert "offsetof(d1l_message_entry_t, channel_id) == 192U" in source
+    assert "sizeof(d1l_message_entry_t) == 200U" in source
+    assert "d1l_message_store_clear_channel" in header
 
 
 def test_public_rf_appends_to_message_store():
     source = read("main/mesh/meshcore_service.c")
-    assert 'd1l_message_store_append_public("tx"' in source
-    assert 'd1l_message_store_append_public("rx"' in source
-    assert "remember_pending_public_tx(text)" in source
-    assert "flush_pending_public_tx()" in source
-    assert "append_public_message_store_rx(message" in source
+    assert "d1l_message_store_append_channel(" in source
+    assert "remember_pending_channel_tx(channel_id, text)" in source
+    assert "flush_pending_channel_tx(" in source
+    assert "append_channel_message_store_rx(" in source
+    assert "reconcile_channel_messages(message_seq)" in source
 
 
 def test_ui_and_console_expose_persistent_public_messages():

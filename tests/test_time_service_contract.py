@@ -307,8 +307,8 @@ def test_protocol_time_failure_returns_before_message_store_or_rf_side_effects()
     )
     public = body(
         mesh,
-        "esp_err_t d1l_meshcore_service_send_public(",
-        "static esp_err_t meshcore_service_send_dm_command(",
+        "static esp_err_t meshcore_service_send_channel_owned(",
+        "esp_err_t d1l_meshcore_service_send_channel(",
     )
     assert advert.index("d1l_time_service_preflight_protocol_timestamp") < advert.index(
         "d1l_meshcore_service_ensure_identity"
@@ -332,7 +332,7 @@ def test_protocol_time_failure_returns_before_message_store_or_rf_side_effects()
         "D1L_MESHCORE_SERVICE_CMD_START_RX"
     )
     assert public.index("d1l_settings_next_mesh_timestamp") < public.index(
-        "remember_pending_public_tx"
+        "remember_pending_channel_tx"
     )
 
 

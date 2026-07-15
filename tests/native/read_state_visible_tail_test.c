@@ -9,6 +9,9 @@
 
 static d1l_dm_entry_t s_rows[TEST_VISIBLE_DM_CAPACITY];
 static size_t s_row_count;
+static d1l_message_entry_t s_public_rows[D1L_MESSAGE_STORE_CAPACITY];
+static size_t s_public_row_count;
+static uint32_t s_message_next_seq = 1U;
 static size_t s_last_dm_copy_max;
 static bool s_contact_muted;
 static uint8_t s_nvs_blob[1024U];
@@ -86,15 +89,21 @@ esp_err_t nvs_commit(nvs_handle_t handle)
 
 d1l_message_store_stats_t d1l_message_store_stats(void)
 {
-    return (d1l_message_store_stats_t) {.next_seq = 1U};
+    return (d1l_message_store_stats_t) {.next_seq = s_message_next_seq};
 }
 
 size_t d1l_message_store_copy_recent(d1l_message_entry_t *out_entries,
                                      size_t max_entries)
 {
-    (void)out_entries;
-    (void)max_entries;
-    return 0U;
+    if (!out_entries || max_entries == 0U) {
+        return 0U;
+    }
+    const size_t copied = s_public_row_count < max_entries ?
+        s_public_row_count : max_entries;
+    const size_t first = s_public_row_count - copied;
+    memcpy(out_entries, &s_public_rows[first],
+           copied * sizeof(out_entries[0]));
+    return copied;
 }
 
 d1l_dm_store_stats_t d1l_dm_store_stats(void)
@@ -140,6 +149,16 @@ static d1l_dm_entry_t row(uint32_t seq, const char *fingerprint,
 
 int main(void)
 {
+    s_public_rows[0] = (d1l_message_entry_t){
+        .seq = 10U,
+        .channel_id = UINT64_C(1),
+    };
+    snprintf(s_public_rows[0].direction,
+             sizeof(s_public_rows[0].direction), "rx");
+    s_public_row_count = 1U;
+    /* Private-channel rows can advance the shared global sequence through 99,
+     * but the compatibility copy is exact-Public filtered. */
+    s_message_next_seq = 100U;
     s_rows[0] = row(1U, "aaaaaaaaaaaaaaaa", "rx");
     for (size_t i = 1U; i < D1L_DM_STORE_CAPACITY; ++i) {
         char fingerprint[D1L_NODE_FINGERPRINT_LEN];
@@ -155,6 +174,8 @@ int main(void)
 
     assert(d1l_read_state_init() == ESP_OK);
     d1l_read_state_stats_t stats = d1l_read_state_stats();
+    assert(stats.public_unread_count == 1U);
+    assert(stats.newest_public_rx_seq == 10U);
     assert(s_last_dm_copy_max == TEST_VISIBLE_DM_CAPACITY);
     assert(stats.dm_unread_count == 0U);
     assert(stats.muted_dm_unread_count == 1U);
@@ -173,6 +194,28 @@ int main(void)
     assert(stats.dm_unread_count == 0U);
     assert(stats.muted_dm_unread_count == 0U);
     assert(stats.mark_read_count == 1U);
+
+    assert(d1l_read_state_mark_public_read() == ESP_OK);
+    stats = d1l_read_state_stats();
+    assert(stats.last_public_read_seq == 10U &&
+           stats.public_unread_count == 0U);
+
+    /* Public-only clear preserves private rows/global sequencing. An empty
+     * exact-Public view is an idempotent mark-read operation: retaining the
+     * monotonic cursor avoids reclassifying restored older rows after an SD
+     * merge, while the next admitted Public row still receives a higher
+     * shared-global sequence. */
+    s_public_row_count = 0U;
+    assert(d1l_read_state_mark_public_read() == ESP_OK);
+    stats = d1l_read_state_stats();
+    assert(stats.last_public_read_seq == 10U &&
+           stats.public_unread_count == 0U);
+    s_public_rows[0].seq = 100U;
+    s_public_row_count = 1U;
+    s_message_next_seq = 101U;
+    stats = d1l_read_state_stats();
+    assert(stats.newest_public_rx_seq == 100U &&
+           stats.public_unread_count == 1U);
 
     puts("native read-state visible tail: ok");
     return 0;

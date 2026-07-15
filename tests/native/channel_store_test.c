@@ -39,10 +39,66 @@ typedef struct {
     channel_entry_v1_t entries[D1L_CHANNEL_STORE_CAPACITY];
 } channel_blob_v1_t;
 
+typedef struct {
+    uint64_t channel_id;
+    uint64_t history_key;
+    uint32_t created_ms;
+    uint32_t updated_ms;
+    uint32_t imported_at_ms;
+    uint32_t newest_message_seq;
+    uint32_t read_through_seq;
+    uint32_t unread_count;
+    char name[D1L_CHANNEL_NAME_LEN];
+    uint8_t secret[D1L_CHANNEL_SECRET_MAX_LEN];
+    uint8_t secret_len;
+    uint8_t channel_hash;
+    uint8_t source;
+    uint8_t enabled;
+    uint8_t is_default;
+    uint8_t reserved[2];
+} channel_entry_v2_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t schema;
+    uint32_t blob_length;
+    uint32_t payload_length;
+    uint32_t payload_checksum;
+    uint32_t envelope_reserved;
+    uint64_t lineage;
+    uint64_t generation;
+    uint64_t next_channel_id;
+    uint32_t revision;
+    uint32_t total_mutations;
+    uint32_t count;
+    uint32_t payload_reserved;
+    channel_entry_v2_t entries[D1L_CHANNEL_STORE_CAPACITY];
+} channel_blob_v2_t;
+
 _Static_assert(sizeof(channel_entry_v1_t) == 104U,
                "native v1 fixture entry layout changed");
 _Static_assert(sizeof(channel_blob_v1_t) == 848U,
                "native v1 fixture blob layout changed");
+_Static_assert(sizeof(channel_entry_v2_t) == 112U,
+               "native v2 fixture entry layout changed");
+_Static_assert(offsetof(channel_blob_v2_t, entries) == 64U,
+               "native v2 fixture entries offset changed");
+_Static_assert(sizeof(channel_blob_v2_t) == 960U,
+               "native v2 fixture blob layout changed");
+
+static uint32_t fixture_crc32(const void *data, size_t len)
+{
+    const uint8_t *bytes = (const uint8_t *)data;
+    uint32_t crc = UINT32_MAX;
+    for (size_t i = 0U; i < len; ++i) {
+        crc ^= bytes[i];
+        for (uint8_t bit = 0U; bit < 8U; ++bit) {
+            const uint32_t mask = (uint32_t)-(int32_t)(crc & 1U);
+            crc = (crc >> 1U) ^ (UINT32_C(0xedb88320) & mask);
+        }
+    }
+    return crc ^ UINT32_MAX;
+}
 
 static void fill_secret(uint8_t secret[D1L_CHANNEL_SECRET_MAX_LEN],
                         uint8_t first, uint8_t salt)
@@ -169,6 +225,158 @@ static void test_default_add_persist_and_unread(void)
     alpha = find_channel(alpha.channel_id);
     assert(alpha.read_through_seq == 11U);
     assert(alpha.unread_count == 0U);
+}
+
+static void test_retained_reconcile_repairs_failure_reboot_and_eviction(void)
+{
+    mock_nvs_reset();
+    mock_timer_set_us(1000000);
+    assert(d1l_channel_store_init() == ESP_OK);
+
+    uint8_t alpha_secret[D1L_CHANNEL_SECRET_MAX_LEN];
+    uint8_t beta_secret[D1L_CHANNEL_SECRET_MAX_LEN];
+    fill_secret(alpha_secret, 0x21U, 0x30U);
+    fill_secret(beta_secret, 0x41U, 0x50U);
+    d1l_channel_mutation_result_t result = D1L_CHANNEL_MUTATION_NONE;
+    d1l_channel_info_t alpha = {0};
+    d1l_channel_info_t beta = {0};
+    assert(d1l_channel_store_add(
+               "Alpha", alpha_secret, D1L_CHANNEL_SECRET_128_LEN, true,
+               false, &result, &alpha) == ESP_OK);
+    assert(d1l_channel_store_add(
+               "Beta", beta_secret, D1L_CHANNEL_SECRET_128_LEN, true,
+               false, &result, &beta) == ESP_OK);
+
+    const d1l_channel_retained_row_t initial[] = {
+        {D1L_CHANNEL_PUBLIC_ID, 1U, true},
+        {alpha.channel_id, 2U, true},
+        {alpha.channel_id, 3U, false},
+        {beta.channel_id, 4U, true},
+    };
+    assert(d1l_channel_store_reconcile_retained_rows(
+               initial, sizeof(initial) / sizeof(initial[0]),
+               &(d1l_channel_message_generation_t){1U, 5U, 0U}) == ESP_OK);
+    d1l_channel_info_t public_info = find_channel(D1L_CHANNEL_PUBLIC_ID);
+    alpha = find_channel(alpha.channel_id);
+    beta = find_channel(beta.channel_id);
+    assert(public_info.newest_message_seq == 1U &&
+           public_info.unread_count == 1U);
+    assert(alpha.newest_message_seq == 3U && alpha.unread_count == 1U);
+    assert(beta.newest_message_seq == 4U && beta.unread_count == 1U);
+
+    assert(d1l_channel_store_mark_all_read(alpha.channel_id) == ESP_OK);
+    alpha = find_channel(alpha.channel_id);
+    assert(alpha.read_through_seq == 3U && alpha.unread_count == 0U);
+
+    const d1l_channel_retained_row_t advanced[] = {
+        {beta.channel_id, 4U, true},
+        {alpha.channel_id, 5U, true},
+        {beta.channel_id, 6U, false},
+    };
+    assert(d1l_channel_store_reconcile_retained_rows(
+               advanced, sizeof(advanced) / sizeof(advanced[0]),
+               &(d1l_channel_message_generation_t){1U, 7U, 0U}) == ESP_OK);
+    public_info = find_channel(D1L_CHANNEL_PUBLIC_ID);
+    alpha = find_channel(alpha.channel_id);
+    beta = find_channel(beta.channel_id);
+    assert(public_info.unread_count == 0U &&
+           public_info.read_through_seq == public_info.newest_message_seq);
+    assert(alpha.newest_message_seq == 5U && alpha.unread_count == 1U);
+    assert(beta.newest_message_seq == 6U && beta.unread_count == 1U);
+
+    const d1l_channel_retained_row_t failed_projection[] = {
+        {beta.channel_id, 4U, true},
+        {alpha.channel_id, 5U, true},
+        {beta.channel_id, 6U, false},
+        {alpha.channel_id, 7U, true},
+    };
+    mock_nvs_fail_next_set(ESP_FAIL);
+    assert(d1l_channel_store_reconcile_retained_rows(
+               failed_projection,
+               sizeof(failed_projection) / sizeof(failed_projection[0]),
+               &(d1l_channel_message_generation_t){1U, 8U, 0U}) ==
+           ESP_FAIL);
+    alpha = find_channel(alpha.channel_id);
+    assert(alpha.newest_message_seq == 5U && alpha.unread_count == 1U);
+
+    assert(d1l_channel_store_reconcile_retained_rows(
+               failed_projection,
+               sizeof(failed_projection) / sizeof(failed_projection[0]),
+               &(d1l_channel_message_generation_t){1U, 8U, 0U}) ==
+           ESP_OK);
+    alpha = find_channel(alpha.channel_id);
+    assert(alpha.newest_message_seq == 7U && alpha.unread_count == 2U);
+    const uint64_t alpha_id = alpha.channel_id;
+    const uint64_t beta_id = beta.channel_id;
+
+    assert(d1l_channel_store_init() == ESP_OK);
+    alpha = find_channel(alpha_id);
+    assert(alpha.newest_message_seq == 7U && alpha.unread_count == 2U);
+
+    /* Simulate a shared-ring eviction of both retained Alpha RX rows. The
+     * coordinator must remove stale unread debt instead of incrementing from
+     * the cached value. */
+    const d1l_channel_retained_row_t after_eviction[] = {
+        {beta_id, 8U, true},
+        {alpha_id, 9U, false},
+    };
+    assert(d1l_channel_store_reconcile_retained_rows(
+               after_eviction,
+               sizeof(after_eviction) / sizeof(after_eviction[0]),
+               &(d1l_channel_message_generation_t){1U, 10U, 0U}) == ESP_OK);
+    alpha = find_channel(alpha_id);
+    beta = find_channel(beta_id);
+    assert(alpha.newest_message_seq == 9U && alpha.unread_count == 0U &&
+           alpha.read_through_seq == 9U);
+    assert(beta.newest_message_seq == 8U && beta.unread_count == 1U);
+
+    /* Channel metadata can commit after a message row is admitted while both
+     * message mirrors fail. Rebooting the message store then reuses its stale
+     * next sequence. Same-generation rewind must clamp the persisted cursor so
+     * the reused RX sequence is counted, not suppressed as already read. */
+    assert(d1l_channel_store_init() == ESP_OK);
+    assert(d1l_channel_store_stats().message_next_seq == 10U);
+    const d1l_channel_retained_row_t stale_message_reboot[] = {
+        {beta_id, 8U, true},
+    };
+    assert(d1l_channel_store_reconcile_retained_rows(
+               stale_message_reboot,
+               sizeof(stale_message_reboot) /
+                   sizeof(stale_message_reboot[0]),
+               &(d1l_channel_message_generation_t){1U, 9U, 0U}) == ESP_OK);
+    alpha = find_channel(alpha_id);
+    assert(alpha.newest_message_seq == 0U &&
+           alpha.read_through_seq == 0U && alpha.unread_count == 0U);
+    const d1l_channel_retained_row_t reused_sequence[] = {
+        {beta_id, 8U, true},
+        {alpha_id, 9U, true},
+    };
+    assert(d1l_channel_store_reconcile_retained_rows(
+               reused_sequence,
+               sizeof(reused_sequence) / sizeof(reused_sequence[0]),
+               &(d1l_channel_message_generation_t){1U, 10U, 0U}) == ESP_OK);
+    alpha = find_channel(alpha_id);
+    assert(alpha.newest_message_seq == 9U &&
+           alpha.read_through_seq == 0U && alpha.unread_count == 1U);
+
+    /* A different generation that also rewinds sequence space is a true
+     * reset: prior cursors cannot carry into the new lineage. */
+    const d1l_channel_retained_row_t reset_generation[] = {
+        {D1L_CHANNEL_PUBLIC_ID, 1U, true},
+    };
+    assert(d1l_channel_store_reconcile_retained_rows(
+               reset_generation,
+               sizeof(reset_generation) / sizeof(reset_generation[0]),
+               &(d1l_channel_message_generation_t){2U, 2U,
+                                                    UINT64_C(0xabc)}) ==
+           ESP_OK);
+    public_info = find_channel(D1L_CHANNEL_PUBLIC_ID);
+    alpha = find_channel(alpha_id);
+    assert(public_info.newest_message_seq == 1U &&
+           public_info.read_through_seq == 0U &&
+           public_info.unread_count == 1U);
+    assert(alpha.newest_message_seq == 0U &&
+           alpha.read_through_seq == 0U && alpha.unread_count == 0U);
 }
 
 static void test_collisions_capacity_defaults_and_rollback(void)
@@ -497,6 +705,97 @@ static void build_v1_fixture(channel_blob_v1_t *legacy)
     legacy_user->enabled = 1U;
 }
 
+static void build_v2_fixture(channel_blob_v2_t *legacy)
+{
+    memset(legacy, 0, sizeof(*legacy));
+    legacy->magic = UINT32_C(0x43484e4c);
+    legacy->schema = 2U;
+    legacy->blob_length = (uint32_t)sizeof(*legacy);
+    legacy->payload_length =
+        (uint32_t)(sizeof(*legacy) - offsetof(channel_blob_v2_t, lineage));
+    legacy->lineage = UINT64_C(0x123456789abcdef0);
+    legacy->generation = 7U;
+    legacy->next_channel_id = 10U;
+    legacy->revision = 9U;
+    legacy->total_mutations = 8U;
+    legacy->count = 2U;
+
+    channel_entry_v2_t *public_entry = &legacy->entries[0];
+    public_entry->channel_id = D1L_CHANNEL_PUBLIC_ID;
+    public_entry->history_key = legacy->lineage ^ public_entry->channel_id;
+    public_entry->newest_message_seq = 5U;
+    public_entry->read_through_seq = 5U;
+    (void)snprintf(public_entry->name, sizeof(public_entry->name), "Public");
+    memcpy(public_entry->secret, PUBLIC_SECRET, sizeof(public_entry->secret));
+    public_entry->secret_len = D1L_CHANNEL_SECRET_128_LEN;
+    assert(d1l_channel_store_protocol_hash(
+               public_entry->secret, public_entry->secret_len,
+               &public_entry->channel_hash) == ESP_OK);
+    public_entry->source = D1L_CHANNEL_SOURCE_BUILTIN;
+    public_entry->enabled = 1U;
+    public_entry->is_default = 1U;
+
+    channel_entry_v2_t *legacy_user = &legacy->entries[1];
+    legacy_user->channel_id = 2U;
+    legacy_user->history_key = legacy->lineage ^ legacy_user->channel_id;
+    legacy_user->created_ms = 123U;
+    legacy_user->updated_ms = 456U;
+    legacy_user->newest_message_seq = 7U;
+    legacy_user->read_through_seq = 6U;
+    legacy_user->unread_count = 1U;
+    (void)snprintf(legacy_user->name, sizeof(legacy_user->name), "V2 Legacy");
+    fill_secret(legacy_user->secret, 0x78U, 0x13U);
+    legacy_user->secret_len = D1L_CHANNEL_SECRET_128_LEN;
+    assert(d1l_channel_store_protocol_hash(
+               legacy_user->secret, legacy_user->secret_len,
+               &legacy_user->channel_hash) == ESP_OK);
+    legacy_user->source = D1L_CHANNEL_SOURCE_MANUAL;
+    legacy_user->enabled = 1U;
+
+    legacy->payload_checksum = fixture_crc32(
+        &legacy->lineage, (size_t)legacy->payload_length);
+}
+
+static void test_v2_migration_and_unknown_generation_rebase(void)
+{
+    mock_nvs_reset();
+    channel_blob_v2_t legacy;
+    build_v2_fixture(&legacy);
+    assert(mock_nvs_seed_blob(CHANNEL_NAMESPACE, CHANNEL_KEY, &legacy,
+                              sizeof(legacy)));
+    assert(d1l_channel_store_init() == ESP_OK);
+    d1l_channel_info_t migrated = find_channel(2U);
+    assert(strcmp(migrated.name, "V2 Legacy") == 0);
+    assert(migrated.newest_message_seq == 7U &&
+           migrated.read_through_seq == 6U && migrated.unread_count == 1U);
+    d1l_channel_store_stats_t stats = d1l_channel_store_stats();
+    assert(stats.message_epoch == 0U && stats.message_next_seq == 0U);
+    assert(mock_nvs_copy_blob(CHANNEL_NAMESPACE, CHANNEL_KEY, NULL, 0U) ==
+           976U);
+
+    /* The v2 cursor is outside the first coherent message generation. Its
+     * provenance is unknowable, so first reconciliation rebases fail-closed. */
+    const d1l_channel_retained_row_t current[] = {
+        {D1L_CHANNEL_PUBLIC_ID, 1U, true},
+    };
+    assert(d1l_channel_store_reconcile_retained_rows(
+               current, sizeof(current) / sizeof(current[0]),
+               &(d1l_channel_message_generation_t){9U, 2U,
+                                                    UINT64_C(0x55)}) ==
+           ESP_OK);
+    migrated = find_channel(2U);
+    const d1l_channel_info_t public_info =
+        find_channel(D1L_CHANNEL_PUBLIC_ID);
+    assert(migrated.newest_message_seq == 0U &&
+           migrated.read_through_seq == 0U && migrated.unread_count == 0U);
+    assert(public_info.newest_message_seq == 1U &&
+           public_info.read_through_seq == 0U &&
+           public_info.unread_count == 1U);
+    stats = d1l_channel_store_stats();
+    assert(stats.message_epoch == 9U && stats.message_next_seq == 2U &&
+           stats.message_clear_lineage == UINT64_C(0x55));
+}
+
 static void test_v1_migration_and_corrupt_fail_closed(void)
 {
     mock_nvs_reset();
@@ -514,9 +813,9 @@ static void test_v1_migration_and_corrupt_fail_closed(void)
     assert(migrated.read_through_seq == 6U);
     assert(migrated.unread_count == 1U);
     assert(mock_nvs_copy_blob(CHANNEL_NAMESPACE, CHANNEL_KEY, NULL, 0U) ==
-           960U);
+           976U);
 
-    uint8_t valid_envelope[960];
+    uint8_t valid_envelope[976];
     memset(valid_envelope, 0, sizeof(valid_envelope));
     assert(mock_nvs_copy_blob(CHANNEL_NAMESPACE, CHANNEL_KEY, valid_envelope,
                               sizeof(valid_envelope)) ==
@@ -524,7 +823,7 @@ static void test_v1_migration_and_corrupt_fail_closed(void)
     assert(valid_envelope[0] == 0x4cU && valid_envelope[1] == 0x4eU &&
            valid_envelope[2] == 0x48U && valid_envelope[3] == 0x43U);
 
-    uint8_t corrupt[960];
+    uint8_t corrupt[976];
     memcpy(corrupt, valid_envelope, sizeof(corrupt));
     corrupt[sizeof(corrupt) - 1U] ^= 0x80U;
     assert_blob_rejected_and_preserved(corrupt, sizeof(corrupt));
@@ -542,7 +841,7 @@ static void test_v1_migration_and_corrupt_fail_closed(void)
     assert_blob_rejected_and_preserved(corrupt, sizeof(corrupt));
 
     memcpy(corrupt, valid_envelope, sizeof(corrupt));
-    put_u32_le(corrupt, 4U, 3U);
+    put_u32_le(corrupt, 4U, 4U);
     assert_blob_rejected_and_preserved(corrupt, sizeof(corrupt));
 
     mock_nvs_reset();
@@ -558,7 +857,7 @@ static void test_v1_migration_and_corrupt_fail_closed(void)
     assert(d1l_channel_store_reset() == ESP_OK);
     assert_public_default();
     assert(mock_nvs_copy_blob(CHANNEL_NAMESPACE, CHANNEL_KEY, NULL, 0U) ==
-           960U);
+           976U);
 }
 
 static void assert_v1_migration_failure_preserves_nvs(bool fail_persist_open)
@@ -605,9 +904,11 @@ static void test_v1_migration_failures_clear_unloaded_ram(void)
 int main(void)
 {
     test_default_add_persist_and_unread();
+    test_retained_reconcile_repairs_failure_reboot_and_eviction();
     test_collisions_capacity_defaults_and_rollback();
     test_uri_import_and_explicit_secret_export();
     test_reset_changes_lineage_and_never_reuses_ids();
+    test_v2_migration_and_unknown_generation_rebase();
     test_v1_migration_and_corrupt_fail_closed();
     test_v1_migration_failures_clear_unloaded_ram();
     puts("native channel store behavior: ok");

@@ -8,15 +8,37 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+def c_function(source: str, signature: str) -> str:
+    start = source.index(signature)
+    while True:
+        brace = source.index("{", start)
+        semicolon = source.find(";", start, brace)
+        if semicolon < 0:
+            break
+        start = source.index(signature, start + len(signature))
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"unterminated function: {signature}")
+
+
 def test_meshcore_service_builds_public_group_text_packets():
     source = read("main/mesh/meshcore_service.c")
+    channel_store = read("main/mesh/channel_store.c")
     wire = read("main/mesh/meshcore_wire.h")
     assert "D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD" in source
     assert "D1L_MESHCORE_PAYLOAD_GROUP_TEXT 0x05U" in wire
-    assert "0x8b, 0x33, 0x87, 0xe9" in source
+    assert "0x8b, 0x33, 0x87, 0xe9" in channel_store
+    assert "s_public_secret" not in source
+    assert "d1l_channel_store_copy_protocol_key" in source
     assert "mbedtls_aes_crypt_ecb" in source
     assert "mbedtls_md_hmac" in source
-    assert "meshcore_service_send_raw(raw, raw_len" in source
+    assert "meshcore_service_send_raw_kind(" in source
     assert "Radio.SendWithOrigin(" in source
     assert "cmd->raw, cmd->raw_len," in source
 
@@ -31,18 +53,14 @@ def test_meshcore_service_rejects_139_byte_or_invalid_utf8_text_without_truncati
     assert "return ESP_ERR_INVALID_SIZE;" in source
     assert "validate_user_text(text)" in source
 
-    public_builder = source.split("static esp_err_t build_public_text_packet", 1)[1].split(
-        "static esp_err_t calc_dm_ack_hash", 1
-    )[0]
-    dm_builder = source.split("static esp_err_t build_dm_text_packet", 1)[1].split(
-        "static void parse_rx_public_packet", 1
-    )[0]
-    public_sender = source.split("esp_err_t d1l_meshcore_service_send_public", 1)[1].split(
-        "static esp_err_t meshcore_service_send_dm_command", 1
-    )[0]
-    dm_sender = source.split(
-        "static esp_err_t meshcore_service_handle_send_dm", 1
-    )[1].split("static void meshcore_service_reply", 1)[0]
+    public_builder = c_function(source, "static esp_err_t build_channel_text_packet(")
+    dm_builder = c_function(source, "static esp_err_t build_dm_text_packet(")
+    public_sender = c_function(
+        source, "static esp_err_t meshcore_service_send_channel_owned("
+    )
+    dm_sender = c_function(
+        source, "static esp_err_t meshcore_service_handle_send_dm("
+    )
 
     assert "validate_user_text(text)" in public_builder
     assert "validate_user_text(text)" in dm_builder
@@ -64,23 +82,19 @@ def test_meshcore_service_rejects_139_byte_or_invalid_utf8_text_without_truncati
     assert '"mesh/user_text.c"' in read("main/CMakeLists.txt")
     assert "d1l_user_text_validate(text)" in source
     assert "d1l_user_text_copy(" in source
-    assert "s_pending_public_text, sizeof(s_pending_public_text), message" in source
+    assert "s_pending_channel_text, sizeof(s_pending_channel_text), message" in source
     assert "s_pending_dm_tx.text," in source
     assert "lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS)" in ui
 
 
 def test_authenticated_inbound_text_is_validated_before_visible_or_ack_side_effects():
     source = read("main/mesh/meshcore_service.c")
-    public_rx = source.split("static void parse_rx_public_packet", 1)[1].split(
-        "static bool parse_rx_dm_packet", 1
-    )[0]
-    dm_rx = source.split("static bool parse_rx_dm_packet", 1)[1].split(
-        "static void parse_rx_path_packet", 1
-    )[0]
+    public_rx = c_function(source, "static void parse_rx_channel_packet(")
+    dm_rx = c_function(source, "static bool parse_rx_dm_packet(")
     public_validate = public_rx.index("d1l_meshcore_text_plaintext_view(")
     assert public_validate < public_rx.index("s_status.rx_packets++")
     assert public_validate < public_rx.index("d1l_route_store_upsert_observation")
-    assert public_validate < public_rx.index("append_public_message_store_rx")
+    assert public_validate < public_rx.index("append_channel_message_store_rx")
     dm_validate = dm_rx.index("d1l_meshcore_text_plaintext_view(")
     for side_effect in [
         "calc_dm_ack_hash",

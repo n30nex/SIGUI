@@ -3217,8 +3217,9 @@ static bool build_data_export_payload(const char *token,
     if (!append_export_json(dest, dest_size, &used,
                             "\"messages\":{\"count\":%u,\"capacity\":%u,"
                             "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+                            "\"history_counters_scope\":\"shared_all_channels\","
                             "\"entries\":[",
-                            (unsigned)message_stats.count,
+                            (unsigned)message_stats.public_count,
                             (unsigned)message_stats.capacity,
                             (unsigned long)message_stats.total_written,
                             (unsigned long)message_stats.dropped_oldest) ||
@@ -3978,8 +3979,8 @@ static void cmd_messages_public(const char *line)
     const bool has_older = total_matches > offset + copied;
     const size_t next_offset = has_older ? offset + copied : offset;
     ok_begin("messages public");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filtered\":%s,\"offset\":%u,\"page_size\":%u,\"page_count\":%u,\"total_matches\":%u,\"has_older\":%s,\"next_offset\":%u",
-           (unsigned)stats.count, (unsigned)stats.capacity,
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"history_counters_scope\":\"shared_all_channels\",\"filtered\":%s,\"offset\":%u,\"page_size\":%u,\"page_count\":%u,\"total_matches\":%u,\"has_older\":%s,\"next_offset\":%u",
+           (unsigned)stats.public_count, (unsigned)stats.capacity,
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
            bool_json(filtered), (unsigned)offset,
            (unsigned)D1L_CONSOLE_MESSAGE_PAGE_SIZE, (unsigned)copied,
@@ -4020,12 +4021,13 @@ static void cmd_messages_public(const char *line)
 
 static void cmd_messages_clear(void)
 {
-    esp_err_t ret = d1l_message_store_clear();
+    esp_err_t ret = d1l_message_store_clear_channel(
+        D1L_CHANNEL_PUBLIC_ID);
     if (ret != ESP_OK) {
         err_result("messages clear", esp_err_to_name(ret), "could not clear public message store");
         return;
     }
-    ret = d1l_read_state_mark_public_read();
+    ret = d1l_app_model_mark_public_read();
     if (ret != ESP_OK) {
         err_result("messages clear", esp_err_to_name(ret), "public messages cleared but read state did not persist");
         return;
@@ -4204,7 +4206,7 @@ static void cmd_messages_read(const char *line)
     char thread_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
     if (strcmp(arg, "public") == 0) {
         target = "public";
-        ret = d1l_read_state_mark_public_read();
+        ret = d1l_app_model_mark_public_read();
     } else if (strcmp(arg, "dm") == 0) {
         target = "dm";
         ret = d1l_read_state_mark_dm_read();

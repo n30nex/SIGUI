@@ -75,6 +75,7 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
 
 def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     console = read("main/comms/usb_console.c")
+    app_source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     messages_ui = read("main/ui/ui_messages.c")
     show_thread = ui.split("static void show_dm_thread_for", 1)[1].split(
@@ -83,7 +84,8 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
 
     assert 'ok_begin("messages unread")' in console
     assert 'strncmp(line, "messages read ", 14)' in console
-    assert "d1l_read_state_mark_public_read()" in console
+    assert "d1l_app_model_mark_public_read()" in console
+    assert "d1l_read_state_mark_public_read()" in app_source
     assert "d1l_read_state_mark_dm_read()" in console
     assert "d1l_read_state_mark_all_read()" in console
     assert '"messages unread"' in console

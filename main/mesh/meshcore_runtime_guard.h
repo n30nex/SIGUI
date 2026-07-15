@@ -113,6 +113,9 @@ static inline bool d1l_mesh_request_guard_release(
 typedef enum {
     D1L_MESH_TX_OPERATION_NONE = 0,
     D1L_MESH_TX_OPERATION_GENERIC,
+    /* Legacy name for the encrypted group-channel operation class. Exact
+     * Public/private identity is carried separately by the pending channel
+     * ID and must never be inferred from this enum value. */
     D1L_MESH_TX_OPERATION_PUBLIC,
     D1L_MESH_TX_OPERATION_ADVERT,
     D1L_MESH_TX_OPERATION_ACK_RESPONSE,

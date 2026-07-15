@@ -108,10 +108,13 @@ def test_meshcore_public_and_advert_paths_feed_routes():
     source = read("main/mesh/meshcore_service.c")
     assert '#include "mesh/route_store.h"' in source
     assert "route_name(packet.route)" in source
-    assert 'd1l_route_store_upsert_observation("public", "Public", "public_text"' in source
+    assert "channel_id == D1L_CHANNEL_PUBLIC_ID" in source
+    assert '"public_text" : "channel_text"' in source
+    assert 'snprintf(dest, 17U, "public")' in source
+    assert "route_target, channel.name, packet_kind" in source
     assert "advert.name[0] ? advert.name : pub_prefix" in source
     assert '"advert"' in source
-    assert 'route store public tx failed' in source
+    assert 'route store channel tx failed' in source
     assert 'route store advert tx failed' in source
     assert "D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT" in source
     assert "d1l_meshcore_service_request_path_discovery_probe" in read("main/mesh/meshcore_service.h")

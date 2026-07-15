@@ -27,7 +27,7 @@ def test_advert_is_a_bounded_mesh_runtime_command():
     adapter = body(
         source,
         "esp_err_t d1l_meshcore_service_request_advert(bool flood)",
-        "esp_err_t d1l_meshcore_service_send_public",
+        "static esp_err_t meshcore_service_send_channel_owned",
     )
 
     assert "D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT" in source

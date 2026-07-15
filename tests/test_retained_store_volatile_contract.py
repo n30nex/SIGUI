@@ -18,10 +18,13 @@ def test_volatile_canaries_have_preview_slots_outside_durable_rings():
     cases = [
         (
             "main/mesh/message_store.c",
-            "static esp_err_t append_public_internal",
+            "static esp_err_t append_channel_internal",
             "d1l_message_entry_t",
             "s_entries[s_head] = entry;",
-            ["d1l_message_store_copy_recent", "d1l_message_store_query_page"],
+            [
+                "d1l_message_store_copy_channel_recent",
+                "d1l_message_store_query_channel_page",
+            ],
         ),
         (
             "main/mesh/dm_store.c",
