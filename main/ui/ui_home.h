@@ -1,8 +1,9 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
-#include "app/app_model.h"
+#include "ui_home_view.h"
 
 typedef struct _lv_obj_t lv_obj_t;
 
@@ -29,11 +30,30 @@ typedef enum {
     D1L_UI_HOME_ACTION_MORE,
 } d1l_ui_home_action_t;
 
-typedef void (*d1l_ui_home_action_handler_t)(d1l_ui_home_action_t action);
+typedef void (*d1l_ui_home_action_handler_t)(d1l_ui_home_action_t action,
+                                             void *context);
 
-const char *d1l_ui_home_sd_state(const d1l_app_snapshot_t *snapshot);
+struct d1l_ui_home_controller;
+
+typedef struct {
+    struct d1l_ui_home_controller *controller;
+    d1l_ui_home_action_t action;
+} d1l_ui_home_action_binding_t;
+
+#define D1L_UI_HOME_ACTION_BINDING_COUNT (D1L_UI_HOME_DESTINATION_COUNT + 1U)
+
+typedef struct d1l_ui_home_controller {
+    d1l_ui_home_view_model_t rendered;
+    d1l_ui_home_action_handler_t action_handler;
+    void *action_context;
+    d1l_ui_home_action_binding_t bindings[D1L_UI_HOME_ACTION_BINDING_COUNT];
+} d1l_ui_home_controller_t;
+
 d1l_ui_home_box_t d1l_ui_home_destination_box(d1l_ui_home_destination_slot_t slot);
 d1l_ui_home_box_t d1l_ui_home_device_box(void);
-void d1l_ui_home_render(lv_obj_t *parent,
-                        const d1l_app_snapshot_t *snapshot,
-                        d1l_ui_home_action_handler_t action_handler);
+void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
+                        lv_obj_t *parent,
+                        const d1l_ui_home_view_model_t *view_model,
+                        d1l_ui_home_action_handler_t action_handler,
+                        void *action_context);
+void d1l_ui_home_deactivate(d1l_ui_home_controller_t *controller);

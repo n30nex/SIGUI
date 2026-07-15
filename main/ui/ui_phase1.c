@@ -126,6 +126,7 @@ static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
 static bool s_messages_show_dms;
+static d1l_ui_home_controller_t s_home_controller;
 static d1l_ui_messages_controller_t s_messages_controller;
 static d1l_ui_nodes_controller_t s_nodes_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR;
@@ -1502,6 +1503,38 @@ static void set_object_hidden(lv_obj_t *obj, bool hidden)
     }
 }
 
+static void home_view_input_from_snapshot(
+    const d1l_app_snapshot_t *snapshot,
+    d1l_ui_home_view_input_t *out_input)
+{
+    if (!snapshot || !out_input) {
+        return;
+    }
+    *out_input = (d1l_ui_home_view_input_t) {
+        .public_unread_count = snapshot->public_unread_count,
+        .dm_unread_count = snapshot->dm_unread_count,
+        .contact_count = snapshot->contact_count,
+        .node_count = snapshot->node_count,
+        .packet_count = snapshot->packet_count,
+        .map_location_set = snapshot->map_location_set,
+        .map_tile_cache_ready = snapshot->map_tile_cache_ready,
+        .wifi_connected = snapshot->wifi_connected,
+        .wifi_enabled = snapshot->wifi_enabled,
+        .ble_companion_enabled = snapshot->ble_companion_enabled,
+        .time_available = snapshot->time_available,
+        .time_label = snapshot->time_label,
+        .storage_retained_backup_degraded =
+            snapshot->storage_retained_backup_degraded,
+        .storage_retained_sd_degraded = snapshot->storage_retained_sd_degraded,
+        .storage_data_enabled = snapshot->storage_data_enabled,
+        .storage_sd_data_root_ready = snapshot->storage_sd_data_root_ready,
+        .storage_setup_required = snapshot->storage_setup_required,
+        .storage_sd_needs_fat32 = snapshot->storage_sd_needs_fat32,
+        .storage_sd_state = snapshot->storage_sd_state,
+        .storage_setup_action = snapshot->storage_setup_action,
+    };
+}
+
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
 {
     if (!snapshot || !s_title_label || !s_status_label || !s_identity_label) {
@@ -1528,10 +1561,12 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
     label_set_fmt(s_status_label, "%s  Mesh %s",
                   snapshot->time_label[0] ? snapshot->time_label : "--:--",
                   snapshot->mesh_state ? snapshot->mesh_state : "starting");
+    d1l_ui_home_view_input_t home_input = {0};
+    home_view_input_from_snapshot(snapshot, &home_input);
     label_set_fmt(s_identity_label, "Wi-Fi %s  BLE %s  SD %s",
                   snapshot->wifi_state ? snapshot->wifi_state : "off",
                   snapshot->ble_state ? snapshot->ble_state : "off",
-                  d1l_ui_home_sd_state(snapshot));
+                  d1l_ui_home_sd_state(&home_input));
 }
 
 static void format_snr_tenths(char *dest, size_t dest_size, int snr_tenths)
@@ -1752,8 +1787,9 @@ static void radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
     s_radio_edit.rx_boost = snapshot->radio_rx_boost;
 }
 
-static void handle_home_action(d1l_ui_home_action_t action)
+static void handle_home_action(d1l_ui_home_action_t action, void *context)
 {
+    (void)context;
     switch (action) {
     case D1L_UI_HOME_ACTION_MESSAGES:
         request_tab_switch(D1L_UI_TAB_MESSAGES);
@@ -1776,7 +1812,11 @@ static void handle_home_action(d1l_ui_home_action_t action)
 
 static void render_home_screen(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
-    d1l_ui_home_render(content, snapshot, handle_home_action);
+    d1l_ui_home_view_input_t input = {0};
+    home_view_input_from_snapshot(snapshot, &input);
+    d1l_ui_home_view(&input, &s_home_controller.rendered);
+    d1l_ui_home_render(&s_home_controller, content, &s_home_controller.rendered,
+                       handle_home_action, NULL);
 }
 
 static void handle_settings_action(d1l_ui_settings_action_t action)
@@ -6177,6 +6217,9 @@ static void render_active_tab(void)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     layout_content_for_active_tab();
+    if (d1l_ui_navigation_active() != D1L_UI_TAB_HOME) {
+        d1l_ui_home_deactivate(&s_home_controller);
+    }
     if (d1l_ui_navigation_active() != D1L_UI_TAB_MESSAGES) {
         d1l_ui_messages_deactivate(&s_messages_controller);
     }

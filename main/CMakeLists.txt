@@ -55,6 +55,7 @@ idf_component_register(
         "ui/ui_chrome.c"
         "ui/ui_connectivity.c"
         "ui/ui_home.c"
+        "ui/ui_home_view.c"
         "ui/ui_keyboard.c"
         "ui/ui_map.c"
         "ui/ui_messages.c"
