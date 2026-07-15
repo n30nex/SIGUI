@@ -615,26 +615,26 @@ def test_unsaved_map_location_uses_empty_fields_and_example_placeholders():
 
 
 def test_home_map_status_reports_setup_requirements_not_sd_as_saved_content():
-    source = read("main/ui/ui_home.c")
+    source = read("main/ui/ui_home_view.c")
 
     assert 'const char *map_status = "Ready to open";' in source
     assert 'map_status = "Set a location";' in source
-    assert "map_status = home_map_storage_state(snapshot);" in source
+    assert "map_status = map_storage_state(input);" in source
     assert 'return "SD starting";' in source
     assert 'return "Insert SD";' in source
-    helper = source.split("static const char *home_map_storage_state", 1)[1].split(
-        "d1l_ui_home_box_t d1l_ui_home_destination_box", 1
+    helper = source.split("static const char *map_storage_state", 1)[1].split(
+        "void d1l_ui_home_view", 1
     )[0]
-    assert helper.index('strcmp(snapshot->storage_setup_action, "insert_card")') < helper.index(
-        "d1l_ui_home_sd_state(snapshot)"
+    assert helper.index('text_equals(input->storage_setup_action, "insert_card")') < helper.index(
+        "d1l_ui_home_sd_state(input)"
     )
-    assert helper.index("snapshot->storage_sd_needs_fat32") < helper.index(
-        "d1l_ui_home_sd_state(snapshot)"
+    assert helper.index("input->storage_sd_needs_fat32") < helper.index(
+        "d1l_ui_home_sd_state(input)"
     )
-    assert "home_storage_needs_attention(snapshot)" in helper
+    assert "storage_needs_attention(input)" in helper
     assert 'map_status = "Needs Wi-Fi";' in source
     assert '"Map cache ready"' not in source
     assert '"Map setup needed"' not in source
-    assert source.index("if (!snapshot->map_location_set)") < source.index(
-        "else if (!snapshot->map_tile_cache_ready)"
-    ) < source.index("else if (!snapshot->wifi_connected)")
+    assert source.index("if (!input->map_location_set)") < source.index(
+        "else if (!input->map_tile_cache_ready)"
+    ) < source.index("else if (!input->wifi_connected)")

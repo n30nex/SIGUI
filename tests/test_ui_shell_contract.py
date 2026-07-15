@@ -179,17 +179,21 @@ def test_home_screen_is_user_first_companion_dashboard():
     header = read("main/app/app_model.h")
     home_module = read("main/ui/ui_home.c")
     home_header = read("main/ui/ui_home.h")
+    home_view = read("main/ui/ui_home_view.c")
+    home_view_header = read("main/ui/ui_home_view.h")
 
     assert '"ui/ui_home.c"' in cmake
+    assert '"ui/ui_home_view.c"' in cmake
     assert '#include "ui_home.h"' in source
-    assert "d1l_ui_home_render(content, snapshot, handle_home_action);" in source
+    assert "d1l_ui_home_view(&input, &s_home_controller.rendered);" in source
+    assert "d1l_ui_home_render(&s_home_controller, content" in source
     assert "d1l_ui_home_render" in home_module
     assert "d1l_ui_home_render" in home_header
-    assert "d1l_ui_home_sd_state" in home_header
-    assert 'strcmp(state, "mount_pending") == 0' in home_module
-    assert 'return "mounting";' in home_module
-    assert 'return "needs FAT32";' in home_module
-    assert "return snapshot->storage_sd_state;" not in home_module
+    assert "d1l_ui_home_sd_state" in home_view_header
+    assert 'strcmp(state, "mount_pending") == 0' in home_view
+    assert 'return "mounting";' in home_view
+    assert 'return "needs FAT32";' in home_view
+    assert "return input->storage_sd_state;" not in home_view
     assert "d1l_ui_home_destination_box" in home_header
     assert "d1l_ui_home_device_box" in home_header
     assert "static const d1l_ui_home_box_t k_destination_boxes" in home_module
@@ -204,8 +208,9 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "lv_obj_set_style_border_width(panel, 1, 0)" in home_module
     assert "home_action_event_cb" in home_module
     assert "lv_event_get_user_data(event)" in home_module
-    assert "static const d1l_ui_home_action_t k_action_values" in home_module
-    assert "(void *)&k_action_values[action]" in home_module
+    assert "d1l_ui_home_action_binding_t" in home_header
+    assert "binding->controller->action_handler" in home_module
+    assert "k_action_values" not in home_module
     assert "(void *)(uintptr_t)action" not in home_module
     assert "D1L_UI_HOME_ACTION_MESSAGES" in home_header
     assert "D1L_UI_HOME_ACTION_NETWORK" in home_header
@@ -230,11 +235,12 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert '"Wi-Fi"' in home_module
     assert '"BLE"' in home_module
     assert '"SD"' in home_module
-    assert "snapshot->public_unread_count" in home_module
-    assert "snapshot->dm_unread_count" in home_module
-    assert "snapshot->contact_count" in home_module
-    assert "snapshot->node_count" in home_module
-    assert "snapshot->packet_count" in home_module
+    assert "input->public_unread_count" in home_view
+    assert "input->dm_unread_count" in home_view
+    assert "input->contact_count" in home_view
+    assert "input->node_count" in home_view
+    assert "input->packet_count" in home_view
+    assert "snapshot->" not in home_module
     assert "handle_home_action" in source
     for action, tab in (
         ("D1L_UI_HOME_ACTION_MESSAGES", "D1L_UI_TAB_MESSAGES"),
@@ -246,7 +252,7 @@ def test_home_screen_is_user_first_companion_dashboard():
         assert f"request_tab_switch({tab});" in route_body
     home_body = home_module.split("void d1l_ui_home_render", 1)[1]
     assert home_body.count("render_destination_card(parent") == 4
-    assert "render_device_status(parent, snapshot);" in home_body
+    assert "render_device_status(parent, &controller->rendered" in home_body
     assert "render_status_icon" not in home_body
     assert "Mesh %s  RX %lu  TX %lu" not in home_body
     assert "Last Messages" not in home_body

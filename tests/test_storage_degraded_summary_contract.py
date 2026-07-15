@@ -13,37 +13,37 @@ def function_body(source: str, start: str, end: str) -> str:
 
 
 def test_home_and_top_bar_prioritize_retained_sd_degradation_over_ready_state():
-    source = read("main/ui/ui_home.c")
+    source = read("main/ui/ui_home_view.c")
     shell = read("main/ui/ui_phase1.c")
     state_body = function_body(
         source,
         "const char *d1l_ui_home_sd_state",
-        "d1l_ui_home_box_t d1l_ui_home_destination_box",
+        "static const char *map_storage_state",
     )
 
-    degraded = "if (home_storage_needs_attention(snapshot))"
-    ready = "if (snapshot->storage_data_enabled || snapshot->storage_sd_data_root_ready)"
+    degraded = "if (storage_needs_attention(input))"
+    ready = "if (input->storage_data_enabled || input->storage_sd_data_root_ready)"
     assert degraded in state_body
     assert state_body.index(degraded) < state_body.index(ready)
     assert 'return "Needs attention";' in state_body
 
-    color_table = source.split("const uint32_t colors[]", 1)[1].split("};", 1)[0]
-    assert "home_storage_needs_attention(snapshot) ? 0xF87171" in color_table
-    assert color_table.index("home_storage_needs_attention") < color_table.index(
-        "snapshot->storage_data_enabled ? 0x5EEAD4"
+    color_table = source.split("out_view->sd_value_color =", 1)[1].split(";", 1)[0]
+    assert "out_view->storage_needs_attention ? 0xF87171U" in color_table
+    assert color_table.index("storage_needs_attention") < color_table.index(
+        "input->storage_data_enabled ? 0x5EEAD4U"
     )
 
     top_bar = function_body(shell, "static void update_chrome", "static lv_obj_t *render_metric_card")
     assert 'label_set_fmt(s_identity_label, "Wi-Fi %s  BLE %s  SD %s"' in top_bar
-    assert "d1l_ui_home_sd_state(snapshot)" in top_bar
+    assert "d1l_ui_home_sd_state(&home_input)" in top_bar
 
 
 def test_home_and_top_bar_never_render_raw_storage_state_slugs():
-    source = read("main/ui/ui_home.c")
+    source = read("main/ui/ui_home_view.c")
     state_body = function_body(
         source,
         "const char *d1l_ui_home_sd_state",
-        "d1l_ui_home_box_t d1l_ui_home_destination_box",
+        "static const char *map_storage_state",
     )
 
     assert "return state;" not in state_body
@@ -94,7 +94,7 @@ def test_more_sd_card_summary_uses_attention_status_and_warning_style_when_degra
 
 
 def test_probe_and_reported_sd_errors_use_friendly_attention_summary_before_ready():
-    home = read("main/ui/ui_home.c")
+    home = read("main/ui/ui_home_view.c")
     settings = read("main/ui/ui_settings.c")
     raw_faults = (
         '"error"',
@@ -105,7 +105,7 @@ def test_probe_and_reported_sd_errors_use_friendly_attention_summary_before_read
 
     home_classifier = function_body(
         home,
-        "static bool home_storage_needs_attention",
+        "static bool storage_needs_attention",
         "const char *d1l_ui_home_sd_state",
     )
     settings_classifier = function_body(
@@ -120,10 +120,10 @@ def test_probe_and_reported_sd_errors_use_friendly_attention_summary_before_read
     home_summary = function_body(
         home,
         "const char *d1l_ui_home_sd_state",
-        "d1l_ui_home_box_t d1l_ui_home_destination_box",
+        "static const char *map_storage_state",
     )
-    assert home_summary.index("home_storage_needs_attention(snapshot)") < home_summary.index(
-        "snapshot->storage_data_enabled || snapshot->storage_sd_data_root_ready"
+    assert home_summary.index("storage_needs_attention(input)") < home_summary.index(
+        "input->storage_data_enabled || input->storage_sd_data_root_ready"
     )
     assert 'return "Needs attention";' in home_summary
 
