@@ -256,6 +256,36 @@ esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
                                       d1l_channel_store_stats_t *out_stats);
 esp_err_t d1l_app_model_select_channel(uint64_t channel_id,
                                        d1l_channel_info_t *out_channel);
+/* Channel-management reads return only d1l_channel_info_t, which is redacted.
+ * Secret-bearing inputs are passed synchronously to the canonical retained
+ * store; this boundary never copies them into normal app state or logs. The
+ * caller remains responsible for clearing its input buffer after the call. */
+esp_err_t d1l_app_model_add_channel(
+    const char *name, const uint8_t *secret, uint8_t secret_len,
+    bool enabled, bool make_default,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel);
+esp_err_t d1l_app_model_import_channel_uri(
+    const char *uri, size_t uri_len,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel);
+esp_err_t d1l_app_model_update_channel(
+    uint64_t channel_id, const char *name, bool enabled, bool make_default,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel);
+/* confirmed must be true. This makes the destructive confirmation decision an
+ * explicit input at the application boundary instead of a UI-only convention. */
+esp_err_t d1l_app_model_remove_channel(
+    uint64_t channel_id, bool confirmed,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel);
+/* This explicit export is the only app-model operation that returns channel
+ * secret material. The caller must never log the URI and must call the clear
+ * helper as soon as the one-shot share/QR view closes. The destination is
+ * securely cleared before use and again on error. */
+esp_err_t d1l_app_model_export_channel_share_uri(
+    uint64_t channel_id, char *dest, size_t dest_size);
+void d1l_app_model_clear_channel_share_uri(char *dest, size_t dest_size);
 size_t d1l_app_model_query_public_messages_page(d1l_message_entry_t *out_entries,
                                                 size_t max_entries,
                                                 size_t skip_newest,
