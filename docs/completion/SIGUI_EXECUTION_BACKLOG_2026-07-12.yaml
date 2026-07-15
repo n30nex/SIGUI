@@ -3,13 +3,13 @@ generated_at: '2026-07-15'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: c50117426956cb8bddd2251e35849069cd5b1044
-  integrated_candidate: c50117426956cb8bddd2251e35849069cd5b1044
-  live_main_actions_run: 29389463246
+  merged_baseline: 840ae4874ad204d8fe13a29ca2e832fc0961d155
+  integrated_candidate: 840ae4874ad204d8fe13a29ca2e832fc0961d155
+  live_main_actions_run: 29391670113
   live_main_actions_status: success
   exact_main_gate_pending: false
   exact_main_evidence_bank_pending: false
-  last_strict_verified_main: c50117426956cb8bddd2251e35849069cd5b1044
+  last_strict_verified_main: 840ae4874ad204d8fe13a29ca2e832fc0961d155
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
   proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
@@ -875,37 +875,37 @@ project:
     wp11_closure: false
     physical_evidence: false
   live_main_artifact_integrity:
-    commit: c50117426956cb8bddd2251e35849069cd5b1044
-    run: 29389463246
+    commit: 840ae4874ad204d8fe13a29ca2e832fc0961d155
+    run: 29391670113
     status: strict_pass_after_download
     exact_main_gate_pending: false
-    host_tests_passed: 1090
+    host_tests_passed: 1094
     checksum_contract_tests_passed: 32
     manifests_total: 3
     manifests_verified: 3
     checksum_entries_verified: 46
     artifact_archives_verified: 5
-    artifact_zip_total_bytes: 23448410
-    firmware_manifest_sha256: 072e06594263a89871417bac76c2f6cfe7b85ece3300f4bdffd0fadc47c9202f
+    artifact_zip_total_bytes: 23578729
+    firmware_manifest_sha256: addcaf530aea8b8957733f7f73382bce80ec9f28bee891c9ade772c3873ebdec
     build_inputs_manifest_sha256: 521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233
-    release_manifest_sha256: af7b966a2465ccfa51e5a4eef39d8cfe7ebf2d6133acf724eb51196207ea6426
-    release_package_manifest_json_sha256: 20741f563eb6f86f46e51ba5657ef40949515e86b160459a1e5a99c671d9b364
-    application_sha256: fec68f68b6e59fadbfee608d682d657415d6e25b926bf9c4164d93ec4a1555ef
-    full_flash_sha256: 373dae95ffb2acfca1bf8db96fd14691b0598f8902c9d0f9ee0e04b606cad1fd
+    release_manifest_sha256: db6c3881372c1fe220decccdfd5c3cfff424fb3cf5e94c1f7667c3f247cf4667
+    release_package_manifest_json_sha256: dbb28349920f6d0c21045d16f4314397b40b48cacd4e32c0c9131c9579a5a416
+    application_sha256: 6e1d19801b4083a8d5a8bf0653e14a3bce33de63f43b083d4f36c81abf7f72c5
+    full_flash_sha256: 0dd78234e3027fe6d05d544cfe963c3c823d0f1baad610694609504c80ef8979
     rp2040_bridge_uf2_sha256: null
-    downloaded_tree_file_count: 222
-    downloaded_tree_total_bytes: 74854241
-    downloaded_tree_sha256: d99a11374b773c24d0e61bb6bdfb71fbe9265cd14c8cdef5cc8bcddc37cba0fd
+    downloaded_tree_file_count: 228
+    downloaded_tree_total_bytes: 75037120
+    downloaded_tree_sha256: cee8eb5f2d23c63103798633fc4f3734b365b542a91ca963770c504621649115
     downloaded_tree_hash_scope: sorted_relative_path_byte_size_and_sha256_entries_compact_sort_keys_json
-    host_success_marker_sha256: 8ce911389d655d7149cde2c858eb91330bbaf51d0abcb5fdeda798187b1b33fd
-    completion_ledger_validation_sha256: 03e7696d96269806ac8d8003f2f94d1527bc5f40e0bdda6eccd26ba663f8b132
-    release_audit_sha256: 2d47932531e2ff4f261e341ccbe5fa276247f8210b1ce396b5770b3268ef02db
-    sbom_sha256: 778455f7294291d90510ea79e0b3bf5e9a7dc0fcbd87b24d07d5d9ea002db245
-    provenance_sha256: 5cf7a7a6d290a98bf905fa8b56c7a08d43a3f4e5260fae1cc2d223c028fe749a
-    meshcore_receipt_sha256: 30f3b6a22995851ca8e4fbb089e837b826150457b4fd9bc8b691c0fc5cc8bd45
-    meshcore_signed_runtime_receipt_sha256: 5b2bf90f60059824a7176fb83108b4eac8a866c8d5cf60bd224514f3df4a0f7c
-    portable_aggregate_path: docs/completion/evidence/wp15/dm_conversation_controller_c50117426956cb8bddd2251e35849069cd5b1044.json
-    portable_aggregate_sha256: 6603a075eb20f254c7ee4b30a9c7b5ae00beca8b40b5c7de8aeeb7b5f3fe4c1b
+    host_success_marker_sha256: d3edf9dae0e1a8b02387c4a01b0a16d64464351b0e9a8f83c4823d8e5d30aa6c
+    completion_ledger_validation_sha256: e08c5b266377900a938d616ed56ef15167fe350f2e647b904440f844ec7f9330
+    release_audit_sha256: 92adbc860f13b825263538c478c95a1eea17724a0342144c06c38d74dff2598a
+    sbom_sha256: 4c083a3487561cd4608d498a904efd02f0f870a26b6ad22eab2c36b8b4e8d163
+    provenance_sha256: a7e46f8e598fdc88779966b172ab1bb3cf271b3e3c24573f70d3414220ad2e9a
+    meshcore_receipt_sha256: 86fdc17414d7b164c34bf48640fb8d88b8dd46df2e7b4ab911138071813a4ff6
+    meshcore_signed_runtime_receipt_sha256: 998ab47f3cd5a18dfd774ac1654bb2f8ef2a65e6be70074718034268d51ad805
+    portable_aggregate_path: docs/completion/evidence/wp15/messages_root_public_chat_840ae4874ad204d8fe13a29ca2e832fc0961d155.json
+    portable_aggregate_sha256: 63f6a69a84b9862524b36dac254a5b941a419e339e5928576d2401b755bcb742
     wp13_portable_aggregate_path: docs/completion/evidence/wp13/wifi_crash_guard_8a73e0b5815d73795cc7f3f2588800e04170b3b9.json
     wp13_portable_aggregate_sha256: 97b2f89f762f8acbdaa84e7d8b905e2dbde58bdd43584771d10345a2c96ca463
     wp13_retry_policy_portable_aggregate_path: docs/completion/evidence/wp13/wifi_retry_policy_bdbf43a6d5e241b0b6aede58d5786469e000c749.json
@@ -922,6 +922,8 @@ project:
     wp14_contact_sheets_portable_aggregate_sha256: f3e3e2d4c62720c22bb5d7c6b9fc6fd61d5e53d13ea938815e4460d773644d9e
     wp15_dm_conversation_portable_aggregate_path: docs/completion/evidence/wp15/dm_conversation_controller_c50117426956cb8bddd2251e35849069cd5b1044.json
     wp15_dm_conversation_portable_aggregate_sha256: 6603a075eb20f254c7ee4b30a9c7b5ae00beca8b40b5c7de8aeeb7b5f3fe4c1b
+    wp15_messages_root_public_chat_portable_aggregate_path: docs/completion/evidence/wp15/messages_root_public_chat_840ae4874ad204d8fe13a29ca2e832fc0961d155.json
+    wp15_messages_root_public_chat_portable_aggregate_sha256: 63f6a69a84b9862524b36dac254a5b941a419e339e5928576d2401b755bcb742
     wp14_wifi_portable_aggregate_path: docs/completion/evidence/wp14/wifi_setup_controller_2384e5047730b1ee9ef8a14d8991a64f20043570.json
     wp14_wifi_portable_aggregate_sha256: 86137f1f43b518c5a5d0136aea0249f63e4eeb842e4041e7c371c8cafd5ce81f
     wp14_storage_portable_aggregate_path: docs/completion/evidence/wp14/storage_viewmodel_9f438da114b9e705662a0dc9f8527891c0ce2b40.json
@@ -937,20 +939,20 @@ project:
     idf_version_portable_aggregate_sha256: f21abb17403f432c17bf19cc052cd185b05a39c705a3a984e73f5fcb6a547fa5
     full_ubsan_clean: true
     sanitizer_exception_count: 0
-    exact_main_gate_receipt_sha256: 605cc5d8988eb798f4825553314535c5f43ee54993ebddc7cbad7f77cb1bde71
-    note: "Current live main and last strict-verified checkpoint are c501174. Actions 29389463246 strict-passed 1,090 host plus 32 checksum tests, conformance/fuzz, five downloaded ZIPs / 46 entries across 222 files / 74,854,241 bytes, exact-source provenance, and SPDX. Strict receipt SHA-256 is 605cc5d8988eb798f4825553314535c5f43ee54993ebddc7cbad7f77cb1bde71. PR #137 adds bounded truthful direct-message conversation ownership as partial WP-15 software. WP-15 remains blocked on its remaining Messages UX, simulator/incoming-event, physical UI, and acceptance gates. PR #136 completed the planned WP-14 UI hierarchy/controller extraction in code; UI-task/lifecycle, 1,000-transition, exact-candidate physical touch/scroll/focus/keyboard, live BLE/display/RF, full WP-14 acceptance, and release closure remain open."
+    exact_main_gate_receipt_sha256: d513bed9bb647a48a01bf57ce7266f99e55a755602ca645d4d479b0940143c0d
+    note: "Current live main and last strict-verified checkpoint are 840ae48. Actions 29391670113 strict-passed 1,094 host plus 32 checksum tests, conformance/fuzz, five downloaded ZIPs / 46 entries across 228 files / 75,037,120 bytes, exact-source provenance, and SPDX. Strict receipt SHA-256 is d513bed9bb647a48a01bf57ce7266f99e55a755602ca645d4d479b0940143c0d. PR #139 adds the bounded Messages root and truthful Public chat hierarchy as the second partial WP-15 software slice; PR #137's direct-message controller remains banked. WP-15 remains blocked on compose/UTF-8, degraded/failure, incoming-event, controlled-peer RF, physical UI, and acceptance gates."
     last_strict_verified_main:
-      commit: c50117426956cb8bddd2251e35849069cd5b1044
-      run: 29389463246
-      host_tests_passed: 1090
+      commit: 840ae4874ad204d8fe13a29ca2e832fc0961d155
+      run: 29391670113
+      host_tests_passed: 1094
       checksum_contract_tests_passed: 32
       checksum_entries_verified: 46
-      downloaded_tree_file_count: 222
-      downloaded_tree_total_bytes: 74854241
-      downloaded_tree_sha256: d99a11374b773c24d0e61bb6bdfb71fbe9265cd14c8cdef5cc8bcddc37cba0fd
-      provenance_sha256: 5cf7a7a6d290a98bf905fa8b56c7a08d43a3f4e5260fae1cc2d223c028fe749a
-      sbom_sha256: 778455f7294291d90510ea79e0b3bf5e9a7dc0fcbd87b24d07d5d9ea002db245
-      exact_main_gate_receipt_sha256: 605cc5d8988eb798f4825553314535c5f43ee54993ebddc7cbad7f77cb1bde71
+      downloaded_tree_file_count: 228
+      downloaded_tree_total_bytes: 75037120
+      downloaded_tree_sha256: cee8eb5f2d23c63103798633fc4f3734b365b542a91ca963770c504621649115
+      provenance_sha256: a7e46f8e598fdc88779966b172ab1bb3cf271b3e3c24573f70d3414220ad2e9a
+      sbom_sha256: 4c083a3487561cd4608d498a904efd02f0f870a26b6ad22eab2c36b8b4e8d163
+      exact_main_gate_receipt_sha256: d513bed9bb647a48a01bf57ce7266f99e55a755602ca645d4d479b0940143c0d
     previous_failed_receipt:
       commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
       run: 29286754864
@@ -967,11 +969,11 @@ project:
     checksum_entries_verified: 78
   release_audit:
     ready_for_public_release: false
-    exact_main_run: 29389463246
-    receipt_sha256: 2d47932531e2ff4f261e341ccbe5fa276247f8210b1ce396b5770b3268ef02db
+    exact_main_run: 29391670113
+    receipt_sha256: 92adbc860f13b825263538c478c95a1eea17724a0342144c06c38d74dff2598a
     status: fail_closed
-    last_strict_verified_main_run: 29389463246
-    last_strict_verified_receipt_sha256: 605cc5d8988eb798f4825553314535c5f43ee54993ebddc7cbad7f77cb1bde71
+    last_strict_verified_main_run: 29391670113
+    last_strict_verified_receipt_sha256: d513bed9bb647a48a01bf57ce7266f99e55a755602ca645d4d479b0940143c0d
     remaining_p0_failures: 33
     failures_overall_including_p1: 35
   active_pull_requests: []
@@ -2668,8 +2670,8 @@ work_packages:
   - 67
   status: blocked
   dependency_gate: merged
-  implementation_commit: c50117426956cb8bddd2251e35849069cd5b1044
-  evidence_commit: c50117426956cb8bddd2251e35849069cd5b1044
+  implementation_commit: 840ae4874ad204d8fe13a29ca2e832fc0961d155
+  evidence_commit: 840ae4874ad204d8fe13a29ca2e832fc0961d155
   implementation_merged: false
   partial_implementation_merged: true
   software_implementation_status: partial_merged_in_progress
@@ -2689,15 +2691,30 @@ work_packages:
     exact_main_gate_pending: false
     wp15_software_implementation_complete: false
     physical_ui_evidence: false
+  - pull_request: 139
+    head_commit: d8457e2578a5ae0eb8f9cee0596d53f68bcfd7d6
+    head_and_main_tree: 9bf1c86026c39d61e661fab74c48603c9177653b
+    merge_commit: 840ae4874ad204d8fe13a29ca2e832fc0961d155
+    pull_request_actions_run: 29391179655
+    pull_request_gate_receipt_sha256: 9fc294d0d212cd53c5a41af8a37ff8214e11eb4d165c1316dc97ceff17506d5e
+    cancelled_duplicate_push_run: 29391170573
+    merged_main_actions_run: 29391670113
+    merged_main_gate_receipt_sha256: d513bed9bb647a48a01bf57ce7266f99e55a755602ca645d4d479b0940143c0d
+    portable_aggregate_path: docs/completion/evidence/wp15/messages_root_public_chat_840ae4874ad204d8fe13a29ca2e832fc0961d155.json
+    portable_aggregate_sha256: 63f6a69a84b9862524b36dac254a5b941a419e339e5928576d2401b755bcb742
+    scope: bounded_messages_root_public_chat_hierarchy_directional_wrapped_bubbles_truthful_tx_state_public_only_read_cursor_and_rf_silent_navigation
+    exact_main_gate_pending: false
+    wp15_software_implementation_complete: false
+    physical_ui_evidence: false
+    controlled_peer_rf_evidence: false
   residual_capabilities:
-  - complete_public_default_and_other_channel_sections
-  - complete_recent_sender_time_preview_and_unread_truth
   - complete_compose_byte_utf8_emoji_and_send_eligibility_controls
   - complete_sender_to_dm_identity_eligibility_explanations
-  - complete_bounded_retained_search
-  - complete_empty_loading_storage_degraded_no_contact_failure_and_retry_states
+  - complete_bounded_retained_search_and_empty_loading_storage_degraded_no_contact_failure_retry_states
+  - integrate_trusted_persisted_wall_time_or_continue_truthful_time_unknown_display
   - prove_notification_badges_follow_relevant_cursor_advancement
   - prove_all_simulator_states_and_incoming_event_switching
+  - controlled_peer_public_and_dm_truthful_delivery_acceptance
   - exact_candidate_physical_touch_keyboard_scroll_and_utf8_qualification
   - required_messages_ui_acceptance_artifact
   required_artifacts:
