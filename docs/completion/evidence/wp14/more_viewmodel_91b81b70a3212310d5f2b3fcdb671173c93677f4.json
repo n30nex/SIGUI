@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp14_more_viewmodel_exact_main_aggregate",
+  "generated_utc": "2026-07-15T01:45:58Z",
+  "claim_scope": "Portable exact-main software and artifact evidence for the sixth bounded WP-14 extraction slice. More/Settings truth is produced by a pure bounded view model, copied into a controller-owned render snapshot, and dispatched through generation-checked controller-owned category and action bindings that are cleared on deactivate. The renderer no longer reads the raw app snapshot. The slice is merged and strict-verified on exact main 91b81b70a3212310d5f2b3fcdb671173c93677f4. This aggregate does not close complete UI-task ownership, remaining screen extraction, lifecycle/generation/redraw invariants, 1,000-transition acceptance, physical UI qualification, WP-14, or release gates.",
+  "exact_pair": {
+    "pull_request": 127,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/127",
+    "base_sha": "bdbf43a6d5e241b0b6aede58d5786469e000c749",
+    "head_sha": "94fc5e56932b549794a6e8ca755a5c3d19431502",
+    "merged_main_sha": "91b81b70a3212310d5f2b3fcdb671173c93677f4",
+    "merged_main_parent_sha": "bdbf43a6d5e241b0b6aede58d5786469e000c749",
+    "merged_main_tree_sha": "0db90f0af19722a0f60b2d23b25065402ef1a722"
+  },
+  "implementation_boundary": {
+    "view_model_files": [
+      "main/ui/ui_more_view.c",
+      "main/ui/ui_more_view.h"
+    ],
+    "controller_files": [
+      "main/ui/ui_settings.c",
+      "main/ui/ui_settings.h"
+    ],
+    "integration_file": "main/ui/ui_phase1.c",
+    "immutable_input_to_owned_bounded_view_model": true,
+    "controller_owned_render_snapshot": true,
+    "controller_owned_category_and_action_bindings": true,
+    "binding_generation_and_action_identity_checked": true,
+    "deactivate_clears_handler_context_and_bindings": true,
+    "renderer_reads_raw_app_snapshot": false,
+    "pure_view_model_calls_lvgl": false,
+    "pure_view_model_calls_app_model_or_freertos": false,
+    "complete_ui_runtime_owner_extraction": false,
+    "thousand_transition_acceptance": false,
+    "physical_ui_acceptance": false
+  },
+  "exact_main_gate": {
+    "actions_run": 29382094865,
+    "actions_jobs_succeeded": 5,
+    "validated_main_sha": "91b81b70a3212310d5f2b3fcdb671173c93677f4",
+    "validated_tree_sha": "0db90f0af19722a0f60b2d23b25065402ef1a722",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 1046,
+    "host_tests_failed": 0,
+    "host_tests_skipped": 0,
+    "checksum_contract_tests_passed": 32,
+    "checksum_contract_tests_failed": 0,
+    "checksum_contract_tests_skipped": 0,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "artifact_archives_verified": 8,
+    "artifact_zip_total_bytes": 33324973,
+    "artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "bb673b870dad4cfea9ee41d45b2dac8be07417fb2efba79aadcb4b9da280dd09",
+      "d1l-host-artifacts": "cb5eba97632f640242268dd89e216e922b9446c2b8ac12fc81d82e6f78b7fef9",
+      "d1l-idf55-migration-state": "396a6709451de306ac24c35dea66987a41698237a1932d8c77f94d56541b1111",
+      "d1l-meshcore-wire-conformance": "0fc6999b853e8c4de6c1311e007e39953522af4084177721af5b53d7c59e7366",
+      "d1l-release-package": "489a037e72aee8b2794a89966c42804e07728f9a9ef56cd22baad570ddf8f76a",
+      "rp2040-sd-bridge-firmware": "9040fa152056553a7d5b5ba511c533a23b41f83cbb13225d1895678f5619ba04",
+      "rp2040-sd-smoke-firmware": "b1921db6cab85510cfa6dd9ead7f77f2ea3077b7eb7e5212453694cd22aa7544",
+      "rp2040-seeed-official-sd-smoke-firmware": "5f77d3d320a897da27fb5a60abf520cc28bc70ac4c3617bcec62d29564400912"
+    },
+    "checksum_manifests_verified": 9,
+    "checksum_entries_verified": 91,
+    "extracted_file_count": 262,
+    "extracted_total_bytes": 107415035,
+    "downloaded_tree_sha256": "1ac1d249e1856d95a5324a07d339558b8020d6fa1c845425b9510c293bca6da2",
+    "firmware_manifest_sha256": "ade2da76efc377569fad6b4ef453eb5e184df6be4742bf9577fc9a28372bad71",
+    "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+    "release_manifest_sha256": "0cae0572fb0db48f2e6518916ba0e5ccc768581b1a128deda60c3a2215054bb6",
+    "release_package_manifest_json_sha256": "b4bcab16fc47cde6e1bed59204228ee50e3ccfd5f3c9cacbd2a6cdaaf5b54504",
+    "application_sha256": "411e968c562f10497cee02b294736eb7984b90969cd55aaba8025f4462a952b9",
+    "full_flash_sha256": "921742a4b936d6b247026bd29cb3668ad76489486737e1011787d440f06af615",
+    "rp2040_bridge_uf2_sha256": "ca1043bc640a6a7d7e9236f0ba0cec4b4ac0bf135c7085776b470b110a5cb096",
+    "host_success_marker_sha256": "2c5cb7c0eedd2104d6f07a02c1f18f5006f28b2fcb0afc52ef4b66b6381667b1",
+    "meshcore_conformance_receipt_sha256": "0c97a417317a799c6adec097a1cf41a5015d137e555058e28385102ba50559bc",
+    "meshcore_signed_runtime_receipt_sha256": "e5c4849e647724f14d0fe9183bdb59ee950b4283ed6a5f431da78f403dfa8f1f",
+    "provenance_sha256": "c0b91d5704dcb5cf7d0ce952103833901943e132fc6b10a2336a3249bd4a1cca",
+    "sbom_sha256": "7371135811a1e4d6be1668f05e36d4edaaa6e1330ea8e745337f37732be193f5",
+    "release_audit_sha256": "30fb47d3c2e6ffc671b715342f3f7ec84a2a81a3240d2bd957a7b406d0d7c4c5",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "completion_ledger_validation_sha256": "e706257acf9d882521813fd1fd8348c08d50d740b1ad6ad5b3d420e31f558486",
+    "firmware_embedded_source_identity_exact": true,
+    "firmware_binaries_checked": 5,
+    "receipt_path": "F:/SIGUI-artifact-gates/main-91b81b7/main_strict_gate_91b81b70a3212310d5f2b3fcdb671173c93677f4.json",
+    "receipt_sha256": "a239057b122b20fcfe48e7f98cff32c0274deb85f11708698d802c62baa0c848",
+    "verdict": "exact_merged_main_sixth_wp14_more_software_and_artifact_gate_banked"
+  },
+  "residual_wp14_gates": {
+    "closed": false,
+    "remaining": [
+      "complete_ui_runtime_owner_and_command_queue_extraction",
+      "extract_remaining_route_contact_storage_wifi_map_terminal_admin_update_surfaces",
+      "lifecycle_generation_and_redraw_invariants",
+      "one_thousand_automated_navigation_transitions",
+      "exact_candidate_physical_ui_and_touch_qualification",
+      "required_ui_runtime_safety_artifact"
+    ]
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "ui_hardware_closure_claimed": false,
+    "wp14_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "sixth_wp14_more_view_slice_merged": true,
+    "exact_merged_main_software_gate_banked": true,
+    "exact_main_gate_pending": false,
+    "wp14_software_implementation_complete": false,
+    "wp14_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
