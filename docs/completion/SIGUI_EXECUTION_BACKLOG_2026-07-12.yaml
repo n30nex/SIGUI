@@ -3,15 +3,15 @@ generated_at: '2026-07-15'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: eaea26f253d206b7b0d675cba32870cb7a9d856a
-  integrated_candidate: eaea26f253d206b7b0d675cba32870cb7a9d856a
-  live_main_actions_run: 29448520278
+  merged_baseline: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+  integrated_candidate: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+  live_main_actions_run: 29452355824
   live_main_actions_status: success
   exact_main_gate_pending: false
   exact_main_evidence_bank_pending: false
-  last_strict_verified_main: eaea26f253d206b7b0d675cba32870cb7a9d856a
-  observed_successor_main: eaea26f253d206b7b0d675cba32870cb7a9d856a
-  observed_successor_pull_request: 155
+  last_strict_verified_main: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+  observed_successor_main: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+  observed_successor_pull_request: 157
   successor_evidence_in_this_slice: true
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
@@ -878,44 +878,46 @@ project:
     wp11_closure: false
     physical_evidence: false
   live_main_observed_gate:
-    commit: eaea26f253d206b7b0d675cba32870cb7a9d856a
-    merged_pull_request: 155
-    run: 29448520278
+    commit: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+    merged_pull_request: 157
+    run: 29452355824
     status: strict_pass_after_download
     actions_status: success
     artifact_evidence_bank_pending: false
     strict_metrics_admitted: true
-    predecessor_strict_checkpoint: 77c0d5a281c15402fe13e9aae5b9655f177765da
-    scope: combined_pr152_runtime_pr153_conversations_pr154_nvs_telemetry_and_pr155_management_boundary_software_stack
+    predecessor_strict_checkpoint: 028d0718d3d7c93152011f39452b471d809fa6f7
+    scope: secure_channel_management_ui_and_fail_closed_hardware_entropy_drbg_merged_pr_gate_banked
   live_main_artifact_integrity:
-    commit: eaea26f253d206b7b0d675cba32870cb7a9d856a
-    run: 29448520278
+    commit: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+    run: 29452355824
     metrics_scope: current_strict_verified_checkpoint_in_this_combined_evidence_pack
     status: strict_pass_after_download
     exact_main_gate_pending: false
-    host_tests_passed: 1145
+    host_tests_passed: 1158
+    targeted_security_tests_passed: 33
+    oracle_pins_verified: 74
     checksum_contract_tests_passed: 32
     manifests_total: 3
     manifests_verified: 3
     checksum_entries_verified: 46
     artifact_archives_verified: 5
-    artifact_zip_total_bytes: 26472849
-    firmware_manifest_sha256: 9fe22012f8caa46b988b941849199109495c911e387f14188c072125bbaa4277
+    artifact_zip_total_bytes: 26583892
+    firmware_manifest_sha256: 891dcc8d238744966171be2196ee804b82897b3b88768d16cd6001122dd74766
     build_inputs_manifest_sha256: 521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233
-    release_manifest_sha256: 05f2368b5b0d33545d0811141345ac6f75b846c07596b8dd62f54b2b2674235b
-    release_package_manifest_json_sha256: bcde329fd8fa7ae766d85ed782243b6a9bbeb40e0d5e95c0698d9b5b3a782c6f
-    application_sha256: b5f975800c049188e60ce9e9c9d6f1d48fa26f2e21d8948adfc8110fff364096
-    full_flash_sha256: b5a45b9af4fa426b30adb4b2eb4185cf07b951b1e6dfe7600c9e4376d60b0f22
+    release_manifest_sha256: 34fea5e15e594c19bd15c4c24188a2e5bbc3de588a2d9f4405b430d1fdf483ca
+    release_package_manifest_json_sha256: a890e6be8953d216d0968630975b501ffb4920f9da306714c24feb34022edd25
+    application_sha256: 0fb776f54e3f2efb5b9de0067ac5c8427699243cc7a2d2aafe210e6541493c6c
+    full_flash_sha256: dcc8c5d5f79eb3e02ecfb6c41d05598e90f298252488ab5ce8058c97e20344f5
     rp2040_bridge_uf2_sha256: null
     downloaded_tree_file_count: 339
-    downloaded_tree_total_bytes: 79125592
-    downloaded_tree_sha256: c6b163f29794df004be4586221ea86cf4b51a0687bf0b861f2a07f15de7053fa
+    downloaded_tree_total_bytes: 79439771
+    downloaded_tree_sha256: a7517cae0e6fc636400ef00a0158f64fa5b3d55b227244774a2c95f38f0fc21c
     downloaded_tree_hash_scope: sorted_relative_path_byte_size_and_sha256_entries_compact_sort_keys_json
-    host_success_marker_sha256: c6393a58473856aeb1b5a551a5af87a85b9fc855e10eefb9b07ceb2881651a03
-    completion_ledger_validation_sha256: 3702c6df363e94b3934d0b8557c669f25ecca83ad1ad2cff9fbb5bb3694b5802
-    release_audit_sha256: e7f4952429bdb8efd2e0f6c9da1bc5afa172f6d77e0c4392be1da940ec055c46
-    sbom_sha256: 80bcfb6147c77afd0a9e3e1fa20aef6be054b166935ab03cdd7ed89218154deb
-    provenance_sha256: 7cadb421df34c40bff5ae2d0c74e001c6277e6ac40e46371762f2aa0d19a9b5a
+    host_success_marker_sha256: 8072a10d44082070929314a31c621308335dc0b3f5c649daf1cd3088e046a708
+    completion_ledger_validation_sha256: 54c7c1b2a45dd3e57517fec160c8fa23944ff466f1b344d959b44e99c1b609e8
+    release_audit_sha256: 154bb5cbb7ccb68d52640cb634cf754ee0c59a4aaf910d377b09467c4865af3c
+    sbom_sha256: 82d311e5da3aac1f8c35a4f5519b1dc98348d87bf53b1a9e0c126f6bc2b90bdf
+    provenance_sha256: f21d259f4940a71bb69e11af5c04e87aac032edd788b8daf62bdb808b873f39f
     provenance_authenticated: false
     slsa_level_claimed: false
     meshcore_receipt_sha256: c54e7ec856f0f555fffccf0861203f8160381fc7efca70260134f30e4a341aad
@@ -924,6 +926,8 @@ project:
     portable_aggregate_sha256: dac0d1dc0720f1b00f84b2208950305f54f94ba5e006dbc43fa77c3512c803e5
     wp09_runtime_portable_aggregate_path: docs/completion/evidence/wp09/channel_runtime_922b1158c4304848d9ece75cb43145159f5355ba.json
     wp09_runtime_portable_aggregate_sha256: dac0d1dc0720f1b00f84b2208950305f54f94ba5e006dbc43fa77c3512c803e5
+    wp09_management_ui_portable_aggregate_path: docs/completion/evidence/wp09/channel_management_ui_404a2fa9e3b28b86d3118920753c85fdd5e0e95e.json
+    wp09_management_ui_portable_aggregate_sha256: 9b53434d25d3c7d7896c8263c50cf96b56e17000cc51dbf8bafcf2a5e39d9342
     wp13_portable_aggregate_path: docs/completion/evidence/wp13/wifi_crash_guard_8a73e0b5815d73795cc7f3f2588800e04170b3b9.json
     wp13_portable_aggregate_sha256: 97b2f89f762f8acbdaa84e7d8b905e2dbde58bdd43584771d10345a2c96ca463
     wp13_retry_policy_portable_aggregate_path: docs/completion/evidence/wp13/wifi_retry_policy_bdbf43a6d5e241b0b6aede58d5786469e000c749.json
@@ -971,22 +975,22 @@ project:
     idf_version_portable_aggregate_sha256: f21abb17403f432c17bf19cc052cd185b05a39c705a3a984e73f5fcb6a547fa5
     full_ubsan_clean: true
     sanitizer_exception_count: 0
-    exact_main_gate_receipt_sha256: 02512742d1610f481c9eff08db40f7f58ccd5e1c3f4f649d7312e0cff4c3b059
-    exact_main_gate_manifest_sha256: 917c6660127cc88a7304770d90c35e6e8c25c6653dac37710715cdbb011dae97
-    note: "Exact main eaea26f through PR #155 is strict-banked by Actions 29448520278 and receipt SHA-256 02512742d1610f481c9eff08db40f7f58ccd5e1c3f4f649d7312e0cff4c3b059: 1,145 host plus 32 checksum tests, conformance/fuzz, five downloaded ZIPs / 46 entries across 339 files / 79,125,592 bytes, exact-source provenance, and SPDX. The stack includes PR #152 selected-channel runtime/storage, PR #153 conversations, PR #154 NVS telemetry, and PR #155 management boundary. Secure management sheets, pinned official-client RF interoperability, exact-candidate reboot/reset/recovery and physical proof, channel_acceptance_<sha>.json, WP-09/WP-11 closure, and release closure remain open. Provenance is unauthenticated and no SLSA level is claimed."
+    exact_main_gate_receipt_sha256: 35319a7b0a5e7e527846121e8bc30f6456532650b816fd7026e4b01c17be4144
+    exact_main_gate_manifest_sha256: 57ff3427cabf3ebbfd169db6cb99202763748ca39e70e536a6e42e69f687e045
+    note: "Exact main 404a2fa through PR #157 is strict-banked: Actions 29452355824, 1,158 host plus 32 checksum and 33 focused security tests, 74 oracle pins, five downloaded ZIPs / 46 entries across 339 files / 79,439,771 bytes, receipt SHA-256 35319a7b0a5e7e527846121e8bc30f6456532650b816fd7026e4b01c17be4144, and gate-manifest SHA-256 57ff3427cabf3ebbfd169db6cb99202763748ca39e70e536a6e42e69f687e045. PR #157 banks secure channel-management sheets and a fail-closed hardware-entropy-backed DRBG. Official-client RF, reboot/reset/recovery, physical UI, channel_acceptance_<sha>.json, WP-09/WP-11, and release closure remain open. Provenance is valid but unauthenticated and no SLSA level is claimed."
     last_strict_verified_main:
-      commit: eaea26f253d206b7b0d675cba32870cb7a9d856a
-      run: 29448520278
-      host_tests_passed: 1145
+      commit: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+      run: 29452355824
+      host_tests_passed: 1158
       checksum_contract_tests_passed: 32
       checksum_entries_verified: 46
       downloaded_tree_file_count: 339
-      downloaded_tree_total_bytes: 79125592
-      downloaded_tree_sha256: c6b163f29794df004be4586221ea86cf4b51a0687bf0b861f2a07f15de7053fa
-      provenance_sha256: 7cadb421df34c40bff5ae2d0c74e001c6277e6ac40e46371762f2aa0d19a9b5a
-      sbom_sha256: 80bcfb6147c77afd0a9e3e1fa20aef6be054b166935ab03cdd7ed89218154deb
-      exact_main_gate_receipt_sha256: 02512742d1610f481c9eff08db40f7f58ccd5e1c3f4f649d7312e0cff4c3b059
-      exact_main_gate_manifest_sha256: 917c6660127cc88a7304770d90c35e6e8c25c6653dac37710715cdbb011dae97
+      downloaded_tree_total_bytes: 79439771
+      downloaded_tree_sha256: a7517cae0e6fc636400ef00a0158f64fa5b3d55b227244774a2c95f38f0fc21c
+      provenance_sha256: f21d259f4940a71bb69e11af5c04e87aac032edd788b8daf62bdb808b873f39f
+      sbom_sha256: 82d311e5da3aac1f8c35a4f5519b1dc98348d87bf53b1a9e0c126f6bc2b90bdf
+      exact_main_gate_receipt_sha256: 35319a7b0a5e7e527846121e8bc30f6456532650b816fd7026e4b01c17be4144
+      exact_main_gate_manifest_sha256: 57ff3427cabf3ebbfd169db6cb99202763748ca39e70e536a6e42e69f687e045
     previous_failed_receipt:
       commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
       run: 29286754864
@@ -1003,20 +1007,15 @@ project:
     checksum_entries_verified: 78
   release_audit:
     ready_for_public_release: false
-    exact_main_run: 29448520278
-    scope_commit: eaea26f253d206b7b0d675cba32870cb7a9d856a
-    receipt_sha256: e7f4952429bdb8efd2e0f6c9da1bc5afa172f6d77e0c4392be1da940ec055c46
+    exact_main_run: 29452355824
+    scope_commit: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+    receipt_sha256: 154bb5cbb7ccb68d52640cb634cf754ee0c59a4aaf910d377b09467c4865af3c
     status: fail_closed
-    last_strict_verified_main_run: 29448520278
-    last_strict_verified_receipt_sha256: 02512742d1610f481c9eff08db40f7f58ccd5e1c3f4f649d7312e0cff4c3b059
+    last_strict_verified_main_run: 29452355824
+    last_strict_verified_receipt_sha256: 35319a7b0a5e7e527846121e8bc30f6456532650b816fd7026e4b01c17be4144
     remaining_p0_failures: 33
     failures_overall_including_p1: 35
-  active_pull_requests:
-  - number: 156
-    title: 'docs: bank WP-09 merged-stack evidence'
-    head: null
-    base: eaea26f253d206b7b0d675cba32870cb7a9d856a
-    draft: false
+  active_pull_requests: []
   local_merge_rehearsals:
     pr62:
       commit: 7648611c412e7f4658f5d14b43ba530744d96160
@@ -1963,8 +1962,8 @@ work_packages:
   - 20
   - 74
   status: blocked
-  implementation_commit: eaea26f253d206b7b0d675cba32870cb7a9d856a
-  evidence_commit: eaea26f253d206b7b0d675cba32870cb7a9d856a
+  implementation_commit: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+  evidence_commit: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
   implementation_merged: false
   partial_implementation_merged: true
   merged_slices:
@@ -2085,8 +2084,42 @@ work_packages:
     official_client_rf_interoperability: false
     wp09_closure: false
     physical_rf_evidence: false
+  - pull_request: 157
+    base: 028d0718d3d7c93152011f39452b471d809fa6f7
+    head: 51871ce86b5b9e7e7774c935176e1426b1f98eea
+    synthetic_merge: a045fbf95bc25d37c5f409ad043509d60babef84
+    merge_commit: 404a2fa9e3b28b86d3118920753c85fdd5e0e95e
+    head_synthetic_merge_and_main_tree: 0e926f1daad86fc4f3cdaa278e87b3d87683a18f
+    actions_pr_run: 29451639572
+    excluded_duplicate_push_run: 29451637075
+    pr_status: success
+    pr_gate_receipt_sha256: 6b754909aafd5db6922f36cd149182a784e9f19791cc88ab2d465cfcabe04840
+    pr_gate_manifest_sha256: f3022e97e51cd651f88f4f4459849e8759038b354fb0c76e81a622335b970a49
+    exact_main_actions_run: 29452355824
+    exact_main_actions_status: success
+    exact_main_host_tests_passed: 1158
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_targeted_security_tests_passed: 33
+    exact_main_oracle_pins_verified: 74
+    exact_main_wire_fuzz_runs_completed: 100000
+    exact_main_advert_fuzz_runs_completed: 100000
+    exact_main_fuzz_findings: 0
+    exact_main_artifact_archives_verified: 5
+    exact_main_checksum_entries_verified: 46
+    exact_main_extracted_files_hashed: 339
+    exact_main_extracted_bytes: 79439771
+    exact_main_downloaded_tree_sha256: a7517cae0e6fc636400ef00a0158f64fa5b3d55b227244774a2c95f38f0fc21c
+    exact_main_gate_receipt_sha256: 35319a7b0a5e7e527846121e8bc30f6456532650b816fd7026e4b01c17be4144
+    exact_main_gate_manifest_sha256: 57ff3427cabf3ebbfd169db6cb99202763748ca39e70e536a6e42e69f687e045
+    portable_aggregate_path: docs/completion/evidence/wp09/channel_management_ui_404a2fa9e3b28b86d3118920753c85fdd5e0e95e.json
+    portable_aggregate_sha256: 9b53434d25d3c7d7896c8263c50cf96b56e17000cc51dbf8bafcf2a5e39d9342
+    secure_new_import_manage_and_qr_sheets: true
+    hardware_entropy_backed_fail_closed_drbg: true
+    official_client_rf_interoperability: false
+    wp09_closure: false
+    physical_rf_evidence: false
   residual_capabilities:
-  - secure_channel_create_import_manage_sheets_and_physical_ui_acceptance
+  - exact_candidate_physical_channel_management_ui_acceptance
   - official_client_bidirectional_interoperability
   - exact_candidate_reboot_reset_recovery_rf_and_physical_qualification
   - required_channel_acceptance_artifact
