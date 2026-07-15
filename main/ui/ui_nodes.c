@@ -268,21 +268,24 @@ static void nodes_render_contact_row(d1l_ui_nodes_controller_t *controller,
     };
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, nodes_dispatch_contact_open_event_cb, LV_EVENT_CLICKED, binding);
-    lv_obj_set_style_pad_all(row, 8, 0);
+    /* Direct-action children need the row's full physical height. Keep the
+     * row content unpadded and place text explicitly so the 44 px DM target
+     * is not clipped down to the former 32 px content box. */
+    lv_obj_set_style_pad_all(row, 0, 0);
 
     lv_obj_t *alias = nodes_create_label(row, entry->alias, 0xF4F7FB);
     nodes_set_dot_width(alias, 166);
     if (alias) {
-        lv_obj_align(alias, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_align(alias, LV_ALIGN_TOP_LEFT, 8, 4);
     }
     if (can_dm) {
-        nodes_create_button(row, "DM", 350, -1, 48, 34,
+        nodes_create_button(row, "DM", 368, 2, 48, 44,
                             nodes_dispatch_contact_dm_event_cb, binding);
     } else {
         lv_obj_t *type = nodes_create_label(
             row, entry->type[0] ? entry->type : "unknown", 0xA7F3D0);
         if (type) {
-            lv_obj_align(type, LV_ALIGN_TOP_RIGHT, 0, 0);
+            lv_obj_align(type, LV_ALIGN_TOP_RIGHT, -8, 4);
         }
     }
     char meta[128];
@@ -290,9 +293,9 @@ static void nodes_render_contact_row(d1l_ui_nodes_controller_t *controller,
              entry->public_key_hex[0] ? "key" : "no key",
              entry->out_path_valid ? "path" : "flood", entry->last_rssi_dbm);
     lv_obj_t *details = nodes_create_label(row, meta, 0x8EA0AE);
-    nodes_set_dot_width(details, 320);
+    nodes_set_dot_width(details, 344);
     if (details) {
-        lv_obj_align(details, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_align(details, LV_ALIGN_BOTTOM_LEFT, 8, -4);
     }
 }
 
@@ -318,7 +321,7 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
     };
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, nodes_dispatch_node_open_event_cb, LV_EVENT_CLICKED, binding);
-    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
 
     lv_obj_t *name = nodes_create_label(
         row,
@@ -327,11 +330,12 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
         0xF4F7FB);
     nodes_set_dot_width(name, 240);
     if (name) {
-        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 8, 4);
     }
-    nodes_render_role_badge(row, view->role, can_dm ? 278 : 336, 0, can_dm ? 60 : 68);
+    nodes_render_role_badge(row, view->role, can_dm ? 278 : 336, 4,
+                            can_dm ? 60 : 68);
     if (can_dm) {
-        nodes_create_button(row, "DM", 350, -1, 52, 34,
+        nodes_create_button(row, "DM", 364, 6, 52, 44,
                             nodes_dispatch_node_dm_event_cb, binding);
     }
     const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
@@ -341,9 +345,9 @@ static void nodes_render_node_row(d1l_ui_nodes_controller_t *controller,
              view->reachable ? "reachable" : "quiet", entry->rssi_dbm,
              entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
     lv_obj_t *details = nodes_create_label(row, meta, 0x8EA0AE);
-    nodes_set_dot_width(details, 392);
+    nodes_set_dot_width(details, can_dm ? 344 : 392);
     if (details) {
-        lv_obj_align(details, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_align(details, LV_ALIGN_BOTTOM_LEFT, 8, -4);
     }
 }
 

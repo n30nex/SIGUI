@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "mesh/contact_store.h"
+#include "ui_dm_identity.h"
 
 typedef struct _lv_obj_t lv_obj_t;
 
@@ -52,6 +52,7 @@ typedef struct {
     char export_uri[D1L_CONTACT_EXPORT_URI_LEN];
     uint8_t meshcore_type_id;
     bool can_dm;
+    d1l_ui_dm_identity_reason_t dm_identity_reason;
     bool can_export;
 } d1l_ui_contact_view_model_t;
 
@@ -78,7 +79,7 @@ bool d1l_ui_contact_sheets_create(
 bool d1l_ui_contact_sheets_set_contact(
     d1l_ui_contact_sheets_controller_t *controller,
     const d1l_contact_entry_t *contact,
-    bool can_dm,
+    d1l_ui_dm_identity_reason_t dm_identity_reason,
     bool can_export,
     uint8_t meshcore_type_id);
 bool d1l_ui_contact_sheets_set_export_uri(

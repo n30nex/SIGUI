@@ -122,6 +122,7 @@ class Node:
     meta: str
     advert_lat_e6: int | None = None
     advert_lon_e6: int | None = None
+    public_key_hex: str = ""
 
 
 @dataclass(frozen=True)
@@ -284,8 +285,16 @@ def compose_eligibility(
 def sample_snapshot() -> Snapshot:
     """Return a stable fake mesh snapshot used by CI screenshot checks."""
 
-    room = Node("YKF Room", "937D290883817CBD", "Room Server", "-44 dBm / 29 dB", "last 12s, signed advert")
-    bot = Node("YKF Corebot", "0BF0A701D5AE2DB6", "Companion", "-41 dBm / 30 dB", "direct route, public key")
+    room = Node(
+        "YKF Room", "937D290883817CBD", "Room Server",
+        "-44 dBm / 29 dB", "last 12s, signed advert",
+        public_key_hex="937D290883817CBD11223344556677880BF0A701D5AE2DB660B6ABA17831F883",
+    )
+    bot = Node(
+        "YKF Corebot", "0BF0A701D5AE2DB6", "Companion",
+        "-41 dBm / 30 dB", "direct route, public key",
+        public_key_hex=SAMPLE_PUBLIC_KEY,
+    )
     repeater = Node("Krabs Lagoon", "60B6ABA17831F883", "Repeater", "-52 dBm / 22 dB", "1 hop via flood path")
     return Snapshot(
         node_name="D1L Desk",
@@ -1137,6 +1146,47 @@ def role_badge_color(role: str) -> tuple[int, int, int]:
     if "companion" in normalized:
         return ACCENT
     return BLUE
+
+
+DM_IDENTITY_REASON_TEXT = {
+    "ready": "Verified canonical chat Contact.",
+    "sender_name_unverified": "Public sender names have no verified full key.",
+    "identity_incomplete": "Identity has no complete verified full key.",
+    "heard_only": "Heard node only; add or import a verified chat Contact.",
+    "contact_missing": "Contact is no longer retained; refresh Contacts.",
+    "contact_not_canonical": "Contact is not verified by signed advert or import.",
+    "identity_mismatch": "Identity full key does not match this Contact.",
+    "role_not_dm_capable": "This verified role does not support direct chat.",
+}
+
+
+def fixed_hex_identity_valid(fingerprint: str, public_key_hex: str) -> bool:
+    hex_digits = frozenset("0123456789abcdefABCDEF")
+    return (
+        len(fingerprint) == 16
+        and len(public_key_hex) == 64
+        and all(ch in hex_digits for ch in fingerprint)
+        and all(ch in hex_digits for ch in public_key_hex)
+        and fingerprint.lower() == public_key_hex[:16].lower()
+    )
+
+
+def node_dm_identity_reason(snap: Snapshot, node: Node) -> str:
+    if not fixed_hex_identity_valid(node.fingerprint, node.public_key_hex):
+        return "identity_incomplete"
+    exact_contacts = tuple(
+        contact for contact in snap.contacts
+        if contact.public_key_hex.lower() == node.public_key_hex.lower()
+    )
+    if len(exact_contacts) != 1:
+        return "heard_only"
+    contact = exact_contacts[0]
+    if contact.fingerprint.lower() != node.fingerprint.lower():
+        return "identity_mismatch"
+    normalized_role = contact.role.lower()
+    if "companion" not in normalized_role and normalized_role != "chat":
+        return "role_not_dm_capable"
+    return "ready"
 
 
 def map_marker_color(role: str) -> tuple[int, int, int]:
@@ -2198,11 +2248,11 @@ def render_nodes(s: Surface, snap: Snapshot):
     y = 140
     contacts_rendered = 0
     for node in snap.contacts:
-        if y + 34 > 220:
+        if y + 48 > 220:
             break
         draw_row(
             s,
-            (28, y, 374, y + 34),
+            (28, y, 374, y + 48),
             node.name,
             f"{node.fingerprint}  {node.signal}",
             role_badge_text(node.role),
@@ -2211,8 +2261,11 @@ def render_nodes(s: Surface, snap: Snapshot):
             action="open_contact_detail",
             destination="contact_detail_sheet",
         )
-        draw_button(s, (384, y, 452, y + 34), "DM", GREEN, action="open_dm_compose", destination="compose_sheet")
-        y += 40
+        draw_button(
+            s, (384, y + 2, 452, y + 46), "DM", GREEN,
+            action="open_dm_compose", destination="compose_sheet",
+        )
+        y += 54
         contacts_rendered += 1
     s.round_rect((16, 240, 464, 416))
     s.text("Heard Nodes", (28, 248, 180, 270), 14, MUTED, True)
@@ -2222,9 +2275,10 @@ def render_nodes(s: Surface, snap: Snapshot):
     for node in snap.heard:
         if y + 44 > 416:
             break
+        dm_ready = node_dm_identity_reason(snap, node) == "ready"
         draw_row(
             s,
-            (28, y, 452, y + 44),
+            (28, y, 374 if dm_ready else 452, y + 44),
             node.name,
             f"{node.meta}  {node.signal}",
             role_badge_text(node.role),
@@ -2233,6 +2287,11 @@ def render_nodes(s: Surface, snap: Snapshot):
             action="open_node_detail",
             destination="node_detail_sheet",
         )
+        if dm_ready:
+            draw_button(
+                s, (384, y, 452, y + 44), "DM", GREEN,
+                action="open_node_dm", destination="compose_sheet",
+            )
         y += 48
         heard_rendered += 1
     s.metrics.update(
@@ -2242,6 +2301,8 @@ def render_nodes(s: Surface, snap: Snapshot):
             "heard_source_count": len(snap.heard),
             "heard_query_count": len(snap.heard),
             "heard_rendered_count": heard_rendered,
+            "contact_dm_shortcut_min_height": 44,
+            "node_dm_shortcut_min_height": 44,
         }
     )
     draw_dock(s, "Nodes")
@@ -3324,16 +3385,18 @@ def render_message_detail_page(s: Surface, snap: Snapshot, *, technical_details:
     s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
     s.text("Sender", (28, 128, 160, 148), 13, MUTED, True)
     s.text(f"{msg.source}  received", (28, 148, 452, 174), 16, TEXT)
-    s.text("Message", (28, 178, 160, 198), 13, MUTED, True)
+    s.text("DM unavailable [sender_name_unverified]", (28, 178, 452, 198), 12, AMBER, True)
+    s.text(DM_IDENTITY_REASON_TEXT["sender_name_unverified"], (28, 198, 452, 218), 11, MUTED)
+    s.text("Message", (28, 224, 160, 244), 13, MUTED, True)
     wrapped_lines, message_end_y = s.wrapped_text(
         message_text,
-        (28, 200, 452, 312),
-        15,
+        (28, 246, 452, 326),
+        13,
         TEXT,
-        line_height=22,
+        line_height=18,
     )
 
-    disclosure_y = max(244, message_end_y + 8)
+    disclosure_y = max(290, message_end_y + 8)
     s.round_rect((28, disclosure_y, 452, disclosure_y + 48), SURFACE_2, BORDER, 8)
     s.text("Technical details", (42, disclosure_y + 8, 330, disclosure_y + 40), 14, BLUE, True)
     s.text("v" if technical_details else ">", (420, disclosure_y + 8, 440, disclosure_y + 40), 16, MUTED, True, "center")
@@ -3352,16 +3415,28 @@ def render_message_detail_page(s: Surface, snap: Snapshot, *, technical_details:
         s.text("1 hop", (340, content_end_y + 6, 444, content_end_y + 28), 13, BLUE)
         content_end_y += 34
 
-    draw_button(s, (16, 420, 464, 472), "Reply", GREEN, action="open_public_reply", destination="compose_sheet")
+    draw_button(
+        s, (16, 420, 232, 472), "Reply", GREEN,
+        action="open_public_reply", destination="compose_sheet",
+    )
+    draw_button(
+        s, (248, 420, 464, 472), "DM sender", AMBER,
+        action="explain_public_sender_dm", destination=None,
+    )
     s.metrics.update(
         {
             "message_body_scrollable": True,
             "message_body_viewport": [16, 120, 464, 408],
             "message_content_height": content_end_y - 120,
             "message_wrapped_lines": wrapped_lines,
-            "message_text_complete": message_end_y <= 312,
+            "message_text_complete": message_end_y <= 326,
             "message_technical_details_expanded": technical_details,
             "message_sticky_reply": True,
+            "sender_dm_available": False,
+            "sender_dm_reason_code": "sender_name_unverified",
+            "sender_dm_exact_key_lookup": False,
+            "sender_dm_opens_compose": False,
+            "sender_dm_rf_tx": False,
         }
     )
 
@@ -3429,7 +3504,7 @@ def draw_contact_page_header(
     s.text(subtitle, (112, 90, 464, 112), 12, MUTED)
 
 
-def render_contact_detail_sheet(s: Surface, snap: Snapshot):
+def render_contact_detail_page(s: Surface, snap: Snapshot, dm_reason: str):
     contact = snap.contacts[0]
     draw_contact_page_header(
         s,
@@ -3446,7 +3521,15 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     s.text(contact.signal, (104, 194, 452, 216), 14, GREEN, True)
     s.text("Status", (28, 230, 100, 250), 13, MUTED, True)
     status_lines, status_end_y = s.wrapped_text(contact.meta, (104, 228, 452, 300), 13, TEXT, line_height=20)
-    draw_button(s, (16, 340, 464, 392), "Message", GREEN, action="open_dm_compose", destination="compose_sheet")
+    dm_available = dm_reason == "ready"
+    if dm_available:
+        draw_button(
+            s, (16, 340, 464, 392), "Message", GREEN,
+            action="open_dm_compose", destination="compose_sheet",
+        )
+    else:
+        s.text(f"DM unavailable [{dm_reason}]", (28, 338, 452, 358), 13, AMBER, True)
+        s.text(DM_IDENTITY_REASON_TEXT[dm_reason], (28, 362, 452, 398), 11, MUTED)
     draw_button(
         s,
         (16, 408, 464, 472),
@@ -3458,11 +3541,29 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     s.metrics.update(
         {
             "contact_hierarchy_level": "detail",
-            "contact_primary_action_count": 2,
+            "contact_primary_action_count": 2 if dm_available else 1,
             "contact_status_wrapped_lines": status_lines,
             "contact_status_complete": status_end_y <= 300,
+            "contact_dm_reason_code": dm_reason,
+            "contact_dm_exact_full_key": dm_available and fixed_hex_identity_valid(
+                contact.fingerprint, contact.public_key_hex
+            ),
+            "contact_dm_navigation_rf_silent": True,
+            "contact_dm_opens_compose": dm_available,
         }
     )
+
+
+def render_contact_detail_sheet(s: Surface, snap: Snapshot):
+    render_contact_detail_page(s, snap, "ready")
+
+
+def render_contact_incomplete_detail_sheet(s: Surface, snap: Snapshot):
+    render_contact_detail_page(s, snap, "identity_incomplete")
+
+
+def render_contact_noncanonical_detail_sheet(s: Surface, snap: Snapshot):
+    render_contact_detail_page(s, snap, "contact_not_canonical")
 
 
 def render_contact_options_page(s: Surface, snap: Snapshot):
@@ -3505,52 +3606,69 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
     s.metrics.update({"contact_hierarchy_level": "options", "contact_option_count": 6})
 
 
-def render_node_detail_sheet(s: Surface, snap: Snapshot):
-    node = snap.heard[0]
-    draw_sheet_frame(s, "Node Detail", node.name)
+def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), DIM)
+    s.round_rect((16, 60, 464, 476), (18, 27, 39), (72, 92, 112), 8)
+    s.text("Node Detail", (36, 76, 196, 104), 22, TEXT, True)
+    s.text(node.name, (36, 120, 428, 142), 12, MUTED)
+    dm_reason = node_dm_identity_reason(snap, node)
+    dm_available = dm_reason == "ready"
     normalized_role = node.role.lower()
-    dm_available = "companion" in normalized_role or normalized_role == "chat"
     management_gated = "room" in normalized_role or "repeat" in normalized_role
     if dm_available:
         draw_button(
             s,
-            (210, 86, 264, 130),
+            (236, 72, 290, 116),
             "DM",
             ACCENT,
             action="open_node_dm",
             destination="compose_sheet",
         )
-    elif management_gated:
-        s.text("Manage locked", (190, 96, 316, 120), 12, MUTED, True, "center")
+    else:
+        draw_button(
+            s,
+            (202, 72, 322, 116),
+            "Why no DM?",
+            AMBER,
+            action="explain_node_dm",
+            destination=None,
+        )
     draw_button(
         s,
-        (332, 86, 408, 130),
+        (344, 72, 420, 116),
         "Close",
         MUTED,
         action="close_node_detail",
         destination="map" if node.advert_lat_e6 is not None else "nodes",
     )
-    s.round_rect((44, 150, 118, 176), (22, 39, 49), role_badge_color(node.role), 8)
-    s.text(role_badge_text(node.role), (50, 152, 112, 174), 11, role_badge_color(node.role), True, "center")
-    s.text("Role", (132, 150, 210, 170), 13, MUTED, True)
-    s.text(node.role, (210, 150, 436, 174), 15, role_badge_color(node.role), True)
-    s.text("Fingerprint", (44, 188, 180, 208), 13, MUTED, True)
-    s.text(node.fingerprint, (44, 210, 436, 232), 16, TEXT)
-    s.text("Public key", (44, 246, 180, 266), 13, MUTED, True)
-    s.text("retained  reachable  normal", (166, 246, 436, 266), 14, GREEN, True)
-    s.text("Signal", (44, 282, 130, 302), 13, MUTED, True)
-    s.text(node.signal, (132, 282, 270, 302), 14, GREEN, True)
-    s.text("Path", (280, 282, 336, 302), 13, MUTED, True)
-    s.text(node.meta, (336, 282, 436, 302), 12, MUTED)
+    s.round_rect((36, 150, 110, 176), (22, 39, 49), role_badge_color(node.role), 8)
+    s.text(role_badge_text(node.role), (42, 152, 104, 174), 11, role_badge_color(node.role), True, "center")
+    s.text("Role", (122, 150, 200, 170), 13, MUTED, True)
+    s.text(node.role, (216, 150, 428, 174), 15, role_badge_color(node.role), True)
+    s.text("Fingerprint", (36, 188, 180, 208), 13, MUTED, True)
+    s.text(node.fingerprint, (36, 210, 428, 232), 16, TEXT)
+    s.text("Public key", (36, 222, 180, 242), 13, MUTED, True)
+    s.text("retained  reachable  normal", (158, 222, 428, 242), 14, GREEN, True)
+    s.text("Signal", (36, 256, 122, 276), 13, MUTED, True)
+    s.text(node.signal, (124, 256, 262, 276), 14, GREEN, True)
+    s.text("Path", (272, 256, 328, 276), 13, MUTED, True)
+    s.text(node.meta, (328, 256, 428, 276), 12, MUTED)
     location = (
         f"{format_e6(node.advert_lat_e6)}, {format_e6(node.advert_lon_e6)}"
         if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
         else "not provided"
     )
-    s.text("Advert location", (44, 304, 166, 324), 13, BLUE, True)
-    s.text(location, (168, 304, 436, 324), 13, TEXT)
-    s.text("Last heard", (44, 326, 150, 346), 13, MUTED, True)
-    s.text("12s ago  heard 24", (152, 326, 436, 346), 14, TEXT)
+    s.text("Advert location", (36, 314, 158, 334), 13, BLUE, True)
+    s.text(location, (160, 314, 428, 334), 13, TEXT)
+    s.text("Last heard", (36, 338, 142, 358), 13, MUTED, True)
+    s.text("12s ago  heard 24", (144, 338, 428, 358), 14, TEXT)
+    status = "DM ready" if dm_available else "DM unavailable"
+    s.text(f"{status} [{dm_reason}]", (36, 370, 428, 390), 12, GREEN if dm_available else AMBER, True)
+    s.text(DM_IDENTITY_REASON_TEXT[dm_reason], (36, 392, 428, 424), 11, MUTED)
+    if management_gated:
+        s.text("Manage locked", (36, 426, 428, 446), 11, MUTED, True)
+        s.text("Authenticated admin session required.", (36, 448, 428, 468), 10, MUTED)
     return_destination = "map" if node.advert_lat_e6 is not None else "nodes"
     s.metrics.update(
         {
@@ -3559,9 +3677,46 @@ def render_node_detail_sheet(s: Surface, snap: Snapshot):
             "node_detail_return_destination": return_destination,
             "node_detail_return_reuses_map_view": return_destination == "map",
             "node_detail_dm_available": dm_available,
+            "node_detail_dm_reason_code": dm_reason,
+            "node_detail_dm_exact_full_key": dm_available,
+            "node_detail_dm_opens_compose": dm_available,
+            "node_detail_dm_rf_tx": False,
             "node_detail_management_gated": management_gated,
+            "node_detail_frame": [16, 60, 464, 476],
+            "node_detail_content_bottom": 468 if management_gated else 424,
+            "node_detail_content_clipped": False,
         }
     )
+
+
+def render_node_detail_sheet(s: Surface, snap: Snapshot):
+    render_node_detail_page(s, snap, snap.heard[0])
+
+
+def render_heard_only_node_detail_sheet(s: Surface, snap: Snapshot):
+    heard_only = Node(
+        "Heard-only Chat",
+        "A1B2C3D4E5F60718",
+        "Chat",
+        "-55 dBm / 18 dB",
+        "signed advert, no canonical Contact",
+        public_key_hex=(
+            "A1B2C3D4E5F607181122334455667788"
+            "99AABBCCDDEEFF00123456789ABCDEF0"
+        ),
+    )
+    render_node_detail_page(s, snap, heard_only)
+
+
+def render_managed_node_detail_sheet(s: Surface, snap: Snapshot):
+    # Keep this contract view anchored to one canonical managed identity even
+    # when the surrounding stress snapshot replaces the live room list.
+    managed = sample_snapshot().rooms[0]
+    contacts = tuple(
+        contact for contact in snap.contacts
+        if contact.public_key_hex.lower() != managed.public_key_hex.lower()
+    ) + (managed,)
+    render_node_detail_page(s, replace(snap, contacts=contacts), managed)
 
 
 def render_contact_edit_sheet(s: Surface, snap: Snapshot):
@@ -4665,8 +4820,12 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "ble_setup_sheet": render_ble_setup_sheet,
     "advert_sheet": render_advert_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
+    "contact_incomplete_detail_sheet": render_contact_incomplete_detail_sheet,
+    "contact_noncanonical_detail_sheet": render_contact_noncanonical_detail_sheet,
     "contact_options_page": render_contact_options_page,
     "node_detail_sheet": render_node_detail_sheet,
+    "heard_only_node_detail_sheet": render_heard_only_node_detail_sheet,
+    "managed_node_detail_sheet": render_managed_node_detail_sheet,
     "contact_edit_sheet": render_contact_edit_sheet,
     "contact_export_sheet": render_contact_export_sheet,
     "forget_contact_confirm_page": render_forget_contact_confirm_page,
@@ -4914,6 +5073,20 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),
     "contact_detail_sheet": ("Back", "Contact detail", "Fingerprint", "Signal", "Status", "Message", "Contact options"),
+    "contact_incomplete_detail_sheet": (
+        "Back",
+        "Contact detail",
+        "DM unavailable [identity_incomplete]",
+        "Identity has no complete verified full key.",
+        "Contact options",
+    ),
+    "contact_noncanonical_detail_sheet": (
+        "Back",
+        "Contact detail",
+        "DM unavailable [contact_not_canonical]",
+        "Contact is not verified by signed advert or import.",
+        "Contact options",
+    ),
     "contact_options_page": (
         "Contact Options",
         "Back",
@@ -4936,6 +5109,24 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Last heard",
         "Close",
     ),
+    "heard_only_node_detail_sheet": (
+        "Node Detail",
+        "Heard-only Chat",
+        "Why no DM?",
+        "DM unavailable [heard_only]",
+        "Heard node only; add or import a verified chat Contact.",
+        "Close",
+    ),
+    "managed_node_detail_sheet": (
+        "Node Detail",
+        "YKF Room",
+        "Why no DM?",
+        "DM unavailable [role_not_dm_capable]",
+        "This verified role does not support direct chat.",
+        "Manage locked",
+        "Authenticated admin session required.",
+        "Close",
+    ),
     "contact_edit_sheet": ("Rename Contact", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"),
     "contact_export_sheet": ("Export Contact", "Back", "MeshCore QR", "Fingerprint", "URI", "Ready to scan"),
     "forget_contact_confirm_page": (
@@ -4946,7 +5137,16 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Cancel",
         "Forget contact",
     ),
-    "message_detail_sheet": ("Message Detail", "Back", "Sender", "Message", "Technical details", "Reply"),
+    "message_detail_sheet": (
+        "Message Detail",
+        "Back",
+        "Sender",
+        "DM unavailable [sender_name_unverified]",
+        "Message",
+        "Technical details",
+        "Reply",
+        "DM sender",
+    ),
     "message_detail_technical_page": (
         "Message Detail",
         "Back",
@@ -4956,6 +5156,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Signal",
         "Path",
         "Reply",
+        "DM sender",
         SAMPLE_LONG_PUBLIC_MESSAGE,
     ),
     "public_tx_detail_technical_page": (
@@ -5138,6 +5339,21 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "public_sender_dm_explanation",
+        "steps": (
+            {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
+            {"view": "messages_public", "action": "open_message_detail", "destination": "message_detail_sheet"},
+            {
+                "view": "message_detail_sheet",
+                "action": "explain_public_sender_dm",
+                "destination": None,
+                "rf_tx": False,
+                "compose_opened": False,
+                "reason": "sender_name_unverified",
+            },
+        ),
+    },
+    {
         "name": "dm_thread_open_and_reply",
         "steps": (
             {"view": "messages", "action": "open_messages_dm", "destination": "messages_dm"},
@@ -5205,6 +5421,19 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "steps": (
             {"view": "nodes", "action": "open_node_detail", "destination": "node_detail_sheet"},
             {"view": "node_detail_sheet", "action": "close_node_detail", "destination": "nodes"},
+        ),
+    },
+    {
+        "name": "heard_only_dm_explanation",
+        "steps": (
+            {
+                "view": "heard_only_node_detail_sheet",
+                "action": "explain_node_dm",
+                "destination": None,
+                "rf_tx": False,
+                "compose_opened": False,
+                "reason": "heard_only",
+            },
         ),
     },
     {

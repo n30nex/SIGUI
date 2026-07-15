@@ -275,7 +275,10 @@ def test_contact_import_is_full_key_authoritative_and_truthful():
     assert "d1l_contact_store_is_canonical" in header
     assert "d1l_contact_store_can_dm" in header
     assert "d1l_contact_store_can_admin" in header
-    assert "return d1l_contact_store_can_dm(entry);" in read("main/ui/ui_phase1.c")
+    phase1 = read("main/ui/ui_phase1.c")
+    identity_ui = read("main/ui/ui_dm_identity.c")
+    assert "dm_identity_for_contact(entry, NULL).can_open_compose" in phase1
+    assert "d1l_contact_store_can_dm(contact)" in identity_ui
     assert "cmd_contacts_import" in console
     assert 'ok_begin("contacts import")' in console
     assert "contacts import <meshcore-uri>" in console
