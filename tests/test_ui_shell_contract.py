@@ -1684,6 +1684,7 @@ def test_settings_screen_has_safe_touch_radio_editor():
 
 def test_settings_screen_has_non_destructive_storage_setup_sheet():
     source = read("main/ui/ui_phase1.c")
+    storage_view = read("main/ui/ui_storage_view.c")
     header = read("main/app/app_model.h")
     model = read("main/app/app_model.c")
 
@@ -1698,11 +1699,11 @@ def test_settings_screen_has_non_destructive_storage_setup_sheet():
     assert "D1L_STORAGE_PAGE_CARD_STATUS" in source
     assert "D1L_STORAGE_PAGE_DATA_LOCATIONS" in source
     assert '"next step: %s%s"' not in source
-    assert "storage_card_state_friendly" in source
+    assert "static const char *card_state" in storage_view
     assert "FAT32 only - This device never formats cards." in source
-    assert "storage_retained_backend_friendly" in source
-    assert "storage_map_backend_friendly" in source
-    assert "storage_export_backend_friendly" in source
+    assert "static const char *retained_backend" in storage_view
+    assert "static const char *map_backend" in storage_view
+    assert "static const char *export_backend" in storage_view
     assert "storage_setup_action" in header
     assert "storage_sd_needs_fat32" in header
     assert "storage_rp2040_sd_protocol_supported" in header
