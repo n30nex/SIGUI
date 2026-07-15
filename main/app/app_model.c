@@ -568,6 +568,103 @@ esp_err_t d1l_app_model_select_channel(uint64_t channel_id,
     return ESP_OK;
 }
 
+static esp_err_t prepare_channel_mutation_outputs(
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel)
+{
+    if (out_channel) {
+        memset(out_channel, 0, sizeof(*out_channel));
+    }
+    if (!out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_result = D1L_CHANNEL_MUTATION_NONE;
+    return ESP_OK;
+}
+
+esp_err_t d1l_app_model_add_channel(
+    const char *name, const uint8_t *secret, uint8_t secret_len,
+    bool enabled, bool make_default,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel)
+{
+    const esp_err_t prepared = prepare_channel_mutation_outputs(
+        out_result, out_channel);
+    if (prepared != ESP_OK) {
+        return prepared;
+    }
+    return d1l_channel_store_add(name, secret, secret_len, enabled,
+                                 make_default, out_result, out_channel);
+}
+
+esp_err_t d1l_app_model_import_channel_uri(
+    const char *uri, size_t uri_len,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel)
+{
+    const esp_err_t prepared = prepare_channel_mutation_outputs(
+        out_result, out_channel);
+    if (prepared != ESP_OK) {
+        return prepared;
+    }
+    return d1l_channel_store_import_uri(uri, uri_len, out_result,
+                                        out_channel);
+}
+
+esp_err_t d1l_app_model_update_channel(
+    uint64_t channel_id, const char *name, bool enabled, bool make_default,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel)
+{
+    const esp_err_t prepared = prepare_channel_mutation_outputs(
+        out_result, out_channel);
+    if (prepared != ESP_OK) {
+        return prepared;
+    }
+    return d1l_channel_store_update(channel_id, name, enabled, make_default,
+                                    out_result, out_channel);
+}
+
+esp_err_t d1l_app_model_remove_channel(
+    uint64_t channel_id, bool confirmed,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel)
+{
+    const esp_err_t prepared = prepare_channel_mutation_outputs(
+        out_result, out_channel);
+    if (prepared != ESP_OK) {
+        return prepared;
+    }
+    if (!confirmed) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return d1l_channel_store_remove(channel_id, out_result, out_channel);
+}
+
+esp_err_t d1l_app_model_export_channel_share_uri(
+    uint64_t channel_id, char *dest, size_t dest_size)
+{
+    if (!dest || dest_size == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_app_model_clear_channel_share_uri(dest, dest_size);
+    const esp_err_t ret = d1l_channel_store_export_share_uri(
+        channel_id, dest, dest_size);
+    if (ret != ESP_OK) {
+        d1l_app_model_clear_channel_share_uri(dest, dest_size);
+    }
+    return ret;
+}
+
+void d1l_app_model_clear_channel_share_uri(char *dest, size_t dest_size)
+{
+    volatile char *cursor = dest;
+    while (cursor && dest_size > 0U) {
+        *cursor++ = '\0';
+        dest_size--;
+    }
+}
+
 size_t d1l_app_model_query_public_messages_page(d1l_message_entry_t *out_entries,
                                                 size_t max_entries,
                                                 size_t skip_newest,

@@ -56,6 +56,228 @@ def test_app_snapshot_exposes_bounded_channel_metadata_and_selection():
     assert "d1l_channel_store_export_share_uri" not in select_channel
 
 
+def test_app_channel_management_boundary_is_redacted_confirmed_and_persistent():
+    header = read("main/app/app_model.h")
+    source = read("main/app/app_model.c")
+
+    for declaration in (
+        "d1l_app_model_add_channel(",
+        "d1l_app_model_import_channel_uri(",
+        "d1l_app_model_update_channel(",
+        "d1l_app_model_remove_channel(",
+        "d1l_app_model_export_channel_share_uri(",
+        "d1l_app_model_clear_channel_share_uri(",
+    ):
+        assert declaration in header
+        assert declaration in source
+
+    add_channel = c_function(source, "esp_err_t d1l_app_model_add_channel(")
+    import_channel = c_function(
+        source, "esp_err_t d1l_app_model_import_channel_uri("
+    )
+    update_channel = c_function(
+        source, "esp_err_t d1l_app_model_update_channel("
+    )
+    remove_channel = c_function(
+        source, "esp_err_t d1l_app_model_remove_channel("
+    )
+    export_channel = c_function(
+        source, "esp_err_t d1l_app_model_export_channel_share_uri("
+    )
+
+    assert "d1l_channel_store_add(" in add_channel
+    assert "d1l_channel_store_import_uri(" in import_channel
+    assert "d1l_channel_store_update(" in update_channel
+    for mutation in (add_channel, import_channel, update_channel, remove_channel):
+        assert "prepare_channel_mutation_outputs(" in mutation
+    assert "if (!confirmed)" in remove_channel
+    assert "ESP_ERR_INVALID_STATE" in remove_channel
+    assert remove_channel.index("if (!confirmed)") < remove_channel.index(
+        "d1l_channel_store_remove("
+    )
+    assert "d1l_channel_store_export_share_uri(" in export_channel
+    assert export_channel.count("d1l_app_model_clear_channel_share_uri(") == 2
+    clear_export = c_function(
+        source, "void d1l_app_model_clear_channel_share_uri("
+    )
+    assert "volatile char *cursor" in clear_export
+    assert "*cursor++ = '\\0'" in clear_export
+
+    for ordinary_result in (
+        add_channel,
+        import_channel,
+        update_channel,
+        remove_channel,
+    ):
+        assert "printf(" not in ordinary_result
+        assert "ESP_LOG" not in ordinary_result
+        assert "copy_protocol_key" not in ordinary_result
+        assert "export_share_uri" not in ordinary_result
+
+
+def test_channel_management_mutation_outputs_clear_before_delegation(tmp_path):
+    source = read("main/app/app_model.c")
+    prepare = c_function(
+        source, "static esp_err_t prepare_channel_mutation_outputs("
+    )
+    update = c_function(source, "esp_err_t d1l_app_model_update_channel(")
+    remove = c_function(source, "esp_err_t d1l_app_model_remove_channel(")
+    compiler = shutil.which("gcc") or shutil.which("clang")
+    if compiler is None:
+        raise AssertionError("A C compiler is required for channel-management vectors")
+
+    harness = tmp_path / "channel_management_output_test.c"
+    executable = tmp_path / (
+        "channel_management_output_test.exe"
+        if os.name == "nt"
+        else "channel_management_output_test"
+    )
+    harness.write_text(
+        "#include <stdbool.h>\n"
+        "#include <stddef.h>\n"
+        "#include <stdint.h>\n"
+        "#include <string.h>\n"
+        "typedef int esp_err_t;\n"
+        "#define ESP_OK 0\n"
+        "#define ESP_ERR_INVALID_ARG 0x102\n"
+        "#define ESP_ERR_INVALID_STATE 0x103\n"
+        "typedef enum {\n"
+        " D1L_CHANNEL_MUTATION_NONE = 0,\n"
+        " D1L_CHANNEL_MUTATION_REMOVED = 3,\n"
+        " D1L_CHANNEL_MUTATION_FULL = 7\n"
+        "} d1l_channel_mutation_result_t;\n"
+        "typedef struct { uint64_t channel_id; char name[33]; } d1l_channel_info_t;\n"
+        "static int update_calls;\n"
+        "static int remove_calls;\n"
+        "static esp_err_t d1l_channel_store_update(\n"
+        " uint64_t id, const char *name, bool enabled, bool make_default,\n"
+        " d1l_channel_mutation_result_t *result, d1l_channel_info_t *info)\n"
+        "{ (void)id; (void)name; (void)enabled; (void)make_default;\n"
+        "  (void)result; (void)info; update_calls++; return ESP_ERR_INVALID_ARG; }\n"
+        "static esp_err_t d1l_channel_store_remove(\n"
+        " uint64_t id, d1l_channel_mutation_result_t *result,\n"
+        " d1l_channel_info_t *info)\n"
+        "{ remove_calls++; *result = D1L_CHANNEL_MUTATION_REMOVED;\n"
+        "  if (info) { info->channel_id = id; }\n"
+        "  return ESP_OK; }\n"
+        + prepare
+        + "\n"
+        + update
+        + "\n"
+        + remove
+        + "\nstatic int all_zero(const void *data, size_t len)\n"
+        "{ const unsigned char *p = data; while (len--) if (*p++) return 0; return 1; }\n"
+        "int main(void)\n"
+        "{\n"
+        " d1l_channel_mutation_result_t result = D1L_CHANNEL_MUTATION_FULL;\n"
+        " d1l_channel_info_t info; memset(&info, 0xa5, sizeof(info));\n"
+        " if (d1l_app_model_update_channel(0, NULL, false, false, &result, &info)\n"
+        "     != ESP_ERR_INVALID_ARG) return 1;\n"
+        " if (update_calls != 1 || result != D1L_CHANNEL_MUTATION_NONE ||\n"
+        "     !all_zero(&info, sizeof(info))) return 2;\n"
+        " result = D1L_CHANNEL_MUTATION_FULL; memset(&info, 0xa5, sizeof(info));\n"
+        " if (d1l_app_model_remove_channel(9, false, &result, &info)\n"
+        "     != ESP_ERR_INVALID_STATE) return 3;\n"
+        " if (remove_calls != 0 || result != D1L_CHANNEL_MUTATION_NONE ||\n"
+        "     !all_zero(&info, sizeof(info))) return 4;\n"
+        " if (d1l_app_model_remove_channel(9, true, &result, &info) != ESP_OK ||\n"
+        "     remove_calls != 1 || result != D1L_CHANNEL_MUTATION_REMOVED ||\n"
+        "     info.channel_id != 9) return 5;\n"
+        " memset(&info, 0xa5, sizeof(info));\n"
+        " if (d1l_app_model_update_channel(0, NULL, false, false, NULL, &info)\n"
+        "     != ESP_ERR_INVALID_ARG || !all_zero(&info, sizeof(info)) ||\n"
+        "     update_calls != 1) return 6;\n"
+        " return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [
+            compiler,
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            str(harness),
+            "-o",
+            str(executable),
+        ],
+        check=True,
+        cwd=ROOT,
+    )
+    subprocess.run([str(executable)], check=True, cwd=ROOT)
+
+
+def test_channel_share_export_failure_and_explicit_clear_zero_full_buffer(tmp_path):
+    source = read("main/app/app_model.c")
+    export = c_function(
+        source, "esp_err_t d1l_app_model_export_channel_share_uri("
+    )
+    clear = c_function(source, "void d1l_app_model_clear_channel_share_uri(")
+    compiler = shutil.which("gcc") or shutil.which("clang")
+    if compiler is None:
+        raise AssertionError("A C compiler is required for channel-export vectors")
+
+    harness = tmp_path / "channel_export_clear_test.c"
+    executable = tmp_path / (
+        "channel_export_clear_test.exe"
+        if os.name == "nt"
+        else "channel_export_clear_test"
+    )
+    harness.write_text(
+        "#include <stddef.h>\n"
+        "#include <stdint.h>\n"
+        "#include <string.h>\n"
+        "typedef int esp_err_t;\n"
+        "#define ESP_OK 0\n"
+        "#define ESP_ERR_INVALID_ARG 0x102\n"
+        "static int fail_export;\n"
+        "static esp_err_t d1l_channel_store_export_share_uri(\n"
+        " uint64_t id, char *dest, size_t size)\n"
+        "{ (void)id; memset(dest, 'S', size);\n"
+        "  if (fail_export) return ESP_ERR_INVALID_ARG;\n"
+        "  if (size >= 7) { memcpy(dest, \"secret\", 7); }\n"
+        "  return ESP_OK; }\n"
+        "void d1l_app_model_clear_channel_share_uri(char *dest, size_t dest_size);\n"
+        + export
+        + "\n"
+        + clear
+        + "\nstatic int all_zero(const void *data, size_t len)\n"
+        "{ const unsigned char *p = data; while (len--) if (*p++) return 0; return 1; }\n"
+        "int main(void)\n"
+        "{\n"
+        " char buffer[32]; memset(buffer, 'X', sizeof(buffer)); fail_export = 1;\n"
+        " if (d1l_app_model_export_channel_share_uri(7, buffer, sizeof(buffer))\n"
+        "     != ESP_ERR_INVALID_ARG || !all_zero(buffer, sizeof(buffer))) return 1;\n"
+        " memset(buffer, 'X', sizeof(buffer)); fail_export = 0;\n"
+        " if (d1l_app_model_export_channel_share_uri(7, buffer, sizeof(buffer))\n"
+        "     != ESP_OK || strcmp(buffer, \"secret\") != 0) return 2;\n"
+        " d1l_app_model_clear_channel_share_uri(buffer, sizeof(buffer));\n"
+        " if (!all_zero(buffer, sizeof(buffer))) return 3;\n"
+        " d1l_app_model_clear_channel_share_uri(NULL, sizeof(buffer));\n"
+        " buffer[0] = 'X'; d1l_app_model_clear_channel_share_uri(buffer, 0);\n"
+        " if (buffer[0] != 'X') return 4;\n"
+        " return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [
+            compiler,
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            str(harness),
+            "-o",
+            str(executable),
+        ],
+        check=True,
+        cwd=ROOT,
+    )
+    subprocess.run([str(executable)], check=True, cwd=ROOT)
+
+
 def test_usb_channel_commands_are_redacted_persistent_and_non_rf():
     console = read("main/comms/usb_console.c")
     renderer = c_function(console, "static void print_channel_metadata_json(")
