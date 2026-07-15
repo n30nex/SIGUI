@@ -8,8 +8,8 @@
 
 | Item | Value |
 |---|---|
-| Live merged main | `f61d40385594284f9e9f15a92bba81770c8fd24d` (PR #132); exact-main Actions `29385596543` in progress, so strict banking is pending |
-| Last strict-verified merged checkpoint | `2bba1b69900002fbfccd5c2f6d2851cd4ebc3645` / Actions `29384981503` / receipt `86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d` |
+| Live merged main | `f61d40385594284f9e9f15a92bba81770c8fd24d` (PR #132); exact-main Actions `29385596543` green, with its strict receipt reserved for the next evidence-bank slice |
+| Last strict-verified merged checkpoint included in this pack | `2bba1b69900002fbfccd5c2f6d2851cd4ebc3645` / Actions `29384981503` / receipt `86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
 | Open pull requests | none |
 | Merged completion slices | PRs #123-#131 are merged and strict-banked through `2bba1b6`; PR #130 banks the owned Wi-Fi setup controller and PR #131 banks the owned Map setup controller |

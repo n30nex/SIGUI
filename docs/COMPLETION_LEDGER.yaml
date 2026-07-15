@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_at": "2026-07-15T03:11:08Z",
+  "snapshot_at": "2026-07-15T03:14:58Z",
   "project": "SIGUI / MeshCore DeskOS D1L",
   "release_posture": "not_ready_to_tag",
   "source_documents": [
@@ -14,8 +14,9 @@
     "main": {
       "commit": "f61d40385594284f9e9f15a92bba81770c8fd24d",
       "actions_run": "29385596543",
-      "actions_status": "in_progress",
-      "exact_main_gate_pending": true,
+      "actions_status": "success",
+      "exact_main_gate_pending": false,
+      "exact_main_evidence_bank_pending": true,
       "strict_evidence_metrics_scope_commit": "2bba1b69900002fbfccd5c2f6d2851cd4ebc3645",
       "host_tests_passed": 1063,
       "checksum_contract_tests_passed": 32,
@@ -89,7 +90,7 @@
       "meshcore_signed_runtime_receipt_sha256": "802c9259c2c9963a95b2b0e0f7e1f0cbfffcef330291b10083017ddf57bc4f69",
       "meshcore_conformance_receipt_sha256": "336eebb4122111e56bfa983298613fc4abf19a0ad8223faa77f2d4fbf24fe6d0",
       "checksum_failure": null,
-      "note": "Current live main f61d40385594284f9e9f15a92bba81770c8fd24d contains PR #132, but exact-main Actions 29385596543 is still in progress and no strict receipt is banked for that commit. The retained numeric and digest fields in this object are explicitly scoped to last_strict_verified_main 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645, where Actions 29384981503 strict-passed 1,063 host tests, 32 checksum-contract tests, conformance/fuzz, five API ZIPs / 46 entries across 219 files / 74,403,293 bytes, exact-source provenance, and SPDX. Strict receipt SHA-256 is 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d and WP-14 Map controller aggregate SHA-256 is 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3. These are partial software/artifact proofs only; Map provider/cache lifecycle, physical UI, full WP-14 ownership, WP-13/WP-14, and release closure remain open.",
+      "note": "Current live main f61d40385594284f9e9f15a92bba81770c8fd24d contains PR #132 and exact-main Actions 29385596543 is green, but its strict receipt is intentionally reserved for the next evidence-bank slice and is not included in this pack. The retained numeric and digest fields in this object are explicitly scoped to last_strict_verified_main 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645, where Actions 29384981503 strict-passed 1,063 host tests, 32 checksum-contract tests, conformance/fuzz, five API ZIPs / 46 entries across 219 files / 74,403,293 bytes, exact-source provenance, and SPDX. Strict receipt SHA-256 is 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d and WP-14 Map controller aggregate SHA-256 is 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3. These are partial software/artifact proofs only; Map provider/cache lifecycle, physical UI, full WP-14 ownership, WP-13/WP-14, and release closure remain open.",
       "last_strict_verified_main": {
         "commit": "2bba1b69900002fbfccd5c2f6d2851cd4ebc3645",
         "actions_run": "29384981503",
@@ -1688,7 +1689,7 @@
   "reconciliation": [
     {
       "conflict": "The audited main SHA predates the merged completion-program documents and WP-01 proof ledger.",
-      "resolution": "Current live main f61d40385594284f9e9f15a92bba81770c8fd24d contains PR #132 and has exact-main Actions 29385596543 still in progress. Last strict-verified merged checkpoint 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645 merges PR #131's bounded owned Map setup controller on top of PR #130's Wi-Fi setup controller; Actions 29384981503 strict-passes the software/artifact gate, with receipt SHA-256 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d and partial WP-14 Map controller aggregate SHA-256 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3. WP-10 route/TRACE/RF, WP-12 retained-time and physical gates, WP-13 credential threat model/live Wi-Fi acceptance, WP-14 full ownership/physical UI/Map lifecycle, and every other unfinished package and release gate remain open."
+      "resolution": "Current live main f61d40385594284f9e9f15a92bba81770c8fd24d contains PR #132 and exact-main Actions 29385596543 is green, but its strict receipt belongs to the next evidence-bank slice and is not included here. Last strict-verified merged checkpoint included in this pack, 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645, merges PR #131's bounded owned Map setup controller on top of PR #130's Wi-Fi setup controller; Actions 29384981503 strict-passes the software/artifact gate, with receipt SHA-256 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d and partial WP-14 Map controller aggregate SHA-256 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3. WP-10 route/TRACE/RF, WP-12 retained-time and physical gates, WP-13 credential threat model/live Wi-Fi acceptance, WP-14 full ownership/physical UI/Map lifecycle, and every other unfinished package and release gate remain open."
     },
     {
       "conflict": "The exact-main ESP-IDF migration receipt contains export activation chatter before the correct version line, so the immutable-input audit rejects idf_version_exact even though the pinned SDK build is correct.",
