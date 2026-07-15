@@ -1,10 +1,15 @@
 schema_version: 1
-generated_at: '2026-07-14'
+generated_at: '2026-07-15'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: bd201a1fa561d67082012c6ebec0e0e554e60e58
-  integrated_candidate: bd201a1fa561d67082012c6ebec0e0e554e60e58
+  merged_baseline: 31e763ce3154c63298414b3667f187b711960b8e
+  integrated_candidate: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
+  live_main_actions_run: 29386120240
+  live_main_actions_status: success
+  exact_main_gate_pending: false
+  exact_main_evidence_bank_pending: true
+  last_strict_verified_main: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
   proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
@@ -870,55 +875,72 @@ project:
     wp11_closure: false
     physical_evidence: false
   live_main_artifact_integrity:
-    commit: bd201a1fa561d67082012c6ebec0e0e554e60e58
-    run: 29374390847
-    status: success
-    host_tests_passed: 1026
+    commit: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
+    run: 29384981503
+    status: strict_pass_after_download
+    exact_main_gate_pending: false
+    host_tests_passed: 1063
     checksum_contract_tests_passed: 32
     manifests_total: 3
     manifests_verified: 3
     checksum_entries_verified: 46
-    firmware_manifest_sha256: d28aa434a68a43f387b1277e79aff5b0361f22719d481924c609812752ccf850
+    artifact_archives_verified: 5
+    artifact_zip_total_bytes: 23263859
+    firmware_manifest_sha256: 02093f6db146af022f9d1516152461233891217adffa7f7bc12d5e4d586920fd
     build_inputs_manifest_sha256: 521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233
-    release_manifest_sha256: 9067db97381bce5b1ae89af9edbfda2b20047dc1131060bf42e5d6ee36df5f09
-    release_package_manifest_json_sha256: 4721572d004620d556067a1b3f281682a4233fe05ca4d3f29d023cbd8bb86e55
-    application_sha256: 8f293f2c1e296955f55af4327674005b4117f2cee2018046d4411fcc6dd52f6d
-    full_flash_sha256: 98763cf4051b817cfa64b75cfb9403a7ec3fe31559f4fbff3222697c810fb480
+    release_manifest_sha256: dddb9da24391d89f414c32d372a37e9efe413d5d94d8d122d6d7e8d14dc57f1e
+    release_package_manifest_json_sha256: 17a3a6a776aa4e3e06a7483de713fd259c19071614868bffb3f6d7f4957ee745
+    application_sha256: f1448176cc4a83b8a4f9e08b291bacb5ae57531a8da031f29871d71a1f34f112
+    full_flash_sha256: d28e337bd03d626c7bd317f1647cc651062c1aa14842a6b4fa3fe2f0556c8da6
     rp2040_bridge_uf2_sha256: null
     downloaded_tree_file_count: 219
-    downloaded_tree_total_bytes: 73786407
-    downloaded_tree_sha256: ebe1779ca587a784fd126d5b2b094a84e7ada728622dd6416944fb0089b80022
+    downloaded_tree_total_bytes: 74403293
+    downloaded_tree_sha256: 7b95d83578052d923dc5eaab5b658da6f8f3fdb67e84765f01f6a1a71b194e4f
     downloaded_tree_hash_scope: sorted_relative_path_byte_size_and_sha256_entries_compact_sort_keys_json
-    host_success_marker_sha256: 6c2e5b5bc8690020b9d3c1bab341f96aeb82bfa4da586435b6126d21b231f4f6
-    completion_ledger_validation_sha256: 37182afbac96f1f2702cdb96ef65ae77557378cf5ebdb72e15d1584f7507be50
-    release_audit_sha256: c06fff49430e2d08f83c30a90f17e1ea3ec545dfdd22c7c25dadca2401a0b7f9
-    sbom_sha256: bd268ad56155192deca5e983098843dd54473a560ef1b389063d92323f5ad956
-    provenance_sha256: 7d76200d65ed65b19ce1002c897143b3db2b4d4802c905bd0181948aad97a160
-    meshcore_receipt_sha256: 62a8e1910cf3bb07f55c8176d06cf09141a218521d67a34ed0ca65a45ef91139
-    meshcore_signed_runtime_receipt_sha256: 5daef7d659193730820dc0c093e752352bc27e4d30835fc7edfa8fed0b617831
-    portable_aggregate_path: docs/completion/evidence/wp14/connectivity_viewmodel_bd201a1fa561d67082012c6ebec0e0e554e60e58.json
-    portable_aggregate_sha256: 1b2d113353cca9859159349889ea1754706de848f4b5358b2e07320362a270ab
+    host_success_marker_sha256: 3a377c103aeb4d02650084bcb11d93522b9c323ec7c9a4d5bf92375d386915c2
+    completion_ledger_validation_sha256: cfc5b50f163035560164f559b1e5dfe8028d0c8b920081233ee63c2cea93e600
+    release_audit_sha256: 110e46bf886b96bc873c0523d296382e758823391190f1d01494d990b9c4495e
+    sbom_sha256: 2efa89b11423b251cf48fcbf04956a5898aedc9d91426b2cad7a5df25f2fc285
+    provenance_sha256: 682f25f585369b81fbcdf35e38d8a4a06a581a429c90f760077a38e65bdcb429
+    meshcore_receipt_sha256: 336eebb4122111e56bfa983298613fc4abf19a0ad8223faa77f2d4fbf24fe6d0
+    meshcore_signed_runtime_receipt_sha256: 802c9259c2c9963a95b2b0e0f7e1f0cbfffcef330291b10083017ddf57bc4f69
+    portable_aggregate_path: docs/completion/evidence/wp14/map_setup_controller_2bba1b69900002fbfccd5c2f6d2851cd4ebc3645.json
+    portable_aggregate_sha256: 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3
+    wp13_portable_aggregate_path: docs/completion/evidence/wp13/wifi_crash_guard_8a73e0b5815d73795cc7f3f2588800e04170b3b9.json
+    wp13_portable_aggregate_sha256: 97b2f89f762f8acbdaa84e7d8b905e2dbde58bdd43584771d10345a2c96ca463
+    wp13_retry_policy_portable_aggregate_path: docs/completion/evidence/wp13/wifi_retry_policy_bdbf43a6d5e241b0b6aede58d5786469e000c749.json
+    wp13_retry_policy_portable_aggregate_sha256: b24394f5377dc755151dce1d9e10c0d18286867f5fff6ab7724d12e24f2229af
+    wp14_portable_aggregate_path: docs/completion/evidence/wp14/map_setup_controller_2bba1b69900002fbfccd5c2f6d2851cd4ebc3645.json
+    wp14_portable_aggregate_sha256: 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3
+    wp14_wifi_portable_aggregate_path: docs/completion/evidence/wp14/wifi_setup_controller_2384e5047730b1ee9ef8a14d8991a64f20043570.json
+    wp14_wifi_portable_aggregate_sha256: 86137f1f43b518c5a5d0136aea0249f63e4eeb842e4041e7c371c8cafd5ce81f
+    wp14_storage_portable_aggregate_path: docs/completion/evidence/wp14/storage_viewmodel_9f438da114b9e705662a0dc9f8527891c0ce2b40.json
+    wp14_storage_portable_aggregate_sha256: c377f329c9238e9b608c2d2581a0532106918f61d5d53e27125a4195d1795810
+    wp14_more_portable_aggregate_path: docs/completion/evidence/wp14/more_viewmodel_91b81b70a3212310d5f2b3fcdb671173c93677f4.json
+    wp14_more_portable_aggregate_sha256: 963a2d9ea68e7b0fb8935ab13e8242a6c062f94e316fd6851ae85f0b6208288e
     wp12_portable_aggregate_path: docs/completion/evidence/wp12/truthful_time_foundation_5e83b17efebad8d2e5e689292b57d87070893f02.json
     wp12_portable_aggregate_sha256: b4cde8bd2664c9f531927f170e7f9066da4679ee071f179d1ffc0566ba9c324f
+    wp12_quarantine_portable_aggregate_path: docs/completion/evidence/wp12/truthful_time_quarantine_756718c54ac71748076d05ff3fc77d0fe7889232.json
+    wp12_quarantine_portable_aggregate_sha256: bd22c908edf661cff9aefb7e4b155e4f6b6e2d5c682e29bee6f3c7cce9f46851
     idf_version_receipt_sha256: b0481060ce29846f2d489adc6179cec007b75a203ca89ea63c3f84c774e340ea
     idf_version_portable_aggregate_path: docs/completion/evidence/wp24/idf_version_receipt_ee520984d2209ae7419c02bb46d57c1549eeb56c.json
     idf_version_portable_aggregate_sha256: f21abb17403f432c17bf19cc052cd185b05a39c705a3a984e73f5fcb6a547fa5
     full_ubsan_clean: true
     sanitizer_exception_count: 0
-    exact_main_gate_receipt_sha256: 3d06276cbfca0566e0625baaa1189406f3c6cae45b50d2a50477486143ec0733
-    note: "Exact checkpoint adds PR #120 truthful-time foundation and PR #121 truthful connectivity-view extraction. Exact-main Actions 29374390847 plus five downloaded artifacts strict-pass. Trusted time admission/migration/recovery, live connectivity, remaining UI ownership, exact-candidate physical behavior, and release closure remain open."
+    exact_main_gate_receipt_sha256: 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d
+    note: "Current live main 31e763c contains PR #133 and exact-main Actions 29386120240 is green. PRs #132/#133 belong to the next evidence-bank update and are not included here. Last strict-verified merged checkpoint included in this pack, 2bba1b6, contains PR #131's bounded owned Map setup controller on top of PR #130's Wi-Fi setup controller. Actions 29384981503 strict-passes 1,063 host plus 32 checksum tests, conformance/fuzz, five downloaded ZIPs / 46 entries across 219 files / 74,403,293 bytes, exact-source provenance, and SPDX. Strict receipt SHA-256 is 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d; partial WP-14 Map controller aggregate SHA-256 is 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3. Map provider/cache lifecycle, physical UI, full WP-14 ownership, WP-13/WP-14, and release closure remain open."
     last_strict_verified_main:
-      commit: bd201a1fa561d67082012c6ebec0e0e554e60e58
-      run: 29374390847
-      host_tests_passed: 1026
+      commit: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
+      run: 29384981503
+      host_tests_passed: 1063
       checksum_contract_tests_passed: 32
       checksum_entries_verified: 46
       downloaded_tree_file_count: 219
-      downloaded_tree_total_bytes: 73786407
-      downloaded_tree_sha256: ebe1779ca587a784fd126d5b2b094a84e7ada728622dd6416944fb0089b80022
-      provenance_sha256: 7d76200d65ed65b19ce1002c897143b3db2b4d4802c905bd0181948aad97a160
-      sbom_sha256: bd268ad56155192deca5e983098843dd54473a560ef1b389063d92323f5ad956
-      exact_main_gate_receipt_sha256: 3d06276cbfca0566e0625baaa1189406f3c6cae45b50d2a50477486143ec0733
+      downloaded_tree_total_bytes: 74403293
+      downloaded_tree_sha256: 7b95d83578052d923dc5eaab5b658da6f8f3fdb67e84765f01f6a1a71b194e4f
+      provenance_sha256: 682f25f585369b81fbcdf35e38d8a4a06a581a429c90f760077a38e65bdcb429
+      sbom_sha256: 2efa89b11423b251cf48fcbf04956a5898aedc9d91426b2cad7a5df25f2fc285
+      exact_main_gate_receipt_sha256: 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d
     previous_failed_receipt:
       commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
       run: 29286754864
@@ -935,11 +957,11 @@ project:
     checksum_entries_verified: 78
   release_audit:
     ready_for_public_release: false
-    exact_main_run: 29374390847
-    receipt_sha256: c06fff49430e2d08f83c30a90f17e1ea3ec545dfdd22c7c25dadca2401a0b7f9
-    status: completed_fail_closed_not_ready
-    last_strict_verified_main_run: 29374390847
-    last_strict_verified_receipt_sha256: c06fff49430e2d08f83c30a90f17e1ea3ec545dfdd22c7c25dadca2401a0b7f9
+    exact_main_run: 29384981503
+    receipt_sha256: 110e46bf886b96bc873c0523d296382e758823391190f1d01494d990b9c4495e
+    status: fail_closed
+    last_strict_verified_main_run: 29384981503
+    last_strict_verified_receipt_sha256: 110e46bf886b96bc873c0523d296382e758823391190f1d01494d990b9c4495e
     remaining_p0_failures: 33
     failures_overall_including_p1: 35
   active_pull_requests: []
@@ -1957,6 +1979,64 @@ work_packages:
   - 19
   - 7
   status: blocked
+  implementation_commit: 3cf84d42200682ba71a96f65953bc8aba7abf7a0
+  evidence_commit: 3cf84d42200682ba71a96f65953bc8aba7abf7a0
+  implementation_merged: true
+  software_implementation_merged: true
+  software_implementation_status: merged_in_progress
+  acceptance_status: blocked_on_unsatisfied_prerequisites_and_exact_candidate_proof
+  proof_banked: false
+  evidence:
+  - filename: reliable_path_fallback_3cf84d42200682ba71a96f65953bc8aba7abf7a0.json
+    kind: merged_reliable_path_fallback_exact_main
+    commit: 3cf84d42200682ba71a96f65953bc8aba7abf7a0
+    workflow_run: 29377562862
+    valid: true
+    closure_required: false
+    scope: wp10_reliable_path_direct_delivery_bounded_fallback_software_implementation
+    sha256: 49dcb153fb71b5d01019c9ac0b9a5df0b73551816773155978cafa214e516b8d
+    pull_request: 123
+    pull_request_head: dbbc72d2e39e3f164e3f6b8c5f5de8b725140f85
+    actions_pull_request_run: 29376883592
+    pull_request_gate_receipt_sha256: 6e95278c560498b8bd687faa7a925b842c20da2f106855631d41be4e094c4101
+    exact_main_gate_receipt_sha256: 3d718bc31508cd9bbfca6986dc6dd36171c7f33ba11154d29159e9a6439ffb82
+    route_trace_acceptance: false
+    physical_rf_evidence: false
+    wp10_closure: false
+  latest_valid_receipt:
+    filename: reliable_path_fallback_3cf84d42200682ba71a96f65953bc8aba7abf7a0.json
+    commit: 3cf84d42200682ba71a96f65953bc8aba7abf7a0
+    scope: wp10_reliable_path_direct_delivery_bounded_fallback_software_implementation
+    closure_eligible: false
+  verification:
+    pull_request: 123
+    head_commit: dbbc72d2e39e3f164e3f6b8c5f5de8b725140f85
+    pull_request_actions_run: 29376883592
+    merge_commit: 3cf84d42200682ba71a96f65953bc8aba7abf7a0
+    exact_main_actions_run: 29377562862
+    host_tests_passed: 1029
+    checksum_contract_tests_passed: 32
+    wire_vectors: 1008
+    oracle_checks: 931
+    wire_fuzz_runs_completed: 100000
+    advert_fuzz_runs_completed: 100000
+    fuzz_findings: 0
+    artifact_archives_verified: 5
+    checksum_entries_verified: 46
+    exact_main_gate_receipt_sha256: 3d718bc31508cd9bbfca6986dc6dd36171c7f33ba11154d29159e9a6439ffb82
+    portable_aggregate_path: docs/completion/evidence/wp10/reliable_path_fallback_3cf84d42200682ba71a96f65953bc8aba7abf7a0.json
+    portable_aggregate_sha256: 49dcb153fb71b5d01019c9ac0b9a5df0b73551816773155978cafa214e516b8d
+    software_implementation_merged: true
+    route_trace_acceptance: false
+    physical_rf_evidence: false
+    wp10_closure: false
+  residual_capabilities:
+  - exact_candidate_controlled_peer_route_trace_acceptance
+  - real_peer_direct_success_and_stale_failed_missing_path_fallback
+  - single_flood_retry_after_direct_timeout_or_radio_busy_clearance_on_rf
+  - multi_hop_trace_route_summary_and_replay_behavior
+  - retained_path_state_reboot_and_power_interruption_recovery
+  - rf_interoperability_and_physical_acceptance
   required_artifacts:
   - route_trace_acceptance_<sha>_<d1l>_<peer>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
@@ -2023,10 +2103,11 @@ work_packages:
   tracks:
   - 69
   status: blocked
-  implementation_commit: 5e83b17efebad8d2e5e689292b57d87070893f02
-  evidence_commit: 5e83b17efebad8d2e5e689292b57d87070893f02
+  implementation_commit: 756718c54ac71748076d05ff3fc77d0fe7889232
+  evidence_commit: 756718c54ac71748076d05ff3fc77d0fe7889232
   implementation_merged: false
   partial_implementation_merged: true
+  software_implementation_status: partial_merged_in_progress
   proof_banked: false
   merged_slices:
   - pull_request: 120
@@ -2051,13 +2132,38 @@ work_packages:
     retained_wall_recovery_complete: false
     wp12_closure: false
     physical_time_evidence: false
+  - pull_request: 124
+    head: 0ef52223d1d7b3dc3f8c8c86e68a3583073130ba
+    merge_commit: 756718c54ac71748076d05ff3fc77d0fe7889232
+    actions_pr_run: 29377783268
+    pr_status: success
+    exact_main_actions_run: 29378500971
+    exact_main_actions_status: success
+    exact_main_host_tests_passed: 1035
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_wire_fuzz_runs_completed: 100000
+    exact_main_advert_fuzz_runs_completed: 100000
+    exact_main_fuzz_findings: 0
+    exact_main_gate_receipt_sha256: 70dcc7eedd0148ffb925b8f707c5d07b2b541523b2d8b60333c7f1fcc03a8f90
+    portable_aggregate_path: docs/completion/evidence/wp12/truthful_time_quarantine_756718c54ac71748076d05ff3fc77d0fe7889232.json
+    portable_aggregate_sha256: bd22c908edf661cff9aefb7e4b155e4f6b6e2d5c682e29bee6f3c7cce9f46851
+    exact_source_build_epoch_anchor: true
+    bounded_sntp_forward_quarantine: true
+    authenticated_companion_recovery: true
+    protocol_preflight_before_tx_side_effects: true
+    retained_wall_recovery_complete: false
+    timezone_display_conversion_complete: false
+    wp12_software_implementation_complete: false
+    wp12_closure: false
+    physical_time_evidence: false
   residual_capabilities:
-  - trusted_sntp_adoption_before_system_clock_mutation
-  - bounded_protocol_forward_jump_policy
-  - retained_wall_checkpoint_and_async_persistence
+  - retained_validated_wall_checkpoint_and_recovery
   - legacy_mesh_ts_explicit_migration_receipt
-  - timezone_and_recovery_ui
-  - exact_candidate_time_tls_reboot_and_power_acceptance
+  - timezone_setting_and_display_conversion
+  - authenticated_companion_transport_acceptance
+  - exact_candidate_cold_boot_sntp_backward_forward_jump_and_tls_acceptance
+  - exact_candidate_reboot_power_interruption_and_protocol_uniqueness_acceptance
+  - required_time_service_acceptance_artifact
   required_artifacts:
   - time_service_acceptance_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
@@ -2072,6 +2178,72 @@ work_packages:
   - 13
   - 63
   status: blocked
+  implementation_commit: 8a73e0b5815d73795cc7f3f2588800e04170b3b9
+  evidence_commit: 8a73e0b5815d73795cc7f3f2588800e04170b3b9
+  implementation_merged: false
+  partial_implementation_merged: true
+  software_implementation_status: partial_merged_in_progress
+  merged_slices:
+  - pull_request: 126
+    head: fac04300c293184c9d621767edad5b226b5a0815
+    merge_commit: bdbf43a6d5e241b0b6aede58d5786469e000c749
+    exact_main_actions_run: 29380830171
+    exact_main_actions_status: success
+    exact_main_host_tests_passed: 1041
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_artifact_archives_verified: 5
+    exact_main_checksum_entries_verified: 46
+    exact_main_downloaded_tree_sha256: 5533028c1f0d8c259c05ec0f9f9030f8d8ff13ce169ad7633d2ccd0026160c33
+    exact_main_gate_receipt_sha256: b4451d35cff999ae84d13159b78faa2e3d1bab69594f2cd2054aef4bf531a741
+    portable_aggregate_path: docs/completion/evidence/wp13/wifi_retry_policy_bdbf43a6d5e241b0b6aede58d5786469e000c749.json
+    portable_aggregate_sha256: b24394f5377dc755151dce1d9e10c0d18286867f5fff6ab7724d12e24f2229af
+    bounded_wifi_retry_state_machine: true
+    boot_local_safe_mode_containment: true
+    persisted_crash_guard_complete: false
+    credential_threat_model_complete: false
+    physical_wifi_evidence: false
+    wp13_software_implementation_complete: false
+    wp13_closure: false
+  - pull_request: 128
+    head: 880296ec2840774719e02f4cc8999efe9600c64d
+    synthetic_merge: 039a1d7ad59a7b4fcf29685490049a4c9cf6ccee
+    head_synthetic_and_main_tree: 1dfac7b92d728f392eb6eece907f089e571301d0
+    merge_commit: 8a73e0b5815d73795cc7f3f2588800e04170b3b9
+    actions_pr_run: 29382385251
+    pr_status: success
+    pr_gate_receipt_sha256: d29492946a75432f7ce742271c573d9d8d728308da082116e87f1f0179f17d4b
+    exact_main_actions_run: 29382842140
+    exact_main_actions_status: success
+    exact_main_gate_pending: false
+    exact_main_host_tests_passed: 1048
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_artifact_archives_verified: 5
+    exact_main_artifact_zip_total_bytes: 23220295
+    exact_main_checksum_manifests_verified: 3
+    exact_main_checksum_entries_verified: 46
+    exact_main_downloaded_tree_file_count: 219
+    exact_main_downloaded_tree_total_bytes: 74280111
+    exact_main_downloaded_tree_sha256: 13e63fbe59ffdc9316736395ec88e9a5e04bfc09080b28bde4584b80df62816a
+    exact_main_provenance_sha256: 6634734c258d65dfe3f6fe26ada33b088cab1ae6628046387d8007628537e28d
+    exact_main_sbom_sha256: 4d0833a7fc43ea6010a7cb936d715228396d2590c4a73fb24249321031e6d107
+    exact_main_gate_receipt_sha256: 84082900a8c8e973729351e2329f6f004ac33a6ec6b12bb1409a0e27bb6ef223
+    portable_aggregate_path: docs/completion/evidence/wp13/wifi_crash_guard_8a73e0b5815d73795cc7f3f2588800e04170b3b9.json
+    portable_aggregate_sha256: 97b2f89f762f8acbdaa84e7d8b905e2dbde58bdd43584771d10345a2c96ca463
+    persisted_repeated_crash_guard_source_merged: true
+    persisted_crash_guard_complete: true
+    credential_threat_model_complete: false
+    physical_wifi_evidence: false
+    wp13_software_implementation_complete: false
+    wp13_closure: false
+  residual_capabilities:
+  - credential_physical_flash_threat_model_and_nvs_encryption_decision
+  - explicit_wifi_ble_coexistence_capability_acceptance
+  - exact_candidate_ap_reboot_wrong_password_weak_signal_and_reconnect_acceptance
+  - exact_candidate_saved_profile_reboot_and_safe_mode_recovery_acceptance
+  - one_hundred_live_reconnect_cycles_without_heap_or_stack_regression
+  - map_visible_and_allowed_resume_acceptance
+  - current_idf_5_5_4_exact_hardware_acceptance
+  - required_wifi_resilience_artifact
   required_artifacts:
   - wifi_resilience_<sha>_<d1l>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
@@ -2085,10 +2257,11 @@ work_packages:
   - 16
   - 76
   status: blocked
-  implementation_commit: bd201a1fa561d67082012c6ebec0e0e554e60e58
-  evidence_commit: bd201a1fa561d67082012c6ebec0e0e554e60e58
+  implementation_commit: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
+  evidence_commit: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
   implementation_merged: false
   partial_implementation_merged: true
+  software_implementation_status: partial_merged_in_progress
   merged_slices:
   - pull_request: 108
     head: 7422c9686aa6687c068b372670539b42cbea40da
@@ -2154,11 +2327,179 @@ work_packages:
     live_connectivity_acceptance: false
     wp14_closure: false
     physical_ui_evidence: false
+  - pull_request: 125
+    head: 010f323ff6334644d696d75563da732086180ed8
+    merge_commit: 2022dba6e4b9fc4fffc78fc38215e411e08065a9
+    actions_pr_run: 29378595462
+    pr_status: success
+    exact_main_actions_run: 29379361608
+    exact_main_actions_status: success
+    exact_main_host_tests_passed: 1038
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_artifact_archives_verified: 5
+    exact_main_checksum_entries_verified: 46
+    exact_main_downloaded_tree_sha256: b5f5957f67bbaff57a9f41fe04b0bdf2abf6e16026b563ebf1cffa00a9ff9ec8
+    exact_main_gate_receipt_sha256: 51375044adfa8edd95888e1950d0b8f030719eb15d6450aa8022990269e3b721
+    exact_main_gate_pending: false
+    portable_aggregate_path: docs/completion/evidence/wp14/home_viewmodel_2022dba6e4b9fc4fffc78fc38215e411e08065a9.json
+    portable_aggregate_sha256: 2fed5c48682dccb5a9f86ae76f6729ee298a40e5524bbe4f08ec2ccf2e19d3b0
+    immutable_home_view_model: true
+    controller_owned_render_snapshot_and_bindings: true
+    saturating_unread_aggregation: true
+    renderer_reads_raw_app_snapshot: false
+    ui_simulator_views: 142
+    ui_simulator_failures: 0
+    thousand_transition_acceptance: false
+    wp14_software_implementation_complete: false
+    wp14_closure: false
+    physical_ui_evidence: false
+  - pull_request: 127
+    head: 94fc5e56932b549794a6e8ca755a5c3d19431502
+    merge_commit: 91b81b70a3212310d5f2b3fcdb671173c93677f4
+    head_and_main_tree: 0db90f0af19722a0f60b2d23b25065402ef1a722
+    exact_main_actions_run: 29382094865
+    exact_main_actions_status: success
+    exact_main_host_tests_passed: 1046
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_artifact_archives_verified: 8
+    exact_main_checksum_manifests_verified: 9
+    exact_main_checksum_entries_verified: 91
+    exact_main_downloaded_tree_sha256: 1ac1d249e1856d95a5324a07d339558b8020d6fa1c845425b9510c293bca6da2
+    exact_main_gate_receipt_sha256: a239057b122b20fcfe48e7f98cff32c0274deb85f11708698d802c62baa0c848
+    exact_main_gate_pending: false
+    portable_aggregate_path: docs/completion/evidence/wp14/more_viewmodel_91b81b70a3212310d5f2b3fcdb671173c93677f4.json
+    portable_aggregate_sha256: 963a2d9ea68e7b0fb8935ab13e8242a6c062f94e316fd6851ae85f0b6208288e
+    more_view_state_ownership_source_merged: true
+    wp14_software_implementation_complete: false
+    wp14_closure: false
+    physical_ui_evidence: false
+  - pull_request: 129
+    head: 28cabae3e76592409814f2f4411d96904cdef4a2
+    synthetic_merge: 18ad60d25c57320e486b334a4778c61354b38cdc
+    head_synthetic_and_main_tree: a2cc3b574ad01c068c3a24ee10d1c8c666e3969b
+    merge_commit: 9f438da114b9e705662a0dc9f8527891c0ce2b40
+    actions_pr_run: 29383099428
+    pr_status: success
+    pr_gate_receipt_sha256: ac7ac98e44b821376b54b1b28e6b38d27e83a6b5a14f51d648bc3efafedfd088
+    cancelled_duplicate_push_run: 29383097228
+    cancelled_duplicate_excluded_from_gate: true
+    exact_main_actions_run: 29383558565
+    exact_main_actions_status: success
+    exact_main_gate_pending: false
+    exact_main_host_tests_passed: 1052
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_artifact_archives_verified: 8
+    exact_main_artifact_zip_total_bytes: 33365997
+    exact_main_checksum_manifests_verified: 9
+    exact_main_checksum_entries_verified: 91
+    exact_main_downloaded_tree_file_count: 262
+    exact_main_downloaded_tree_total_bytes: 107522959
+    exact_main_downloaded_tree_sha256: 23f570eec50e189eabf3d4a89482d8e194856c8bd49c6f929952bb1a9bb1bea8
+    exact_main_provenance_sha256: 976f693808b93aac87a531f3cdafd5b1380fdc246c911d6cdf2ef494dfd6d858
+    exact_main_sbom_sha256: 6b1fc9667d7664adb06928779b57bdfa8f85e9f2ed13941c2818202226748eb0
+    exact_main_gate_receipt_sha256: c9417c610da53ce718ff5afc829d9525560eb15055699173d0bbbd2304101d85
+    portable_aggregate_path: docs/completion/evidence/wp14/storage_viewmodel_9f438da114b9e705662a0dc9f8527891c0ce2b40.json
+    portable_aggregate_sha256: c377f329c9238e9b608c2d2581a0532106918f61d5d53e27125a4195d1795810
+    pure_bounded_storage_view_model: true
+    owned_render_snapshot: true
+    renderer_reads_raw_app_snapshot: false
+    read_only_and_no_device_formatting: true
+    thousand_transition_acceptance: false
+    wp14_software_implementation_complete: false
+    wp14_closure: false
+    physical_sd_evidence: false
+    physical_ui_evidence: false
+  - pull_request: 130
+    head: 03a6e360b39e94e73d1788a5fe5ebd2c004276e7
+    synthetic_merge: d5f60d551f4a8fdbe6904fa4bd87e12c641f157a
+    head_synthetic_and_main_tree: 8ef4bcf2f9829ec6128756590fd5ac2b9316b518
+    merge_commit: 2384e5047730b1ee9ef8a14d8991a64f20043570
+    actions_pr_run: 29383867615
+    pr_status: success
+    pr_gate_receipt_sha256: 64d0f194dbf7469cf627f4c2b94cf7e56e8403f22c4e7b6ede80cd51f6c2c271
+    cancelled_duplicate_push_run: 29383865874
+    cancelled_duplicate_excluded_from_gate: true
+    superseded_pre_fix_runs:
+    - 29383620411
+    - 29383622312
+    superseded_pre_fix_runs_excluded_from_gate: true
+    exact_main_actions_run: 29384334171
+    exact_main_actions_status: success
+    exact_main_gate_pending: false
+    exact_main_host_tests_passed: 1057
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_artifact_archives_verified: 5
+    exact_main_artifact_zip_total_bytes: 23255130
+    exact_main_checksum_manifests_verified: 3
+    exact_main_checksum_entries_verified: 46
+    exact_main_downloaded_tree_file_count: 219
+    exact_main_downloaded_tree_total_bytes: 74368687
+    exact_main_downloaded_tree_sha256: acf5d0ba03c69fd6537bfaa70a4bf7dbba5c8f39804968b621678bbcf8347ae9
+    exact_main_provenance_sha256: b7010f86f6c807b9a5f851323bea97568f16d18fc84b5cc00a2237cf1621c412
+    exact_main_sbom_sha256: 0a7ee703845aa7d8ad2e74a56638ed7fb9a19e320f71155fbc1a1f24975b4336
+    exact_main_gate_receipt_sha256: 160b848704a839e14424086be9b19c96124fb79f6c3b7794ba0f24359d444e75
+    portable_aggregate_path: docs/completion/evidence/wp14/wifi_setup_controller_2384e5047730b1ee9ef8a14d8991a64f20043570.json
+    portable_aggregate_sha256: 86137f1f43b518c5a5d0136aea0249f63e4eeb842e4041e7c371c8cafd5ce81f
+    single_bounded_wifi_setup_controller: true
+    owned_fixed_array_view_strings: true
+    persistent_generation_checked_bindings: 9
+    invalid_models_fail_closed: true
+    password_not_copied_into_controller_or_render_model: true
+    password_cleared_before_refresh_hide_and_delete: true
+    credential_threat_model_complete: false
+    live_wifi_acceptance: false
+    thousand_transition_acceptance: false
+    wp13_software_implementation_complete: false
+    wp14_software_implementation_complete: false
+    wp14_closure: false
+    physical_wifi_evidence: false
+    physical_ui_evidence: false
+  - pull_request: 131
+    head: 9867fe5b4cf5835fccf1423be2d607148b9d8131
+    synthetic_merge: df8ecc4addf919e1c18363feceae244296181ffa
+    head_synthetic_and_main_tree: 8b76f3fc3746c37159d6a5300103e57f4edeff72
+    merge_commit: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
+    actions_pr_run: 29384552321
+    pr_status: success
+    pr_gate_receipt_sha256: 68aef15c1ab8f0df3d9a48175fa2fd4c616ec32bc50e956dd6e62ba00cc0164e
+    cancelled_duplicate_push_run: 29384550427
+    cancelled_duplicate_excluded_from_gate: true
+    exact_main_actions_run: 29384981503
+    exact_main_actions_status: success
+    exact_main_gate_pending: false
+    exact_main_host_tests_passed: 1063
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_artifact_archives_verified: 5
+    exact_main_artifact_zip_total_bytes: 23263859
+    exact_main_checksum_manifests_verified: 3
+    exact_main_checksum_entries_verified: 46
+    exact_main_downloaded_tree_file_count: 219
+    exact_main_downloaded_tree_total_bytes: 74403293
+    exact_main_downloaded_tree_sha256: 7b95d83578052d923dc5eaab5b658da6f8f3fdb67e84765f01f6a1a71b194e4f
+    exact_main_provenance_sha256: 682f25f585369b81fbcdf35e38d8a4a06a581a429c90f760077a38e65bdcb429
+    exact_main_sbom_sha256: 2efa89b11423b251cf48fcbf04956a5898aedc9d91426b2cad7a5df25f2fc285
+    exact_main_gate_receipt_sha256: 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d
+    portable_aggregate_path: docs/completion/evidence/wp14/map_setup_controller_2bba1b69900002fbfccd5c2f6d2851cd4ebc3645.json
+    portable_aggregate_sha256: 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3
+    single_bounded_external_ram_owner: true
+    owns_map_location_and_options_sheets: true
+    repeat_create_and_partial_allocation_fail_closed: true
+    keyboard_detached_before_redraw_or_delete: true
+    phase1_uses_validated_controller: true
+    map_provider_cache_lifecycle_complete: false
+    thousand_transition_acceptance: false
+    wp14_software_implementation_complete: false
+    wp14_closure: false
+    physical_ui_evidence: false
   residual_capabilities:
-  - complete_ui_runtime_owner_extraction
+  - complete_ui_runtime_owner_and_command_queue_extraction
+  - remaining_route_contact_tools_terminal_admin_update_extraction
+  - complete_map_provider_cache_render_cancel_and_revisit_lifecycle
   - lifecycle_generation_and_redraw_invariants
   - live_wifi_and_ble_integration
+  - one_thousand_automated_navigation_transitions
   - exact_candidate_physical_ui_qualification
+  - required_ui_runtime_safety_artifact
   required_artifacts:
   - ui_runtime_safety_<sha>_<d1l>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
