@@ -249,6 +249,82 @@ static void print_retained_sd_store_json(const d1l_retained_blob_store_sd_stats_
            esp_err_to_name(stats->nvs_mirror_last_error));
 }
 
+static void print_retained_nvs_store_telemetry_json(
+    const d1l_retained_blob_store_nvs_store_telemetry_t *telemetry)
+{
+    const d1l_retained_blob_store_nvs_store_telemetry_t empty = {0};
+    if (!telemetry) {
+        telemetry = &empty;
+    }
+    printf("{\"write_attempts\":%" PRIu64 ",\"write_commits\":%" PRIu64
+           ",\"write_failures\":%" PRIu64
+           ",\"write_bytes_attempted\":%" PRIu64
+           ",\"write_bytes_committed\":%" PRIu64
+           ",\"erase_attempts\":%" PRIu64
+           ",\"erase_commits\":%" PRIu64
+           ",\"erase_failures\":%" PRIu64 ",\"last_error\":\"%s\"}",
+           telemetry->write_attempt_count,
+           telemetry->write_commit_count,
+           telemetry->write_fail_count,
+           telemetry->write_bytes_attempted,
+           telemetry->write_bytes_committed,
+           telemetry->erase_attempt_count,
+           telemetry->erase_commit_count,
+           telemetry->erase_fail_count,
+           esp_err_to_name(telemetry->last_error));
+}
+
+static void print_retained_nvs_telemetry_json(
+    const d1l_retained_blob_store_nvs_telemetry_t *telemetry)
+{
+    const d1l_retained_blob_store_nvs_telemetry_t empty = {0};
+    if (!telemetry) {
+        telemetry = &empty;
+    }
+    printf("{\"scope\":\"boot_runtime_api_calls\","
+           "\"physical_flash_cycles_measured\":false,\"capacity\":{"
+           "\"valid\":%s,\"error\":\"%s\",\"used_entries\":%lu,"
+           "\"free_entries\":%lu,\"available_entries\":%lu,"
+           "\"total_entries\":%lu,\"namespace_count\":%lu},"
+           "\"write_amplification\":{\"write_attempts\":%" PRIu64
+           ",\"write_commits\":%" PRIu64
+           ",\"write_failures\":%" PRIu64
+           ",\"write_bytes_attempted\":%" PRIu64
+           ",\"write_bytes_committed\":%" PRIu64
+           ",\"erase_attempts\":%" PRIu64
+           ",\"erase_commits\":%" PRIu64
+           ",\"erase_failures\":%" PRIu64 ",\"last_error\":\"%s\"},"
+           "\"stores\":{\"messages\":",
+           bool_json(telemetry->capacity_valid),
+           esp_err_to_name(telemetry->capacity_error),
+           (unsigned long)telemetry->used_entries,
+           (unsigned long)telemetry->free_entries,
+           (unsigned long)telemetry->available_entries,
+           (unsigned long)telemetry->total_entries,
+           (unsigned long)telemetry->namespace_count,
+           telemetry->write_attempt_count,
+           telemetry->write_commit_count,
+           telemetry->write_fail_count,
+           telemetry->write_bytes_attempted,
+           telemetry->write_bytes_committed,
+           telemetry->erase_attempt_count,
+           telemetry->erase_commit_count,
+           telemetry->erase_fail_count,
+           esp_err_to_name(telemetry->last_error));
+    print_retained_nvs_store_telemetry_json(
+        &telemetry->stores[D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES]);
+    printf(",\"dm\":");
+    print_retained_nvs_store_telemetry_json(
+        &telemetry->stores[D1L_RETAINED_BLOB_STORE_DM_MESSAGES]);
+    printf(",\"routes\":");
+    print_retained_nvs_store_telemetry_json(
+        &telemetry->stores[D1L_RETAINED_BLOB_STORE_ROUTES]);
+    printf(",\"packets\":");
+    print_retained_nvs_store_telemetry_json(
+        &telemetry->stores[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    printf("}}");
+}
+
 static void print_retained_scheduler_json(
     const d1l_retained_store_worker_status_t *status)
 {
@@ -1648,6 +1724,8 @@ static void cmd_storage_status(void)
     d1l_connectivity_status(&connectivity);
     d1l_retained_store_worker_status_t retained_scheduler = {0};
     d1l_retained_store_worker_status(&retained_scheduler);
+    d1l_retained_blob_store_nvs_telemetry_t retained_nvs_telemetry = {0};
+    (void)d1l_retained_blob_store_nvs_telemetry(&retained_nvs_telemetry);
     ok_begin("storage status");
     printf(",\"manager\":{\"running\":%s,\"state\":",
            bool_json(status.manager_running));
@@ -1730,7 +1808,7 @@ static void cmd_storage_status(void)
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
-    printf(",\"retained_nvs\":{\"partition\":\"d1l_retained\",\"marker_ready\":%s,\"markers_complete\":%s,\"anchor_ready\":%s,\"sentinel_ready\":%s,\"external_init_required\":%s,\"initialized_this_boot\":%s,\"ready\":%s,\"init_error\":\"%s\",\"migrated_keys\":%lu,\"migration_error\":\"%s\"}",
+    printf(",\"retained_nvs\":{\"partition\":\"d1l_retained\",\"marker_ready\":%s,\"markers_complete\":%s,\"anchor_ready\":%s,\"sentinel_ready\":%s,\"external_init_required\":%s,\"initialized_this_boot\":%s,\"ready\":%s,\"init_error\":\"%s\",\"migrated_keys\":%lu,\"migration_error\":\"%s\",\"telemetry\":",
            bool_json(d1l_retained_blob_store_nvs_marker_ready()),
            bool_json(d1l_retained_blob_store_nvs_markers_complete()),
            bool_json(d1l_retained_blob_store_nvs_anchor_ready()),
@@ -1741,6 +1819,8 @@ static void cmd_storage_status(void)
            esp_err_to_name(d1l_retained_blob_store_nvs_error()),
            (unsigned long)d1l_retained_blob_store_nvs_migrated_keys(),
            esp_err_to_name(d1l_retained_blob_store_nvs_migration_error()));
+    print_retained_nvs_telemetry_json(&retained_nvs_telemetry);
+    printf("}");
     printf(",\"retained_scheduler\":");
     print_retained_scheduler_json(&retained_scheduler);
     printf(",\"retained_sd\":{\"degraded\":%s,\"backup_degraded\":%s,\"note\":",

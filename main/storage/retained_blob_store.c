@@ -93,8 +93,94 @@ static bool s_retained_nvs_marker_finalize_pending;
 static bool s_retained_nvs_initialized_this_boot;
 static uint32_t s_retained_nvs_migrated_keys;
 static esp_err_t s_retained_nvs_migration_error = ESP_OK;
+static d1l_retained_blob_store_nvs_telemetry_t s_retained_nvs_telemetry;
 
 static esp_err_t retained_nvs_unavailable_error(void);
+
+static void telemetry_add_u64(uint64_t *value, uint64_t increment)
+{
+    if (!value) {
+        return;
+    }
+    *value = UINT64_MAX - *value < increment ? UINT64_MAX :
+        *value + increment;
+}
+
+static void note_nvs_write_attempt(
+    const d1l_retained_blob_store_config_t *config, size_t len)
+{
+    if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return;
+    }
+    portENTER_CRITICAL(&s_store_state_mux);
+    d1l_retained_blob_store_nvs_store_telemetry_t *store =
+        &s_retained_nvs_telemetry.stores[config->id];
+    telemetry_add_u64(&s_retained_nvs_telemetry.write_attempt_count, 1U);
+    telemetry_add_u64(&s_retained_nvs_telemetry.write_bytes_attempted,
+                      (uint64_t)len);
+    telemetry_add_u64(&store->write_attempt_count, 1U);
+    telemetry_add_u64(&store->write_bytes_attempted, (uint64_t)len);
+    portEXIT_CRITICAL(&s_store_state_mux);
+}
+
+static void note_nvs_write_result(
+    const d1l_retained_blob_store_config_t *config, size_t len, esp_err_t ret)
+{
+    if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return;
+    }
+    portENTER_CRITICAL(&s_store_state_mux);
+    d1l_retained_blob_store_nvs_store_telemetry_t *store =
+        &s_retained_nvs_telemetry.stores[config->id];
+    if (ret == ESP_OK) {
+        telemetry_add_u64(&s_retained_nvs_telemetry.write_commit_count, 1U);
+        telemetry_add_u64(&s_retained_nvs_telemetry.write_bytes_committed,
+                          (uint64_t)len);
+        telemetry_add_u64(&store->write_commit_count, 1U);
+        telemetry_add_u64(&store->write_bytes_committed, (uint64_t)len);
+    } else {
+        telemetry_add_u64(&s_retained_nvs_telemetry.write_fail_count, 1U);
+        telemetry_add_u64(&store->write_fail_count, 1U);
+        s_retained_nvs_telemetry.last_error = ret;
+        store->last_error = ret;
+    }
+    portEXIT_CRITICAL(&s_store_state_mux);
+}
+
+static void note_nvs_erase_attempt(
+    const d1l_retained_blob_store_config_t *config)
+{
+    if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return;
+    }
+    portENTER_CRITICAL(&s_store_state_mux);
+    d1l_retained_blob_store_nvs_store_telemetry_t *store =
+        &s_retained_nvs_telemetry.stores[config->id];
+    telemetry_add_u64(&s_retained_nvs_telemetry.erase_attempt_count, 1U);
+    telemetry_add_u64(&store->erase_attempt_count, 1U);
+    portEXIT_CRITICAL(&s_store_state_mux);
+}
+
+static void note_nvs_erase_result(
+    const d1l_retained_blob_store_config_t *config, esp_err_t ret)
+{
+    if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT) {
+        return;
+    }
+    portENTER_CRITICAL(&s_store_state_mux);
+    d1l_retained_blob_store_nvs_store_telemetry_t *store =
+        &s_retained_nvs_telemetry.stores[config->id];
+    if (ret == ESP_OK) {
+        telemetry_add_u64(&s_retained_nvs_telemetry.erase_commit_count, 1U);
+        telemetry_add_u64(&store->erase_commit_count, 1U);
+    } else {
+        telemetry_add_u64(&s_retained_nvs_telemetry.erase_fail_count, 1U);
+        telemetry_add_u64(&store->erase_fail_count, 1U);
+        s_retained_nvs_telemetry.last_error = ret;
+        store->last_error = ret;
+    }
+    portEXIT_CRITICAL(&s_store_state_mux);
+}
 
 static bool sd_error_latches_degraded(esp_err_t ret)
 {
@@ -255,9 +341,15 @@ static esp_err_t nvs_write_blob_to(const d1l_retained_blob_store_config_t *confi
                                    const char *key, const void *src, size_t len,
                                    bool dedicated)
 {
+    if (dedicated) {
+        note_nvs_write_attempt(config, len);
+    }
     nvs_handle_t handle;
     esp_err_t ret = nvs_open_store(config, dedicated, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        if (dedicated) {
+            note_nvs_write_result(config, len, ret);
+        }
         return ret;
     }
     ret = nvs_set_blob(handle, key, src, len);
@@ -265,6 +357,9 @@ static esp_err_t nvs_write_blob_to(const d1l_retained_blob_store_config_t *confi
         ret = nvs_commit(handle);
     }
     nvs_close(handle);
+    if (dedicated) {
+        note_nvs_write_result(config, len, ret);
+    }
     return ret;
 }
 
@@ -281,9 +376,15 @@ static esp_err_t nvs_erase_blob_from(const d1l_retained_blob_store_config_t *con
         return ret;
     }
 
+    if (dedicated) {
+        note_nvs_erase_attempt(config);
+    }
     nvs_handle_t handle;
     ret = nvs_open_store(config, dedicated, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        if (dedicated) {
+            note_nvs_erase_result(config, ret);
+        }
         return ret;
     }
     ret = nvs_erase_key(handle, key);
@@ -294,6 +395,9 @@ static esp_err_t nvs_erase_blob_from(const d1l_retained_blob_store_config_t *con
         ret = nvs_commit(handle);
     }
     nvs_close(handle);
+    if (dedicated) {
+        note_nvs_erase_result(config, ret);
+    }
     return ret;
 }
 
@@ -1208,6 +1312,9 @@ void d1l_retained_blob_store_note_sd_backend(bool data_ready,
 
 esp_err_t d1l_retained_blob_store_init(void)
 {
+    portENTER_CRITICAL(&s_store_state_mux);
+    memset(&s_retained_nvs_telemetry, 0, sizeof(s_retained_nvs_telemetry));
+    portEXIT_CRITICAL(&s_store_state_mux);
     s_retained_nvs_ready = false;
     s_retained_nvs_marker_ready = false;
     s_retained_nvs_markers_complete = false;
@@ -1291,6 +1398,32 @@ uint32_t d1l_retained_blob_store_nvs_migrated_keys(void)
 esp_err_t d1l_retained_blob_store_nvs_migration_error(void)
 {
     return s_retained_nvs_migration_error;
+}
+
+bool d1l_retained_blob_store_nvs_telemetry(
+    d1l_retained_blob_store_nvs_telemetry_t *out_telemetry)
+{
+    if (!out_telemetry) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&s_store_state_mux);
+    *out_telemetry = s_retained_nvs_telemetry;
+    portEXIT_CRITICAL(&s_store_state_mux);
+
+    nvs_stats_t stats = {0};
+    out_telemetry->capacity_error = s_retained_nvs_ready ?
+        nvs_get_stats(D1L_RETAINED_NVS_PARTITION, &stats) :
+        retained_nvs_unavailable_error();
+    out_telemetry->capacity_valid = out_telemetry->capacity_error == ESP_OK;
+    if (out_telemetry->capacity_valid) {
+        out_telemetry->used_entries = stats.used_entries;
+        out_telemetry->free_entries = stats.free_entries;
+        out_telemetry->available_entries = stats.available_entries;
+        out_telemetry->total_entries = stats.total_entries;
+        out_telemetry->namespace_count = stats.namespace_count;
+    }
+    return true;
 }
 
 esp_err_t d1l_retained_blob_store_read_sd_primary(

@@ -31,6 +31,41 @@ typedef struct {
     uint32_t generation;
 } d1l_retained_blob_store_backend_state_t;
 
+/* Boot-local API telemetry. These counters measure retained-store NVS write
+ * requests and successful commits, not physical flash program/erase cycles. */
+typedef struct {
+    uint64_t write_attempt_count;
+    uint64_t write_commit_count;
+    uint64_t write_fail_count;
+    uint64_t write_bytes_attempted;
+    uint64_t write_bytes_committed;
+    uint64_t erase_attempt_count;
+    uint64_t erase_commit_count;
+    uint64_t erase_fail_count;
+    esp_err_t last_error;
+} d1l_retained_blob_store_nvs_store_telemetry_t;
+
+typedef struct {
+    uint64_t write_attempt_count;
+    uint64_t write_commit_count;
+    uint64_t write_fail_count;
+    uint64_t write_bytes_attempted;
+    uint64_t write_bytes_committed;
+    uint64_t erase_attempt_count;
+    uint64_t erase_commit_count;
+    uint64_t erase_fail_count;
+    esp_err_t last_error;
+    bool capacity_valid;
+    esp_err_t capacity_error;
+    size_t used_entries;
+    size_t free_entries;
+    size_t available_entries;
+    size_t total_entries;
+    size_t namespace_count;
+    d1l_retained_blob_store_nvs_store_telemetry_t
+        stores[D1L_RETAINED_BLOB_STORE_COUNT];
+} d1l_retained_blob_store_nvs_telemetry_t;
+
 esp_err_t d1l_retained_blob_store_init(void);
 bool d1l_retained_blob_store_nvs_ready(void);
 esp_err_t d1l_retained_blob_store_nvs_error(void);
@@ -42,6 +77,8 @@ bool d1l_retained_blob_store_nvs_external_init_required(void);
 bool d1l_retained_blob_store_nvs_initialized_this_boot(void);
 uint32_t d1l_retained_blob_store_nvs_migrated_keys(void);
 esp_err_t d1l_retained_blob_store_nvs_migration_error(void);
+bool d1l_retained_blob_store_nvs_telemetry(
+    d1l_retained_blob_store_nvs_telemetry_t *out_telemetry);
 const char *d1l_retained_blob_store_backend_name(d1l_retained_blob_store_id_t store_id);
 bool d1l_retained_blob_store_is_available(d1l_retained_blob_store_id_t store_id);
 bool d1l_retained_blob_store_uses_sd(d1l_retained_blob_store_id_t store_id);

@@ -148,6 +148,18 @@ slots as v2. Release hardware status must show `marker_ready=true`,
 `external_init_required=false`, `ready=true`, and both init and migration errors
 as `ESP_OK`. No automatic whole-default-NVS erase is allowed.
 
+`storage status.retained_nvs.telemetry` exposes a boot-local retained-NVS
+capacity snapshot plus API-level write, committed-byte, failure, and erase
+counters globally and per Public/DM/route/packet store. The capacity fields come
+from `nvs_get_stats("d1l_retained", ...)`; a failed capacity read remains
+explicit through `capacity.valid=false` and `capacity.error`. These counters
+measure requests and successful `nvs_commit` calls, not physical flash
+program/erase cycles, so release write-amplification evidence must pair them
+with the retained scheduler's dirty/coalesced/commit counts over a named
+workload and exact boot nonce. Erase counters cover existing-key mutation and
+commit attempts in the dedicated partition; a missing-key no-op or a pre-read
+failure does not claim an erase attempt.
+
 `ui_capture_d1l.py` is the hardware display truth path for the split-page UI blocker. It reads the 480x480 RGB565 frame back over the COM12 console, writes JSON/PNG/raw artifacts, and must stay non-destructive: no RF send, no SD format, and no manual touch requirement.
 
 ## GitHub Actions

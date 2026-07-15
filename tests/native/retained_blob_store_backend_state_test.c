@@ -23,6 +23,7 @@
 #define TEST_NVS_NAME_MAX 31U
 #define TEST_NVS_BLOB_MAX 128U
 #define TEST_NVS_EVENT_COUNT 512U
+#define TEST_NVS_TOTAL_ENTRIES 512U
 
 typedef enum {
     TEST_NVS_EVENT_INIT_PARTITION = 0,
@@ -92,6 +93,7 @@ static esp_err_t s_anchor_commit_result = ESP_OK;
 static esp_err_t s_sentinel_commit_result = ESP_OK;
 static esp_err_t s_dedicated_commit_result = ESP_OK;
 static esp_err_t s_legacy_commit_result = ESP_OK;
+static esp_err_t s_nvs_stats_result = ESP_OK;
 static size_t s_meta_write_attempt;
 static size_t s_meta_write_fail_on_attempt;
 static esp_err_t s_meta_erase_result = ESP_OK;
@@ -268,6 +270,7 @@ static void clear_nvs_case(void)
     s_anchor_commit_result = ESP_OK;
     s_sentinel_commit_result = ESP_OK;
     s_legacy_commit_result = ESP_OK;
+    s_nvs_stats_result = ESP_OK;
     s_partition_init_result = ESP_OK;
     s_meta_write_attempt = 0U;
     s_meta_write_fail_on_attempt = 0U;
@@ -442,6 +445,40 @@ esp_err_t nvs_flash_init_partition(const char *partition_label)
     note_nvs_event(TEST_NVS_EVENT_INIT_PARTITION);
     esp_err_t ret = s_partition_init_result;
     return ret;
+}
+
+esp_err_t nvs_get_stats(const char *part_name, nvs_stats_t *nvs_stats)
+{
+    if (!part_name || strcmp(part_name, TEST_RETAINED_PARTITION) != 0 ||
+        !nvs_stats) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(nvs_stats, 0, sizeof(*nvs_stats));
+    if (s_nvs_stats_result != ESP_OK) {
+        return s_nvs_stats_result;
+    }
+    for (size_t i = 0U; i < TEST_NVS_ENTRY_COUNT; ++i) {
+        if (!s_nvs_entries[i].used || !s_nvs_entries[i].dedicated) {
+            continue;
+        }
+        nvs_stats->used_entries++;
+        bool namespace_seen = false;
+        for (size_t j = 0U; j < i; ++j) {
+            if (s_nvs_entries[j].used && s_nvs_entries[j].dedicated &&
+                strcmp(s_nvs_entries[j].namespace_name,
+                       s_nvs_entries[i].namespace_name) == 0) {
+                namespace_seen = true;
+                break;
+            }
+        }
+        if (!namespace_seen) {
+            nvs_stats->namespace_count++;
+        }
+    }
+    nvs_stats->total_entries = TEST_NVS_TOTAL_ENTRIES;
+    nvs_stats->free_entries = TEST_NVS_TOTAL_ENTRIES - nvs_stats->used_entries;
+    nvs_stats->available_entries = nvs_stats->free_entries - 4U;
+    return ESP_OK;
 }
 
 esp_err_t nvs_open(const char *namespace_name, nvs_open_mode_t open_mode,
@@ -1374,6 +1411,81 @@ static void test_erase_clears_dedicated_and_legacy_copies(void)
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY) == 1U);
 }
 
+static void test_nvs_capacity_and_write_amplification_telemetry(void)
+{
+    static const char public_blob[] = "telemetry public";
+    static const char dm_blob[] = "telemetry dm";
+    d1l_retained_blob_store_nvs_telemetry_t telemetry = {0};
+
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(telemetry.capacity_valid);
+    assert(telemetry.capacity_error == ESP_OK);
+    assert(telemetry.total_entries == TEST_NVS_TOTAL_ENTRIES);
+    assert(telemetry.used_entries == 1U);
+    assert(telemetry.namespace_count == 1U);
+    assert(telemetry.write_attempt_count == 0U);
+
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               public_blob, sizeof(public_blob)) == ESP_OK);
+    s_dedicated_commit_result = ESP_FAIL;
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "messages_v2",
+               dm_blob, sizeof(dm_blob)) == ESP_FAIL);
+    s_dedicated_commit_result = ESP_OK;
+    assert(d1l_retained_blob_store_erase_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public") == ESP_OK);
+
+    memset(&telemetry, 0, sizeof(telemetry));
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(telemetry.capacity_valid);
+    assert(telemetry.used_entries == 1U);
+    assert(telemetry.free_entries == TEST_NVS_TOTAL_ENTRIES - 1U);
+    assert(telemetry.available_entries == TEST_NVS_TOTAL_ENTRIES - 5U);
+    assert(telemetry.available_entries != telemetry.free_entries);
+    assert(telemetry.write_attempt_count == 2U);
+    assert(telemetry.write_commit_count == 1U);
+    assert(telemetry.write_fail_count == 1U);
+    assert(telemetry.write_bytes_attempted ==
+           sizeof(public_blob) + sizeof(dm_blob));
+    assert(telemetry.write_bytes_committed == sizeof(public_blob));
+    assert(telemetry.erase_attempt_count == 1U);
+    assert(telemetry.erase_commit_count == 1U);
+    assert(telemetry.erase_fail_count == 0U);
+    assert(telemetry.last_error == ESP_FAIL);
+
+    const d1l_retained_blob_store_nvs_store_telemetry_t *messages =
+        &telemetry.stores[D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES];
+    assert(messages->write_attempt_count == 1U);
+    assert(messages->write_commit_count == 1U);
+    assert(messages->write_fail_count == 0U);
+    assert(messages->write_bytes_committed == sizeof(public_blob));
+    assert(messages->erase_attempt_count == 1U);
+    assert(messages->erase_commit_count == 1U);
+
+    const d1l_retained_blob_store_nvs_store_telemetry_t *dms =
+        &telemetry.stores[D1L_RETAINED_BLOB_STORE_DM_MESSAGES];
+    assert(dms->write_attempt_count == 1U);
+    assert(dms->write_commit_count == 0U);
+    assert(dms->write_fail_count == 1U);
+    assert(dms->write_bytes_committed == 0U);
+    assert(dms->last_error == ESP_FAIL);
+
+    s_nvs_stats_result = ESP_ERR_INVALID_STATE;
+    memset(&telemetry, 0, sizeof(telemetry));
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(!telemetry.capacity_valid);
+    assert(telemetry.capacity_error == ESP_ERR_INVALID_STATE);
+    assert(telemetry.used_entries == 0U);
+    assert(telemetry.total_entries == 0U);
+    assert(telemetry.write_attempt_count == 2U);
+    assert(telemetry.write_commit_count == 1U);
+    s_nvs_stats_result = ESP_OK;
+}
+
 static void test_partition_init_failure_never_falls_back_or_resurrects(void)
 {
     static const char dedicated_blob[] = "dedicated current";
@@ -1573,6 +1685,7 @@ int main(void)
     test_legacy_read_migrates_after_dedicated_miss();
     test_dedicated_write_reclaims_legacy_only_after_commit();
     test_erase_clears_dedicated_and_legacy_copies();
+    test_nvs_capacity_and_write_amplification_telemetry();
     test_partition_init_failure_never_falls_back_or_resurrects();
 
     puts("native retained backend generation and NVS partition: ok");
