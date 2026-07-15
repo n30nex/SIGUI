@@ -3,11 +3,11 @@ generated_at: '2026-07-15'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: f61d40385594284f9e9f15a92bba81770c8fd24d
+  merged_baseline: 31e763ce3154c63298414b3667f187b711960b8e
   integrated_candidate: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
-  live_main_actions_run: 29385596543
-  live_main_actions_status: success
-  exact_main_gate_pending: false
+  live_main_actions_run: 29386120240
+  live_main_actions_status: in_progress
+  exact_main_gate_pending: true
   exact_main_evidence_bank_pending: true
   last_strict_verified_main: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
   proof_ledger_pr: 83
@@ -928,7 +928,7 @@ project:
     full_ubsan_clean: true
     sanitizer_exception_count: 0
     exact_main_gate_receipt_sha256: 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d
-    note: "Current live main f61d403 contains PR #132 and exact-main Actions 29385596543 is green, but its strict receipt is reserved for the next evidence-bank slice and is not included here. Last strict-verified merged checkpoint included in this pack, 2bba1b6, contains PR #131's bounded owned Map setup controller on top of PR #130's Wi-Fi setup controller. Actions 29384981503 strict-passes 1,063 host plus 32 checksum tests, conformance/fuzz, five downloaded ZIPs / 46 entries across 219 files / 74,403,293 bytes, exact-source provenance, and SPDX. Strict receipt SHA-256 is 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d; partial WP-14 Map controller aggregate SHA-256 is 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3. Map provider/cache lifecycle, physical UI, full WP-14 ownership, WP-13/WP-14, and release closure remain open."
+    note: "Current live main 31e763c contains PR #133 and exact-main Actions 29386120240 is in progress. PR #132 / f61d403 is green, but both post-PR #131 slices belong to the next evidence-bank update and are not included here. Last strict-verified merged checkpoint included in this pack, 2bba1b6, contains PR #131's bounded owned Map setup controller on top of PR #130's Wi-Fi setup controller. Actions 29384981503 strict-passes 1,063 host plus 32 checksum tests, conformance/fuzz, five downloaded ZIPs / 46 entries across 219 files / 74,403,293 bytes, exact-source provenance, and SPDX. Strict receipt SHA-256 is 86f5bed6b506a1a2ebce9dc701bba33ba428560fef7a5b8f7fa8038d1ad5191d; partial WP-14 Map controller aggregate SHA-256 is 3fb7490733c6a449c5c11b738a40252c029dbc9653c276e8ab79c7cc7cb863f3. Map provider/cache lifecycle, physical UI, full WP-14 ownership, WP-13/WP-14, and release closure remain open."
     last_strict_verified_main:
       commit: 2bba1b69900002fbfccd5c2f6d2851cd4ebc3645
       run: 29384981503
