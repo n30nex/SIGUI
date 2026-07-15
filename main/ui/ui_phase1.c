@@ -34,6 +34,7 @@
 #include "ui_navigation.h"
 #include "ui_nodes.h"
 #include "ui_packets.h"
+#include "ui_radio_settings.h"
 #include "ui_screen.h"
 #include "ui_settings.h"
 #include "ui_storage_view.h"
@@ -88,7 +89,6 @@ static lv_obj_t *s_public_search_textarea;
 static lv_obj_t *s_public_search_keyboard;
 static lv_obj_t *s_message_detail_sheet;
 static lv_obj_t *s_dm_thread_sheet;
-static lv_obj_t *s_radio_settings_sheet;
 static lv_obj_t *s_storage_sheet;
 static d1l_wifi_scan_result_t s_wifi_scan_result;
 static bool s_wifi_scan_loaded;
@@ -129,10 +129,10 @@ static d1l_ui_wifi_controller_t s_wifi_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_map_sheets_controller_t s_map_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_device_sheets_controller_t s_device_sheets_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_radio_settings_controller_t s_radio_settings_controller EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
-static d1l_app_radio_profile_edit_t s_radio_edit;
 static int32_t s_map_location_lat_e7;
 static int32_t s_map_location_lon_e7;
 static bool s_map_location_returns_to_options;
@@ -293,18 +293,6 @@ typedef struct {
     int32_t lon_e7;
     uint8_t zoom;
 } d1l_ui_map_render_input_t;
-
-typedef enum {
-    D1L_RADIO_EDIT_FREQ_DOWN = 0,
-    D1L_RADIO_EDIT_FREQ_UP,
-    D1L_RADIO_EDIT_BW,
-    D1L_RADIO_EDIT_SF_DOWN,
-    D1L_RADIO_EDIT_SF_UP,
-    D1L_RADIO_EDIT_CR,
-    D1L_RADIO_EDIT_TX_DOWN,
-    D1L_RADIO_EDIT_TX_UP,
-    D1L_RADIO_EDIT_RX_BOOST,
-} d1l_radio_edit_action_t;
 
 typedef enum {
     D1L_MESH_ROLES_PAGE_ROOT = 0,
@@ -671,7 +659,7 @@ static void render_dm_thread_sheet(void);
 static void render_public_history_sheet(void);
 static void show_public_history_sheet(void);
 static void render_packet_detail_sheet(void);
-static void render_radio_settings_sheet(void);
+static bool render_radio_settings_sheet(void);
 static void render_storage_sheet(void);
 static bool render_wifi_sheet(void);
 static bool render_ble_sheet(void);
@@ -1357,7 +1345,9 @@ static void hide_dm_thread_sheet(void)
 
 static void hide_radio_settings_sheet(void)
 {
-    d1l_ui_modal_hide(s_radio_settings_sheet);
+    d1l_ui_radio_settings_deactivate(&s_radio_settings_controller);
+    d1l_ui_modal_hide(
+        d1l_ui_radio_settings_sheet(&s_radio_settings_controller));
     restore_dock_for_active_tab();
 }
 
@@ -1749,18 +1739,6 @@ static bool parse_coord_text_e7(const char *text, int32_t min_value, int32_t max
     return true;
 }
 
-static void format_radio_profile_line(char *dest, size_t dest_size,
-                                      const d1l_app_radio_profile_edit_t *profile)
-{
-    if (!dest || dest_size == 0 || !profile) {
-        return;
-    }
-    snprintf(dest, dest_size, "US/CAN %.3f  BW%.1f  SF%u  CR%u",
-             ((double)profile->frequency_hz) / 1000000.0,
-             ((double)profile->bandwidth_tenths_khz) / 10.0,
-             profile->spreading_factor, profile->coding_rate);
-}
-
 static const char *node_role_badge_text(const char *role)
 {
     if (!role || role[0] == '\0') {
@@ -1875,18 +1853,22 @@ static lv_obj_t *render_node_role_badge(lv_obj_t *parent, const char *role,
     return badge;
 }
 
-static void radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
+static bool radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
 {
+    d1l_app_radio_profile_edit_t edit = {0};
     if (!snapshot) {
-        d1l_app_model_current_radio_profile(&s_radio_edit);
-        return;
+        d1l_app_model_current_radio_profile(&edit);
+        return d1l_ui_radio_settings_set_edit(
+            &s_radio_settings_controller, &edit);
     }
-    s_radio_edit.frequency_hz = snapshot->radio_frequency_hz;
-    s_radio_edit.bandwidth_tenths_khz = snapshot->radio_bandwidth_tenths_khz;
-    s_radio_edit.spreading_factor = snapshot->radio_spreading_factor;
-    s_radio_edit.coding_rate = snapshot->radio_coding_rate;
-    s_radio_edit.tx_power_dbm = snapshot->radio_tx_power_dbm;
-    s_radio_edit.rx_boost = snapshot->radio_rx_boost;
+    edit.frequency_hz = snapshot->radio_frequency_hz;
+    edit.bandwidth_tenths_khz = snapshot->radio_bandwidth_tenths_khz;
+    edit.spreading_factor = snapshot->radio_spreading_factor;
+    edit.coding_rate = snapshot->radio_coding_rate;
+    edit.tx_power_dbm = snapshot->radio_tx_power_dbm;
+    edit.rx_boost = snapshot->radio_rx_boost;
+    return d1l_ui_radio_settings_set_edit(
+        &s_radio_settings_controller, &edit);
 }
 
 static void handle_home_action(d1l_ui_home_action_t action, void *context)
@@ -4900,179 +4882,75 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
     }
 }
 
-static uint16_t next_radio_bandwidth(uint16_t current)
+static void radio_settings_action_handler(
+    d1l_ui_radio_settings_action_t action,
+    const d1l_app_radio_profile_edit_t *edit,
+    void *context)
 {
-    static const uint16_t bandwidths[] = {625U, 1250U, 2500U, 5000U};
-    for (size_t i = 0; i < sizeof(bandwidths) / sizeof(bandwidths[0]); ++i) {
-        if (current < bandwidths[i]) {
-            return bandwidths[i];
+    (void)context;
+    if (action >= D1L_UI_RADIO_SETTINGS_ACTION_FREQ_DOWN &&
+        action <= D1L_UI_RADIO_SETTINGS_ACTION_RX_BOOST) {
+        if (!render_radio_settings_sheet()) {
+            hide_radio_settings_sheet();
         }
-    }
-    return bandwidths[0];
-}
-
-static void radio_edit_adjust_event_cb(lv_event_t *event)
-{
-    d1l_radio_edit_action_t action =
-        (d1l_radio_edit_action_t)(uintptr_t)lv_event_get_user_data(event);
-    switch (action) {
-    case D1L_RADIO_EDIT_FREQ_DOWN:
-        if (s_radio_edit.frequency_hz >= 902025000UL) {
-            s_radio_edit.frequency_hz -= 25000UL;
-        }
-        break;
-    case D1L_RADIO_EDIT_FREQ_UP:
-        if (s_radio_edit.frequency_hz <= 927975000UL) {
-            s_radio_edit.frequency_hz += 25000UL;
-        }
-        break;
-    case D1L_RADIO_EDIT_BW:
-        s_radio_edit.bandwidth_tenths_khz =
-            next_radio_bandwidth(s_radio_edit.bandwidth_tenths_khz);
-        break;
-    case D1L_RADIO_EDIT_SF_DOWN:
-        if (s_radio_edit.spreading_factor > 5U) {
-            s_radio_edit.spreading_factor--;
-        }
-        break;
-    case D1L_RADIO_EDIT_SF_UP:
-        if (s_radio_edit.spreading_factor < 12U) {
-            s_radio_edit.spreading_factor++;
-        }
-        break;
-    case D1L_RADIO_EDIT_CR:
-        s_radio_edit.coding_rate =
-            s_radio_edit.coding_rate >= 8U ? 5U : (uint8_t)(s_radio_edit.coding_rate + 1U);
-        break;
-    case D1L_RADIO_EDIT_TX_DOWN:
-        if (s_radio_edit.tx_power_dbm > -9) {
-            s_radio_edit.tx_power_dbm--;
-        }
-        break;
-    case D1L_RADIO_EDIT_TX_UP:
-        if (s_radio_edit.tx_power_dbm < D1L_RADIO_TX_POWER_DBM) {
-            s_radio_edit.tx_power_dbm++;
-        }
-        break;
-    case D1L_RADIO_EDIT_RX_BOOST:
-        s_radio_edit.rx_boost = !s_radio_edit.rx_boost;
-        break;
-    }
-    render_radio_settings_sheet();
-}
-
-static void radio_defaults_event_cb(lv_event_t *event)
-{
-    (void)event;
-    d1l_app_model_default_radio_profile(&s_radio_edit);
-    render_radio_settings_sheet();
-}
-
-static void radio_save_event_cb(lv_event_t *event)
-{
-    (void)event;
-    esp_err_t ret = d1l_app_model_save_radio_profile(&s_radio_edit);
-    if (ret == ESP_OK) {
-        d1l_app_model_snapshot(&s_snapshot);
-        request_content_refresh();
-        render_radio_settings_sheet();
-        if (s_radio_settings_sheet) {
-            show_modal(s_radio_settings_sheet);
-        }
-        show_toast_text("Radio saved; RF apply pending", true);
-    } else {
-        show_toast_text("Radio profile rejected", false);
-    }
-}
-
-static void close_radio_settings_event_cb(lv_event_t *event)
-{
-    (void)event;
-    hide_radio_settings_sheet();
-}
-
-static void render_radio_settings_sheet(void)
-{
-    if (!s_radio_settings_sheet) {
         return;
     }
-    lv_obj_clean(s_radio_settings_sheet);
+    switch (action) {
+    case D1L_UI_RADIO_SETTINGS_ACTION_DEFAULTS: {
+        d1l_app_radio_profile_edit_t defaults = {0};
+        d1l_app_model_default_radio_profile(&defaults);
+        if (!d1l_ui_radio_settings_set_edit(
+                &s_radio_settings_controller, &defaults) ||
+            !render_radio_settings_sheet()) {
+            hide_radio_settings_sheet();
+        }
+        return;
+    }
+    case D1L_UI_RADIO_SETTINGS_ACTION_SAVE: {
+        esp_err_t ret = edit ?
+            d1l_app_model_save_radio_profile(edit) : ESP_ERR_INVALID_ARG;
+        if (ret != ESP_OK) {
+            show_toast_text("Radio profile rejected", false);
+            return;
+        }
+        d1l_app_model_snapshot(&s_snapshot);
+        request_content_refresh();
+        if (render_radio_settings_sheet()) {
+            show_modal(
+                d1l_ui_radio_settings_sheet(&s_radio_settings_controller));
+        } else {
+            hide_radio_settings_sheet();
+        }
+        show_toast_text("Radio saved; RF apply pending", true);
+        return;
+    }
+    case D1L_UI_RADIO_SETTINGS_ACTION_CLOSE:
+        hide_radio_settings_sheet();
+        return;
+    case D1L_UI_RADIO_SETTINGS_ACTION_NONE:
+    default:
+        return;
+    }
+}
 
-    char profile[80];
-    char line[96];
-    format_radio_profile_line(profile, sizeof(profile), &s_radio_edit);
-
-    lv_obj_t *title = create_label(s_radio_settings_sheet, "Radio Settings", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_pos(title, 8, 4);
-
-    create_button(s_radio_settings_sheet, "Close", 340, 0, 76, 40,
-                  close_radio_settings_event_cb, NULL);
-
-    lv_obj_t *summary = create_label(s_radio_settings_sheet, profile, 0x5EEAD4);
-    lv_label_set_long_mode(summary, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(summary, 408);
-    lv_obj_set_pos(summary, 8, 44);
-
-    const char *radio_apply_text =
-        s_snapshot.radio_applied ? "Live RF matches saved profile" :
-        s_snapshot.radio_apply_pending ? "Saved profile pending next radio start/apply" :
-        "Radio apply status unavailable";
-    lv_obj_t *warning = create_label(s_radio_settings_sheet, radio_apply_text,
-                                     s_snapshot.radio_applied ? 0x5EEAD4 : 0xFBBF24);
-    lv_label_set_long_mode(warning, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(warning, 408);
-    lv_obj_set_pos(warning, 8, 68);
-
-    lv_obj_t *freq = create_label(s_radio_settings_sheet, "", 0xE5EDF5);
-    label_set_fmt(freq, "Freq %.3f MHz", ((double)s_radio_edit.frequency_hz) / 1000000.0);
-    lv_obj_set_pos(freq, 8, 102);
-    create_button(s_radio_settings_sheet, "-25k", 226, 92, 72, 36, radio_edit_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_RADIO_EDIT_FREQ_DOWN);
-    create_button(s_radio_settings_sheet, "+25k", 306, 92, 72, 36, radio_edit_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_RADIO_EDIT_FREQ_UP);
-
-    snprintf(line, sizeof(line), "BW %.1f kHz", ((double)s_radio_edit.bandwidth_tenths_khz) / 10.0);
-    lv_obj_t *bw = create_label(s_radio_settings_sheet, line, 0xE5EDF5);
-    lv_obj_set_pos(bw, 8, 142);
-    create_button(s_radio_settings_sheet, "Cycle BW", 226, 132, 152, 36,
-                  radio_edit_adjust_event_cb, (void *)(uintptr_t)D1L_RADIO_EDIT_BW);
-
-    lv_obj_t *sf = create_label(s_radio_settings_sheet, "", 0xE5EDF5);
-    label_set_fmt(sf, "SF %u", s_radio_edit.spreading_factor);
-    lv_obj_set_pos(sf, 8, 182);
-    create_button(s_radio_settings_sheet, "SF-", 92, 172, 62, 36, radio_edit_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_RADIO_EDIT_SF_DOWN);
-    create_button(s_radio_settings_sheet, "SF+", 162, 172, 62, 36, radio_edit_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_RADIO_EDIT_SF_UP);
-    lv_obj_t *cr = create_label(s_radio_settings_sheet, "", 0xE5EDF5);
-    label_set_fmt(cr, "CR %u", s_radio_edit.coding_rate);
-    lv_obj_set_pos(cr, 244, 182);
-    create_button(s_radio_settings_sheet, "Cycle", 306, 172, 72, 36, radio_edit_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_RADIO_EDIT_CR);
-
-    lv_obj_t *tx = create_label(s_radio_settings_sheet, "", 0xE5EDF5);
-    label_set_fmt(tx, "TX %d dBm", s_radio_edit.tx_power_dbm);
-    lv_obj_set_pos(tx, 8, 222);
-    create_button(s_radio_settings_sheet, "TX-", 106, 212, 62, 36, radio_edit_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_RADIO_EDIT_TX_DOWN);
-    create_button(s_radio_settings_sheet, "TX+", 176, 212, 62, 36, radio_edit_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_RADIO_EDIT_TX_UP);
-    create_button(s_radio_settings_sheet, s_radio_edit.rx_boost ? "RX Boost On" : "RX Boost Off",
-                  250, 212, 128, 36, radio_edit_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_RADIO_EDIT_RX_BOOST);
-
-    create_button(s_radio_settings_sheet, "US/CAN", 8, 266, 104, 40, radio_defaults_event_cb, NULL);
-    create_button(s_radio_settings_sheet, "Save", 124, 266, 104, 40, radio_save_event_cb, NULL);
-    create_button(s_radio_settings_sheet, "Close", 240, 266, 104, 40,
-                  close_radio_settings_event_cb, NULL);
+static bool render_radio_settings_sheet(void)
+{
+    return d1l_ui_radio_settings_render(
+        &s_radio_settings_controller,
+        s_snapshot.radio_applied,
+        s_snapshot.radio_apply_pending,
+        radio_settings_action_handler,
+        NULL);
 }
 
 static void open_radio_settings_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_app_model_snapshot(&s_snapshot);
-    radio_edit_from_snapshot(&s_snapshot);
+    if (!radio_edit_from_snapshot(&s_snapshot)) {
+        hide_radio_settings_sheet();
+        return;
+    }
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -5092,9 +4970,11 @@ static void open_radio_settings_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
-    render_radio_settings_sheet();
-    if (s_radio_settings_sheet) {
-        show_modal(s_radio_settings_sheet);
+    if (render_radio_settings_sheet()) {
+        show_modal(d1l_ui_radio_settings_sheet(
+            &s_radio_settings_controller));
+    } else {
+        hide_radio_settings_sheet();
     }
 }
 
@@ -7128,23 +7008,6 @@ static void create_dm_thread_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_dm_thread_sheet);
 }
 
-static void create_radio_settings_sheet(lv_obj_t *screen)
-{
-    s_radio_settings_sheet = create_object(screen, "radio settings sheet");
-    if (!s_radio_settings_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_radio_settings_sheet, 448, 320);
-    lv_obj_set_pos(s_radio_settings_sheet, 16, 82);
-    lv_obj_set_style_radius(s_radio_settings_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_radio_settings_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_radio_settings_sheet, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_border_width(s_radio_settings_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_radio_settings_sheet, 12, 0);
-    lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_radio_settings_sheet);
-}
-
 static void create_storage_sheet(lv_obj_t *screen)
 {
     s_storage_sheet = create_object(screen, "storage sheet");
@@ -7600,7 +7463,10 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_public_search_sheet(s_screen);
     create_message_detail_sheet(s_screen);
     create_dm_thread_sheet(s_screen);
-    create_radio_settings_sheet(s_screen);
+    if (!d1l_ui_radio_settings_create(
+            &s_radio_settings_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
     create_storage_sheet(s_screen);
     if (!d1l_ui_wifi_create(&s_wifi_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
