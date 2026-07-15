@@ -141,19 +141,19 @@ def test_meshcore_identity_generation_preserves_inconsistent_persisted_material(
     ].split("d1l_meshcore_service_status_t d1l_meshcore_service_status", 1)[0]
 
     load_status = body.index("d1l_settings_load_status()")
-    current = body.index("d1l_settings_current()")
-    classify = body.index("d1l_settings_identity_state(&settings)")
+    current = body.index("d1l_settings_identity_secret_snapshot(&identity)")
+    classify = body.index("d1l_identity_state_classify(")
     reject = body.index("persisted_state == D1L_IDENTITY_STATE_INCONSISTENT")
     random = body.index("d1l_secure_random_fill")
-    save = body.index("d1l_settings_save")
+    save = body.index("d1l_settings_save_identity_if_absent")
     assert load_status < current < classify < reject < random < save
 
     unreadable = body.split("if (load_status != ESP_OK)", 1)[1].split(
-        "d1l_settings_t settings", 1
+        "d1l_settings_identity_secret_t identity", 1
     )[0]
     assert "s_status.identity_ready = false;" in unreadable
     assert "return load_status;" in unreadable
-    assert "d1l_settings_current" not in unreadable
+    assert "d1l_settings_identity_secret_snapshot" not in unreadable
     assert "d1l_settings_save" not in unreadable
 
     inconsistent = body.split(
@@ -165,7 +165,8 @@ def test_meshcore_identity_generation_preserves_inconsistent_persisted_material(
     assert "d1l_secure_random_fill" not in inconsistent
 
     generation = body.split("uint8_t seed", 1)[1]
-    assert "d1l_settings_identity_state(&settings)" in generation
+    assert "d1l_identity_state_classify(" in generation
+    assert "d1l_settings_identity_secret_wipe(&identity)" in generation
     assert "D1L_IDENTITY_STATE_CONSISTENT" in generation
     assert "identity_public_key[0]" not in generation
 
@@ -227,7 +228,8 @@ def test_meshcore_status_getter_is_passive_and_radio_owned_by_service_task():
     ensure_radio = source.split("static esp_err_t ensure_radio_started(void)", 1)[1].split(
         "static void d1l_meshcore_start_rx(void)", 1
     )[0]
-    assert "s_status.identity_ready = d1l_settings_current()->identity_ready;" in ensure_radio
+    assert "d1l_settings_public_snapshot(&settings_snapshot)" in ensure_radio
+    assert "s_status.identity_ready = settings_snapshot.identity_ready;" in ensure_radio
     assert app_main.index("d1l_board_init()") < app_main.index(
         "d1l_meshcore_service_start_rx_async()"
     ) < app_main.index("d1l_connectivity_init()")

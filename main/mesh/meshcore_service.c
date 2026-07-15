@@ -879,6 +879,67 @@ static void secure_zero_channel_key(d1l_channel_protocol_key_t *key)
     secure_zero_bytes(key, key ? sizeof(*key) : 0U);
 }
 
+static esp_err_t derive_local_identity_shared_secret(
+    const uint8_t peer_public_key[D1L_MESHCORE_PUB_KEY_SIZE],
+    const uint8_t expected_public_key[D1L_MESHCORE_PUB_KEY_SIZE],
+    uint8_t out_secret[D1L_MESHCORE_PUB_KEY_SIZE])
+{
+    if (!peer_public_key || !expected_public_key || !out_secret) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    secure_zero_bytes(out_secret, D1L_MESHCORE_PUB_KEY_SIZE);
+    d1l_settings_identity_secret_t identity = {0};
+    esp_err_t ret = d1l_settings_identity_secret_snapshot(&identity);
+    if (ret == ESP_OK &&
+        d1l_identity_state_classify(
+            identity.identity_ready, identity.identity_public_key,
+            identity.identity_private_key) != D1L_IDENTITY_STATE_CONSISTENT) {
+        ret = ESP_ERR_INVALID_STATE;
+    }
+    if (ret == ESP_OK &&
+        memcmp(identity.identity_public_key, expected_public_key,
+               D1L_MESHCORE_PUB_KEY_SIZE) != 0) {
+        ret = ESP_ERR_INVALID_STATE;
+    }
+    if (ret == ESP_OK) {
+        ed25519_key_exchange(out_secret, peer_public_key,
+                             identity.identity_private_key);
+    }
+    d1l_settings_identity_secret_wipe(&identity);
+    return ret;
+}
+
+static esp_err_t sign_with_local_identity(
+    const uint8_t expected_public_key[D1L_MESHCORE_PUB_KEY_SIZE],
+    const uint8_t *message, size_t message_length,
+    uint8_t signature[D1L_MESHCORE_SIGNATURE_SIZE])
+{
+    if (!expected_public_key || (!message && message_length != 0U) ||
+        !signature) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_settings_identity_secret_t identity = {0};
+    esp_err_t ret = d1l_settings_identity_secret_snapshot(&identity);
+    if (ret == ESP_OK &&
+        d1l_identity_state_classify(
+            identity.identity_ready, identity.identity_public_key,
+            identity.identity_private_key) != D1L_IDENTITY_STATE_CONSISTENT) {
+        ret = ESP_ERR_INVALID_STATE;
+    }
+    if (ret == ESP_OK &&
+        memcmp(identity.identity_public_key, expected_public_key,
+               D1L_MESHCORE_PUB_KEY_SIZE) != 0) {
+        ret = ESP_ERR_INVALID_STATE;
+    }
+    if (ret == ESP_OK) {
+        ed25519_sign(signature, message, message_length,
+                     identity.identity_public_key,
+                     identity.identity_private_key);
+    }
+    d1l_settings_identity_secret_wipe(&identity);
+    return ret;
+}
+
 static bool channel_metadata(uint64_t channel_id, d1l_channel_info_t *out_info)
 {
     if (!out_info) {
@@ -972,7 +1033,9 @@ static void append_channel_message_store_rx(
 static void append_channel_message_store_tx(uint64_t channel_id,
                                             const char *message)
 {
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     uint32_t message_seq = 0U;
     esp_err_t ret = d1l_message_store_append_channel(
         channel_id, "tx", settings->node_name, message, 0, 0,
@@ -1939,6 +2002,9 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
     if (contact->public_key_hex[0] == '\0') {
         return ESP_ERR_INVALID_STATE;
     }
+    if (attempt > 3U) {
+        return ESP_ERR_INVALID_ARG;
+    }
     const bool use_direct = selection->route == D1L_MESHCORE_ROUTE_DIRECT;
     const bool use_flood = selection->route == D1L_MESHCORE_ROUTE_FLOOD;
     if ((!use_direct && !use_flood) ||
@@ -1960,22 +2026,24 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
     }
 
     uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
-    ed25519_key_exchange(secret, dest_pub, settings->identity_private_key);
+    esp_err_t ret = derive_local_identity_shared_secret(
+        dest_pub, settings->identity_public_key, secret);
+    if (ret != ESP_OK) {
+        return ret;
+    }
 
     uint8_t plain[D1L_MESHCORE_MAX_TEXT_BYTES] = {0};
     write_le32(plain, tx_timestamp);
-    if (attempt > 3U) {
-        return ESP_ERR_INVALID_ARG;
-    }
     plain[4] = (uint8_t)((D1L_MESHCORE_TXT_TYPE_PLAIN << 2) |
                          (attempt & 0x03U));
     const size_t message_len = strlen(text);
     memcpy(&plain[5], text, message_len);
     const size_t plain_len = 5U + message_len;
 
-    esp_err_t ret = calc_dm_ack_hash(out_ack_hash, plain, plain_len,
-                                     settings->identity_public_key);
+    ret = calc_dm_ack_hash(out_ack_hash, plain, plain_len,
+                           settings->identity_public_key);
     if (ret != ESP_OK) {
+        secure_zero_bytes(secret, sizeof(secret));
         return ret;
     }
 
@@ -1987,6 +2055,7 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
             selection->path_len,
             selection->path_byte_len > 0U ? selection->path : NULL,
             raw, raw_size, &i) || raw_size - i < 2U) {
+        secure_zero_bytes(secret, sizeof(secret));
         return ESP_ERR_INVALID_SIZE;
     }
     raw[i++] = dest_pub[0];
@@ -1995,7 +2064,7 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
     size_t mac_cipher_len = 0;
     ret = meshcore_encrypt_then_mac(secret, &raw[i], raw_size - i,
                                     plain, plain_len, &mac_cipher_len);
-    memset(secret, 0, sizeof(secret));
+    secure_zero_bytes(secret, sizeof(secret));
     if (ret != ESP_OK) {
         return ret;
     }
@@ -2021,7 +2090,11 @@ static esp_err_t build_path_discovery_request(
         return ESP_ERR_INVALID_ARG;
     }
     uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
-    ed25519_key_exchange(secret, dest_pub, settings->identity_private_key);
+    esp_err_t ret = derive_local_identity_shared_secret(
+        dest_pub, settings->identity_public_key, secret);
+    if (ret != ESP_OK) {
+        return ret;
+    }
 
     const uint8_t header = (uint8_t)(
         (D1L_MESHCORE_REQUEST_TYPE << 2U) | D1L_MESHCORE_ROUTE_FLOOD);
@@ -2031,7 +2104,7 @@ static esp_err_t build_path_discovery_request(
     if (!d1l_meshcore_wire_write_prefix(
             header, 0U, 0U, path_len, NULL,
             raw, raw_size, &index) || raw_size - index < 2U) {
-        memset(secret, 0, sizeof(secret));
+        secure_zero_bytes(secret, sizeof(secret));
         return ESP_ERR_INVALID_SIZE;
     }
     raw[index++] = dest_pub[0];
@@ -2046,10 +2119,10 @@ static esp_err_t build_path_discovery_request(
     plain[5] = (uint8_t)~0x01U;
     write_le32(&plain[9], esp_random());
     size_t cipher_len = 0U;
-    const esp_err_t ret = meshcore_encrypt_then_mac(
+    ret = meshcore_encrypt_then_mac(
         secret, &raw[index], raw_size - index,
         plain, sizeof(plain), &cipher_len);
-    memset(secret, 0, sizeof(secret));
+    secure_zero_bytes(secret, sizeof(secret));
     if (ret != ESP_OK) {
         return ret;
     }
@@ -2366,7 +2439,9 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         return false;
     }
 
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     if (!settings->identity_ready || packet.payload[0] != settings->identity_public_key[0]) {
         return false;
     }
@@ -2382,26 +2457,30 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         }
 
         uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
-        ed25519_key_exchange(secret, sender_pub, settings->identity_private_key);
+        if (derive_local_identity_shared_secret(
+                sender_pub, settings->identity_public_key,
+                secret) != ESP_OK) {
+            continue;
+        }
         uint8_t plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
         const size_t plain_len =
             meshcore_decrypt_after_mac(secret, plain, sizeof(plain) - 1U,
                                        &packet.payload[2], packet.payload_len - 2U);
         if (plain_len < 6U) {
-            memset(secret, 0, sizeof(secret));
+            secure_zero_bytes(secret, sizeof(secret));
             continue;
         }
 
         const uint8_t txt_type = plain[4] >> 2;
         if (txt_type != D1L_MESHCORE_TXT_TYPE_PLAIN) {
-            memset(secret, 0, sizeof(secret));
+            secure_zero_bytes(secret, sizeof(secret));
             continue;
         }
         d1l_meshcore_text_plaintext_view_t text_view = {0};
         if (!d1l_meshcore_text_plaintext_view(
                 &plain[5], plain_len - 5U, true, plain[4] & 0x03U,
                 &text_view)) {
-            memset(secret, 0, sizeof(secret));
+            secure_zero_bytes(secret, sizeof(secret));
             continue;
         }
         plain[5U + text_view.text_length] = '\0';
@@ -2417,7 +2496,7 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
             &ack_path_expired);
         if (prepare_ret != ESP_OK ||
             !d1l_contact_store_can_dm(&ack_contact)) {
-            memset(secret, 0, sizeof(secret));
+            secure_zero_bytes(secret, sizeof(secret));
             ESP_LOGW(TAG, "DM contact revalidation failed: %s",
                      esp_err_to_name(
                          prepare_ret != ESP_OK ? prepare_ret :
@@ -2474,7 +2553,7 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
                                       ack_raw, sizeof(ack_raw), &ack_raw_len) :
                 ESP_ERR_INVALID_ARG;
         }
-        memset(secret, 0, sizeof(secret));
+        secure_zero_bytes(secret, sizeof(secret));
 
         s_status.rx_packets++;
         if (duplicate) {
@@ -2666,7 +2745,9 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
         return;
     }
 
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     if (!settings->identity_ready || packet.payload[0] != settings->identity_public_key[0]) {
         return;
     }
@@ -2683,14 +2764,18 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
         }
 
         uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
-        ed25519_key_exchange(secret, sender_pub, settings->identity_private_key);
+        if (derive_local_identity_shared_secret(
+                sender_pub, settings->identity_public_key,
+                secret) != ESP_OK) {
+            continue;
+        }
         uint8_t plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
         const size_t plain_len =
             meshcore_decrypt_after_mac(secret, plain, sizeof(plain) - 1U,
                                        &packet.payload[2], packet.payload_len - 2U);
         d1l_meshcore_path_plain_t decoded = {0};
         if (!d1l_meshcore_path_plain_decode(plain, plain_len, &decoded)) {
-            memset(secret, 0, sizeof(secret));
+            secure_zero_bytes(secret, sizeof(secret));
             continue;
         }
 
@@ -2702,7 +2787,7 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
             !d1l_meshcore_path_replay_take(
                 &s_path_replay_cache, replay_identity)) {
             memset(replay_identity, 0, sizeof(replay_identity));
-            memset(secret, 0, sizeof(secret));
+            secure_zero_bytes(secret, sizeof(secret));
             return;
         }
 
@@ -2715,7 +2800,7 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
             (void)d1l_meshcore_path_replay_forget(
                 &s_path_replay_cache, replay_identity);
             memset(replay_identity, 0, sizeof(replay_identity));
-            memset(secret, 0, sizeof(secret));
+            secure_zero_bytes(secret, sizeof(secret));
             ESP_LOGW(TAG, "contact path update failed: %s",
                      esp_err_to_name(ret));
             return;
@@ -2782,7 +2867,7 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
                          esp_err_to_name(ret));
             }
         }
-        memset(secret, 0, sizeof(secret));
+        secure_zero_bytes(secret, sizeof(secret));
         return;
     }
 }
@@ -2991,8 +3076,13 @@ static esp_err_t build_advert_packet(const d1l_settings_t *settings, bool flood,
     msg_len += 4U;
     memcpy(&message[msg_len], app_data, app_data_len);
     msg_len += app_data_len;
-    ed25519_sign(signature, message, msg_len, settings->identity_public_key,
-                 settings->identity_private_key);
+    const esp_err_t sign_ret = sign_with_local_identity(
+        settings->identity_public_key, message, msg_len, signature);
+    secure_zero_bytes(message, sizeof(message));
+    if (sign_ret != ESP_OK) {
+        secure_zero_bytes(signature, D1L_MESHCORE_SIGNATURE_SIZE);
+        return sign_ret;
+    }
 
     *out_len = (uint8_t)i;
     return ESP_OK;
@@ -3085,7 +3175,9 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
         return;
     }
 
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     if (settings->identity_ready &&
         memcmp(pub_key, settings->identity_public_key, D1L_MESHCORE_PUB_KEY_SIZE) == 0) {
         char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
@@ -3529,7 +3621,9 @@ static esp_err_t ensure_radio_started(void)
         return ret;
     }
     s_status.radio_ready = true;
-    s_status.identity_ready = d1l_settings_current()->identity_ready;
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    s_status.identity_ready = settings_snapshot.identity_ready;
     s_status.companion_framing_ready = true;
     if (!s_tx_busy) {
         s_status.state = D1L_MESHCORE_SERVICE_READY;
@@ -3648,7 +3742,9 @@ static esp_err_t meshcore_service_handle_send_advert(
         return ret;
     }
 
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     uint32_t tx_timestamp = 0U;
     ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
     if (ret != ESP_OK) {
@@ -3833,7 +3929,9 @@ static esp_err_t retry_pending_dm_as_flood(uint64_t now_us)
         return failure;
     }
 
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     d1l_meshcore_route_selection_t retry_selection = {0};
     if (!d1l_meshcore_route_select(
             false, false, NULL, 0U, 0U, now_ms,
@@ -3967,7 +4065,9 @@ static esp_err_t meshcore_service_handle_send_dm(
         return ret;
     }
 
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     bool path_expired = false;
     const esp_err_t prepare_ret = d1l_contact_store_prepare_path_route(
         contact.fingerprint, now_ms, &contact, &path_expired);
@@ -4411,7 +4511,9 @@ static esp_err_t meshcore_service_send_ack_async(
 
 void d1l_meshcore_service_init(void)
 {
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     const esp_err_t task_ret = meshcore_service_start_task();
     if (!s_service_initialized) {
         d1l_store_lock_take(&s_trace_lock);
@@ -4478,16 +4580,27 @@ esp_err_t d1l_meshcore_service_ensure_identity(void)
         return load_status;
     }
 
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_identity_secret_t identity = {0};
+    const esp_err_t snapshot_ret =
+        d1l_settings_identity_secret_snapshot(&identity);
+    if (snapshot_ret != ESP_OK) {
+        d1l_settings_identity_secret_wipe(&identity);
+        s_status.identity_ready = false;
+        return snapshot_ret;
+    }
     const d1l_identity_state_t persisted_state =
-        d1l_settings_identity_state(&settings);
+        d1l_identity_state_classify(
+            identity.identity_ready, identity.identity_public_key,
+            identity.identity_private_key);
     if (persisted_state == D1L_IDENTITY_STATE_CONSISTENT) {
+        d1l_settings_identity_secret_wipe(&identity);
         s_status.identity_ready = true;
         return ESP_OK;
     }
     if (persisted_state == D1L_IDENTITY_STATE_INCONSISTENT) {
         /* Preserve invalid persisted material for recovery/diagnostics. It must
          * never be silently replaced with a new node identity. */
+        d1l_settings_identity_secret_wipe(&identity);
         s_status.identity_ready = false;
         return ESP_ERR_INVALID_STATE;
     }
@@ -4498,31 +4611,40 @@ esp_err_t d1l_meshcore_service_ensure_identity(void)
             d1l_secure_random_fill(seed, sizeof(seed));
         if (random_ret != ESP_OK) {
             secure_zero_bytes(seed, sizeof(seed));
+            d1l_settings_identity_secret_wipe(&identity);
             s_status.identity_ready = false;
             return random_ret;
         }
-        ed25519_create_keypair(settings.identity_public_key, settings.identity_private_key, seed);
-        settings.identity_ready = true;
-        if (d1l_settings_identity_state(&settings) ==
+        ed25519_create_keypair(identity.identity_public_key,
+                               identity.identity_private_key, seed);
+        identity.identity_ready = true;
+        if (d1l_identity_state_classify(
+                identity.identity_ready, identity.identity_public_key,
+                identity.identity_private_key) ==
             D1L_IDENTITY_STATE_CONSISTENT) {
             break;
         }
-        settings.identity_ready = false;
+        identity.identity_ready = false;
     }
     secure_zero_bytes(seed, sizeof(seed));
-    if (!settings.identity_ready) {
+    if (!identity.identity_ready) {
+        d1l_settings_identity_secret_wipe(&identity);
         s_status.identity_ready = false;
         return ESP_FAIL;
     }
 
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_save_identity_if_absent(
+        identity.identity_public_key, identity.identity_private_key);
+    d1l_settings_identity_secret_wipe(&identity);
     s_status.identity_ready = ret == ESP_OK;
     return ret;
 }
 
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
 {
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     d1l_radio_profile_t current_profile = d1l_settings_radio_profile(settings);
     d1l_radio_profile_t applied_profile = {0};
     bool applied_valid = false;
@@ -4679,7 +4801,9 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
 
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
     uint8_t raw_len = 0;
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     uint32_t tx_timestamp = 0;
     ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
     if (ret != ESP_OK) {
@@ -4826,7 +4950,9 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     if (ret != ESP_OK) {
         return ret;
     }
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
     uint8_t raw_len = 0U;
     ret = build_path_discovery_request(

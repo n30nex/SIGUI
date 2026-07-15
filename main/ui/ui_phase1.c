@@ -7922,7 +7922,9 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     lv_obj_set_pos(s_onboarding_name_textarea, 8, 92);
     lv_textarea_set_one_line(s_onboarding_name_textarea, true);
     lv_textarea_set_max_length(s_onboarding_name_textarea, D1L_NODE_NAME_LEN - 1U);
-    lv_textarea_set_text(s_onboarding_name_textarea, d1l_settings_current()->node_name);
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    lv_textarea_set_text(s_onboarding_name_textarea, settings.node_name);
     lv_obj_set_style_radius(s_onboarding_name_textarea, 8, 0);
     lv_obj_set_style_bg_color(s_onboarding_name_textarea, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_onboarding_name_textarea, lv_color_hex(0x263241), 0);
@@ -7955,7 +7957,7 @@ static void create_onboarding_sheet(lv_obj_t *screen)
                                     8, 258, 424, 160);
     lv_obj_add_event_cb(s_onboarding_keyboard, onboarding_keyboard_event_cb, LV_EVENT_READY, NULL);
 
-    if (d1l_settings_current()->onboarding_complete) {
+    if (settings.onboarding_complete) {
         s_onboarding_visible = false;
         d1l_ui_modal_hide(s_onboarding_sheet);
     } else {

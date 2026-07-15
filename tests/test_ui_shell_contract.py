@@ -94,7 +94,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert '"sd_cache_required"' in source
     assert '"location_required"' in source
     assert '"ready"' in source
-    assert "snapshot->map_location_set = settings->map_location_set" in source
+    assert "snapshot->map_location_set = settings.map_location_set" in source
     assert "d1l_app_model_save_map_tile_provider" not in header
     assert "d1l_app_model_download_center_map_tile" not in header
     assert "d1l_app_radio_profile_edit_t" in header
@@ -725,7 +725,7 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_route_store_copy_for_target(fingerprint, out_entries, max_entries)" in model
     assert "d1l_meshcore_service_request_advert(flood)" in model
     assert "d1l_settings_complete_onboarding(node_name, false, false, false)" in model
-    assert "d1l_settings_save(&settings)" in model
+    assert "d1l_settings_update_fields(" in model
     assert "d1l_meshcore_service_ensure_identity()" in model
 
 
@@ -1756,7 +1756,7 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "controller->edit.rx_boost = !controller->edit.rx_boost" in radio_module
     assert "d1l_app_model_save_radio_profile(edit)" in source
     assert "d1l_app_model_default_radio_profile(&defaults)" in source
-    assert "d1l_settings_save(&settings)" in model
+    assert "D1L_SETTINGS_UPDATE_RADIO_PROFILE" in model
     assert "settings.tcxo_mode = D1L_TCXO_NONE" in model
 
 

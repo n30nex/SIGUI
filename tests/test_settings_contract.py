@@ -47,10 +47,31 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "migrate_v4_settings" in source
     assert "migrate_v5_settings" in source
     assert "migrate_v6_settings" in source
-    assert "switch (loaded.schema_version)" in source
-    assert "case D1L_SETTINGS_SCHEMA_VERSION:" in source
-    assert "case 5U:" in source
-    assert "Unknown same-size blobs are never sanitized as v7" in source
+    assert '#include "settings_envelope.h"' in source
+    assert "persist_settings_envelope" in source
+    persist = source.split("static esp_err_t persist_settings_envelope", 1)[1].split(
+        "static bool migrate_legacy_settings_blob", 1
+    )[0]
+    assert persist.count("wipe_sensitive_bytes(blob, sizeof(blob))") == 2
+    assert "migrate_legacy_settings_blob" in source
+    legacy_publish = source.split(
+        "d1l_settings_t migrated = {0}", 1
+    )[1].split("wipe_sensitive_bytes(blob, len)", 1)[0]
+    assert "migrate_legacy_settings_blob(\n                            &migrated" in legacy_publish
+    assert "persist_settings_envelope(\n                            handle, &migrated" in legacy_publish
+    assert legacy_publish.index("persist_settings_envelope(") < legacy_publish.index(
+        "s_current = migrated"
+    )
+    assert "wipe_sensitive_bytes(&migrated, sizeof(migrated))" in legacy_publish
+    legacy = source.split("static bool migrate_legacy_settings_blob", 1)[1].split(
+        "static esp_err_t quarantine_settings", 1
+    )[0]
+    for schema in ["D1L_SETTINGS_SCHEMA_VERSION", "6U", "5U", "4U", "3U", "2U"]:
+        assert f"case {schema}:" in legacy
+    assert "D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA" in source
+    assert "D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED" in source
+    assert "D1L_SETTINGS_PERSISTENCE_QUARANTINED_CHECKSUM" in source
+    assert "s_persistence_write_blocked = true" in source
     assert "d1l_settings_save_wifi_profile" in header
     assert "d1l_settings_clear_wifi_profile" in header
     assert "strlen(ssid) >= D1L_WIFI_SSID_LEN" in source
@@ -85,14 +106,75 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->tcxo_mode = D1L_TCXO_NONE" in source
     assert "settings->identity_ready = false" in source
     assert "static esp_err_t s_load_status = ESP_ERR_INVALID_STATE" in source
-    load = source.split("esp_err_t d1l_settings_load(void)", 1)[1].split(
-        "esp_err_t d1l_settings_save", 1
+    load = source.split("static esp_err_t settings_load_locked(void)", 1)[1].split(
+        "esp_err_t d1l_settings_load(void)", 1
     )[0]
     assert "s_load_status = ret;" in load
-    save = source.split("esp_err_t d1l_settings_save", 1)[1].split(
-        "esp_err_t d1l_settings_reset", 1
+    save = source.split("static esp_err_t settings_save_locked", 1)[1].split(
+        "static void apply_settings_update_fields", 1
     )[0]
-    assert "s_load_status" not in save
+    assert "s_load_status =" not in save
+    update_wrapper = source.split("esp_err_t d1l_settings_update_fields", 1)[1].split(
+        "esp_err_t d1l_settings_save_identity_if_absent", 1
+    )[0]
+    assert "settings_owner_take()" in update_wrapper
+    assert "settings_save_locked(&updated)" in update_wrapper
+    assert "settings_owner_give()" in update_wrapper
+    assert "d1l_settings_current" not in header
+    assert "d1l_settings_current" not in source
+    assert "d1l_settings_snapshot" not in header
+    assert "d1l_settings_snapshot" not in source
+    assert "d1l_settings_public_snapshot" in header
+    public_snapshot = source.split(
+        "esp_err_t d1l_settings_public_snapshot", 1
+    )[1].split("void d1l_settings_wifi_secret_wipe", 1)[0]
+    assert "copy_public_settings(settings, &s_current)" in public_snapshot
+    public_copy = source.split("static void copy_public_settings", 1)[1].split(
+        "static void wipe_derived_identity_key", 1
+    )[0]
+    assert "wipe_sensitive_bytes(destination, sizeof(*destination))" in public_copy
+    assert "offsetof(d1l_settings_t, wifi_password)" in public_copy
+    assert "offsetof(d1l_settings_t, identity_private_key)" in public_copy
+    assert "source->wifi_password" not in public_copy
+    assert "source->identity_private_key" not in public_copy
+    assert "d1l_settings_wifi_secret_snapshot" in header
+    assert "d1l_settings_wifi_secret_wipe" in header
+    assert "d1l_settings_identity_secret_snapshot" in header
+    assert "d1l_settings_identity_secret_wipe" in header
+    assert "D1L_SETTINGS_UPDATE_WIFI_PROFILE" not in header
+    assert "D1L_SETTINGS_UPDATE_IDENTITY" not in header
+    update_fields = source.split("static void apply_settings_update_fields", 1)[1].split(
+        "static esp_err_t settings_replace_all", 1
+    )[0]
+    assert "wifi_password" not in update_fields
+    assert "identity_private_key" not in update_fields
+    clear_wifi = source.split(
+        "esp_err_t d1l_settings_clear_wifi_profile", 1
+    )[1].split("esp_err_t d1l_settings_complete_onboarding", 1)[0]
+    assert "memset(settings.wifi_ssid, 0, sizeof(settings.wifi_ssid))" in clear_wifi
+    assert (
+        "wipe_sensitive_bytes(settings.wifi_password," in clear_wifi
+    )
+    save_wifi = source.split(
+        "esp_err_t d1l_settings_save_wifi_profile", 1
+    )[1].split("esp_err_t d1l_settings_clear_wifi_profile", 1)[0]
+    ssid_wipe = save_wifi.index(
+        "memset(settings.wifi_ssid, 0, sizeof(settings.wifi_ssid))"
+    )
+    password_wipe = save_wifi.index(
+        "wipe_sensitive_bytes(settings.wifi_password,"
+    )
+    ssid_copy = save_wifi.index("snprintf(settings.wifi_ssid")
+    password_copy = save_wifi.index("snprintf(settings.wifi_password")
+    assert ssid_wipe < ssid_copy
+    assert password_wipe < password_copy
+    assert "zero_text_tail(settings.wifi_password," in save_wifi
+    sanitize = source.split("void d1l_settings_sanitize", 1)[1].split(
+        "const char *d1l_settings_role_name", 1
+    )[0]
+    assert "!settings->wifi_profile_saved" in sanitize
+    assert "zero_text_tail(settings->wifi_ssid" in sanitize
+    assert "zero_text_tail(settings->wifi_password" in sanitize
 
 
 def test_console_exposes_phase2_foundation_commands():
@@ -194,19 +276,15 @@ def test_v5_and_v6_migrations_preserve_wifi_location_and_identity():
         assert "memcpy(dest->identity_private_key, src->identity_private_key" in migration
         assert "dest->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM" in migration
 
-    load = source.split("esp_err_t d1l_settings_load(void)", 1)[1].split(
-        "esp_err_t d1l_settings_save", 1
+    legacy = source.split("static bool migrate_legacy_settings_blob", 1)[1].split(
+        "static esp_err_t quarantine_settings", 1
     )[0]
-    same_size = load.split("len == sizeof(s_current)", 1)[1].split(
-        "len == sizeof(d1l_settings_v6_t)", 1
-    )[0]
-    assert "switch (loaded.schema_version)" in same_size
-    assert "case 5U:" in same_size
-    assert "migrate_v5_settings(&s_current, &old_v5)" in same_size
-    v6_blob = load.split("len == sizeof(d1l_settings_v6_t)", 1)[1].split(
-        "len == sizeof(d1l_settings_v5_t)", 1
-    )[0]
-    assert "migrate_v6_settings(&s_current, &old_settings)" in v6_blob
+    assert "case 5U:" in legacy
+    assert "blob_length != sizeof(d1l_settings_v5_t)" in legacy
+    assert "migrate_v5_settings(destination" in legacy
+    assert "case 6U:" in legacy
+    assert "blob_length != sizeof(d1l_settings_v6_t)" in legacy
+    assert "migrate_v6_settings(destination" in legacy
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():

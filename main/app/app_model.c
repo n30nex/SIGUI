@@ -102,7 +102,12 @@ static void radio_edit_from_settings(const d1l_settings_t *settings,
     if (!profile) {
         return;
     }
-    const d1l_settings_t *src = settings ? settings : d1l_settings_current();
+    d1l_settings_t snapshot = {0};
+    const d1l_settings_t *src = settings;
+    if (!src) {
+        (void)d1l_settings_public_snapshot(&snapshot);
+        src = &snapshot;
+    }
     profile->frequency_hz = src->frequency_hz;
     profile->bandwidth_tenths_khz = src->bandwidth_tenths_khz;
     profile->spreading_factor = src->spreading_factor;
@@ -284,7 +289,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
 
     memset(snapshot, 0, sizeof(*snapshot));
 
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
     d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
     d1l_message_store_stats_t messages = d1l_message_store_stats();
     d1l_dm_store_stats_t dms = d1l_dm_store_stats();
@@ -303,22 +309,22 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
 
     snapshot->board_ready = s_model.board_ready;
     snapshot->ui_ready = s_model.ui_ready;
-    snapshot->identity_ready = settings->identity_ready || mesh.identity_ready;
+    snapshot->identity_ready = settings.identity_ready || mesh.identity_ready;
     snapshot->settings_load_status = d1l_settings_load_status();
-    snapshot->identity_state = d1l_settings_identity_state(settings);
+    snapshot->identity_state = d1l_settings_persisted_identity_state();
     snapshot->protocol_tx_ready = time_status.protocol_tx_ready;
     snapshot->protocol_tx_error = time_status.protocol_tx_error;
     snapshot->radio_ready = mesh.radio_ready;
     snapshot->radio_applied = mesh.radio_applied;
     snapshot->radio_apply_pending = mesh.radio_apply_pending;
     snapshot->companion_ready = mesh.companion_framing_ready;
-    snapshot->radio_frequency_hz = settings->frequency_hz;
-    snapshot->radio_bandwidth_tenths_khz = settings->bandwidth_tenths_khz;
-    snapshot->radio_spreading_factor = settings->spreading_factor;
-    snapshot->radio_coding_rate = settings->coding_rate;
-    snapshot->radio_tx_power_dbm = settings->tx_power_dbm;
-    snapshot->radio_rx_boost = settings->rx_boost;
-    snapshot->radio_tcxo = d1l_settings_tcxo_name(settings->tcxo_mode);
+    snapshot->radio_frequency_hz = settings.frequency_hz;
+    snapshot->radio_bandwidth_tenths_khz = settings.bandwidth_tenths_khz;
+    snapshot->radio_spreading_factor = settings.spreading_factor;
+    snapshot->radio_coding_rate = settings.coding_rate;
+    snapshot->radio_tx_power_dbm = settings.tx_power_dbm;
+    snapshot->radio_rx_boost = settings.rx_boost;
+    snapshot->radio_tcxo = d1l_settings_tcxo_name(settings.tcxo_mode);
     snapshot->radio_apply_error = esp_err_to_name(mesh.radio_apply_error);
     snapshot->wifi_enabled = connectivity.wifi_enabled_setting;
     snapshot->ble_companion_enabled = connectivity.ble_companion_enabled_setting;
@@ -329,7 +335,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->wifi_stack_active = connectivity.wifi_stack_active;
     snapshot->wifi_connected = connectivity.wifi_connected;
     snapshot->wifi_connecting = connectivity.wifi_connecting;
-    snapshot->onboarding_complete = settings->onboarding_complete;
+    snapshot->onboarding_complete = settings.onboarding_complete;
     snapshot->wifi_build_enabled = connectivity.wifi_build_enabled;
     snapshot->ble_build_enabled = connectivity.ble_build_enabled;
     snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED;
@@ -365,15 +371,15 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
     snapshot->map_tile_render_supported = D1L_MAP_TILE_RENDER_SUPPORTED;
     snapshot->map_tile_sideload_supported = false;
-    snapshot->map_location_set = settings->map_location_set;
+    snapshot->map_location_set = settings.map_location_set;
     snapshot->map_tile_download_supported = connectivity.wifi_build_enabled &&
                                             connectivity.wifi_connected &&
                                             snapshot->map_tile_cache_ready &&
                                             snapshot->map_location_set &&
                                             snapshot->map_tile_render_supported;
-    snapshot->map_lat_e7 = settings->map_lat_e7;
-    snapshot->map_lon_e7 = settings->map_lon_e7;
-    snapshot->map_tile_zoom = settings->map_tile_zoom;
+    snapshot->map_lat_e7 = settings.map_lat_e7;
+    snapshot->map_lon_e7 = settings.map_lon_e7;
+    snapshot->map_tile_zoom = settings.map_tile_zoom;
     snapshot->storage_capacity_kb = storage.capacity_kb;
     snapshot->storage_free_kb = storage.free_kb;
     snapshot->storage_last_error = storage.last_error;
@@ -394,7 +400,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->map_tile_download_state = !snapshot->map_tile_cache_ready ? "sd_cache_required" :
                                         !connectivity.wifi_build_enabled ? "wifi_unavailable" :
                                         !connectivity.wifi_connected ? "wifi_required" :
-                                        !settings->map_location_set ? "location_required" :
+                                        !settings.map_location_set ? "location_required" :
                                         !snapshot->map_tile_render_supported ? "tile_render_pending" :
                                         "ready";
     snapshot->map_tile_download_requires = D1L_MAP_TILE_DOWNLOAD_REQUIRES;
@@ -404,14 +410,14 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->storage_note = storage.note;
     snapshot->time_available = false;
     snprintf(snapshot->time_label, sizeof(snapshot->time_label), "--:--");
-    snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings->node_name);
+    snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings.node_name);
     copy_cstr(snapshot->wifi_ssid, sizeof(snapshot->wifi_ssid),
-              connectivity.wifi_ssid ? connectivity.wifi_ssid : "");
+              connectivity.wifi_ssid);
     copy_cstr(snapshot->wifi_ip, sizeof(snapshot->wifi_ip),
               connectivity.wifi_ip ? connectivity.wifi_ip : "");
-    if (settings->identity_ready) {
+    if (settings.identity_ready) {
         hex_prefix(snapshot->identity_fingerprint, sizeof(snapshot->identity_fingerprint),
-                   settings->identity_public_key, 8U);
+                   settings.identity_public_key, 8U);
     }
     snapshot->mesh_state = d1l_meshcore_service_state_name(mesh.state);
     snapshot->reset_reason = health.reset_reason;
@@ -876,20 +882,22 @@ esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7)
         return ESP_ERR_INVALID_ARG;
     }
 
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.map_location_set = true;
     settings.map_lat_e7 = lat_e7;
     settings.map_lon_e7 = lon_e7;
-    return d1l_settings_save(&settings);
+    return d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_MAP_LOCATION);
 }
 
 esp_err_t d1l_app_model_clear_map_location(void)
 {
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.map_location_set = false;
     settings.map_lat_e7 = 0;
     settings.map_lon_e7 = 0;
-    return d1l_settings_save(&settings);
+    return d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_MAP_LOCATION);
 }
 
 esp_err_t d1l_app_model_set_wifi_enabled(bool enabled)
@@ -929,7 +937,7 @@ esp_err_t d1l_app_model_set_ble_enabled(bool enabled)
 
 void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile)
 {
-    radio_edit_from_settings(d1l_settings_current(), profile);
+    radio_edit_from_settings(NULL, profile);
 }
 
 void d1l_app_model_default_radio_profile(d1l_app_radio_profile_edit_t *profile)
@@ -952,7 +960,7 @@ esp_err_t d1l_app_model_save_radio_profile(const d1l_app_radio_profile_edit_t *p
         return ESP_ERR_INVALID_ARG;
     }
 
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.frequency_hz = profile->frequency_hz;
     settings.bandwidth_tenths_khz = profile->bandwidth_tenths_khz;
     settings.spreading_factor = profile->spreading_factor;
@@ -960,7 +968,8 @@ esp_err_t d1l_app_model_save_radio_profile(const d1l_app_radio_profile_edit_t *p
     settings.tx_power_dbm = profile->tx_power_dbm;
     settings.rx_boost = profile->rx_boost;
     settings.tcxo_mode = D1L_TCXO_NONE;
-    return d1l_settings_save(&settings);
+    return d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_RADIO_PROFILE);
 }
 
 esp_err_t d1l_app_model_complete_onboarding(const char *node_name)

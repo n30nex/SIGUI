@@ -11,6 +11,7 @@ idf_component_register(
         "app_main.c"
         "app/app_model.c"
         "app/dm_conversation_list.c"
+        "app/settings_envelope.c"
         "app/settings_model.c"
         "comms/connectivity_boot_guard.c"
         "comms/connectivity_manager.c"

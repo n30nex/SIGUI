@@ -63,6 +63,17 @@ static const uint32_t D1L_REBOOT_RESTART_MARGIN_MS = 100U;
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 static bool parse_channel_id_hex(const char *text, uint64_t *out_value);
 
+static void wipe_console_bytes(void *data, size_t length)
+{
+    if (!data) {
+        return;
+    }
+    volatile uint8_t *bytes = (volatile uint8_t *)data;
+    for (size_t i = 0; i < length; ++i) {
+        bytes[i] = 0U;
+    }
+}
+
 static uint32_t deadline_remaining_ms(int64_t started_us, uint32_t timeout_ms)
 {
     const int64_t elapsed_us = esp_timer_get_time() - started_us;
@@ -567,7 +578,9 @@ static void cmd_board(void)
 
 static void cmd_settings_get(void)
 {
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     const d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
     ok_begin("settings get");
     printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,\"map_location\":{\"set\":%s,\"lat\":",
@@ -607,12 +620,16 @@ static void cmd_settings_reset(void)
     }
     d1l_meshcore_service_init();
     ok_begin("settings reset");
-    printf(",\"persisted\":true,\"node_name\":\"%s\"}\n", d1l_settings_current()->node_name);
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    printf(",\"persisted\":true,\"node_name\":\"%s\"}\n", settings.node_name);
 }
 
 static void cmd_settings_onboarding_status(void)
 {
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     ok_begin("settings onboarding status");
     printf(",\"complete\":%s,\"node_name\":\"%s\",\"role\":\"%s\",\"region\":\"Canada/USA\",\"radio_profile\":\"uscan-meshcore-default\",\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s}\n",
            bool_json(settings->onboarding_complete), settings->node_name,
@@ -654,7 +671,9 @@ static void cmd_settings_onboarding_complete(const char *line)
         err_result("settings onboarding complete", esp_err_to_name(ret), "could not persist onboarding choices");
         return;
     }
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     ok_begin("settings onboarding complete");
     printf(",\"complete\":true,\"persisted\":true,\"node_name\":\"%s\",\"role\":\"%s\",\"wifi_enabled\":false,\"ble_companion_enabled\":false,\"observer_enabled\":false,\"identity_ready\":%s}\n",
            settings->node_name, d1l_settings_role_name(settings->role),
@@ -676,16 +695,17 @@ static void cmd_settings_set_name(const char *line)
         err_result("settings set name", "INVALID_NAME", "usage: settings set name <1-31 chars>");
         return;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     memcpy(settings.node_name, arg, arg_len + 1U);
     sanitize_node_name(settings.node_name);
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_NODE_NAME);
     if (ret != ESP_OK) {
         err_result("settings set name", esp_err_to_name(ret), "could not persist node name");
         return;
     }
     ok_begin("settings set name");
-    printf(",\"persisted\":true,\"node_name\":\"%s\"}\n", d1l_settings_current()->node_name);
+    printf(",\"persisted\":true,\"node_name\":\"%s\"}\n", settings.node_name);
 }
 
 static void cmd_settings_set_pathhash(const char *line)
@@ -695,9 +715,10 @@ static void cmd_settings_set_pathhash(const char *line)
         err_result("settings set pathhash", "INVALID_PATH_HASH_BYTES", "usage: settings set pathhash <1|2|3>");
         return;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.path_hash_bytes = (uint8_t)value;
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_PATH_HASH);
     if (ret != ESP_OK) {
         err_result("settings set pathhash", esp_err_to_name(ret), "could not persist path hash setting");
         return;
@@ -705,7 +726,7 @@ static void cmd_settings_set_pathhash(const char *line)
     d1l_meshcore_service_init();
     ok_begin("settings set pathhash");
     printf(",\"persisted\":true,\"path_hash_bytes\":%u,\"legacy_warning\":%s}\n",
-           d1l_settings_current()->path_hash_bytes,
+           (unsigned)settings.path_hash_bytes,
            value > 1 ? "true" : "false");
 }
 
@@ -761,7 +782,9 @@ static void persist_map_location_from_args(const char *cmd, const char *arg)
         err_result(cmd, esp_err_to_name(ret), "could not persist map location");
         return;
     }
-    print_map_location_result(cmd, d1l_settings_current(), true);
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    print_map_location_result(cmd, &settings, true);
 }
 
 static void clear_map_location(const char *cmd)
@@ -771,7 +794,9 @@ static void clear_map_location(const char *cmd)
         err_result(cmd, esp_err_to_name(ret), "could not clear map location");
         return;
     }
-    print_map_location_result(cmd, d1l_settings_current(), true);
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    print_map_location_result(cmd, &settings, true);
 }
 
 static void cmd_settings_set_location(const char *line)
@@ -787,7 +812,9 @@ static void cmd_settings_clear_location(void)
 
 static void cmd_map_center(void)
 {
-    print_map_location_result("map center", d1l_settings_current(), false);
+    d1l_settings_t settings = {0};
+    (void)d1l_settings_public_snapshot(&settings);
+    print_map_location_result("map center", &settings, false);
 }
 
 static void cmd_map_center_set(const char *line)
@@ -1093,7 +1120,9 @@ static void cmd_identity_status(void)
         err_result("identity status", esp_err_to_name(ret), "could not generate or persist MeshCore local identity");
         return;
     }
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     char fingerprint[17] = {0};
     hex_prefix(fingerprint, sizeof(fingerprint), settings->identity_public_key, 8U);
     ok_begin("identity status");
@@ -1240,7 +1269,7 @@ static void cmd_radio_get(void)
 
 static void cmd_radio_set_preset_uscan(void)
 {
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     const d1l_radio_profile_t *defaults = d1l_radio_profile_uscan_default();
     settings.frequency_hz = defaults->frequency_hz;
     settings.bandwidth_tenths_khz = (uint16_t)((defaults->bandwidth_khz * 10.0f) + 0.5f);
@@ -1249,7 +1278,8 @@ static void cmd_radio_set_preset_uscan(void)
     settings.tx_power_dbm = defaults->tx_power_dbm;
     settings.rx_boost = defaults->rx_boost;
     settings.tcxo_mode = D1L_TCXO_NONE;
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_RADIO_PROFILE);
     if (ret != ESP_OK) {
         err_result("radio set preset uscan", esp_err_to_name(ret), "could not persist Canada/USA radio defaults");
         return;
@@ -1264,9 +1294,10 @@ static void cmd_radio_set_freq(const char *line)
         err_result("radio set freq", "INVALID_FREQ", "Canada/USA D1L range is 902.000-928.000 MHz");
         return;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.frequency_hz = (uint32_t)((mhz * 1000000.0) + 0.5);
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_FREQUENCY);
     if (ret != ESP_OK) {
         err_result("radio set freq", esp_err_to_name(ret), "could not persist frequency");
         return;
@@ -1281,9 +1312,10 @@ static void cmd_radio_set_bw(const char *line)
         err_result("radio set bw", "INVALID_BW", "usage: radio set bw <7.8-500.0>");
         return;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.bandwidth_tenths_khz = (uint16_t)((khz * 10.0) + 0.5);
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_BANDWIDTH);
     if (ret != ESP_OK) {
         err_result("radio set bw", esp_err_to_name(ret), "could not persist bandwidth");
         return;
@@ -1298,9 +1330,10 @@ static void cmd_radio_set_sf(const char *line)
         err_result("radio set sf", "INVALID_SF", "usage: radio set sf <5-12>");
         return;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.spreading_factor = (uint8_t)sf;
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_SPREADING);
     if (ret != ESP_OK) {
         err_result("radio set sf", esp_err_to_name(ret), "could not persist spreading factor");
         return;
@@ -1315,9 +1348,10 @@ static void cmd_radio_set_cr(const char *line)
         err_result("radio set cr", "INVALID_CR", "usage: radio set cr <5-8>");
         return;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.coding_rate = (uint8_t)cr;
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_CODING_RATE);
     if (ret != ESP_OK) {
         err_result("radio set cr", esp_err_to_name(ret), "could not persist coding rate");
         return;
@@ -1332,9 +1366,10 @@ static void cmd_radio_set_txpower(const char *line)
         err_result("radio set txpower", "INVALID_TX_POWER", "usage: radio set txpower <-9-20>");
         return;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.tx_power_dbm = (int8_t)tx_power;
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_TX_POWER);
     if (ret != ESP_OK) {
         err_result("radio set txpower", esp_err_to_name(ret), "could not persist TX power");
         return;
@@ -1357,9 +1392,10 @@ static void cmd_radio_set_rxboost(const char *line)
         err_result("radio set rxboost", "INVALID_RX_BOOST", "usage: radio set rxboost <0|1>");
         return;
     }
-    d1l_settings_t settings = *d1l_settings_current();
+    d1l_settings_t settings = {0};
     settings.rx_boost = enabled;
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_RX_BOOST);
     if (ret != ESP_OK) {
         err_result("radio set rxboost", esp_err_to_name(ret), "could not persist RX boost");
         return;
@@ -3224,7 +3260,9 @@ static bool build_data_export_payload(const char *token,
     static d1l_node_entry_t nodes[D1L_EXPORT_DATA_SAMPLE_MAX];
     static d1l_read_state_dm_thread_t read_threads[D1L_EXPORT_DATA_SAMPLE_MAX];
 
-    const d1l_settings_t *settings = d1l_settings_current();
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const d1l_settings_t *settings = &settings_snapshot;
     const d1l_message_store_stats_t message_stats = d1l_message_store_stats();
     const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
     const d1l_route_store_stats_t route_stats = d1l_route_store_stats();
@@ -5403,7 +5441,7 @@ static void cmd_wifi_save(const char *line)
     char ssid[D1L_WIFI_SSID_LEN] = {0};
     char password[D1L_WIFI_PASSWORD_LEN] = {0};
     const char *space = strchr(args, ' ');
-    const char *password_to_save = NULL;
+    const char *password_to_save = password;
     size_t ssid_len = space ? (size_t)(space - args) : strlen(args);
     if (ssid_len == 0 || ssid_len >= sizeof(ssid)) {
         err_result("wifi save", "INVALID_SSID", "SSID must be 1-32 printable characters without spaces");
@@ -5421,11 +5459,9 @@ static void cmd_wifi_save(const char *line)
             return;
         }
         snprintf(password, sizeof(password), "%s", password_arg);
-        if (password[0] != '\0') {
-            password_to_save = password;
-        }
     }
     esp_err_t ret = d1l_connectivity_save_wifi_profile(ssid, password_to_save);
+    wipe_console_bytes(password, sizeof(password));
     if (ret != ESP_OK) {
         err_result("wifi save", esp_err_to_name(ret),
                    "could not fully save or apply Wi-Fi profile; inspect wifi status");
@@ -5436,7 +5472,7 @@ static void cmd_wifi_save(const char *line)
     ok_begin("wifi save");
     printf(",\"persisted\":true,\"profile_saved\":%s,\"password_saved\":%s,\"ssid\":",
            bool_json(status.wifi_profile_saved), bool_json(status.wifi_password_saved));
-    print_json_string(status.wifi_ssid ? status.wifi_ssid : "");
+    print_json_string(status.wifi_ssid);
     printf(",\"public_rf_tx\":false,\"note\":\"Wi-Fi profile saved for the measured runtime path; password is not printed\"}\n");
 }
 
@@ -5935,7 +5971,7 @@ static void handle_line(const char *line)
     } else if (strcmp(line, "factory-reset-confirm") == 0) {
         err_result("factory-reset-confirm", "SAFETY_NONCE_REQUIRED", "factory reset will require a generated nonce in a later phase");
     } else {
-        err_result(line, "UNKNOWN_COMMAND", "send help for supported commands");
+        err_result("unknown", "UNKNOWN_COMMAND", "send help for supported commands");
     }
 }
 
@@ -5963,6 +5999,7 @@ void d1l_usb_console_run(void)
         if (ch == '\n' || ch == '\r') {
             if (dropping_overlong) {
                 dropping_overlong = false;
+                wipe_console_bytes(line, sizeof(line));
                 used = 0;
                 prompt_pending = true;
                 continue;
@@ -5974,11 +6011,13 @@ void d1l_usb_console_run(void)
             used = 0;
             trim_line(line);
             if (line[0] == '\0') {
+                wipe_console_bytes(line, sizeof(line));
                 prompt_pending = true;
                 continue;
             }
             printf("\n");
             handle_line(line);
+            wipe_console_bytes(line, sizeof(line));
             prompt_pending = true;
             continue;
         }
@@ -5988,6 +6027,7 @@ void d1l_usb_console_run(void)
         }
 
         if (used + 1U >= sizeof(line)) {
+            wipe_console_bytes(line, sizeof(line));
             used = 0;
             dropping_overlong = true;
             printf("\n");

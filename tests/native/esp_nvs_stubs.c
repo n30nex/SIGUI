@@ -2,6 +2,13 @@
 
 #include <stdio.h>
 #include <string.h>
+#ifdef D1L_TEST_REAL_MUTEX
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sched.h>
+#endif
+#endif
 
 #include "esp_timer.h"
 #include "freertos/semphr.h"
@@ -170,12 +177,14 @@ int64_t esp_timer_get_time(void)
 
 SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *buffer)
 {
+    if (buffer) {
+        buffer->value = 0U;
+    }
     return buffer;
 }
 
 BaseType_t xSemaphoreTake(SemaphoreHandle_t handle, TickType_t ticks_to_wait)
 {
-    (void)handle;
     (void)ticks_to_wait;
     if (s_semaphore_take_hook && s_semaphore_takes_before_hook > 0U) {
         s_semaphore_takes_before_hook--;
@@ -183,12 +192,33 @@ BaseType_t xSemaphoreTake(SemaphoreHandle_t handle, TickType_t ticks_to_wait)
             run_hook_once(&s_semaphore_take_hook);
         }
     }
+#ifdef D1L_TEST_REAL_MUTEX
+    if (!handle) {
+        return 0;
+    }
+    while (__atomic_exchange_n(&handle->value, 1U, __ATOMIC_ACQUIRE) != 0U) {
+#ifdef _WIN32
+        (void)SwitchToThread();
+#else
+        (void)sched_yield();
+#endif
+    }
+#else
+    (void)handle;
+#endif
     return pdTRUE;
 }
 
 BaseType_t xSemaphoreGive(SemaphoreHandle_t handle)
 {
+#ifdef D1L_TEST_REAL_MUTEX
+    if (!handle) {
+        return 0;
+    }
+    __atomic_store_n(&handle->value, 0U, __ATOMIC_RELEASE);
+#else
     (void)handle;
+#endif
     return pdTRUE;
 }
 

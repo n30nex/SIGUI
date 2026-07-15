@@ -208,7 +208,9 @@ static void test_settings_load_status_is_not_forged_by_ram_defaults_or_save(void
 
     d1l_settings_t defaults = {0};
     d1l_settings_defaults(&defaults);
-    assert(d1l_settings_save(&defaults) == ESP_OK);
+    assert(d1l_settings_update_fields(
+               &defaults, D1L_SETTINGS_UPDATE_NODE_NAME) ==
+           ESP_ERR_INVALID_STATE);
     assert(d1l_settings_load_status() == ESP_FAIL);
 
     assert(d1l_settings_load() == ESP_OK);

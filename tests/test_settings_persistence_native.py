@@ -7,13 +7,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_persisted_identity_state_native_behavior(tmp_path):
+def test_settings_persistence_native_behavior(tmp_path):
     compiler = shutil.which("gcc") or shutil.which("clang")
     if compiler is None:
-        raise AssertionError("A C compiler is required for native identity tests")
+        raise AssertionError("A C compiler is required for native settings persistence tests")
 
     executable = tmp_path / (
-        "identity_state_test.exe" if os.name == "nt" else "identity_state_test"
+        "settings_persistence_test.exe"
+        if os.name == "nt"
+        else "settings_persistence_test"
     )
     command = [
         compiler,
@@ -21,6 +23,8 @@ def test_persisted_identity_state_native_behavior(tmp_path):
         "-Wall",
         "-Wextra",
         "-Werror",
+        "-DD1L_TEST_REAL_MUTEX=1",
+        "-pthread",
         "-I",
         str(ROOT / "tests/native/stubs"),
         "-I",
@@ -36,7 +40,7 @@ def test_persisted_identity_state_native_behavior(tmp_path):
         str(ROOT / "third_party/MeshCore/lib/ed25519/keypair.c"),
         str(ROOT / "third_party/MeshCore/lib/ed25519/sha512.c"),
         str(ROOT / "tests/native/esp_nvs_stubs.c"),
-        str(ROOT / "tests/native/identity_state_test.c"),
+        str(ROOT / "tests/native/settings_persistence_test.c"),
         "-o",
         str(executable),
     ]
@@ -44,4 +48,4 @@ def test_persisted_identity_state_native_behavior(tmp_path):
     completed = subprocess.run(
         [str(executable)], cwd=ROOT, check=True, capture_output=True, text=True
     )
-    assert completed.stdout.strip() == "native persisted identity classification: ok"
+    assert completed.stdout.strip() == "native settings persistence: ok"
