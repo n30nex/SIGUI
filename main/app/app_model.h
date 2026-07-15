@@ -199,6 +199,7 @@ typedef struct {
     uint32_t muted_dm_unread_count;
     uint32_t last_public_read_seq;
     uint32_t last_dm_read_seq;
+    uint32_t read_state_mark_count;
     uint32_t node_total_written;
     size_t node_count;
     uint32_t contact_total_written;

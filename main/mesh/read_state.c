@@ -84,6 +84,26 @@ static esp_err_t persist_state(void)
     return ret;
 }
 
+static esp_err_t persist_mutation_or_rollback(
+    const d1l_read_state_v2_blob_t *previous)
+{
+    if (!previous) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const esp_err_t ret = persist_state();
+    if (ret != ESP_OK) {
+        s_state = *previous;
+    }
+    return ret;
+}
+
+static void note_cursor_advance(void)
+{
+    if (s_state.mark_read_count < UINT32_MAX) {
+        s_state.mark_read_count++;
+    }
+}
+
 static esp_err_t ensure_loaded(void)
 {
     if (s_loaded) {
@@ -156,9 +176,15 @@ esp_err_t d1l_read_state_init(void)
 
 esp_err_t d1l_read_state_clear(void)
 {
+    const d1l_read_state_v2_blob_t previous = s_state;
+    const bool previous_loaded = s_loaded;
     clear_ram();
     s_loaded = true;
-    return persist_state();
+    const esp_err_t ret = persist_mutation_or_rollback(&previous);
+    if (ret != ESP_OK) {
+        s_loaded = previous_loaded;
+    }
+    return ret;
 }
 
 static bool same_fingerprint(const char *lhs, const char *rhs)
@@ -184,7 +210,12 @@ static uint32_t dm_thread_read_seq(const char *fingerprint)
 {
     const int idx = find_dm_cursor(fingerprint);
     const uint32_t thread_seq = idx >= 0 ? s_state.dm_cursors[idx].last_read_seq : 0;
-    return thread_seq > s_state.last_dm_read_seq ? thread_seq : s_state.last_dm_read_seq;
+    const uint32_t read_seq = thread_seq > s_state.last_dm_read_seq ?
+        thread_seq : s_state.last_dm_read_seq;
+    const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
+    /* Retained stores restart sequence numbering only after an explicit clear.
+     * A cursor outside the new generation must not suppress new seq=1 rows. */
+    return read_seq >= dm_stats.next_seq ? 0U : read_seq;
 }
 
 static esp_err_t upsert_dm_cursor(const char *fingerprint, uint32_t last_read_seq)
@@ -323,9 +354,13 @@ esp_err_t d1l_read_state_mark_public_read(void)
     }
 
     d1l_read_state_stats_t stats = d1l_read_state_stats();
+    if (stats.newest_public_rx_seq <= stats.last_public_read_seq) {
+        return ESP_OK;
+    }
+    const d1l_read_state_v2_blob_t previous = s_state;
     s_state.last_public_read_seq = stats.newest_public_rx_seq;
-    s_state.mark_read_count++;
-    return persist_state();
+    note_cursor_advance();
+    return persist_mutation_or_rollback(&previous);
 }
 
 esp_err_t d1l_read_state_mark_dm_read(void)
@@ -336,9 +371,13 @@ esp_err_t d1l_read_state_mark_dm_read(void)
     }
 
     d1l_read_state_stats_t stats = d1l_read_state_stats();
+    if (stats.newest_dm_rx_seq <= stats.last_dm_read_seq) {
+        return ESP_OK;
+    }
+    const d1l_read_state_v2_blob_t previous = s_state;
     s_state.last_dm_read_seq = stats.newest_dm_rx_seq;
-    s_state.mark_read_count++;
-    return persist_state();
+    note_cursor_advance();
+    return persist_mutation_or_rollback(&previous);
 }
 
 esp_err_t d1l_read_state_mark_dm_thread_read(const char *fingerprint)
@@ -369,12 +408,19 @@ esp_err_t d1l_read_state_mark_dm_thread_read(const char *fingerprint)
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* Opening or refreshing an already-read thread is a read-only operation.
+     * Only an actual advance of this exact fingerprint's cursor is persisted. */
+    if (newest_rx_seq <= dm_thread_read_seq(fingerprint)) {
+        return ESP_OK;
+    }
+
+    const d1l_read_state_v2_blob_t previous = s_state;
     ret = upsert_dm_cursor(fingerprint, newest_rx_seq);
     if (ret != ESP_OK) {
         return ret;
     }
-    s_state.mark_read_count++;
-    return persist_state();
+    note_cursor_advance();
+    return persist_mutation_or_rollback(&previous);
 }
 
 esp_err_t d1l_read_state_mark_all_read(void)
@@ -385,10 +431,21 @@ esp_err_t d1l_read_state_mark_all_read(void)
     }
 
     d1l_read_state_stats_t stats = d1l_read_state_stats();
-    s_state.last_public_read_seq = stats.newest_public_rx_seq;
-    s_state.last_dm_read_seq = stats.newest_dm_rx_seq;
-    s_state.mark_read_count++;
-    return persist_state();
+    const bool public_advance =
+        stats.newest_public_rx_seq > stats.last_public_read_seq;
+    const bool dm_advance = stats.newest_dm_rx_seq > stats.last_dm_read_seq;
+    if (!public_advance && !dm_advance) {
+        return ESP_OK;
+    }
+    const d1l_read_state_v2_blob_t previous = s_state;
+    if (public_advance) {
+        s_state.last_public_read_seq = stats.newest_public_rx_seq;
+    }
+    if (dm_advance) {
+        s_state.last_dm_read_seq = stats.newest_dm_rx_seq;
+    }
+    note_cursor_advance();
+    return persist_mutation_or_rollback(&previous);
 }
 
 bool d1l_read_state_dm_entry_is_unread(const d1l_dm_entry_t *entry)

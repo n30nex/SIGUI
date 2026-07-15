@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 75
+    assert len(views) == 79
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -84,6 +84,7 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert report["overflow_count"] == 0
     assert report["touch_target_issue_count"] == 0
     assert report["flow_report"]["ok"] is True
+    assert report["incoming_event_report"]["ok"] is True
     assert report["required_labels_missing"] == []
     assert report["snapshot_counts"]["heard"] == 96
     assert report["snapshot_counts"]["public_messages"] == 48
@@ -111,6 +112,20 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert messages_dm["dm_source_count"] == 32
     assert messages_dm["dm_conversation_count"] == 32
     assert messages_dm["dm_rendered_count"] <= 5
+    for view_name in (
+        "compose_incoming_public_refresh",
+        "public_search_incoming_refresh",
+        "dm_thread_incoming_refresh",
+        "dm_search_incoming_refresh",
+    ):
+        metrics = views[view_name]["metrics"]
+        assert metrics["incoming_event_content_refreshed"] is True
+        assert metrics["incoming_event_mode_preserved"] is True
+        assert metrics["incoming_event_overlay_preserved"] is True
+        assert metrics["incoming_event_keyboard_focus_preserved"] is True
+        assert metrics["incoming_event_transmitted_rf"] is False
+        assert metrics["incoming_event_advanced_public_cursor"] is False
+        assert metrics["incoming_event_advanced_dm_cursor"] is False
     nodes = views["nodes"]["metrics"]
     assert nodes["contacts_source_count"] == 18
     assert nodes["contacts_rendered_count"] <= 2

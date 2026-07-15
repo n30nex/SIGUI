@@ -238,6 +238,7 @@ typedef struct {
     uint32_t muted_dm_unread_count;
     uint32_t last_public_read_seq;
     uint32_t last_dm_read_seq;
+    uint32_t read_state_mark_count;
     size_t message_count;
     size_t dm_count;
     size_t node_count;
@@ -328,6 +329,7 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .muted_dm_unread_count = snapshot->muted_dm_unread_count,
         .last_public_read_seq = snapshot->last_public_read_seq,
         .last_dm_read_seq = snapshot->last_dm_read_seq,
+        .read_state_mark_count = snapshot->read_state_mark_count,
         .message_count = snapshot->message_count,
         .dm_count = snapshot->dm_count,
         .node_count = snapshot->node_count,
@@ -398,6 +400,7 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->muted_dm_unread_count == right->muted_dm_unread_count &&
         left->last_public_read_seq == right->last_public_read_seq &&
         left->last_dm_read_seq == right->last_dm_read_seq &&
+        left->read_state_mark_count == right->read_state_mark_count &&
         left->message_count == right->message_count &&
         left->dm_count == right->dm_count &&
         left->node_count == right->node_count &&
@@ -1513,6 +1516,7 @@ static void home_view_input_from_snapshot(
     *out_input = (d1l_ui_home_view_input_t) {
         .public_unread_count = snapshot->public_unread_count,
         .dm_unread_count = snapshot->dm_unread_count,
+        .muted_dm_unread_count = snapshot->muted_dm_unread_count,
         .contact_count = snapshot->contact_count,
         .node_count = snapshot->node_count,
         .packet_count = snapshot->packet_count,
@@ -5639,7 +5643,11 @@ static void render_active_tab(void)
     if (d1l_ui_navigation_active() != D1L_UI_TAB_HOME) {
         d1l_ui_home_deactivate(&s_home_controller);
     }
-    if (d1l_ui_navigation_active() != D1L_UI_TAB_MESSAGES) {
+    /* A Home preview can own the exact DM thread overlay. Ambient Home
+     * refreshes must not deactivate that controller; explicit tab switches
+     * hide the thread before reaching this renderer. */
+    if (d1l_ui_navigation_active() != D1L_UI_TAB_MESSAGES &&
+        !d1l_ui_messages_thread_active(&s_messages_controller)) {
         d1l_ui_messages_deactivate(&s_messages_controller);
     }
     if (d1l_ui_navigation_active() != D1L_UI_TAB_NODES) {
@@ -6002,10 +6010,32 @@ static void process_pending_content_refresh(void)
         request_content_refresh();
         return;
     }
+    /* Snapshot the visible Messages hierarchy before rebuilding the active
+     * tab. Incoming store generations must refresh the related retained view
+     * without changing the selected mode or replacing the user's modal. */
+    const d1l_ui_messages_mode_t messages_mode = s_messages_mode;
+    const bool messages_active =
+        d1l_ui_navigation_active() == D1L_UI_TAB_MESSAGES;
+    const bool refresh_public_history = messages_active &&
+        (d1l_ui_modal_visible(s_public_history_sheet) ||
+         d1l_ui_modal_visible(s_public_search_sheet));
     const bool refresh_dm_thread =
         d1l_ui_messages_thread_active(&s_messages_controller);
+    const bool public_search_visible =
+        d1l_ui_modal_visible(s_public_search_sheet);
     const bool dm_search_visible = d1l_ui_modal_visible(s_dm_search_sheet);
     render_active_tab();
+    /* render_active_tab() consumes the captured mode but never owns it. This
+     * assignment is an explicit fail-safe against future renderer changes. */
+    s_messages_mode = messages_mode;
+    if (refresh_public_history) {
+        /* The search textarea and keyboard live in a separate modal. Rebuild
+         * only the retained result sheet so focus and the typed query survive. */
+        render_public_history_sheet();
+        if (!public_search_visible) {
+            show_modal(s_public_history_sheet);
+        }
+    }
     if (refresh_dm_thread) {
         if (render_dm_thread_sheet()) {
             show_modal(dm_search_visible ? s_dm_search_sheet :

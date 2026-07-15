@@ -132,14 +132,24 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
     const size_t unread_count = input->public_unread_count >
         SIZE_MAX - input->dm_unread_count ? SIZE_MAX :
         input->public_unread_count + input->dm_unread_count;
-    if (unread_count > 0U) {
+    if (unread_count > 0U && input->muted_dm_unread_count > 0U) {
+        snprintf(out_view->messages_status, sizeof(out_view->messages_status),
+                 "%llu unread + %llu muted",
+                 (unsigned long long)unread_count,
+                 (unsigned long long)input->muted_dm_unread_count);
+    } else if (unread_count > 0U) {
         snprintf(out_view->messages_status, sizeof(out_view->messages_status),
                  "%llu unread", (unsigned long long)unread_count);
+    } else if (input->muted_dm_unread_count > 0U) {
+        snprintf(out_view->messages_status, sizeof(out_view->messages_status),
+                 "%llu muted",
+                 (unsigned long long)input->muted_dm_unread_count);
     } else {
         snprintf(out_view->messages_status, sizeof(out_view->messages_status),
                  "All caught up");
     }
-    out_view->messages_status_color = unread_count ? 0xFBBF24U : 0x5EEAD4U;
+    out_view->messages_status_color = unread_count ? 0xFBBF24U :
+        (input->muted_dm_unread_count ? 0x8EA0AEU : 0x5EEAD4U);
 
     snprintf(out_view->network_status, sizeof(out_view->network_status),
              "%llu contacts | %llu nearby",

@@ -10,6 +10,7 @@
 typedef struct {
     size_t public_unread_count;
     size_t dm_unread_count;
+    size_t muted_dm_unread_count;
     size_t contact_count;
     size_t node_count;
     size_t packet_count;
