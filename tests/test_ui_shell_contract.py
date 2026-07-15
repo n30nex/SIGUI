@@ -473,7 +473,9 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_obj_get_scroll_bottom(target)" in source
     assert "lv_obj_scroll_to_y(target, LV_COORD_MAX, LV_ANIM_OFF)" in source
     assert '"Scroll Probe DM"' in source
-    assert '"Thread keeps delivery, ACK, and PATH state together."' in source
+    assert '"state %s | reason %s | error %d | revision %lu | session %llu"' in read(
+        "main/ui/ui_messages.c"
+    )
     assert '"Scroll proof keeps this empty-state layout validated too."' in nodes_source
 
 
@@ -770,7 +772,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "edit_public_search": "s_public_search_textarea",
         "apply_public_search": "apply_public_search_event_cb",
         "open_dm_thread": "D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD",
-        "open_dm_reply": "reply_dm_thread_event_cb",
+        "open_dm_reply": "D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD",
+        "toggle_dm_details": "D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS",
         "open_contact_detail": "open_contact_detail_event_cb",
         "close_contact_detail": "D1L_UI_CONTACT_ACTION_CLOSE_DETAIL",
         "open_dm_compose": "D1L_UI_CONTACT_ACTION_MESSAGE",
@@ -931,54 +934,90 @@ def test_dm_composer_opens_from_contact_rows():
 def test_dm_thread_sheet_opens_from_recent_dm_rows():
     source = read("main/ui/ui_phase1.c")
     messages_source = read("main/ui/ui_messages.c")
-    create = source.split("static void create_dm_thread_sheet", 1)[1].split(
-        "static void create_storage_sheet", 1
-    )[0]
-    render = source.split("static void render_dm_thread_sheet(void)", 1)[1].split(
+    messages_header = read("main/ui/ui_messages.h")
+    render = source.split("static bool render_dm_thread_sheet(void)", 1)[1].split(
         "static void show_dm_thread_for", 1
     )[0]
     show = source.split("static void show_dm_thread_for", 1)[1].split(
         "static void open_home_dm_preview_event_cb", 1
     )[0]
 
-    assert "static lv_obj_t *s_dm_thread_sheet" in source
-    assert "static char s_dm_thread_fingerprint" in source
-    assert "create_dm_thread_sheet" in source
+    assert "static lv_obj_t *s_dm_thread_sheet" not in source
+    assert "static char s_dm_thread_fingerprint" not in source
+    assert "static d1l_dm_entry_t s_dm_thread_entries" not in source
+    assert "static bool s_dm_thread_unread" not in source
+    assert "static size_t s_dm_thread_limit" not in source
+    assert "lv_obj_t *thread_sheet" in messages_header
+    assert "d1l_dm_entry_t thread_entries[D1L_DM_STORE_CAPACITY]" in messages_header
+    assert "bool thread_unread[D1L_DM_STORE_CAPACITY]" in messages_header
+    assert "D1L_UI_MESSAGES_THREAD_INITIAL_ROWS 5U" in messages_header
+    assert "D1L_UI_MESSAGES_THREAD_LOAD_OLDER_STEP 5U" in messages_header
+    assert "d1l_ui_messages_create" in source
     assert "render_dm_thread_sheet" in source
     assert "D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD" in messages_source
-    assert "reply_dm_thread_event_cb" in source
-    assert "static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY]" in source
-    assert "static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY]" in source
-    assert "static size_t s_dm_thread_limit" in source
-    assert "dm_thread_load_older_event_cb" in source
-    assert "lv_obj_set_size(s_dm_thread_sheet, 480, 424)" in create
-    assert "lv_obj_set_pos(s_dm_thread_sheet, 0, 56)" in create
-    assert 'create_button(s_dm_thread_sheet, "Back", 12, 6, 72, 44' in render
-    assert 'create_nested_page_body(s_dm_thread_sheet, "dm thread body")' in render
-    assert "d1l_app_model_copy_dm_thread_page(s_dm_thread_fingerprint" in render
-    assert "thread_count < total_matches && s_dm_thread_limit < D1L_DM_STORE_CAPACITY" in render
-    assert 'create_button(body, "Load Older", 0, 0, 424, 48' in render
-    assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in render
+    assert "D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD" in messages_source
+    assert "D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS" in messages_source
+    assert "lv_obj_set_size(sheet, 480, 424)" in messages_source
+    assert "lv_obj_set_pos(sheet, 0, 56)" in messages_source
+    assert 'sheet, "Back", 12, 6, 72, 44' in messages_source
+    assert "loader(" in messages_source
+    assert "d1l_app_model_copy_dm_thread_page(" in source
+    assert "controller->thread_limit > D1L_DM_STORE_CAPACITY" in messages_source
+    assert 'body, "Load Older", 0, 0, 424, 48' in messages_source
+    assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in messages_source
+    assert "outgoing ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START" in messages_source
+    assert "LV_LABEL_LONG_WRAP" in messages_source
+    assert "entry->text[0] ? entry->text : \"-\"" in messages_source
+    for state in (
+        "QUEUED",
+        "WAITING_RADIO",
+        "TX_ACTIVE",
+        "TX_DONE",
+        "AWAITING_ACK",
+        "ACKNOWLEDGED",
+        "RETRY_WAIT",
+        "RETRY_TX",
+        "FAILED_RADIO",
+        "FAILED_TIMEOUT",
+        "FAILED_QUEUE",
+        "INTERRUPTED_BY_REBOOT",
+        "CANCELLED",
+    ):
+        assert f"D1L_DM_DELIVERY_{state}" in messages_source
+    assert "entry->delivery_state" in messages_source
+    assert "entry->delivery_reason" in messages_source
+    assert "entry->delivery_last_error" in messages_source
+    assert "entry->delivery_retry_count" in messages_source
+    assert "entry->delivery_revision" in messages_source
+    assert "entry->delivery_session_id" in messages_source
+    assert "entry->path_hash_bytes" in messages_source
+    assert "entry->path_hops" in messages_source
+    assert "binding->generation != binding->controller->generation" in messages_source
+    assert "expanded_delivery_session_id" in messages_source
+    assert "expanded_row_seq" in messages_source
     assert "lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE)" in messages_source
     assert ".action = D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD" in messages_source
     assert "show_dm_thread_for(event->dm_message->contact_fingerprint" in source
-    assert "d1l_app_model_find_contact(s_dm_thread_fingerprint, &contact)" in source
+    assert "d1l_ui_messages_thread_fingerprint(" in source
+    assert "d1l_app_model_find_contact(fingerprint, &contact)" in source
     assert "open_dm_compose_for_contact(&contact)" in source
     reply = re.search(
-        r'create_button\(s_dm_thread_sheet,\s*"Reply",\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)',
-        render,
+        r'messages_create_button\(\s*sheet,\s*"Reply",\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)',
+        messages_source,
     )
     assert reply is not None
     reply_x, _, reply_width, reply_height = (int(value) for value in reply.groups())
     assert reply_x == 16
     assert reply_width == 448
     assert reply_height >= 48
-    assert 'create_button(s_dm_thread_sheet, "Read"' not in render
+    assert 'messages_create_button(\n        sheet, "Read"' not in messages_source
     assert "read_dm_thread_event_cb" not in source
     assert "d1l_app_model_mark_dm_thread_read(fingerprint)" in show
     assert show.index("d1l_app_model_mark_dm_thread_read(fingerprint)") < show.index(
-        "render_dm_thread_sheet();"
+        "render_dm_thread_sheet()"
     )
+    assert "snapshot->dm_content_revision" in source
+    assert "refresh_dm_thread" in source
     assert "hide_dm_thread_sheet()" in source
 
 
@@ -1268,8 +1307,8 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert "for (size_t i = 0; i < controller->rendered.public_row_count; ++i)" in messages_source
     assert "for (size_t i = 0; i < controller->rendered.dm_row_count; ++i)" in messages_source
     assert "y += 80" in messages_source
-    assert "public_rows[D1L_APP_SNAPSHOT_MESSAGE_PREVIEW]" in messages_header
-    assert "dm_rows[D1L_APP_SNAPSHOT_DM_PREVIEW]" in messages_header
+    assert "public_rows[D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS]" in messages_header
+    assert "dm_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS]" in messages_header
     assert "snapshot->message_count" in source
     assert "snapshot->dm_count" in source
     assert "snapshot->public_unread_count" in source

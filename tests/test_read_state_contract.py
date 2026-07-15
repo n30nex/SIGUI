@@ -86,9 +86,12 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert "snapshot->muted_dm_unread_count" in ui
     assert "read_dm_thread_event_cb" not in ui
     assert 'create_button(s_dm_thread_sheet, "Read"' not in ui
+    assert 'sheet, "Read"' not in messages_ui.split(
+        "bool d1l_ui_messages_render_thread(", 1
+    )[1].split("bool d1l_ui_messages_expand_thread", 1)[0]
     assert "d1l_app_model_mark_dm_thread_read(fingerprint)" in show_thread
     assert show_thread.index("d1l_app_model_mark_dm_thread_read(fingerprint)") < show_thread.index(
-        "render_dm_thread_sheet();"
+        "render_dm_thread_sheet()"
     )
     assert "messages_render_dm_row(controller, parent, y, i)" in messages_ui
-    assert "messages_dm_row_state(entry, unread)" in messages_ui
+    assert "d1l_ui_messages_delivery_label(entry, unread)" in messages_ui

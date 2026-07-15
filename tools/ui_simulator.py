@@ -89,6 +89,24 @@ class Message:
     text: str
     meta: str
     unread: bool = False
+    direction: str = "rx"
+    delivery_state: str = "not_applicable"
+    delivery_reason: str = "none"
+    seq: int = 0
+    delivery_error: int = 0
+    delivery_revision: int = 0
+    delivery_session_id: int = 0
+    ack_hash: int = 0
+    attempt: int = 0
+    retry_count: int = 0
+    rssi_dbm: int = 0
+    snr_tenths: int = 0
+    path_hash_bytes: int = 0
+    path_hops: int = 0
+    ack_state: str = "legacy_unverified"
+    ack_dispatch_count: int = 0
+    ack_last_error: int = 0
+    identity_valid: bool = False
 
 
 @dataclass(frozen=True)
@@ -208,8 +226,22 @@ def sample_snapshot() -> Snapshot:
             Message("Local Meshcorebot", "test ack on Public", "RX new, 1 hop", True),
         ),
         dm_messages=(
-            Message("YKF Corebot", "route is direct", "acked, hash 9A2B"),
-            Message("D1L Desk", "desk check", "TX stored", True),
+            Message(
+                "YKF Corebot", "route is direct", "ACK sent, hash 9A2B",
+                direction="rx", seq=1, ack_hash=0x9A2B,
+                rssi_dbm=-41, snr_tenths=300, path_hops=0,
+                ack_state="sent", ack_dispatch_count=1,
+                identity_valid=True,
+            ),
+            Message(
+                "D1L Desk", "desk check", "retry 0, path direct",
+                direction="tx", delivery_state="awaiting_ack",
+                delivery_reason="ack_expected",
+                seq=2, delivery_revision=4, delivery_session_id=0xD15E5510,
+                ack_hash=0x9A2B, attempt=1, retry_count=0,
+                rssi_dbm=-41, snr_tenths=300, path_hash_bytes=1,
+                path_hops=0,
+            ),
         ),
         packets=(
             Packet("Public", "RX", "RSSI -41 SNR 30 hop 1", "YKF Corebot test reply", "80245100A62F34B9"),
@@ -337,6 +369,17 @@ def large_mesh_snapshot() -> Snapshot:
             f"dm stress row {i:02d} with ACK/path metadata",
             f"ack {'yes' if i % 2 else 'pending'}, hash {0x9000 + i:X}",
             unread=i % 5 == 0,
+            direction="tx" if i % 2 else "rx",
+            delivery_state=(
+                "acknowledged" if i % 4 == 1 else
+                "retry_wait" if i % 4 == 3 else
+                "not_applicable"
+            ),
+            delivery_reason=(
+                "ack_received" if i % 4 == 1 else
+                "retry_scheduled" if i % 4 == 3 else
+                "none"
+            ),
         )
         for i in range(32)
     )
@@ -1814,12 +1857,28 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
     s.text("DM Conversations", (28, 236, 250, 256), 14, MUTED, True)
     y = 264
     dm_rendered = 0
+    dm_rendered_states: list[str] = []
     for msg in snap.dm_messages:
         if y + 58 > DOCK_Y:
             break
         s.round_rect((28, y, 452, y + 58), SURFACE, BORDER, 8)
-        s.text(msg.source, (40, y + 6, 300, y + 24), 12, AMBER if msg.unread else GREEN, True)
-        s.text("new" if msg.unread else "received", (330, y + 6, 440, y + 24), 11, MUTED if not msg.unread else AMBER, True, "right")
+        state = dm_list_delivery_label(msg)
+        dm_rendered_states.append(state)
+        s.text(
+            msg.source,
+            (40, y + 6, 300, y + 24),
+            12,
+            AMBER if msg.unread else (ACCENT if msg.direction == "tx" else GREEN),
+            True,
+        )
+        s.text(
+            state,
+            (290, y + 6, 440, y + 24),
+            10,
+            MUTED if not msg.unread else AMBER,
+            True,
+            "right",
+        )
         s.text(msg.text, (40, y + 26, 440, y + 42), 12, TEXT, True)
         s.text(msg.meta, (40, y + 42, 440, y + 56), 10, MUTED, True)
         s.touch_target(
@@ -1839,6 +1898,7 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
             "public_rendered_count": 0,
             "dm_source_count": len(snap.dm_messages),
             "dm_rendered_count": dm_rendered,
+            "dm_rendered_states": dm_rendered_states,
         }
     )
 
@@ -3509,10 +3569,57 @@ def render_forget_contact_confirm_page(s: Surface, snap: Snapshot):
     )
 
 
+DM_DELIVERY_LABELS = {
+    "not_applicable": "Status unavailable",
+    "queued": "Queued",
+    "waiting_radio": "Waiting for radio",
+    "tx_active": "Sending",
+    "tx_done": "Sent over RF",
+    "awaiting_ack": "Sent over RF / awaiting delivery",
+    "acknowledged": "Delivered",
+    "retry_wait": "Retry scheduled",
+    "retry_tx": "Retrying",
+    "failed_radio": "Failed",
+    "failed_timeout": "Failed",
+    "failed_queue": "Failed",
+    "interrupted_by_reboot": "Interrupted by reboot",
+    "cancelled": "Cancelled",
+}
+
+DM_LIST_DELIVERY_LABELS = {
+    "not_applicable": "Status unknown",
+    "queued": "Queued",
+    "waiting_radio": "Waiting radio",
+    "tx_active": "Sending",
+    "tx_done": "Sent RF",
+    "awaiting_ack": "Awaiting ACK",
+    "acknowledged": "Delivered",
+    "retry_wait": "Retry waiting",
+    "retry_tx": "Retrying",
+    "failed_radio": "Failed",
+    "failed_timeout": "Failed",
+    "failed_queue": "Failed",
+    "interrupted_by_reboot": "Interrupted",
+    "cancelled": "Cancelled",
+}
+
+
+def dm_primary_delivery_label(message: Message) -> str:
+    if message.direction != "tx":
+        return "New" if message.unread else "Received"
+    return DM_DELIVERY_LABELS.get(message.delivery_state, "Status unavailable")
+
+
+def dm_list_delivery_label(message: Message) -> str:
+    if message.direction != "tx":
+        return "New" if message.unread else "Received"
+    return DM_LIST_DELIVERY_LABELS.get(message.delivery_state, "Status unknown")
+
+
 def render_dm_thread_sheet(s: Surface, snap: Snapshot):
     dm_thread_page_limit = 5
     load_older_available = len(snap.dm_messages) > dm_thread_page_limit
-    visible_messages = snap.dm_messages[-(3 if load_older_available else min(3, len(snap.dm_messages))):]
+    visible_messages = snap.dm_messages[-(2 if load_older_available else min(3, len(snap.dm_messages))):]
     alias = snap.contacts[0].name if snap.contacts else "Direct message"
     count_line = f"{min(len(snap.dm_messages), dm_thread_page_limit)} of {len(snap.dm_messages)} messages"
     draw_top_bar(s, snap)
@@ -3522,9 +3629,46 @@ def render_dm_thread_sheet(s: Surface, snap: Snapshot):
     s.text(count_line, (112, 90, 464, 112), 12, MUTED)
     s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
     y = 132
+    rendered_states: list[str] = []
+    outgoing_bubbles = 0
+    incoming_bubbles = 0
     for msg in visible_messages:
-        draw_row(s, (28, y, 452, y + 54), f"{msg.source}: {msg.text}", msg.meta)
-        y += 62
+        outgoing = msg.direction == "tx"
+        state = dm_primary_delivery_label(msg)
+        rendered_states.append(state)
+        if outgoing:
+            bubble = (128, y, 452, y + 66)
+            bubble_fill = (25, 38, 58)
+            bubble_border = (59, 91, 134)
+            outgoing_bubbles += 1
+        else:
+            bubble = (28, y, 352, y + 66)
+            bubble_fill = (18, 45, 42)
+            bubble_border = (40, 99, 90)
+            incoming_bubbles += 1
+        s.round_rect(bubble, bubble_fill, bubble_border, 8)
+        s.text(
+            f"{'You' if outgoing else msg.source}  |  {state}  |  details >",
+            (bubble[0] + 10, y + 7, bubble[2] - 10, y + 25),
+            10,
+            ACCENT if outgoing else (AMBER if msg.unread else GREEN),
+            True,
+        )
+        s.wrapped_text(
+            msg.text,
+            (bubble[0] + 10, y + 29, bubble[2] - 10, y + 61),
+            11,
+            TEXT,
+            line_height=15,
+        )
+        s.touch_target(
+            f"DM details {msg.source}",
+            bubble,
+            kind="conversation_bubble",
+            action="toggle_dm_details",
+            destination="dm_thread_details_sheet",
+        )
+        y += 74
     if load_older_available:
         draw_button(s, (28, 344, 166, 392), "Load Older", BLUE, action="load_older_dm_thread")
     draw_button(s, (16, 420, 464, 472), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
@@ -3540,6 +3684,118 @@ def render_dm_thread_sheet(s: Surface, snap: Snapshot):
             "dm_thread_sticky_reply": True,
             "dm_thread_alias": alias,
             "dm_thread_count_line": count_line,
+            "dm_thread_directional_bubbles": True,
+            "dm_thread_outgoing_bubbles": outgoing_bubbles,
+            "dm_thread_incoming_bubbles": incoming_bubbles,
+            "dm_thread_rendered_states": rendered_states,
+            "dm_thread_delivery_state_labels": dict(DM_DELIVERY_LABELS),
+            "dm_thread_per_row_technical_disclosure": True,
+            "dm_thread_primary_state_truthful": True,
+            "dm_thread_navigation_rf_silent": True,
+        }
+    )
+
+
+def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
+    msg = snap.dm_messages[-1] if snap.dm_messages else Message(
+        "Direct message", "No retained message", "",
+    )
+    alias = snap.contacts[0].name if snap.contacts else msg.source
+    outgoing = msg.direction == "tx"
+    state = dm_primary_delivery_label(msg)
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(
+        s, (16, 64, 96, 108), "Back", MUTED,
+        action="close_dm_thread", destination="messages_dm",
+    )
+    s.text(alias, (112, 62, 330, 90), 20, TEXT, True)
+    draw_button(
+        s, (340, 64, 464, 108), "Hide details", BLUE,
+        action="toggle_dm_details", destination="dm_thread_sheet",
+    )
+    s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
+    bubble = (88, 130, 452, 398) if outgoing else (28, 130, 392, 398)
+    s.round_rect(
+        bubble,
+        (25, 38, 58) if outgoing else (18, 45, 42),
+        (59, 91, 134) if outgoing else (40, 99, 90),
+        8,
+    )
+    s.text(
+        f"{'You' if outgoing else msg.source}  |  {state}",
+        (bubble[0] + 10, 140, bubble[2] - 10, 160),
+        11,
+        ACCENT if outgoing else GREEN,
+        True,
+    )
+    _, text_end = s.wrapped_text(
+        msg.text,
+        (bubble[0] + 10, 166, bubble[2] - 10, 204),
+        12,
+        TEXT,
+        line_height=18,
+    )
+    details_y = max(214, text_end + 8)
+    s.text(
+        "Technical details",
+        (bubble[0] + 10, details_y, bubble[2] - 10, details_y + 20),
+        11,
+        MUTED,
+        True,
+    )
+    details_y += 24
+    detail_lines = [
+        (
+            f"state {msg.delivery_state} | reason {msg.delivery_reason} | "
+            f"error {msg.delivery_error} | revision {msg.delivery_revision} | "
+            f"session {msg.delivery_session_id}"
+        ),
+        (
+            f"seq {msg.seq} | attempt {msg.attempt} | retries {msg.retry_count} | "
+            + (
+                f"expected ACK {msg.ack_hash:08X}"
+                if outgoing
+                else (
+                    f"ACK dispatch {msg.ack_state} | count {msg.ack_dispatch_count} | "
+                    f"error {msg.ack_last_error} | hash {msg.ack_hash:08X} | "
+                    f"identity {'retained' if msg.identity_valid else 'legacy'}"
+                )
+            )
+        ),
+        (
+            f"rssi {msg.rssi_dbm} | snr {msg.snr_tenths / 10:.1f} | "
+            f"path bytes {msg.path_hash_bytes} | hops {msg.path_hops}"
+        ),
+    ]
+    rendered_detail_lines = 0
+    for line in detail_lines:
+        lines, details_y = s.wrapped_text(
+            line,
+            (bubble[0] + 10, details_y, bubble[2] - 10, details_y + 46),
+            9,
+            MUTED,
+            line_height=13,
+        )
+        rendered_detail_lines += lines
+        details_y += 4
+    draw_button(
+        s, (16, 420, 464, 472), "Reply", GREEN,
+        action="open_dm_reply", destination="compose_sheet",
+    )
+    s.metrics.update(
+        {
+            "dm_thread_details_expanded": True,
+            "dm_thread_details_single_row": True,
+            "dm_thread_details_state": msg.delivery_state,
+            "dm_thread_details_reason": msg.delivery_reason,
+            "dm_thread_details_error": msg.delivery_error,
+            "dm_thread_details_session": msg.delivery_session_id,
+            "dm_thread_details_ack_hash": msg.ack_hash,
+            "dm_thread_details_path_hops": msg.path_hops,
+            "dm_thread_details_rendered_lines": rendered_detail_lines,
+            "dm_thread_sticky_reply": True,
+            "dm_thread_navigation_rf_silent": True,
         }
     )
 
@@ -3805,6 +4061,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "message_detail_sheet": render_message_detail_sheet,
     "message_detail_technical_page": render_message_detail_technical_page,
     "dm_thread_sheet": render_dm_thread_sheet,
+    "dm_thread_details_sheet": render_dm_thread_details_sheet,
     "route_detail_sheet": render_route_detail_sheet,
     "route_trace_sheet": render_route_trace_sheet,
     "packet_detail_sheet": render_packet_detail_sheet,
@@ -4067,6 +4324,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         SAMPLE_LONG_PUBLIC_MESSAGE,
     ),
     "dm_thread_sheet": ("Back", "Reply"),
+    "dm_thread_details_sheet": ("Back", "Hide details", "Technical details", "Reply"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
@@ -4228,6 +4486,18 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
                 "action": "open_dm_thread",
                 "destination": "dm_thread_sheet",
                 "marks_read": True,
+            },
+            {
+                "view": "dm_thread_sheet",
+                "action": "toggle_dm_details",
+                "destination": "dm_thread_details_sheet",
+                "rf_tx": False,
+            },
+            {
+                "view": "dm_thread_details_sheet",
+                "action": "toggle_dm_details",
+                "destination": "dm_thread_sheet",
+                "rf_tx": False,
             },
             {"view": "dm_thread_sheet", "action": "open_dm_reply", "destination": "compose_sheet"},
             {"view": "dm_thread_sheet", "action": "close_dm_thread", "destination": "messages_dm"},

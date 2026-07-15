@@ -179,6 +179,7 @@ typedef struct {
     uint32_t message_total_written;
     size_t message_count;
     uint32_t dm_total_written;
+    uint32_t dm_content_revision;
     size_t dm_count;
     uint32_t public_unread_count;
     uint32_t dm_unread_count;

@@ -45,8 +45,6 @@
 static const char *TAG = "d1l_ui";
 #define D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS 5U
 #define D1L_PUBLIC_HISTORY_UI_LOAD_OLDER_STEP 5U
-#define D1L_DM_THREAD_UI_INITIAL_ROWS 5U
-#define D1L_DM_THREAD_UI_LOAD_OLDER_STEP 5U
 
 static lv_disp_draw_buf_t s_draw_buf;
 static lv_disp_drv_t s_disp_drv;
@@ -89,7 +87,6 @@ static lv_obj_t *s_public_search_sheet;
 static lv_obj_t *s_public_search_textarea;
 static lv_obj_t *s_public_search_keyboard;
 static lv_obj_t *s_message_detail_sheet;
-static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_storage_sheet;
 static d1l_wifi_scan_result_t s_wifi_scan_result;
 static bool s_wifi_scan_loaded;
@@ -113,7 +110,7 @@ static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
 static bool s_messages_show_dms;
 static d1l_ui_home_controller_t s_home_controller;
-static d1l_ui_messages_controller_t s_messages_controller;
+static d1l_ui_messages_controller_t s_messages_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_nodes_controller_t s_nodes_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_settings_controller_t s_settings_controller EXT_RAM_BSS_ATTR;
@@ -139,11 +136,7 @@ static d1l_packet_log_entry_t s_packet_detail_packet;
 static d1l_node_view_t s_map_node_rows[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
-static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY];
-static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY];
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
-static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
-static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
 static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
@@ -153,7 +146,6 @@ static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
 static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 5000U;
 static const uint32_t D1L_UI_COMPOSE_PROBE_TIMEOUT_MS = 1500U;
 static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
-static size_t s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
 typedef struct {
     uint32_t next_id;
     uint32_t pending_id;
@@ -204,7 +196,6 @@ static void packet_pause_event_cb(lv_event_t *event);
 static void packet_load_older_event_cb(lv_event_t *event);
 static void packet_load_newer_event_cb(lv_event_t *event);
 static void public_history_load_older_event_cb(lv_event_t *event);
-static void dm_thread_load_older_event_cb(lv_event_t *event);
 static void packet_detail_mode_event_cb(lv_event_t *event);
 static void open_radio_settings_event_cb(lv_event_t *event);
 static void open_storage_sheet_event_cb(lv_event_t *event);
@@ -229,6 +220,7 @@ typedef struct {
     uint32_t tx_packets;
     uint32_t message_total_written;
     uint32_t dm_total_written;
+    uint32_t dm_content_revision;
     uint32_t node_total_written;
     uint32_t contact_total_written;
     uint32_t route_total_written;
@@ -309,6 +301,7 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .tx_packets = snapshot->tx_packets,
         .message_total_written = snapshot->message_total_written,
         .dm_total_written = snapshot->dm_total_written,
+        .dm_content_revision = snapshot->dm_content_revision,
         .node_total_written = snapshot->node_total_written,
         .contact_total_written = snapshot->contact_total_written,
         .route_total_written = snapshot->route_total_written,
@@ -367,6 +360,7 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->tx_packets == right->tx_packets &&
         left->message_total_written == right->message_total_written &&
         left->dm_total_written == right->dm_total_written &&
+        left->dm_content_revision == right->dm_content_revision &&
         left->node_total_written == right->node_total_written &&
         left->contact_total_written == right->contact_total_written &&
         left->route_total_written == right->route_total_written &&
@@ -638,7 +632,9 @@ static bool compose_probe_pending(void)
     return pending;
 }
 
-static void render_dm_thread_sheet(void);
+static bool render_dm_thread_sheet(void);
+static void handle_messages_action(
+    const d1l_ui_messages_action_event_t *event, void *context);
 static void render_public_history_sheet(void);
 static void show_public_history_sheet(void);
 static void render_packet_detail_sheet(void);
@@ -1287,10 +1283,7 @@ static void hide_message_detail_sheet(void)
 
 static void hide_dm_thread_sheet(void)
 {
-    d1l_ui_modal_hide(s_dm_thread_sheet);
-    s_dm_thread_fingerprint[0] = '\0';
-    s_dm_thread_alias[0] = '\0';
-    s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
+    d1l_ui_messages_hide_thread(&s_messages_controller);
     restore_dock_for_active_tab();
 }
 
@@ -3902,170 +3895,43 @@ static void open_public_history_event_cb(lv_event_t *event)
     show_public_history_sheet();
 }
 
-static const char *dm_row_state(const d1l_dm_entry_t *entry, bool unread)
+static size_t load_dm_thread_rows(
+    const char *fingerprint,
+    d1l_dm_entry_t *out_entries,
+    bool *out_unread,
+    size_t max_entries,
+    size_t skip_newest,
+    size_t *out_total_matches,
+    void *context)
 {
-    if (entry->direction[0] == 'r') {
-        if (entry->identity_digest_valid) {
-            return d1l_dm_ack_state_name(entry->ack_state);
-        }
-        return unread ? "new legacy" : "legacy";
-    }
-    if (unread) {
-        return "new";
-    }
-    if (entry->acked) {
-        return "acked";
-    }
-    return entry->direction[0] == 't' ? "sent" : "received";
+    (void)context;
+    return d1l_app_model_copy_dm_thread_page(
+        fingerprint, out_entries, out_unread, max_entries, skip_newest,
+        out_total_matches);
 }
 
-static void close_dm_thread_event_cb(lv_event_t *event)
+static bool render_dm_thread_sheet(void)
 {
-    (void)event;
-    hide_dm_thread_sheet();
-}
-
-static void dm_thread_load_older_event_cb(lv_event_t *event)
-{
-    (void)event;
-    if (s_dm_thread_fingerprint[0] == '\0') {
-        return;
-    }
-    if (s_dm_thread_limit < D1L_DM_THREAD_UI_INITIAL_ROWS) {
-        s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
-    }
-    if (s_dm_thread_limit < D1L_DM_STORE_CAPACITY) {
-        s_dm_thread_limit += D1L_DM_THREAD_UI_LOAD_OLDER_STEP;
-        if (s_dm_thread_limit > D1L_DM_STORE_CAPACITY) {
-            s_dm_thread_limit = D1L_DM_STORE_CAPACITY;
-        }
-    }
-    render_dm_thread_sheet();
-    if (s_dm_thread_sheet) {
-        show_modal(s_dm_thread_sheet);
-    }
-}
-
-static void reply_dm_thread_event_cb(lv_event_t *event)
-{
-    (void)event;
-    d1l_contact_entry_t contact = {0};
-    esp_err_t ret = d1l_app_model_find_contact(s_dm_thread_fingerprint, &contact);
-    if (ret != ESP_OK) {
-        show_toast("DM", ret);
-        return;
-    }
-    open_dm_compose_for_contact(&contact);
-}
-
-static void render_dm_thread_sheet(void)
-{
-    if (!s_dm_thread_sheet) {
-        return;
+    if (!d1l_ui_messages_thread_active(&s_messages_controller)) {
+        return false;
     }
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
-    lv_obj_clean(s_dm_thread_sheet);
-
-    const char *alias = s_dm_thread_alias[0] ? s_dm_thread_alias : s_dm_thread_fingerprint;
-    create_button(s_dm_thread_sheet, "Back", 12, 6, 72, 44,
-                  close_dm_thread_event_cb, NULL);
-    lv_obj_t *title = create_label(s_dm_thread_sheet, alias, 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 364);
-    lv_obj_set_pos(title, 100, 10);
-
-    if (s_dm_thread_limit < D1L_DM_THREAD_UI_INITIAL_ROWS) {
-        s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
-    }
-    if (s_dm_thread_limit > D1L_DM_STORE_CAPACITY) {
-        s_dm_thread_limit = D1L_DM_STORE_CAPACITY;
-    }
-    size_t total_matches = 0;
-    const size_t thread_count =
-        d1l_app_model_copy_dm_thread_page(s_dm_thread_fingerprint, s_dm_thread_entries,
-                                          s_dm_thread_unread, s_dm_thread_limit,
-                                          0, &total_matches);
-
-    lv_obj_t *body = create_nested_page_body(s_dm_thread_sheet, "dm thread body");
-    if (!body) {
-        return;
-    }
-    lv_obj_t *meta = create_nested_page_label(body, "", 0x8EA0AE, false);
-    if (meta) {
-        label_set_fmt(meta, "%.16s  showing %u/%u", s_dm_thread_fingerprint,
-                      (unsigned)thread_count, (unsigned)total_matches);
-    }
-    if (thread_count < total_matches && s_dm_thread_limit < D1L_DM_STORE_CAPACITY) {
-        lv_obj_t *older = create_button(body, "Load Older", 0, 0, 424, 48,
-                                        dm_thread_load_older_event_cb, NULL);
-        if (older) {
-            lv_obj_set_width(older, LV_PCT(100));
-        }
-    }
-
-    for (size_t i = 0; i < thread_count; ++i) {
-        const d1l_dm_entry_t *entry = &s_dm_thread_entries[i];
-        const bool unread = s_dm_thread_unread[i];
-        lv_obj_t *row = create_panel(body, 0, 0, 424, 56);
-        if (!row) {
-            continue;
-        }
-        lv_obj_set_width(row, LV_PCT(100));
-        lv_obj_set_style_pad_all(row, 8, 0);
-        const char *who = entry->direction[0] == 't' ? "You" : alias;
-        lv_obj_t *sender = create_label(row, who,
-                                        unread ? 0xFBBF24 :
-                                        (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
-        lv_label_set_long_mode(sender, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(sender, 160);
-        lv_obj_align(sender, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_t *state = create_label(row, "", 0x8EA0AE);
-        label_set_fmt(state, "#%lu %s", (unsigned long)entry->seq, dm_row_state(entry, unread));
-        lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
-        lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
-        lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(text, 372);
-        lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    }
-    if (thread_count < 3) {
-        const char *notes[] = {
-            "Thread keeps delivery, ACK, and PATH state together.",
-            "Older retained rows appear here after RF traffic or SD restore.",
-            "Use Reply for a direct MeshCore DM when contact keys exist.",
-        };
-        for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); ++i) {
-            lv_obj_t *note = create_panel(body, 0, 0, 424, 56);
-            if (!note) {
-                continue;
-            }
-            lv_obj_set_width(note, LV_PCT(100));
-            lv_obj_set_style_pad_all(note, 8, 0);
-            lv_obj_t *text = create_label(note, notes[i], 0x8EA0AE);
-            lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-            lv_obj_set_width(text, 372);
-            lv_obj_align(text, LV_ALIGN_LEFT_MID, 0, 0);
-        }
-    }
-    if (thread_count > 0) {
-        lv_obj_update_layout(body);
-        lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);
-    }
-    create_button(s_dm_thread_sheet, "Reply", 16, 360, 448, 52,
-                  reply_dm_thread_event_cb, NULL);
+    return d1l_ui_messages_render_thread(
+        &s_messages_controller,
+        load_dm_thread_rows,
+        NULL,
+        handle_messages_action,
+        NULL);
 }
 
 static void show_dm_thread_for(const char *fingerprint, const char *alias)
 {
-    if (!fingerprint || fingerprint[0] == '\0') {
+    if (!d1l_ui_messages_select_thread(
+            &s_messages_controller, fingerprint, alias)) {
         show_toast("DM", ESP_ERR_INVALID_STATE);
         return;
     }
-    snprintf(s_dm_thread_fingerprint, sizeof(s_dm_thread_fingerprint), "%s", fingerprint);
-    snprintf(s_dm_thread_alias, sizeof(s_dm_thread_alias), "%s",
-             alias && alias[0] ? alias : fingerprint);
-    s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
     if (d1l_app_model_mark_dm_thread_read(fingerprint) == ESP_OK) {
         request_content_refresh();
     }
@@ -4081,10 +3947,12 @@ static void show_dm_thread_for(const char *fingerprint, const char *alias)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
-    render_dm_thread_sheet();
-    if (s_dm_thread_sheet) {
-        show_modal(s_dm_thread_sheet);
+    if (!render_dm_thread_sheet()) {
+        hide_dm_thread_sheet();
+        show_toast("DM", ESP_ERR_NO_MEM);
+        return;
     }
+    show_modal(d1l_ui_messages_thread_sheet(&s_messages_controller));
 }
 
 static void open_home_dm_preview_event_cb(lv_event_t *event)
@@ -4125,15 +3993,15 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     view_model->last_public_read_seq = snapshot->last_public_read_seq;
 
     view_model->public_row_count = snapshot->recent_message_count;
-    if (view_model->public_row_count > D1L_APP_SNAPSHOT_MESSAGE_PREVIEW) {
-        view_model->public_row_count = D1L_APP_SNAPSHOT_MESSAGE_PREVIEW;
+    if (view_model->public_row_count > D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS) {
+        view_model->public_row_count = D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS;
     }
     memcpy(view_model->public_rows, snapshot->recent_messages,
            view_model->public_row_count * sizeof(view_model->public_rows[0]));
 
     view_model->dm_row_count = snapshot->recent_dm_count;
-    if (view_model->dm_row_count > D1L_APP_SNAPSHOT_DM_PREVIEW) {
-        view_model->dm_row_count = D1L_APP_SNAPSHOT_DM_PREVIEW;
+    if (view_model->dm_row_count > D1L_UI_MESSAGES_DM_PREVIEW_ROWS) {
+        view_model->dm_row_count = D1L_UI_MESSAGES_DM_PREVIEW_ROWS;
     }
     memcpy(view_model->dm_rows, snapshot->recent_dms,
            view_model->dm_row_count * sizeof(view_model->dm_rows[0]));
@@ -4179,6 +4047,48 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
                            event->dm_message->contact_alias[0] ?
                            event->dm_message->contact_alias :
                            event->dm_message->contact_fingerprint);
+        break;
+    case D1L_UI_MESSAGES_ACTION_CLOSE_DM_THREAD:
+        hide_dm_thread_sheet();
+        request_content_refresh();
+        break;
+    case D1L_UI_MESSAGES_ACTION_LOAD_OLDER_DM_THREAD:
+        if (d1l_ui_messages_expand_thread(&s_messages_controller)) {
+            if (render_dm_thread_sheet()) {
+                show_modal(d1l_ui_messages_thread_sheet(&s_messages_controller));
+            } else {
+                hide_dm_thread_sheet();
+                request_content_refresh();
+                show_toast("DM", ESP_ERR_NO_MEM);
+            }
+        }
+        break;
+    case D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD: {
+        const char *fingerprint = d1l_ui_messages_thread_fingerprint(
+            &s_messages_controller);
+        d1l_contact_entry_t contact = {0};
+        esp_err_t ret = fingerprint ?
+            d1l_app_model_find_contact(fingerprint, &contact) :
+            ESP_ERR_INVALID_STATE;
+        if (ret == ESP_OK) {
+            open_dm_compose_for_contact(&contact);
+            request_content_refresh();
+        } else {
+            show_toast("DM", ret);
+        }
+        break;
+    }
+    case D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS:
+        if (d1l_ui_messages_toggle_thread_details(
+                &s_messages_controller, event->dm_message)) {
+            if (render_dm_thread_sheet()) {
+                show_modal(d1l_ui_messages_thread_sheet(&s_messages_controller));
+            } else {
+                hide_dm_thread_sheet();
+                request_content_refresh();
+                show_toast("DM", ESP_ERR_NO_MEM);
+            }
+        }
         break;
     case D1L_UI_MESSAGES_ACTION_NONE:
     default:
@@ -5678,7 +5588,17 @@ static void process_pending_content_refresh(void)
         request_content_refresh();
         return;
     }
+    const bool refresh_dm_thread =
+        d1l_ui_messages_thread_active(&s_messages_controller);
     render_active_tab();
+    if (refresh_dm_thread) {
+        if (render_dm_thread_sheet()) {
+            show_modal(d1l_ui_messages_thread_sheet(&s_messages_controller));
+        } else {
+            hide_dm_thread_sheet();
+            show_toast("DM", ESP_ERR_NO_MEM);
+        }
+    }
     force_ui_layout_repaint();
 }
 
@@ -5859,13 +5779,15 @@ static lv_obj_t *scroll_probe_open_surface(const char *surface)
         if (s_snapshot.recent_dm_count == 0 ||
             s_snapshot.recent_dms[0].contact_fingerprint[0] == '\0') {
             show_dm_thread_for("0000000000000000", "Scroll Probe DM");
-            return scroll_probe_find_target(s_dm_thread_sheet);
+            return scroll_probe_find_target(
+                d1l_ui_messages_thread_sheet(&s_messages_controller));
         }
         show_dm_thread_for(s_snapshot.recent_dms[0].contact_fingerprint,
                            s_snapshot.recent_dms[0].contact_alias[0] ?
                            s_snapshot.recent_dms[0].contact_alias :
                            s_snapshot.recent_dms[0].contact_fingerprint);
-        return scroll_probe_find_target(s_dm_thread_sheet);
+        return scroll_probe_find_target(
+            d1l_ui_messages_thread_sheet(&s_messages_controller));
     }
     if (strcmp(surface, "storage") == 0 ||
         strcmp(surface, "storage_card") == 0 ||
@@ -6702,22 +6624,6 @@ static void create_public_search_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_public_search_sheet);
 }
 
-static void create_dm_thread_sheet(lv_obj_t *screen)
-{
-    s_dm_thread_sheet = create_object(screen, "dm thread sheet");
-    if (!s_dm_thread_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_dm_thread_sheet, 480, 424);
-    lv_obj_set_pos(s_dm_thread_sheet, 0, 56);
-    lv_obj_set_style_radius(s_dm_thread_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_dm_thread_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_width(s_dm_thread_sheet, 0, 0);
-    lv_obj_set_style_pad_all(s_dm_thread_sheet, 0, 0);
-    lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_dm_thread_sheet);
-}
-
 static void create_storage_sheet(lv_obj_t *screen)
 {
     s_storage_sheet = create_object(screen, "storage sheet");
@@ -7030,7 +6936,9 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_public_history_sheet(s_screen);
     create_public_search_sheet(s_screen);
     create_message_detail_sheet(s_screen);
-    create_dm_thread_sheet(s_screen);
+    if (!d1l_ui_messages_create(&s_messages_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
     if (!d1l_ui_radio_settings_create(
             &s_radio_settings_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
