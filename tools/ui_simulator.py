@@ -24,6 +24,7 @@ DOCKED_VIEWS = frozenset(
     {
         "messages",
         "messages_public",
+        "messages_channel_private",
         "messages_dm",
         "messages_loading",
         "messages_public_storage_degraded",
@@ -118,6 +119,16 @@ class Message:
     conversation: str = ""
     conversation_id: str = ""
     muted: bool = False
+    channel_id: int = 1
+
+
+@dataclass(frozen=True)
+class Channel:
+    channel_id: int
+    name: str
+    enabled: bool = True
+    active: bool = False
+    unread: int = 0
 
 
 @dataclass(frozen=True)
@@ -223,6 +234,9 @@ class Snapshot:
     map_visible_tile_count: int = 9
     map_progress_completed: int = 0
     map_progress_total: int = 0
+    channels: tuple[Channel, ...] = ()
+    channel_messages: tuple[Message, ...] = ()
+    active_channel_id: int = 1
 
 
 @dataclass(frozen=True)
@@ -238,6 +252,8 @@ def compose_eligibility(
     *,
     validation: str,
     is_dm: bool = False,
+    channel_found: bool = True,
+    channel_sendable: bool = True,
     contact_found: bool = True,
     contact_sendable: bool = True,
     previous_send_error: str = "none",
@@ -269,7 +285,12 @@ def compose_eligibility(
         return result(False, False, "route_policy_invalid", "Route settings invalid")
     if not snap.protocol_tx_ready:
         return result(False, False, "protocol_time_unavailable", "Protocol time unavailable")
-    if is_dm:
+    if not is_dm:
+        if not channel_found:
+            return result(False, False, "channel_missing", "Channel unavailable")
+        if not channel_sendable:
+            return result(False, False, "channel_not_sendable", "Channel disabled")
+    else:
         if not snap.settings_load_ok:
             return result(False, False, "settings_unavailable", "Settings need recovery")
         if snap.identity_state == "inconsistent":
@@ -326,11 +347,12 @@ def sample_snapshot() -> Snapshot:
         contacts=(bot, room),
         heard=(bot, room, repeater),
         public_messages=(
-            Message("YKF Corebot", "Public test reply received", "RX new, RSSI -41", True),
-            Message("Local Meshcorebot", "test ack on Public", "RX new, 1 hop", True),
+            Message("YKF Corebot", "Public test reply received", "RX new, RSSI -41", True, seq=1),
+            Message("Local Meshcorebot", "test ack on Public", "RX new, 1 hop", True, seq=2),
             Message(
                 "D1L Desk", "test", "TX done, seq 31",
                 direction="tx", delivery_state="tx_done",
+                seq=3,
             ),
         ),
         dm_messages=(
@@ -396,6 +418,24 @@ def sample_snapshot() -> Snapshot:
         map_lat_e7=0,
         map_lon_e7=0,
         map_center_source="unset",
+        channels=(
+            Channel(1, "Public", enabled=True, active=True, unread=2),
+            Channel(2, "Ops Café 東京", enabled=True, unread=1),
+            Channel(3, "Disabled Lab", enabled=False),
+        ),
+        channel_messages=(
+            Message(
+                "Ops Relay", "private channel row stays isolated",
+                "RX new, exact channel 2", unread=True, seq=40,
+                channel_id=2,
+            ),
+            Message(
+                "D1L Desk", "ops-only acknowledgement",
+                "TX done, exact channel 2", direction="tx",
+                delivery_state="tx_done", seq=41, channel_id=2,
+            ),
+        ),
+        active_channel_id=1,
     )
 
 
@@ -576,6 +616,24 @@ def large_mesh_snapshot() -> Snapshot:
         map_lat_e7=0,
         map_lon_e7=0,
         map_center_source="unset",
+        channels=(
+            Channel(1, "Public", enabled=True, active=True, unread=12),
+            Channel(2, "Ops Café 東京", enabled=True, unread=1),
+            Channel(3, "Disabled Lab", enabled=False),
+        ),
+        channel_messages=(
+            Message(
+                "Ops Relay", "private channel row stays isolated",
+                "RX new, exact channel 2", unread=True, seq=40,
+                channel_id=2,
+            ),
+            Message(
+                "D1L Desk", "ops-only acknowledgement",
+                "TX done, exact channel 2", direction="tx",
+                delivery_state="tx_done", seq=41, channel_id=2,
+            ),
+        ),
+        active_channel_id=1,
     )
 
 
@@ -1997,6 +2055,26 @@ def messages_store_state(snap: Snapshot, *, direct: bool) -> str:
     return "degraded" if degraded else "ready"
 
 
+def active_channel(snap: Snapshot) -> Channel:
+    for channel in snap.channels:
+        if channel.channel_id == snap.active_channel_id:
+            return replace(channel, active=True)
+    if snap.active_channel_id == 1:
+        return Channel(1, "Public", enabled=True, active=True,
+                       unread=snap.unread_public)
+    return Channel(snap.active_channel_id, "Channel unavailable",
+                   enabled=False, active=True)
+
+
+def messages_for_channel(snap: Snapshot, channel_id: int | None = None) -> tuple[Message, ...]:
+    selected = snap.active_channel_id if channel_id is None else channel_id
+    if selected == 1:
+        return tuple(message for message in snap.public_messages
+                     if message.channel_id == 1)
+    return tuple(message for message in snap.channel_messages
+                 if message.channel_id == selected)
+
+
 def draw_messages_notice(
     s: Surface,
     y: int,
@@ -2013,13 +2091,16 @@ def render_messages(s: Surface, snap: Snapshot):
     s.text("Messages", (18, 66, 220, 96), 24, TEXT, True)
     s.text("Choose a conversation type", (18, 98, 340, 118), 12, MUTED)
     dm_summaries = dm_conversation_summaries(snap.dm_messages)
+    selected_channel = active_channel(snap)
+    selected_messages = messages_for_channel(snap)
     cards = (
         (
             (18, 126, 442, 244),
-            "Public",
-            "Default channel conversation",
-            len(snap.public_messages),
-            snap.unread_public,
+            selected_channel.name,
+            "Default channel conversation" if selected_channel.channel_id == 1
+            else "Active group channel conversation",
+            len(selected_messages),
+            selected_channel.unread,
             0,
             "messages",
             messages_store_state(snap, direct=False),
@@ -2067,6 +2148,9 @@ def render_messages(s: Surface, snap: Snapshot):
     s.metrics.update(
         {
             "messages_mode": "root",
+            "active_channel_id": selected_channel.channel_id,
+            "active_channel_name": selected_channel.name,
+            "active_channel_source_count": len(selected_messages),
             "public_source_count": len(snap.public_messages),
             "public_rendered_count": 0,
             "dm_source_count": len(snap.dm_messages),
@@ -2107,25 +2191,40 @@ def snapshot_after_incoming_public(snap: Snapshot) -> Snapshot:
 
 
 def render_messages_public(s: Surface, snap: Snapshot):
+    selected_channel = active_channel(snap)
+    selected_messages = messages_for_channel(snap)
     draw_top_bar(s, snap)
     draw_button(s, (18, 64, 90, 108), "Back", MUTED, action="open_messages_root", destination="messages")
-    s.text("Public", (104, 66, 304, 92), 20, ACCENT, True)
+    s.text(selected_channel.name, (104, 66, 340, 92), 20, ACCENT, True)
+    draw_button(
+        s, (350, 64, 442, 108), "Channels", BLUE,
+        action="open_channel_selector",
+        destination="channel_selector_sheet" if selected_channel.channel_id == 1
+        else "channel_selector_private_sheet",
+    )
     s.text(
-        f"{len(snap.public_messages)} messages | {snap.unread_public} unread",
-        (104, 92, 360, 112),
+        f"{len(selected_messages)} messages | {selected_channel.unread} unread",
+        (104, 92, 344, 112),
         11,
         MUTED,
     )
-    draw_button(s, (18, 116, 114, 160), "Mark read", GREEN, action="mark_public_read")
+    draw_button(
+        s, (18, 116, 114, 160), "Mark read", GREEN,
+        action="mark_public_read" if selected_channel.channel_id == 1
+        else "mark_channel_read",
+    )
     draw_button(
         s, (122, 116, 218, 160), "History", BLUE,
-        action="open_public_history", destination="public_history_sheet",
+        action="open_public_history" if selected_channel.channel_id == 1
+        else "open_channel_history",
+        destination="public_history_sheet" if selected_channel.channel_id == 1
+        else "channel_history_private_sheet",
     )
     body = (18, 168, 442, 352)
     s.round_rect(body, (7, 16, 24), BORDER, 8)
     store_state = messages_store_state(snap, direct=False)
     visible_limit = 2 if store_state == "ready" else 1
-    visible = snap.public_messages[-visible_limit:]
+    visible = selected_messages[-visible_limit:]
     y = 176
     if store_state == "loading":
         y = draw_messages_notice(s, y, "Loading retained history...", BLUE)
@@ -2175,7 +2274,7 @@ def render_messages_public(s: Surface, snap: Snapshot):
             True,
         )
         s.touch_target(
-            f"Public bubble {msg.source}", bubble, kind="conversation_bubble",
+            f"Channel bubble {msg.source}", bubble, kind="conversation_bubble",
             action="open_message_detail", destination="message_detail_sheet",
         )
         outgoing_bubbles += int(outgoing)
@@ -2183,20 +2282,31 @@ def render_messages_public(s: Surface, snap: Snapshot):
         y += 86
     if not visible:
         empty_text = (
-            "Loading retained Public history..."
+            "Loading retained channel history..."
             if store_state == "loading" else
-            "No readable Public history in RAM."
+            "No readable channel history in RAM."
             if store_state == "unavailable" else
-            "No Public messages yet"
+            "No messages in this channel yet"
         )
         s.text(empty_text, (34, y + 12, 426, y + 38), 13, MUTED)
     draw_button(
-        s, (18, 360, 442, 410), "Compose", ACCENT,
-        action="open_public_compose", destination="compose_sheet",
+        s, (18, 360, 442, 410),
+        "Compose" if selected_channel.enabled else "Channel unavailable",
+        ACCENT if selected_channel.enabled else MUTED,
+        action="open_public_compose" if selected_channel.channel_id == 1
+        else "open_channel_compose",
+        destination="compose_sheet" if selected_channel.channel_id == 1
+        else "compose_channel_private_sheet",
+        enabled=selected_channel.enabled,
     )
     s.metrics.update(
         {
             "messages_mode": "public",
+            "active_channel_id": selected_channel.channel_id,
+            "active_channel_name": selected_channel.name,
+            "active_channel_enabled": selected_channel.enabled,
+            "active_channel_source_count": len(selected_messages),
+            "channel_selector_available": True,
             "public_source_count": len(snap.public_messages),
             "public_rendered_count": len(visible),
             "dm_source_count": len(snap.dm_messages),
@@ -2214,6 +2324,77 @@ def render_messages_public(s: Surface, snap: Snapshot):
         }
     )
     draw_dock(s, "Messages")
+
+
+def render_messages_channel_private(s: Surface, snap: Snapshot):
+    render_messages_public(s, replace(snap, active_channel_id=2))
+
+
+def render_channel_selector_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Channels", "Select an enabled group channel")
+    channels = snap.channels[:8] or (Channel(1, "Public", active=True),)
+    y = 152
+    rendered: list[dict[str, object]] = []
+    for channel in channels:
+        active = channel.channel_id == snap.active_channel_id
+        box = (44, y, 436, y + 44)
+        s.round_rect(
+            box,
+            SURFACE_2 if channel.enabled else SURFACE,
+            ACCENT if active else BORDER,
+            8,
+        )
+        s.text(
+            channel.name,
+            (56, y + 10, 278, y + 34),
+            13,
+            ACCENT if active else (TEXT if channel.enabled else MUTED),
+            True,
+        )
+        state = (
+            ("active | " if active else "")
+            + ("" if channel.enabled else "disabled | ")
+            + f"{channel.unread} unread"
+        )
+        s.text(state, (282, y + 10, 424, y + 34), 11, MUTED, True, "right")
+        s.touch_target(
+            channel.name,
+            box,
+            kind="channel_row",
+            action=f"select_channel_{channel.channel_id}",
+            destination=(
+                "messages_public" if channel.channel_id == 1 else
+                "messages_channel_private" if channel.channel_id == 2 else
+                None
+            ),
+            enabled=channel.enabled,
+        )
+        rendered.append({
+            "channel_id": channel.channel_id,
+            "name": channel.name,
+            "enabled": channel.enabled,
+            "active": active,
+            "unread": channel.unread,
+        })
+        y += 52
+    draw_button(
+        s, (364, 94, 436, 138), "Close", MUTED,
+        action="close_channel_selector",
+        destination="messages_public" if snap.active_channel_id == 1
+        else "messages_channel_private",
+    )
+    s.metrics.update({
+        "channel_selector_capacity": 8,
+        "channel_selector_row_height": 44,
+        "channel_selector_channels": rendered,
+        "channel_selector_displays_secret": False,
+        "channel_selector_navigation_rf_silent": True,
+        "channel_selector_disabled_fail_closed": True,
+    })
+
+
+def render_channel_selector_private_sheet(s: Surface, snap: Snapshot):
+    render_channel_selector_sheet(s, replace(snap, active_channel_id=2))
 
 
 def dm_conversation_id(message: Message) -> str:
@@ -3450,6 +3631,8 @@ def render_compose_state(
     byte_count: int,
     character_count: int | None,
     is_dm: bool = False,
+    channel_found: bool = True,
+    channel_sendable: bool = True,
     contact_found: bool = True,
     contact_sendable: bool = True,
     previous_send_error: str = "none",
@@ -3458,6 +3641,8 @@ def render_compose_state(
         snap,
         validation=validation,
         is_dm=is_dm,
+        channel_found=channel_found,
+        channel_sendable=channel_sendable,
         contact_found=contact_found,
         contact_sendable=contact_sendable,
         previous_send_error=previous_send_error,
@@ -3467,9 +3652,14 @@ def render_compose_state(
         eligibility.reason != "ready"
     ):
         counter = f"{eligibility.status} | {byte_count}/138 B"
-    title = "DM YKF Corebot" if is_dm else "Compose Public"
-    placeholder = "Direct message" if is_dm else "Public message"
-    send_action = "send_dm_text" if is_dm else "send_public_text"
+    selected_channel = active_channel(snap)
+    title = "DM YKF Corebot" if is_dm else f"Compose {selected_channel.name}"
+    placeholder = (
+        "Direct message" if is_dm else
+        "Public message" if selected_channel.channel_id == 1 else
+        "Channel message"
+    )
+    send_action = "send_dm_text" if is_dm else "send_channel_text"
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
     s.text(title, (16, 64, 240, 96), 22, TEXT, True)
@@ -3484,7 +3674,15 @@ def render_compose_state(
         enabled=send_enabled,
     )
     draw_button(s, (322, 64, 384, 108), "Clear", ACCENT, action="clear_public_message")
-    draw_button(s, (392, 64, 464, 108), "Close", MUTED, action="close_compose", destination="messages_dm" if is_dm else "messages_public")
+    draw_button(
+        s, (392, 64, 464, 108), "Close", MUTED,
+        action="close_compose",
+        destination=(
+            "messages_dm" if is_dm else
+            "messages_public" if selected_channel.channel_id == 1 else
+            "messages_channel_private"
+        ),
+    )
     s.round_rect((16, 114, 464, 192), SURFACE_2, BORDER, 8)
     s.touch_target(placeholder, (16, 114, 464, 192), kind="text_field", action="edit_dm_message" if is_dm else "edit_public_message")
     s.text(placeholder, (28, 122, 220, 144), 13, MUTED, True)
@@ -3530,6 +3728,10 @@ def render_compose_state(
         "compose_eligibility_reason": eligibility.reason,
         "compose_eligibility_status": eligibility.status,
         "compose_is_dm": is_dm,
+        "compose_channel_id": 0 if is_dm else selected_channel.channel_id,
+        "compose_channel_name": "" if is_dm else selected_channel.name,
+        "compose_channel_found": channel_found,
+        "compose_channel_sendable": channel_sendable,
     })
 
 
@@ -3610,6 +3812,32 @@ def render_compose_retry_sheet(s: Surface, snap: Snapshot):
     )
 
 
+def render_compose_channel_private_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        replace(snap, active_channel_id=2),
+        sample="private channel draft",
+        counter="21 chars | 21/138 B",
+        validation="valid",
+        byte_count=21,
+        character_count=21,
+    )
+
+
+def render_compose_channel_disabled_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        replace(snap, active_channel_id=3),
+        sample="draft remains local",
+        counter="",
+        validation="valid",
+        byte_count=19,
+        character_count=19,
+        channel_found=True,
+        channel_sendable=False,
+    )
+
+
 def render_compose_protocol_time_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s,
@@ -3651,19 +3879,39 @@ def render_compose_dm_active_sheet(s: Surface, snap: Snapshot):
 
 
 def render_public_history_sheet(s: Surface, snap: Snapshot):
+    selected_channel = active_channel(snap)
+    selected_messages = messages_for_channel(snap)
     public_page_limit = 5
-    load_older_available = len(snap.public_messages) > public_page_limit
+    load_older_available = len(selected_messages) > public_page_limit
     draw_sheet_frame(
         s,
-        "Public History",
-        f"showing {min(len(snap.public_messages), public_page_limit)}/{len(snap.public_messages)} retained",
+        "Public History" if selected_channel.channel_id == 1
+        else f"{selected_channel.name} History",
+        (f"showing {min(len(selected_messages), public_page_limit)}/{len(selected_messages)} retained"
+         if selected_channel.channel_id == 1 else
+         f"{selected_channel.name}  showing {min(len(selected_messages), public_page_limit)}/{len(selected_messages)} retained"),
     )
-    draw_button(s, (204, 94, 282, 134), "Search", BLUE, action="open_public_search", destination="public_search_sheet")
+    draw_button(
+        s, (204, 94, 282, 134), "Search", BLUE,
+        action="open_public_search" if selected_channel.channel_id == 1
+        else "open_channel_search",
+        destination="public_search_sheet" if selected_channel.channel_id == 1
+        else "channel_search_private_sheet",
+    )
     draw_button(s, (292, 94, 356, 134), "Clear", ACCENT, action="clear_public_search")
-    draw_button(s, (366, 94, 436, 134), "Close", MUTED, action="close_public_history", destination="messages_public")
+    draw_button(
+        s, (366, 94, 436, 134), "Close", MUTED,
+        action="close_public_history",
+        destination="messages_public" if selected_channel.channel_id == 1
+        else "messages_channel_private",
+    )
     s.round_rect((44, 154, 436, 318), SURFACE, BORDER, 8)
-    s.text("Public scrollback", (56, 162, 260, 184), 13, MUTED, True)
-    visible_messages = snap.public_messages[-3:]
+    s.text(
+        "Public scrollback" if selected_channel.channel_id == 1
+        else "Channel scrollback",
+        (56, 162, 260, 184), 13, MUTED, True,
+    )
+    visible_messages = selected_messages[-3:]
     y = 194
     rendered_states: list[str] = []
     for msg in visible_messages:
@@ -3679,6 +3927,8 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
     s.metrics.update(
         {
             "public_history_source_count": len(snap.public_messages),
+            "channel_history_channel_id": selected_channel.channel_id,
+            "channel_history_source_count": len(selected_messages),
             "public_history_page_limit": public_page_limit,
             "public_history_rendered_count": len(visible_messages),
             "public_history_load_older_available": load_older_available,
@@ -3688,20 +3938,44 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
 
 
 def render_public_search_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Public Search", "Filter retained Public rows")
+    selected_channel = active_channel(snap)
+    draw_sheet_frame(
+        s,
+        "Public Search" if selected_channel.channel_id == 1
+        else f"Search {selected_channel.name}",
+        "Filter retained channel rows",
+    )
     s.round_rect((44, 158, 436, 210), SURFACE_2, BORDER, 8)
     s.touch_target("Search author or message", (44, 158, 436, 210), kind="text_field", action="edit_public_search")
     s.text("Search author or message", (56, 166, 424, 190), 13, MUTED, True)
     s.text("test", (56, 188, 424, 206), 16, TEXT)
-    draw_button(s, (44, 228, 156, 278), "Apply", GREEN, action="apply_public_search", destination="public_history_sheet")
+    history_destination = (
+        "public_history_sheet" if selected_channel.channel_id == 1
+        else "channel_history_private_sheet"
+    )
+    draw_button(s, (44, 228, 156, 278), "Apply", GREEN, action="apply_public_search", destination=history_destination)
     draw_button(s, (166, 228, 278, 278), "Clear", ACCENT, action="clear_public_search")
-    draw_button(s, (288, 228, 400, 278), "Close", MUTED, action="close_public_search", destination="public_history_sheet")
+    draw_button(s, (288, 228, 400, 278), "Close", MUTED, action="close_public_search", destination=history_destination)
     s.round_rect((44, 300, 436, 370), SURFACE, BORDER, 8)
-    s.text("Keyboard opens for Public history search", (56, 318, 424, 350), 13, MUTED, False, "center")
+    s.text("Keyboard opens for channel history search", (56, 318, 424, 350), 13, MUTED, False, "center")
+    s.metrics.update({
+        "channel_search_channel_id": selected_channel.channel_id,
+        "channel_search_source_count": len(messages_for_channel(snap)),
+    })
+
+
+def render_channel_history_private_sheet(s: Surface, snap: Snapshot):
+    render_public_history_sheet(s, replace(snap, active_channel_id=2))
+
+
+def render_channel_search_private_sheet(s: Surface, snap: Snapshot):
+    render_public_search_sheet(s, replace(snap, active_channel_id=2))
 
 
 def render_message_detail_page(s: Surface, snap: Snapshot, *, technical_details: bool):
-    msg = snap.public_messages[1] if len(snap.public_messages) > 1 else snap.public_messages[0]
+    selected_channel = active_channel(snap)
+    selected_messages = messages_for_channel(snap)
+    msg = selected_messages[1] if len(selected_messages) > 1 else selected_messages[0]
     message_text = SAMPLE_LONG_PUBLIC_MESSAGE if technical_details else msg.text
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
@@ -3764,6 +4038,8 @@ def render_message_detail_page(s: Surface, snap: Snapshot, *, technical_details:
             "sender_dm_exact_key_lookup": False,
             "sender_dm_opens_compose": False,
             "sender_dm_rf_tx": False,
+            "message_detail_channel_id": selected_channel.channel_id,
+            "message_detail_reply_channel_id": msg.channel_id,
         }
     )
 
@@ -5250,6 +5526,9 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "home": render_home,
     "messages": render_messages,
     "messages_public": render_messages_public,
+    "messages_channel_private": render_messages_channel_private,
+    "channel_selector_sheet": render_channel_selector_sheet,
+    "channel_selector_private_sheet": render_channel_selector_private_sheet,
     "messages_dm": render_messages_dm,
     "messages_loading": render_messages_loading,
     "messages_public_storage_degraded": render_messages_public_storage_degraded,
@@ -5279,12 +5558,16 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "compose_offline_sheet": render_compose_offline_sheet,
     "compose_busy_sheet": render_compose_busy_sheet,
     "compose_retry_sheet": render_compose_retry_sheet,
+    "compose_channel_private_sheet": render_compose_channel_private_sheet,
+    "compose_channel_disabled_sheet": render_compose_channel_disabled_sheet,
     "compose_protocol_time_sheet": render_compose_protocol_time_sheet,
     "compose_dm_no_contact_sheet": render_compose_dm_no_contact_sheet,
     "compose_dm_active_sheet": render_compose_dm_active_sheet,
     "compose_incoming_public_refresh": render_compose_incoming_public_refresh,
     "public_history_sheet": render_public_history_sheet,
     "public_search_sheet": render_public_search_sheet,
+    "channel_history_private_sheet": render_channel_history_private_sheet,
+    "channel_search_private_sheet": render_channel_search_private_sheet,
     "public_search_incoming_refresh": render_public_search_incoming_refresh,
     "radio_settings_sheet": render_radio_settings_sheet,
     "storage_setup_sheet": render_storage_setup_sheet,
@@ -5350,7 +5633,10 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Direct messages",
         "Private contact conversations",
     ),
-    "messages_public": ("Public", "Back", "Mark read", "History", "Compose"),
+    "messages_public": ("Public", "Back", "Channels", "Mark read", "History", "Compose"),
+    "messages_channel_private": ("Ops Café 東京", "Back", "Channels", "Mark read", "History", "Compose"),
+    "channel_selector_sheet": ("Channels", "Public", "Ops Café 東京", "Disabled Lab", "Close"),
+    "channel_selector_private_sheet": ("Channels", "Public", "Ops Café 東京", "Disabled Lab", "Close"),
     "messages_dm": ("Direct messages", "Back"),
     "messages_loading": (
         "Messages",
@@ -5484,11 +5770,18 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "compose_offline_sheet": ("Compose Public", "Radio unavailable | 16/138 B", "Send"),
     "compose_busy_sheet": ("Compose Public", "Radio busy | 21/138 B", "Send"),
     "compose_retry_sheet": ("Compose Public", "Retry ready: timeout | 28/138 B", "Send"),
+    "compose_channel_private_sheet": ("Compose Ops Café 東京", "private channel draft", "Send"),
+    "compose_channel_disabled_sheet": ("Compose Disabled Lab", "Channel disabled | 19/138 B", "Send"),
     "compose_protocol_time_sheet": ("Compose Public", "Protocol time unavailable | 21/138 B", "Send"),
     "compose_dm_no_contact_sheet": ("DM YKF Corebot", "Direct message", "Contact unavailable | 22/138 B", "Send"),
     "compose_dm_active_sheet": ("DM YKF Corebot", "Prior DM still active | 20/138 B", "Send"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
+    "channel_history_private_sheet": (
+        "Ops Café 東京 History", "Ops Café 東京  showing 2/2 retained",
+        "Channel scrollback", "Search", "Close",
+    ),
+    "channel_search_private_sheet": ("Search Ops Café 東京", "Search author or message", "Apply", "Close"),
     "radio_settings_sheet": (
         "Radio Settings",
         "Freq 910.525 MHz",
@@ -5870,8 +6163,25 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "messages", "action": "open_messages_public", "destination": "messages_public"},
             {"view": "messages_public", "action": "open_public_compose", "destination": "compose_sheet"},
             {"view": "compose_sheet", "action": "edit_public_message"},
-            {"view": "compose_sheet", "action": "send_public_text", "public_rf_tx": True},
+            {"view": "compose_sheet", "action": "send_channel_text", "public_rf_tx": True},
             {"view": "compose_sheet", "action": "close_compose", "destination": "messages_public"},
+        ),
+    },
+    {
+        "name": "channel_select_private_history_compose_and_return_public",
+        "steps": (
+            {"view": "messages_public", "action": "open_channel_selector", "destination": "channel_selector_sheet"},
+            {"view": "channel_selector_sheet", "action": "select_channel_2", "destination": "messages_channel_private"},
+            {"view": "messages_channel_private", "action": "mark_channel_read"},
+            {"view": "messages_channel_private", "action": "open_channel_history", "destination": "channel_history_private_sheet"},
+            {"view": "channel_history_private_sheet", "action": "open_channel_search", "destination": "channel_search_private_sheet"},
+            {"view": "channel_search_private_sheet", "action": "apply_public_search", "destination": "channel_history_private_sheet"},
+            {"view": "messages_channel_private", "action": "open_channel_compose", "destination": "compose_channel_private_sheet"},
+            {"view": "compose_channel_private_sheet", "action": "edit_public_message"},
+            {"view": "compose_channel_private_sheet", "action": "send_channel_text", "public_rf_tx": True},
+            {"view": "compose_channel_private_sheet", "action": "close_compose", "destination": "messages_channel_private"},
+            {"view": "messages_channel_private", "action": "open_channel_selector", "destination": "channel_selector_private_sheet"},
+            {"view": "channel_selector_private_sheet", "action": "select_channel_1", "destination": "messages_public"},
         ),
     },
     {

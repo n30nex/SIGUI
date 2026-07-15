@@ -32,6 +32,8 @@ def test_compose_runtime_eligibility_is_live_fail_closed_and_rf_silent() -> None
     assert "settings_load_status" in helper_header
     assert "identity_state" in helper_header
     assert "dm_delivery_active" in helper_header
+    assert "channel_found" in helper_header
+    assert "channel_sendable" in helper_header
     assert "radio_applied" not in helper_header
     assert "out_path" not in helper_header
     assert 'strcmp(mesh_state, "tx_busy")' in helper
@@ -39,6 +41,8 @@ def test_compose_runtime_eligibility_is_live_fail_closed_and_rf_silent() -> None
     assert "D1L_UI_COMPOSE_PROTOCOL_TIME_UNAVAILABLE" in helper
     assert "D1L_IDENTITY_STATE_INCONSISTENT" in helper
     assert "D1L_UI_COMPOSE_DM_DELIVERY_ACTIVE" in helper
+    assert "D1L_UI_COMPOSE_CHANNEL_MISSING" in helper
+    assert "D1L_UI_COMPOSE_CHANNEL_NOT_SENDABLE" in helper
 
     projection = phase1.split(
         "static d1l_ui_compose_eligibility_t compose_eligibility_for_text", 1
@@ -49,6 +53,8 @@ def test_compose_runtime_eligibility_is_live_fail_closed_and_rf_silent() -> None
     assert "s_snapshot.settings_load_status" in projection
     assert "s_snapshot.identity_state" in projection
     assert "s_snapshot.dm_delivery_active" in projection
+    assert "snapshot_find_channel(" in projection
+    assert "channel.enabled" in projection
     assert "out_path" not in projection
     assert "radio_applied" not in projection
 
@@ -57,7 +63,7 @@ def test_compose_runtime_eligibility_is_live_fail_closed_and_rf_silent() -> None
     )[0]
     assert "d1l_ui_modal_visible(s_compose_sheet)" in refresh
     assert "update_compose_counter()" in refresh
-    assert "d1l_app_model_send_public_text" not in refresh
+    assert "d1l_app_model_send_channel_text" not in refresh
     assert "d1l_app_model_send_dm_text" not in refresh
 
     send = phase1.split("static void send_compose_text(void)", 1)[1].split(
@@ -68,6 +74,8 @@ def test_compose_runtime_eligibility_is_live_fail_closed_and_rf_silent() -> None
     )
     assert "if (!eligibility.send_enabled)" in send
     assert "s_compose_last_send_error = ret" in send
+    assert "d1l_app_model_send_channel_text(" in send
+    assert "s_compose_channel_id" in send
     assert "show_toast_text(retry.status, false)" in send
     assert "hide_compose_sheet();" in send.split("if (ret == ESP_OK)", 1)[1].split(
         "} else {", 1

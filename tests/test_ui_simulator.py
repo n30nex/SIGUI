@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 79
+    assert len(views) == 86
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -311,6 +311,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         {
             "messages",
             "messages_public",
+            "messages_channel_private",
                 "messages_dm",
                 "messages_loading",
                 "messages_public_storage_degraded",
@@ -359,6 +360,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     for view_name in (
         "messages",
         "messages_public",
+        "messages_channel_private",
         "messages_dm",
         "nodes",
         "map",
@@ -853,7 +855,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert "send_public_test" not in actions_by_view["messages"]
     assert views["messages"]["metrics"]["messages_navigation_rf_silent"] is True
     assert views["messages_public"]["metrics"]["public_navigation_rf_silent"] is True
-    assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
+    assert actions_by_view["compose_sheet"]["send_channel_text"]["public_rf_tx"] is True
     assert views["compose_utf8_sheet"]["metrics"]["compose_validation"] == "valid_utf8"
     assert views["compose_utf8_sheet"]["metrics"]["compose_byte_count"] == 12
     assert views["compose_utf8_sheet"]["metrics"]["compose_character_count"] == 7
@@ -861,7 +863,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert views["compose_byte_limit_sheet"]["metrics"]["compose_send_enabled"] is True
     for invalid_view in ("compose_oversize_sheet", "compose_invalid_sheet"):
         assert views[invalid_view]["metrics"]["compose_send_enabled"] is False
-        target = actions_by_view[invalid_view]["send_public_text"]
+        target = actions_by_view[invalid_view]["send_channel_text"]
         assert target["enabled"] is False
         assert target["rf_tx"] is False
         assert target["public_rf_tx"] is False
@@ -876,7 +878,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         metrics = views[view_name]["metrics"]
         assert metrics["compose_send_enabled"] is False
         assert metrics["compose_eligibility_reason"] == reason
-        send_action = "send_dm_text" if metrics["compose_is_dm"] else "send_public_text"
+        send_action = "send_dm_text" if metrics["compose_is_dm"] else "send_channel_text"
         target = actions_by_view[view_name][send_action]
         assert target["enabled"] is False
         assert target["rf_tx"] is False
@@ -886,7 +888,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert retry["compose_send_enabled"] is True
     assert retry["compose_retry_available"] is True
     assert retry["compose_eligibility_reason"] == "retry_timeout"
-    retry_target = actions_by_view["compose_retry_sheet"]["send_public_text"]
+    retry_target = actions_by_view["compose_retry_sheet"]["send_channel_text"]
     assert retry_target["public_rf_tx"] is True
     assert retry_target["enabled"] is True
     for compose_view in (
@@ -1847,6 +1849,95 @@ def test_ui_simulator_unsaved_map_location_fields_start_blank(tmp_path):
     assert view["metrics"]["map_location_examples_are_placeholders_only"] is True
     assert "e.g. 43.6532000" in view["labels"]
     assert "e.g. -79.3832000" in view["labels"]
+
+
+def test_channel_surfaces_partition_rows_and_fail_closed_exactly():
+    snap = ui_simulator.sample_snapshot()
+
+    public = ui_simulator.Surface("messages_public")
+    ui_simulator.render_messages_public(public, snap)
+    private = ui_simulator.Surface("messages_channel_private")
+    ui_simulator.render_messages_channel_private(private, snap)
+
+    assert public.metrics["active_channel_id"] == 1
+    assert public.metrics["active_channel_source_count"] == 3
+    assert private.metrics["active_channel_id"] == 2
+    assert private.metrics["active_channel_source_count"] == 2
+    assert "private channel row stays isolated" not in public.labels
+    assert "ops-only acknowledgement" not in public.labels
+    assert "Public test reply received" not in private.labels
+    assert "test ack on Public" not in private.labels
+    assert next(
+        target for target in private.touch_targets
+        if target["action"] == "mark_channel_read"
+    )["rf_tx"] is False
+
+    selector = ui_simulator.Surface("channel_selector_sheet")
+    ui_simulator.render_channel_selector_sheet(selector, snap)
+    assert selector.metrics["channel_selector_capacity"] == 8
+    assert selector.metrics["channel_selector_row_height"] == 44
+    assert selector.metrics["channel_selector_displays_secret"] is False
+    assert selector.metrics["channel_selector_navigation_rf_silent"] is True
+    assert [row["channel_id"] for row in selector.metrics["channel_selector_channels"]] == [1, 2, 3]
+    selector_rows = [
+        target for target in selector.touch_targets
+        if target["kind"] == "channel_row"
+    ]
+    assert all(target["height"] >= 44 for target in selector_rows)
+    disabled = next(
+        target for target in selector_rows
+        if target["action"] == "select_channel_3"
+    )
+    assert disabled["enabled"] is False
+    assert disabled["destination"] is None
+    assert disabled["rf_tx"] is False
+
+    private_selector = ui_simulator.Surface("channel_selector_private_sheet")
+    ui_simulator.render_channel_selector_private_sheet(private_selector, snap)
+    close_selector = next(
+        target for target in private_selector.touch_targets
+        if target["action"] == "close_channel_selector"
+    )
+    assert close_selector["destination"] == "messages_channel_private"
+
+    history = ui_simulator.Surface("channel_history_private_sheet")
+    ui_simulator.render_channel_history_private_sheet(history, snap)
+    assert history.metrics["channel_history_channel_id"] == 2
+    assert history.metrics["channel_history_source_count"] == 2
+    assert history.metrics["public_history_source_count"] == 3
+    close_history = next(
+        target for target in history.touch_targets
+        if target["action"] == "close_public_history"
+    )
+    assert close_history["destination"] == "messages_channel_private"
+
+    search = ui_simulator.Surface("channel_search_private_sheet")
+    ui_simulator.render_channel_search_private_sheet(search, snap)
+    assert search.metrics["channel_search_channel_id"] == 2
+    assert search.metrics["channel_search_source_count"] == 2
+
+    compose = ui_simulator.Surface("compose_channel_private_sheet")
+    ui_simulator.render_compose_channel_private_sheet(compose, snap)
+    send = next(
+        target for target in compose.touch_targets
+        if target["action"] == "send_channel_text"
+    )
+    assert compose.metrics["compose_channel_id"] == 2
+    assert compose.metrics["compose_send_enabled"] is True
+    assert send["enabled"] is True
+    assert send["rf_tx"] is True
+
+    disabled_compose = ui_simulator.Surface("compose_channel_disabled_sheet")
+    ui_simulator.render_compose_channel_disabled_sheet(disabled_compose, snap)
+    disabled_send = next(
+        target for target in disabled_compose.touch_targets
+        if target["action"] == "send_channel_text"
+    )
+    assert disabled_compose.metrics["compose_channel_id"] == 3
+    assert disabled_compose.metrics["compose_eligibility_reason"] == "channel_not_sendable"
+    assert disabled_compose.metrics["compose_send_enabled"] is False
+    assert disabled_send["enabled"] is False
+    assert disabled_send["rf_tx"] is False
 
 
 def test_ui_simulator_is_documented_and_run_in_ci():

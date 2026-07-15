@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "mesh/dm_store.h"
+#include "mesh/channel_store.h"
 #include "mesh/message_store.h"
 
 typedef struct _lv_obj_t lv_obj_t;
@@ -32,9 +33,15 @@ typedef struct {
     uint32_t public_unread;
     uint32_t dm_unread;
     uint32_t muted_dm_unread;
-    uint32_t last_public_read_seq;
+    uint32_t last_channel_read_seq;
     d1l_message_entry_t public_rows[D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS];
     size_t public_row_count;
+    uint64_t active_channel_id;
+    char active_channel_name[D1L_CHANNEL_NAME_LEN];
+    bool active_channel_enabled;
+    d1l_channel_info_t channels[D1L_CHANNEL_STORE_CAPACITY];
+    size_t channel_count;
+    bool channel_store_loaded;
     d1l_dm_entry_t dm_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
     bool dm_row_unread[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
     uint32_t dm_row_unread_count[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
@@ -62,12 +69,16 @@ typedef enum {
     D1L_UI_MESSAGES_ACTION_OPEN_DM_SEARCH,
     D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD,
     D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS,
+    D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR,
+    D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR,
+    D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL,
 } d1l_ui_messages_action_t;
 
 typedef struct {
     d1l_ui_messages_action_t action;
     const d1l_message_entry_t *public_message;
     const d1l_dm_entry_t *dm_message;
+    const d1l_channel_info_t *channel;
 } d1l_ui_messages_action_event_t;
 
 typedef void (*d1l_ui_messages_action_handler_t)(
@@ -85,6 +96,7 @@ typedef struct {
 
 #define D1L_UI_MESSAGES_CONTROL_BINDING_COUNT 6U
 #define D1L_UI_MESSAGES_THREAD_CONTROL_BINDING_COUNT 4U
+#define D1L_UI_MESSAGES_CHANNEL_CONTROL_BINDING_COUNT 1U
 #define D1L_UI_MESSAGES_THREAD_INITIAL_ROWS 5U
 #define D1L_UI_MESSAGES_THREAD_LOAD_OLDER_STEP 5U
 #define D1L_UI_MESSAGES_THREAD_MAX_ROWS (D1L_DM_STORE_CAPACITY + 1U)
@@ -102,6 +114,7 @@ typedef size_t (*d1l_ui_messages_thread_loader_t)(
 
 typedef struct d1l_ui_messages_controller {
     lv_obj_t *thread_sheet;
+    lv_obj_t *channel_sheet;
     d1l_ui_messages_view_model_t rendered;
     d1l_ui_messages_action_handler_t action_handler;
     void *action_context;
@@ -113,6 +126,10 @@ typedef struct d1l_ui_messages_controller {
         thread_controls[D1L_UI_MESSAGES_THREAD_CONTROL_BINDING_COUNT];
     d1l_ui_messages_action_binding_t
         thread_rows[D1L_UI_MESSAGES_THREAD_MAX_ROWS];
+    d1l_ui_messages_action_binding_t
+        channel_controls[D1L_UI_MESSAGES_CHANNEL_CONTROL_BINDING_COUNT];
+    d1l_ui_messages_action_binding_t
+        channel_rows[D1L_CHANNEL_STORE_CAPACITY];
     d1l_dm_entry_t thread_entries[D1L_UI_MESSAGES_THREAD_MAX_ROWS];
     bool thread_unread[D1L_UI_MESSAGES_THREAD_MAX_ROWS];
     char thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
@@ -175,6 +192,16 @@ void d1l_ui_messages_render(d1l_ui_messages_controller_t *controller,
                             const d1l_ui_messages_view_model_t *view_model,
                             d1l_ui_messages_action_handler_t action_handler,
                             void *action_context);
+bool d1l_ui_messages_render_channel_selector(
+    d1l_ui_messages_controller_t *controller,
+    d1l_ui_messages_action_handler_t action_handler,
+    void *action_context);
+bool d1l_ui_messages_channel_selector_active(
+    const d1l_ui_messages_controller_t *controller);
+lv_obj_t *d1l_ui_messages_channel_selector_sheet(
+    const d1l_ui_messages_controller_t *controller);
+void d1l_ui_messages_hide_channel_selector(
+    d1l_ui_messages_controller_t *controller);
 bool d1l_ui_messages_select_thread(d1l_ui_messages_controller_t *controller,
                                    const char *fingerprint,
                                    const char *alias);

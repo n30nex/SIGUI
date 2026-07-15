@@ -21,6 +21,8 @@ typedef enum {
     D1L_UI_COMPOSE_PROTOCOL_TIME_UNAVAILABLE,
     D1L_UI_COMPOSE_SETTINGS_UNAVAILABLE,
     D1L_UI_COMPOSE_IDENTITY_INCONSISTENT,
+    D1L_UI_COMPOSE_CHANNEL_MISSING,
+    D1L_UI_COMPOSE_CHANNEL_NOT_SENDABLE,
     D1L_UI_COMPOSE_CONTACT_MISSING,
     D1L_UI_COMPOSE_CONTACT_NOT_SENDABLE,
     D1L_UI_COMPOSE_DM_DELIVERY_ACTIVE,
@@ -42,6 +44,8 @@ typedef struct {
     bool protocol_tx_ready;
     esp_err_t settings_load_status;
     d1l_identity_state_t identity_state;
+    bool channel_found;
+    bool channel_sendable;
     bool contact_found;
     bool contact_sendable;
     bool dm_delivery_active;

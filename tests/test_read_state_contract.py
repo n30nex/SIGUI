@@ -97,7 +97,12 @@ def test_console_controls_remain_and_ui_marks_dm_threads_read_on_open():
     assert "messages unread" in SMOKE_COMMANDS
 
     assert "mark_public_read_event_cb" in ui
-    assert "d1l_app_model_mark_public_read()" in ui
+    mark_channel = ui.split(
+        "static void mark_public_read_event_cb", 1
+    )[1].split("static void open_dm_compose_for_contact", 1)[0]
+    assert "s_messages_controller.rendered.active_channel_id" in mark_channel
+    assert "d1l_app_model_mark_channel_read(channel_id)" in mark_channel
+    assert "d1l_app_model_mark_public_read()" not in mark_channel
     assert "d1l_app_model_mark_messages_read" not in ui
     assert 'parent, "Mark read", 18, 60, 96, 44' in messages_ui
     assert 'return unread ? "New" : "Received";' in messages_ui
