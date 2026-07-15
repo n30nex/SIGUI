@@ -437,6 +437,10 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "dm_content_revision" in header
     assert "snapshot->dm_content_revision = dms.content_revision" in source
     assert "d1l_dm_store_copy_recent" in source
+    assert "dm_conversation_count" in header
+    assert "d1l_dm_conversation_list_project(" in source
+    assert "recent_dm_unread_count" in header
+    assert "recent_dm_muted" in header
     assert "d1l_app_model_copy_dm_thread_page" in header
     assert "d1l_app_model_copy_dm_thread" in header
     assert "d1l_dm_store_copy_thread_page(fingerprint, out_entries" in source

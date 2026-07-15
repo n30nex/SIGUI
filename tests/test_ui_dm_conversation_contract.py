@@ -24,6 +24,11 @@ def test_dm_conversation_controller_owns_bounded_state_and_stale_guards():
     assert "thread_limit" in header
     assert "thread_row_count" in header
     assert "thread_total_matches" in header
+    assert "dm_row_unread_count[D1L_UI_MESSAGES_DM_PREVIEW_ROWS]" in header
+    assert "dm_row_muted[D1L_UI_MESSAGES_DM_PREVIEW_ROWS]" in header
+    assert "controller->rendered.dm_row_unread_count[index]" in source
+    assert "unread && !muted ? 0xFBBF24" in source
+    assert '"%lu unread%s | %s"' in source
     assert "messages_deactivate_actions(controller);" in source
     assert source.index("messages_deactivate_actions(controller);") < source.index(
         "lv_obj_clean(sheet);"
@@ -225,7 +230,7 @@ def test_simulator_projects_direction_and_every_delivery_state_truthfully():
     ) == "Received"
     surface = ui_simulator.Surface("messages_dm")
     ui_simulator.render_messages_dm(surface, ui_simulator.sample_snapshot())
-    assert "Awaiting ACK" in surface.metrics["dm_rendered_states"]
+    assert "1 unread | Awaiting ACK" in surface.metrics["dm_rendered_states"]
     details = ui_simulator.Surface("dm_thread_details_sheet")
     ui_simulator.render_dm_thread_details_sheet(details, ui_simulator.sample_snapshot())
     assert details.metrics["dm_thread_details_expanded"] is True

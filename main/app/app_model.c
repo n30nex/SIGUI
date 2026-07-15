@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/dm_conversation_list.h"
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
 #include "d1l_config.h"
@@ -18,6 +19,15 @@ static d1l_app_model_t s_model = {
     .board_error = ESP_ERR_INVALID_STATE,
     .boot_count = 0,
 };
+
+/* Snapshot publication is serialized by the UI task.  Keep the bounded
+ * retained projection out of that task's stack. */
+static d1l_dm_entry_t
+    s_dm_conversation_source[D1L_DM_CONVERSATION_SOURCE_CAPACITY];
+static bool
+    s_dm_conversation_source_unread[D1L_DM_CONVERSATION_SOURCE_CAPACITY];
+static d1l_dm_conversation_summary_t
+    s_dm_conversation_summaries[D1L_APP_SNAPSHOT_DM_PREVIEW];
 
 static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t src_len)
 {
@@ -160,6 +170,43 @@ static void populate_home_messages(d1l_app_snapshot_t *snapshot)
             preview->snr_tenths = entry->snr_tenths;
             preview->path_hops = entry->path_hops;
         }
+    }
+}
+
+static void populate_dm_conversation_summaries(d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return;
+    }
+    memset(s_dm_conversation_source, 0, sizeof(s_dm_conversation_source));
+    memset(s_dm_conversation_source_unread, 0,
+           sizeof(s_dm_conversation_source_unread));
+    memset(s_dm_conversation_summaries, 0,
+           sizeof(s_dm_conversation_summaries));
+    const size_t source_count = d1l_dm_store_copy_recent(
+        s_dm_conversation_source, D1L_DM_CONVERSATION_SOURCE_CAPACITY);
+    for (size_t i = 0U; i < source_count; ++i) {
+        s_dm_conversation_source_unread[i] =
+            d1l_read_state_dm_entry_is_unread(
+                &s_dm_conversation_source[i]);
+    }
+    snapshot->recent_dm_count = d1l_dm_conversation_list_project(
+        s_dm_conversation_source, s_dm_conversation_source_unread,
+        source_count,
+        s_dm_conversation_summaries, D1L_APP_SNAPSHOT_DM_PREVIEW,
+        &snapshot->dm_conversation_count);
+    for (size_t i = 0U; i < snapshot->recent_dm_count; ++i) {
+        d1l_contact_entry_t contact = {0};
+        s_dm_conversation_summaries[i].muted =
+            d1l_contact_store_find_by_fingerprint(
+                s_dm_conversation_summaries[i].latest.contact_fingerprint,
+                &contact) && contact.muted;
+        snapshot->recent_dms[i] = s_dm_conversation_summaries[i].latest;
+        snapshot->recent_dm_unread_count[i] =
+            s_dm_conversation_summaries[i].unread_count;
+        snapshot->recent_dm_unread[i] =
+            snapshot->recent_dm_unread_count[i] > 0U;
+        snapshot->recent_dm_muted[i] = s_dm_conversation_summaries[i].muted;
     }
 }
 
@@ -380,11 +427,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
                                   D1L_APP_SNAPSHOT_NODE_PREVIEW);
     snapshot->recent_message_count =
         d1l_message_store_copy_recent(snapshot->recent_messages, D1L_APP_SNAPSHOT_MESSAGE_PREVIEW);
-    snapshot->recent_dm_count =
-        d1l_dm_store_copy_recent(snapshot->recent_dms, D1L_APP_SNAPSHOT_DM_PREVIEW);
-    for (size_t i = 0; i < snapshot->recent_dm_count; ++i) {
-        snapshot->recent_dm_unread[i] = d1l_read_state_dm_entry_is_unread(&snapshot->recent_dms[i]);
-    }
+    populate_dm_conversation_summaries(snapshot);
     snapshot->recent_packet_count =
         d1l_packet_log_copy_recent(snapshot->recent_packets, D1L_APP_SNAPSHOT_PACKET_PREVIEW);
     populate_home_messages(snapshot);

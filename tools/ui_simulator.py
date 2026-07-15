@@ -108,6 +108,9 @@ class Message:
     ack_dispatch_count: int = 0
     ack_last_error: int = 0
     identity_valid: bool = False
+    conversation: str = ""
+    conversation_id: str = ""
+    muted: bool = False
 
 
 @dataclass(frozen=True)
@@ -193,6 +196,7 @@ class Snapshot:
     radio_applied: bool = True
     radio_apply_pending: bool = False
     identity_ready: bool = True
+    muted_unread_dm: int = 0
     firmware_version: str = "1.0.0-rc1"
     map_cached_tile_count: int = 0
     map_visible_tile_count: int = 9
@@ -232,10 +236,11 @@ def sample_snapshot() -> Snapshot:
         dm_messages=(
             Message(
                 "YKF Corebot", "route is direct", "ACK sent, hash 9A2B",
-                direction="rx", seq=1, ack_hash=0x9A2B,
+                unread=True, direction="rx", seq=1, ack_hash=0x9A2B,
                 rssi_dbm=-41, snr_tenths=300, path_hops=0,
                 ack_state="sent", ack_dispatch_count=1,
-                identity_valid=True,
+                identity_valid=True, conversation="YKF Corebot",
+                conversation_id="0BF0A701D5AE2DB6",
             ),
             Message(
                 "D1L Desk", "desk check", "retry 0, path direct",
@@ -244,7 +249,8 @@ def sample_snapshot() -> Snapshot:
                 seq=2, delivery_revision=4, delivery_session_id=0xD15E5510,
                 ack_hash=0x9A2B, attempt=1, retry_count=0,
                 rssi_dbm=-41, snr_tenths=300, path_hash_bytes=1,
-                path_hops=0,
+                path_hops=0, conversation="YKF Corebot",
+                conversation_id="0BF0A701D5AE2DB6",
             ),
         ),
         packets=(
@@ -1817,6 +1823,7 @@ def render_messages(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Messages", (18, 66, 220, 96), 24, TEXT, True)
     s.text("Choose a conversation type", (18, 98, 340, 118), 12, MUTED)
+    dm_summaries = dm_conversation_summaries(snap.dm_messages)
     cards = (
         (
             (18, 126, 442, 244),
@@ -1824,6 +1831,8 @@ def render_messages(s: Surface, snap: Snapshot):
             "Default channel conversation",
             len(snap.public_messages),
             snap.unread_public,
+            0,
+            "messages",
             ACCENT,
             "open_messages_public",
             "messages_public",
@@ -1832,20 +1841,25 @@ def render_messages(s: Surface, snap: Snapshot):
             (18, 256, 442, 374),
             "Direct messages",
             "Private contact conversations",
-            len(snap.dm_messages),
+            len(dm_summaries),
             snap.unread_dm,
+            snap.muted_unread_dm,
+            "conversations",
             GREEN,
             "open_messages_dm",
             "messages_dm",
         ),
     )
-    for box, title, detail, total, unread, color, action, destination in cards:
+    for box, title, detail, total, unread, muted_unread, unit, color, action, destination in cards:
         s.round_rect(box, SURFACE, BORDER, 8)
         s.text(title, (box[0] + 14, box[1] + 12, box[2] - 42, box[1] + 38), 18, color, True)
         s.text(">", (box[2] - 34, box[1] + 12, box[2] - 14, box[1] + 38), 18, MUTED, True, "center")
         s.text(detail, (box[0] + 14, box[1] + 48, box[2] - 14, box[1] + 68), 12, TEXT)
+        status = f"{total} {unit} | {unread} unread"
+        if muted_unread:
+            status += f" + {muted_unread} muted"
         s.text(
-            f"{total} retained | {unread} unread",
+            status,
             (box[0] + 14, box[1] + 82, box[2] - 14, box[1] + 104),
             12,
             AMBER if unread else MUTED,
@@ -1858,6 +1872,7 @@ def render_messages(s: Surface, snap: Snapshot):
             "public_source_count": len(snap.public_messages),
             "public_rendered_count": 0,
             "dm_source_count": len(snap.dm_messages),
+            "dm_conversation_count": len(dm_summaries),
             "dm_rendered_count": 0,
             "messages_root_simple_destinations": True,
             "messages_navigation_rf_silent": True,
@@ -1961,30 +1976,81 @@ def render_messages_public(s: Surface, snap: Snapshot):
     draw_dock(s, "Messages")
 
 
+def dm_conversation_summaries(messages: tuple[Message, ...]) -> tuple[Message, ...]:
+    """Mirror the firmware list: latest row per contact, newest first."""
+
+    unread_sources = {
+        message.conversation_id or message.conversation or message.source
+        for message in messages
+        if message.unread
+    }
+    muted_sources = {
+        message.conversation_id or message.conversation or message.source
+        for message in messages
+        if message.muted
+    }
+    summaries: list[Message] = []
+    seen: set[str] = set()
+    for message in reversed(messages):
+        conversation_id = (
+            message.conversation_id or message.conversation or message.source
+        )
+        if conversation_id in seen:
+            continue
+        seen.add(conversation_id)
+        summaries.append(
+            replace(
+                message,
+                source=message.conversation or message.source,
+                unread=conversation_id in unread_sources,
+                muted=conversation_id in muted_sources,
+            )
+        )
+    return tuple(summaries)
+
+
 def render_messages_dm_list(s: Surface, snap: Snapshot):
     body = (16, 124, 464, 410)
     s.round_rect(body, (7, 16, 24), BORDER, 8)
     y = 134
     dm_rendered = 0
     dm_rendered_states: list[str] = []
-    for msg in snap.dm_messages:
+    summaries = dm_conversation_summaries(snap.dm_messages)
+    unread_by_source: dict[str, int] = {}
+    for message in snap.dm_messages:
+        if message.unread:
+            conversation_id = (
+                message.conversation_id or message.conversation or message.source
+            )
+            unread_by_source[conversation_id] = (
+                unread_by_source.get(conversation_id, 0) + 1
+            )
+    for msg in summaries:
         if y + 58 > 402:
             break
         s.round_rect((28, y, 452, y + 58), SURFACE, BORDER, 8)
         state = dm_list_delivery_label(msg)
+        conversation_id = msg.conversation_id or msg.conversation or msg.source
+        unread_count = unread_by_source.get(conversation_id, 0)
+        if unread_count:
+            state = (
+                f"{unread_count} unread{' muted' if msg.muted else ''} | {state}"
+            )
         dm_rendered_states.append(state)
         s.text(
             msg.source,
             (40, y + 6, 300, y + 24),
             12,
-            AMBER if msg.unread else (ACCENT if msg.direction == "tx" else GREEN),
+            AMBER if msg.unread and not msg.muted else
+            (MUTED if msg.muted else
+             (ACCENT if msg.direction == "tx" else GREEN)),
             True,
         )
         s.text(
             state,
             (290, y + 6, 440, y + 24),
             10,
-            MUTED if not msg.unread else AMBER,
+            AMBER if msg.unread and not msg.muted else MUTED,
             True,
             "right",
         )
@@ -2006,6 +2072,7 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
             "public_source_count": len(snap.public_messages),
             "public_rendered_count": 0,
             "dm_source_count": len(snap.dm_messages),
+            "dm_conversation_count": len(summaries),
             "dm_rendered_count": dm_rendered,
             "dm_rendered_states": dm_rendered_states,
         }
@@ -2016,8 +2083,14 @@ def render_messages_dm(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="open_messages_root", destination="messages")
     s.text("Direct messages", (112, 66, 360, 92), 20, GREEN, True)
+    status = (
+        f"{len(dm_conversation_summaries(snap.dm_messages))} conversations | "
+        f"{snap.unread_dm} unread"
+    )
+    if snap.muted_unread_dm:
+        status += f" + {snap.muted_unread_dm} muted"
     s.text(
-        f"{len(snap.dm_messages)} retained messages | {snap.unread_dm} unread",
+        status,
         (112, 92, 420, 112),
         11,
         MUTED,

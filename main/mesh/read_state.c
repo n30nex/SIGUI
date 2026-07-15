@@ -13,6 +13,10 @@
 #define D1L_READ_STATE_KEY "state"
 #define D1L_READ_STATE_SCHEMA 2U
 #define D1L_READ_STATE_SCHEMA_V1 1U
+/* The durable DM ring can expose one additional volatile row while its
+ * persistence retry is pending.  Read cursors and global counts must include
+ * that visible tail even though only 16 durable rows/cursors are retained. */
+#define D1L_READ_STATE_VISIBLE_DM_CAPACITY (D1L_DM_STORE_CAPACITY + 1U)
 
 typedef struct {
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
@@ -38,8 +42,9 @@ typedef struct {
 static d1l_read_state_v2_blob_t s_state;
 static bool s_loaded;
 static d1l_message_entry_t s_message_scratch[D1L_MESSAGE_STORE_CAPACITY];
-static d1l_dm_entry_t s_dm_scratch[D1L_DM_STORE_CAPACITY];
-static d1l_read_state_dm_thread_t s_thread_scratch[D1L_READ_STATE_DM_THREAD_CAPACITY];
+static d1l_dm_entry_t s_dm_scratch[D1L_READ_STATE_VISIBLE_DM_CAPACITY];
+static d1l_read_state_dm_thread_t
+    s_thread_scratch[D1L_READ_STATE_VISIBLE_DM_CAPACITY];
 
 static void clear_ram(void)
 {
@@ -217,7 +222,8 @@ static size_t build_dm_thread_stats(d1l_read_state_dm_thread_t *out_threads, siz
 
     memset(out_threads, 0, sizeof(out_threads[0]) * max_threads);
     size_t thread_count = 0;
-    const size_t copied = d1l_dm_store_copy_recent(s_dm_scratch, D1L_DM_STORE_CAPACITY);
+    const size_t copied = d1l_dm_store_copy_recent(
+        s_dm_scratch, D1L_READ_STATE_VISIBLE_DM_CAPACITY);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_dm_entry_t *entry = &s_dm_scratch[i];
         if (entry->direction[0] != 'r' || entry->contact_fingerprint[0] == '\0') {
@@ -292,8 +298,8 @@ d1l_read_state_stats_t d1l_read_state_stats(void)
         }
     }
 
-    stats.dm_thread_count = (uint32_t)build_dm_thread_stats(s_thread_scratch,
-                                                            D1L_READ_STATE_DM_THREAD_CAPACITY);
+    stats.dm_thread_count = (uint32_t)build_dm_thread_stats(
+        s_thread_scratch, D1L_READ_STATE_VISIBLE_DM_CAPACITY);
     for (uint32_t i = 0; i < stats.dm_thread_count; ++i) {
         const d1l_read_state_dm_thread_t *thread = &s_thread_scratch[i];
         if (thread->newest_rx_seq > stats.newest_dm_rx_seq) {
@@ -347,7 +353,8 @@ esp_err_t d1l_read_state_mark_dm_thread_read(const char *fingerprint)
 
     uint32_t newest_rx_seq = 0;
     bool found_thread = false;
-    const size_t copied = d1l_dm_store_copy_recent(s_dm_scratch, D1L_DM_STORE_CAPACITY);
+    const size_t copied = d1l_dm_store_copy_recent(
+        s_dm_scratch, D1L_READ_STATE_VISIBLE_DM_CAPACITY);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_dm_entry_t *entry = &s_dm_scratch[i];
         if (!same_fingerprint(entry->contact_fingerprint, fingerprint)) {

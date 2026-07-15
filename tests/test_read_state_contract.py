@@ -33,6 +33,9 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "nvs_set_blob" in source
     assert "static d1l_message_entry_t s_message_scratch" in source
     assert "static d1l_dm_entry_t s_dm_scratch" in source
+    assert "D1L_READ_STATE_VISIBLE_DM_CAPACITY (D1L_DM_STORE_CAPACITY + 1U)" in source
+    assert "s_dm_scratch[D1L_READ_STATE_VISIBLE_DM_CAPACITY]" in source
+    assert "s_thread_scratch[D1L_READ_STATE_VISIBLE_DM_CAPACITY]" in source
     assert "d1l_contact_store_find_by_fingerprint" in source
     assert "contact.muted" in source
     assert "D1L_READ_STATE_SCHEMA 2U" in source
@@ -41,6 +44,9 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "blob_v1_is_valid" in source
     assert "thread_seq > s_state.last_dm_read_seq ? thread_seq : s_state.last_dm_read_seq" in source
     assert "build_dm_thread_stats" in source
+    assert source.count(
+        "s_dm_scratch, D1L_READ_STATE_VISIBLE_DM_CAPACITY"
+    ) == 2
     assert "upsert_dm_cursor(fingerprint, newest_rx_seq)" in source
     assert '"mesh/read_state.c"' in cmake
     assert "d1l_read_state_init()" in app_main
@@ -51,12 +57,16 @@ def test_read_state_tracks_bounded_per_thread_dm_cursors():
     assert "last_public_read_seq" in app_header
     assert "last_dm_read_seq" in app_header
     assert "recent_dm_unread[D1L_APP_SNAPSHOT_DM_PREVIEW]" in app_header
+    assert "recent_dm_unread_count[D1L_APP_SNAPSHOT_DM_PREVIEW]" in app_header
+    assert "recent_dm_muted[D1L_APP_SNAPSHOT_DM_PREVIEW]" in app_header
     assert "d1l_app_model_mark_public_read" in app_header
     assert "d1l_app_model_mark_dm_thread_read" in app_header
     assert "d1l_read_state_stats()" in app_source
     assert "d1l_read_state_mark_public_read()" in app_source
     assert "d1l_read_state_mark_all_read()" not in app_source
-    assert "d1l_read_state_dm_entry_is_unread(&snapshot->recent_dms[i])" in app_source
+    assert "d1l_read_state_dm_entry_is_unread(" in app_source
+    assert "d1l_dm_conversation_list_project(" in app_source
+    assert "snapshot->recent_dm_unread_count[i] > 0U" in app_source
     assert "d1l_read_state_mark_dm_thread_read(fingerprint)" in app_source
 
 

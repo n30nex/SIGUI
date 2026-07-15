@@ -181,6 +181,7 @@ typedef struct {
     uint32_t dm_total_written;
     uint32_t dm_content_revision;
     size_t dm_count;
+    size_t dm_conversation_count;
     uint32_t public_unread_count;
     uint32_t dm_unread_count;
     uint32_t muted_dm_unread_count;
@@ -216,6 +217,8 @@ typedef struct {
     size_t recent_message_count;
     d1l_dm_entry_t recent_dms[D1L_APP_SNAPSHOT_DM_PREVIEW];
     bool recent_dm_unread[D1L_APP_SNAPSHOT_DM_PREVIEW];
+    uint32_t recent_dm_unread_count[D1L_APP_SNAPSHOT_DM_PREVIEW];
+    bool recent_dm_muted[D1L_APP_SNAPSHOT_DM_PREVIEW];
     size_t recent_dm_count;
     d1l_packet_log_entry_t recent_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
     size_t recent_packet_count;

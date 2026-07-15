@@ -1331,9 +1331,12 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert "public_rows[D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS]" in messages_header
     assert "dm_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS]" in messages_header
     assert "snapshot->message_count" in source
-    assert "snapshot->dm_count" in source
+    assert "snapshot->dm_conversation_count" in source
     assert "snapshot->public_unread_count" in source
     assert "snapshot->dm_unread_count" in source
+    assert "snapshot->muted_dm_unread_count" in source
+    assert "snapshot->recent_dm_unread_count" in source
+    assert "snapshot->recent_dm_muted" in source
     assert "D1L_UI_MESSAGES_ACTION_OPEN_HISTORY" in messages_source
     assert "static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]" in source
     assert "static size_t s_public_history_limit" in source
