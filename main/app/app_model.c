@@ -567,6 +567,16 @@ esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_
            ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
+esp_err_t d1l_app_model_find_contact_by_public_key(
+    const char *public_key_hex, d1l_contact_entry_t *out_contact)
+{
+    if (!public_key_hex || public_key_hex[0] == '\0' || !out_contact) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return d1l_contact_store_find_by_public_key(public_key_hex, out_contact) ?
+           ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
 esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite, bool muted,
                                           d1l_contact_entry_t *out_contact)
 {

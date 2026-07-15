@@ -63,6 +63,7 @@ idf_component_register(
         "ui/ui_connectivity.c"
         "ui/ui_contact_sheets.c"
         "ui/ui_device_sheets.c"
+        "ui/ui_dm_identity.c"
         "ui/ui_home.c"
         "ui/ui_home_view.c"
         "ui/ui_keyboard.c"

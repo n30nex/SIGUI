@@ -154,7 +154,7 @@ bool d1l_ui_contact_sheets_create(
 bool d1l_ui_contact_sheets_set_contact(
     d1l_ui_contact_sheets_controller_t *controller,
     const d1l_contact_entry_t *contact,
-    bool can_dm,
+    d1l_ui_dm_identity_reason_t dm_identity_reason,
     bool can_export,
     uint8_t meshcore_type_id)
 {
@@ -163,7 +163,9 @@ bool d1l_ui_contact_sheets_set_contact(
     }
     memset(&controller->rendered, 0, sizeof(controller->rendered));
     controller->rendered.contact = *contact;
-    controller->rendered.can_dm = can_dm;
+    controller->rendered.dm_identity_reason = dm_identity_reason;
+    controller->rendered.can_dm =
+        dm_identity_reason == D1L_UI_DM_IDENTITY_READY;
     controller->rendered.can_export = can_export;
     controller->rendered.meshcore_type_id = meshcore_type_id;
     return true;
@@ -527,10 +529,25 @@ bool d1l_ui_contact_sheets_render_detail(
             BINDING_DETAIL_MESSAGE, D1L_UI_CONTACT_ACTION_MESSAGE) != NULL &&
             complete;
     } else {
-        lv_obj_t *unavailable = create_label(
-            sheet, "Messaging unavailable for this role", 0x8EA0AE);
+        char dm_status[96];
+        snprintf(dm_status, sizeof(dm_status), "DM unavailable [%s]",
+                 d1l_ui_dm_identity_reason_code(
+                     controller->rendered.dm_identity_reason));
+        lv_obj_t *unavailable = create_label(sheet, dm_status, 0xFBBF24);
         if (unavailable) {
-            lv_obj_set_pos(unavailable, 16, 254);
+            lv_obj_set_pos(unavailable, 16, 238);
+        } else {
+            complete = false;
+        }
+        lv_obj_t *reason = create_label(
+            sheet,
+            d1l_ui_dm_identity_reason_text(
+                controller->rendered.dm_identity_reason),
+            0x8EA0AE);
+        if (reason) {
+            lv_label_set_long_mode(reason, LV_LABEL_LONG_WRAP);
+            lv_obj_set_size(reason, 448, 42);
+            lv_obj_set_pos(reason, 16, 262);
         } else {
             complete = false;
         }

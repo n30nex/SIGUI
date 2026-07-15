@@ -950,7 +950,9 @@ def test_dm_composer_opens_from_contact_rows():
     assert 'nodes_create_button(row, "DM"' in nodes_source
     assert "nodes_dispatch_contact_dm_event_cb" in nodes_source
     assert "open_dm_compose_for_contact(event->contact);" in source
-    assert "d1l_contact_entry_t selected = *entry" in source
+    assert "selected = *entry" in source
+    assert "dm_identity_for_contact(entry, &selected)" in source
+    assert "if (!eligibility.can_open_compose)" in source
     assert "s_compose_contact = selected" in source
     assert 'lv_label_set_text(s_compose_title, title)' in source
     assert 'lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message")' in source
@@ -1082,8 +1084,11 @@ def test_public_message_detail_sheet_opens_from_public_rows():
     assert reply is not None
     reply_x, _, reply_width, reply_height = (int(value) for value in reply.groups())
     assert reply_x == 16
-    assert reply_width == 448
+    assert reply_width == 216
     assert reply_height >= 48
+    assert 'create_button(s_message_detail_sheet, "DM sender", 248, 360, 216, 52' in render
+    assert "explain_public_sender_dm_event_cb" in source
+    assert "D1L_UI_DM_IDENTITY_SOURCE_PUBLIC_SENDER_LABEL" in source
     assert 'snprintf(title, sizeof(title), "Reply %.32s"' in source
     assert 'snprintf(placeholder, sizeof(placeholder), "Reply to %.48s"' in source
     assert "show_public_compose_sheet(title, placeholder)" in source
@@ -1117,7 +1122,9 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "nodes_role_color" in nodes_source
     assert "node_view_can_dm" in source
     assert "node_view_management_gated" in source
-    assert 'nodes_create_button(row, "DM", 350, -1, 52, 34' in nodes_source
+    assert 'nodes_create_button(row, "DM", 364, 6, 52, 44' in nodes_source
+    assert 'nodes_create_button(row, "DM", 368, 2, 48, 44' in nodes_source
+    assert "lv_obj_set_style_pad_all(row, 0, 0);" in nodes_source
     assert "render_node_role_badge" in source
     assert "nodes_dispatch_node_open_event_cb" in nodes_source
     assert "recent_contact_count" in source
@@ -1427,10 +1434,11 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     for label in (
         '"Back"',
         '"Message"',
-        '"Messaging unavailable for this role"',
         '"Contact options"',
     ):
         assert label in detail
+    assert '"DM unavailable [%s]"' in detail
+    assert "d1l_ui_dm_identity_reason_text(" in detail
     for hidden_action in ('"Route trace"', '"Rename"', '"Export QR"', '"Forget contact"'):
         assert hidden_action not in detail
 

@@ -280,8 +280,8 @@ def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view
     assert "entry->lat_e6" in detail
     assert "entry->lon_e6" in detail
     assert "GPS" not in detail
-    assert "lv_obj_set_size(s_node_detail_sheet, 448, 320);" in source
-    assert "lv_obj_set_pos(s_node_detail_sheet, 16, 82);" in source
+    assert "lv_obj_set_size(s_node_detail_sheet, 448, 416);" in source
+    assert "lv_obj_set_pos(s_node_detail_sheet, 16, 60);" in source
     assert "d1l_app_model_query_nodes(" in open_from_map
     assert "&query, s_map_node_rows, D1L_NODE_STORE_CAPACITY" in open_from_map
     assert "D1L_NODE_STORE_CAPACITY" in open_from_map
@@ -302,7 +302,7 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
         source, "static bool contact_can_dm", "static bool contact_can_export"
     )
     compose = function_body(
-        source, "static void open_dm_compose_for_contact", "static bool contact_from_node_view"
+        source, "static void open_dm_compose_for_contact", "static void node_detail_dm_event_cb"
     )
     detail = function_body(
         contact_source,
@@ -310,14 +310,16 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
         "bool d1l_ui_contact_sheets_render_options",
     )
 
-    assert "d1l_app_model_find_contact(view->node.fingerprint, &contact) == ESP_OK" in node_gate
-    assert "d1l_contact_store_can_dm(&contact)" in node_gate
+    assert "dm_identity_for_node(view, NULL).can_open_compose" in node_gate
     assert 'strcmp(view->role, "companion")' not in node_gate
-    assert "return d1l_contact_store_can_dm(entry);" in contact_gate
+    assert "dm_identity_for_contact(entry, NULL).can_open_compose" in contact_gate
     assert 'strcmp(entry->type, "chat")' not in contact_gate
-    assert "if (!contact_can_dm(entry))" in compose
+    assert "dm_identity_for_contact(entry, &selected)" in compose
+    assert "if (!eligibility.can_open_compose)" in compose
+    assert "show_dm_identity_reason(eligibility)" in compose
     assert "if (controller->rendered.can_dm)" in detail
-    assert '"Messaging unavailable for this role"' in detail
+    assert '"DM unavailable [%s]"' in detail
+    assert "d1l_ui_dm_identity_reason_text(" in detail
 
     nodes_source = read("main/ui/ui_nodes.c")
     contact_row = function_body(

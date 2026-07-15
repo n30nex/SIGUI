@@ -28,6 +28,7 @@
 #include "ui_connectivity.h"
 #include "ui_contact_sheets.h"
 #include "ui_device_sheets.h"
+#include "ui_dm_identity.h"
 #include "ui_home.h"
 #include "ui_keyboard.h"
 #include "ui_map.h"
@@ -1748,30 +1749,87 @@ static bool node_role_is_managed_service(const char *role)
     return role && (strcmp(role, "room") == 0 || strcmp(role, "repeater") == 0);
 }
 
+static d1l_ui_dm_identity_eligibility_t dm_identity_for_contact(
+    const d1l_contact_entry_t *entry,
+    d1l_contact_entry_t *out_current)
+{
+    if (out_current) {
+        memset(out_current, 0, sizeof(*out_current));
+    }
+    d1l_contact_entry_t current = {0};
+    const bool found = entry && entry->public_key_hex[0] != '\0' &&
+        d1l_app_model_find_contact_by_public_key(
+            entry->public_key_hex, &current) == ESP_OK;
+    const d1l_ui_dm_identity_input_t input = {
+        .source = D1L_UI_DM_IDENTITY_SOURCE_CONTACT,
+        .fingerprint = entry ? entry->fingerprint : NULL,
+        .public_key_hex = entry ? entry->public_key_hex : NULL,
+        .resolved_contact = found ? &current : NULL,
+        .contact_found_by_full_key = found,
+    };
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        d1l_ui_dm_identity_eligibility(&input);
+    if (eligibility.can_open_compose && out_current) {
+        *out_current = current;
+    }
+    return eligibility;
+}
+
+static d1l_ui_dm_identity_eligibility_t dm_identity_for_node(
+    const d1l_node_view_t *view,
+    d1l_contact_entry_t *out_current)
+{
+    if (out_current) {
+        memset(out_current, 0, sizeof(*out_current));
+    }
+    d1l_contact_entry_t current = {0};
+    const bool found = view && view->node.public_key_hex[0] != '\0' &&
+        d1l_app_model_find_contact_by_public_key(
+            view->node.public_key_hex, &current) == ESP_OK;
+    const d1l_ui_dm_identity_input_t input = {
+        .source = D1L_UI_DM_IDENTITY_SOURCE_HEARD_NODE,
+        .fingerprint = view ? view->node.fingerprint : NULL,
+        .public_key_hex = view ? view->node.public_key_hex : NULL,
+        .resolved_contact = found ? &current : NULL,
+        .contact_found_by_full_key = found,
+    };
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        d1l_ui_dm_identity_eligibility(&input);
+    if (eligibility.can_open_compose && out_current) {
+        *out_current = current;
+    }
+    return eligibility;
+}
+
+static void show_dm_identity_reason(
+    d1l_ui_dm_identity_eligibility_t eligibility)
+{
+    char message[96];
+    snprintf(message, sizeof(message), "DM blocked [%s]: %.48s",
+             d1l_ui_dm_identity_reason_code(eligibility.reason),
+             d1l_ui_dm_identity_reason_text(eligibility.reason));
+    show_toast_text(message, false);
+}
+
 static bool node_view_can_dm(const d1l_node_view_t *view)
 {
-    if (!view || view->node.fingerprint[0] == '\0') {
-        return false;
-    }
-    d1l_contact_entry_t contact = {0};
-    return d1l_app_model_find_contact(view->node.fingerprint, &contact) == ESP_OK &&
-           d1l_contact_store_can_dm(&contact);
+    return dm_identity_for_node(view, NULL).can_open_compose;
 }
 
 static bool contact_can_dm(const d1l_contact_entry_t *entry)
 {
-    return d1l_contact_store_can_dm(entry);
+    return dm_identity_for_contact(entry, NULL).can_open_compose;
+}
+
+static bool node_view_management_gated(const d1l_node_view_t *view)
+{
+    return view && node_role_is_managed_service(view->role);
 }
 
 static bool contact_can_export(const d1l_contact_entry_t *entry)
 {
     return entry && d1l_contact_store_has_export_key(entry) &&
            d1l_contact_store_meshcore_type_id(entry->type) != 0U;
-}
-
-static bool node_view_management_gated(const d1l_node_view_t *view)
-{
-    return view && node_role_is_managed_service(view->role);
 }
 
 static lv_obj_t *render_node_role_badge(lv_obj_t *parent, const char *role,
@@ -2156,11 +2214,16 @@ static void mark_public_read_event_cb(lv_event_t *event)
 
 static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
 {
-    if (!contact_can_dm(entry)) {
-        show_toast("DM", ESP_ERR_INVALID_STATE);
+    d1l_contact_entry_t selected = {0};
+    if (entry) {
+        selected = *entry;
+    }
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        dm_identity_for_contact(entry, &selected);
+    if (!eligibility.can_open_compose) {
+        show_dm_identity_reason(eligibility);
         return;
     }
-    d1l_contact_entry_t selected = *entry;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -2198,32 +2261,32 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     request_full_screen_repaint();
 }
 
-static bool contact_from_node_view(const d1l_node_view_t *view, d1l_contact_entry_t *out_contact)
-{
-    if (!view || !out_contact || view->node.fingerprint[0] == '\0') {
-        return false;
-    }
-    memset(out_contact, 0, sizeof(*out_contact));
-    return d1l_app_model_find_contact(view->node.fingerprint, out_contact) == ESP_OK &&
-           d1l_contact_store_can_dm(out_contact);
-}
-
 static void node_detail_dm_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_contact_entry_t contact = {0};
-    if (!contact_from_node_view(&s_node_detail_node, &contact)) {
-        show_toast("DM", ESP_ERR_INVALID_STATE);
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        dm_identity_for_node(&s_node_detail_node, &contact);
+    if (!eligibility.can_open_compose) {
+        show_dm_identity_reason(eligibility);
         return;
     }
     open_dm_compose_for_contact(&contact);
 }
 
+static void node_detail_dm_reason_event_cb(lv_event_t *event)
+{
+    (void)event;
+    show_dm_identity_reason(dm_identity_for_node(&s_node_detail_node, NULL));
+}
+
 static void open_node_dm_for(const d1l_node_view_t *view)
 {
     d1l_contact_entry_t contact = {0};
-    if (!contact_from_node_view(view, &contact)) {
-        show_toast("DM", ESP_ERR_INVALID_STATE);
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        dm_identity_for_node(view, &contact);
+    if (!eligibility.can_open_compose) {
+        show_dm_identity_reason(eligibility);
         return;
     }
     open_dm_compose_for_contact(&contact);
@@ -2236,10 +2299,15 @@ static const d1l_contact_entry_t *selected_contact(void)
 
 static bool set_selected_contact(const d1l_contact_entry_t *contact)
 {
-    return contact && d1l_ui_contact_sheets_set_contact(
+    if (!contact) {
+        return false;
+    }
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        dm_identity_for_contact(contact, NULL);
+    return d1l_ui_contact_sheets_set_contact(
         &s_contact_sheets_controller,
         contact,
-        contact_can_dm(contact),
+        eligibility.reason,
         contact_can_export(contact),
         d1l_contact_store_meshcore_type_id(contact->type));
 }
@@ -2726,6 +2794,8 @@ static void render_node_detail_sheet(void)
 
     const d1l_node_view_t *view = &s_node_detail_node;
     const d1l_node_entry_t *entry = &view->node;
+    const d1l_ui_dm_identity_eligibility_t dm_eligibility =
+        dm_identity_for_node(view, NULL);
     const char *name = view->display_name[0] ? view->display_name :
                        (entry->name[0] ? entry->name : entry->fingerprint);
 
@@ -2734,16 +2804,14 @@ static void render_node_detail_sheet(void)
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_set_width(title, 160);
     lv_obj_set_pos(title, 8, 4);
-    if (node_view_can_dm(view)) {
-        create_button(s_node_detail_sheet, "DM", 208, 0, 54, 40,
+    if (dm_eligibility.can_open_compose) {
+        create_button(s_node_detail_sheet, "DM", 208, 0, 54, 44,
                       node_detail_dm_event_cb, NULL);
-    } else if (node_view_management_gated(view)) {
-        lv_obj_t *gated = create_label(s_node_detail_sheet, "Manage locked", 0x8EA0AE);
-        lv_label_set_long_mode(gated, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(gated, 124);
-        lv_obj_set_pos(gated, 178, 12);
+    } else {
+        create_button(s_node_detail_sheet, "Why no DM?", 174, 0, 120, 44,
+                      node_detail_dm_reason_event_cb, NULL);
     }
-    create_button(s_node_detail_sheet, "Close", 316, 0, 76, 40,
+    create_button(s_node_detail_sheet, "Close", 316, 0, 76, 44,
                   close_node_detail_event_cb, NULL);
 
     lv_obj_t *name_label = create_label(s_node_detail_sheet, name, 0xE5EDF5);
@@ -2813,6 +2881,37 @@ static void render_node_detail_sheet(void)
     lv_label_set_long_mode(heard, LV_LABEL_LONG_DOT);
     lv_obj_set_width(heard, 392);
     lv_obj_set_pos(heard, 8, 266);
+
+    char dm_status[160];
+    snprintf(dm_status, sizeof(dm_status), "DM %s [%s]: %s",
+             dm_eligibility.can_open_compose ? "ready" : "unavailable",
+             d1l_ui_dm_identity_reason_code(dm_eligibility.reason),
+             d1l_ui_dm_identity_reason_text(dm_eligibility.reason));
+    lv_obj_t *dm_reason = create_label(
+        s_node_detail_sheet, dm_status,
+        dm_eligibility.can_open_compose ? 0x5EEAD4 : 0xFBBF24);
+    if (dm_reason) {
+        lv_label_set_long_mode(dm_reason, LV_LABEL_LONG_WRAP);
+        lv_obj_set_size(dm_reason, 392, 54);
+        lv_obj_set_pos(dm_reason, 8, 298);
+    }
+    if (node_view_management_gated(view)) {
+        lv_obj_t *managed = create_label(s_node_detail_sheet,
+                                         "Manage locked", 0x8EA0AE);
+        if (managed) {
+            lv_label_set_long_mode(managed, LV_LABEL_LONG_DOT);
+            lv_obj_set_size(managed, 392, 20);
+            lv_obj_set_pos(managed, 8, 354);
+        }
+        lv_obj_t *managed_reason = create_label(
+            s_node_detail_sheet,
+            "Authenticated admin session required.", 0x8EA0AE);
+        if (managed_reason) {
+            lv_label_set_long_mode(managed_reason, LV_LABEL_LONG_DOT);
+            lv_obj_set_size(managed_reason, 392, 20);
+            lv_obj_set_pos(managed_reason, 8, 376);
+        }
+    }
 }
 
 static void show_node_detail_view(const d1l_node_view_t *view, bool return_to_map)
@@ -2989,6 +3088,26 @@ static void reply_message_detail_event_cb(lv_event_t *event)
     show_public_compose_sheet(title, placeholder);
 }
 
+static d1l_ui_dm_identity_eligibility_t public_sender_dm_eligibility(void)
+{
+    const d1l_ui_dm_identity_input_t input = {
+        .source = D1L_UI_DM_IDENTITY_SOURCE_PUBLIC_SENDER_LABEL,
+        .fingerprint = NULL,
+        .public_key_hex = NULL,
+        .resolved_contact = NULL,
+        .contact_found_by_full_key = false,
+    };
+    return d1l_ui_dm_identity_eligibility(&input);
+}
+
+static void explain_public_sender_dm_event_cb(lv_event_t *event)
+{
+    (void)event;
+    /* This action is explanation-only. A Public display name is never used
+     * to select a Contact, open compose, or dispatch RF. */
+    show_dm_identity_reason(public_sender_dm_eligibility());
+}
+
 static lv_obj_t *create_nested_page_body(lv_obj_t *page, const char *name)
 {
     lv_obj_t *body = create_object(page, name);
@@ -3054,6 +3173,14 @@ static void render_message_detail_sheet(void)
                       message_delivery_label(entry));
     }
 
+    const d1l_ui_dm_identity_eligibility_t sender_dm =
+        public_sender_dm_eligibility();
+    char dm_reason[160];
+    snprintf(dm_reason, sizeof(dm_reason), "DM unavailable [%s]: %s",
+             d1l_ui_dm_identity_reason_code(sender_dm.reason),
+             d1l_ui_dm_identity_reason_text(sender_dm.reason));
+    create_nested_page_label(body, dm_reason, 0xFBBF24, true);
+
     create_nested_page_label(body, "Message", 0x5EEAD4, false);
     create_nested_page_label(body, entry->text[0] ? entry->text : "-", 0xF4F7FB, true);
 
@@ -3108,8 +3235,10 @@ static void render_message_detail_sheet(void)
     }
 
     if (entry->direction[0] != 't') {
-        create_button(s_message_detail_sheet, "Reply", 16, 360, 448, 52,
+        create_button(s_message_detail_sheet, "Reply", 16, 360, 216, 52,
                       reply_message_detail_event_cb, NULL);
+        create_button(s_message_detail_sheet, "DM sender", 248, 360, 216, 52,
+                      explain_public_sender_dm_event_cb, NULL);
     }
 }
 
@@ -6959,8 +7088,11 @@ static void create_node_detail_sheet(lv_obj_t *screen)
     if (!s_node_detail_sheet) {
         return;
     }
-    lv_obj_set_size(s_node_detail_sheet, 448, 320);
-    lv_obj_set_pos(s_node_detail_sheet, 16, 82);
+    /* The deepest managed-role copy ends at local y=396. With the retained
+     * 12 px padding this bounded 416 px sheet keeps every reason visible
+     * below the 56 px top bar and above the physical display edge. */
+    lv_obj_set_size(s_node_detail_sheet, 448, 416);
+    lv_obj_set_pos(s_node_detail_sheet, 16, 60);
     lv_obj_set_style_radius(s_node_detail_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_node_detail_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_node_detail_sheet, lv_color_hex(0x334155), 0);

@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 63
+    assert len(views) == 67
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -488,6 +488,11 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
     assert {"Message Detail", "Back", "Sender", "Message", "Technical details", "Reply"} <= labels_by_view["message_detail_sheet"]
     assert {
+        "DM unavailable [sender_name_unverified]",
+        "Public sender names have no verified full key.",
+        "DM sender",
+    } <= labels_by_view["message_detail_sheet"]
+    assert {
         "Message Detail",
         "Back",
         "Sender",
@@ -499,6 +504,34 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         ui_simulator.SAMPLE_LONG_PUBLIC_MESSAGE,
     } <= labels_by_view["message_detail_technical_page"]
     assert {"YKF Corebot", "Contact detail", "Back", "Fingerprint", "Signal", "Status", "Message", "Contact options"} <= labels_by_view["contact_detail_sheet"]
+    assert {
+        "DM unavailable [identity_incomplete]",
+        "Identity has no complete verified full key.",
+        "Contact options",
+    } <= labels_by_view["contact_incomplete_detail_sheet"]
+    assert "Message" not in labels_by_view["contact_incomplete_detail_sheet"]
+    assert {
+        "DM unavailable [contact_not_canonical]",
+        "Contact is not verified by signed advert or import.",
+        "Contact options",
+    } <= labels_by_view["contact_noncanonical_detail_sheet"]
+    assert "Message" not in labels_by_view["contact_noncanonical_detail_sheet"]
+    assert {
+        "Node Detail",
+        "Heard-only Chat",
+        "Why no DM?",
+        "DM unavailable [heard_only]",
+        "Heard node only; add or import a verified chat Contact.",
+    } <= labels_by_view["heard_only_node_detail_sheet"]
+    assert {
+        "Node Detail",
+        "YKF Room",
+        "Why no DM?",
+        "DM unavailable [role_not_dm_capable]",
+        "This verified role does not support direct chat.",
+        "Manage locked",
+        "Authenticated admin session required.",
+    } <= labels_by_view["managed_node_detail_sheet"]
     assert {
         "Contact Options",
         "YKF Corebot",
@@ -561,9 +594,11 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "public_compose_and_send",
         "public_history_search",
         "public_message_detail",
-        "public_message_reply",
+            "public_message_reply",
+            "public_sender_dm_explanation",
         "dm_thread_open_and_reply",
-        "node_detail_inspection",
+            "node_detail_inspection",
+            "heard_only_dm_explanation",
         "contact_detail_options_hierarchy",
         "contact_rename_and_forget_confirmation",
         "map_page_policy",
@@ -594,9 +629,38 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["message_detail_sheet"]["toggle_message_detail_advanced"]["destination"] == "message_detail_technical_page"
     assert actions_by_view["message_detail_technical_page"]["toggle_message_detail_advanced"]["destination"] == "message_detail_sheet"
     assert actions_by_view["message_detail_sheet"]["open_public_reply"]["destination"] == "compose_sheet"
-    assert actions_by_view["message_detail_sheet"]["open_public_reply"]["visual_box"] == [16, 420, 464, 472]
+    assert actions_by_view["message_detail_sheet"]["open_public_reply"]["visual_box"] == [16, 420, 232, 472]
     assert actions_by_view["message_detail_sheet"]["open_public_reply"]["height"] >= 48
-    assert actions_by_view["message_detail_technical_page"]["open_public_reply"]["visual_box"] == [16, 420, 464, 472]
+    assert actions_by_view["message_detail_technical_page"]["open_public_reply"]["visual_box"] == [16, 420, 232, 472]
+    sender_dm = actions_by_view["message_detail_sheet"]["explain_public_sender_dm"]
+    assert sender_dm["visual_box"] == [248, 420, 464, 472]
+    assert sender_dm["destination"] is None
+    assert views["message_detail_sheet"]["metrics"]["sender_dm_reason_code"] == "sender_name_unverified"
+    assert views["message_detail_sheet"]["metrics"]["sender_dm_opens_compose"] is False
+    assert views["message_detail_sheet"]["metrics"]["sender_dm_rf_tx"] is False
+    heard_only_dm = actions_by_view["heard_only_node_detail_sheet"]["explain_node_dm"]
+    assert heard_only_dm["height"] >= ui_simulator.MIN_TOUCH_TARGET
+    assert heard_only_dm["destination"] is None
+    assert views["heard_only_node_detail_sheet"]["metrics"]["node_detail_dm_reason_code"] == "heard_only"
+    assert views["heard_only_node_detail_sheet"]["metrics"]["node_detail_dm_opens_compose"] is False
+    assert views["heard_only_node_detail_sheet"]["metrics"]["node_detail_dm_rf_tx"] is False
+    assert views["node_detail_sheet"]["metrics"]["node_detail_dm_reason_code"] == "ready"
+    assert views["node_detail_sheet"]["metrics"]["node_detail_dm_exact_full_key"] is True
+    assert views["contact_detail_sheet"]["metrics"]["contact_dm_reason_code"] == "ready"
+    assert views["contact_detail_sheet"]["metrics"]["contact_dm_exact_full_key"] is True
+    assert views["contact_incomplete_detail_sheet"]["metrics"]["contact_dm_reason_code"] == "identity_incomplete"
+    assert views["contact_incomplete_detail_sheet"]["metrics"]["contact_dm_opens_compose"] is False
+    assert views["contact_noncanonical_detail_sheet"]["metrics"]["contact_dm_reason_code"] == "contact_not_canonical"
+    assert views["contact_noncanonical_detail_sheet"]["metrics"]["contact_dm_opens_compose"] is False
+    assert views["node_detail_sheet"]["metrics"]["node_detail_frame"] == [16, 60, 464, 476]
+    assert views["node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
+    assert views["heard_only_node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
+    assert views["managed_node_detail_sheet"]["metrics"]["node_detail_frame"] == [16, 60, 464, 476]
+    assert views["managed_node_detail_sheet"]["metrics"]["node_detail_content_bottom"] == 468
+    assert views["managed_node_detail_sheet"]["metrics"]["node_detail_content_clipped"] is False
+    assert views["managed_node_detail_sheet"]["metrics"]["node_detail_management_gated"] is True
+    assert views["nodes"]["metrics"]["contact_dm_shortcut_min_height"] >= ui_simulator.MIN_TOUCH_TARGET
+    assert views["nodes"]["metrics"]["node_dm_shortcut_min_height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert views["message_detail_technical_page"]["metrics"]["message_text_complete"] is True
     assert views["message_detail_technical_page"]["metrics"]["message_wrapped_lines"] >= 3
     assert views["message_detail_technical_page"]["metrics"]["message_technical_details_expanded"] is True

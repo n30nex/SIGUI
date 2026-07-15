@@ -169,10 +169,13 @@ def test_contact_progressive_disclosure_layout_and_truth_are_preserved():
     for label in (
         "Back",
         "Message",
-        "Messaging unavailable for this role",
         "Contact options",
     ):
         assert f'"{label}"' in detail
+    assert '"DM unavailable [%s]"' in detail
+    assert "d1l_ui_dm_identity_reason_code(" in detail
+    assert "d1l_ui_dm_identity_reason_text(" in detail
+    assert "controller->rendered.dm_identity_reason" in detail
     for hidden in ("Route trace", "Rename", "Export QR", "Forget contact"):
         assert f'"{hidden}"' not in detail
     for label in (

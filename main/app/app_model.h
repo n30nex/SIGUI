@@ -270,6 +270,8 @@ size_t d1l_app_model_copy_dm_thread_page(const char *fingerprint,
 size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,
                                     bool *out_unread, size_t max_entries);
 esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact);
+esp_err_t d1l_app_model_find_contact_by_public_key(
+    const char *public_key_hex, d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite, bool muted,
                                           d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_rename_contact(const char *fingerprint, const char *alias,
