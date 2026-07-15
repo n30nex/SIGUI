@@ -125,7 +125,7 @@ def test_meshcore_service_generates_identity_and_signed_adverts():
     cmake = read("main/CMakeLists.txt")
     assert "ed25519_create_keypair" in source
     assert "ed25519_sign" in source
-    assert "esp_fill_random" in source
+    assert "d1l_secure_random_fill" in source
     assert "d1l_settings_next_mesh_timestamp" in source
     assert "build_advert_packet" in source
     assert '"tx", "advert", 0, 0' in source
@@ -144,7 +144,7 @@ def test_meshcore_identity_generation_preserves_inconsistent_persisted_material(
     current = body.index("d1l_settings_current()")
     classify = body.index("d1l_settings_identity_state(&settings)")
     reject = body.index("persisted_state == D1L_IDENTITY_STATE_INCONSISTENT")
-    random = body.index("esp_fill_random")
+    random = body.index("d1l_secure_random_fill")
     save = body.index("d1l_settings_save")
     assert load_status < current < classify < reject < random < save
 
@@ -162,7 +162,7 @@ def test_meshcore_identity_generation_preserves_inconsistent_persisted_material(
     assert "s_status.identity_ready = false;" in inconsistent
     assert "return ESP_ERR_INVALID_STATE;" in inconsistent
     assert "d1l_settings_save" not in inconsistent
-    assert "esp_fill_random" not in inconsistent
+    assert "d1l_secure_random_fill" not in inconsistent
 
     generation = body.split("uint8_t seed", 1)[1]
     assert "d1l_settings_identity_state(&settings)" in generation
@@ -194,7 +194,7 @@ def test_meshcore_status_getter_is_passive_and_radio_owned_by_service_task():
         "d1l_meshcore_start_rx",
         "Radio.",
         "d1l_settings_save",
-        "esp_fill_random",
+        "d1l_secure_random_fill",
         "ed25519_create_keypair",
     ]
     for token in forbidden:

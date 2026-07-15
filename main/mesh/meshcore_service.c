@@ -36,6 +36,7 @@
 #include "mesh/route_store.h"
 #include "mesh/store_lock.h"
 #include "platform/time_service.h"
+#include "platform/secure_random.h"
 #include "radio.h"
 #include "sx126x.h"
 
@@ -863,14 +864,19 @@ static bool append_packet_log(const char *direction, const char *kind, int rssi,
         payload_len, raw, raw_len, note, false);
 }
 
-static void secure_zero_channel_key(d1l_channel_protocol_key_t *key)
+static void secure_zero_bytes(void *data, size_t size)
 {
-    volatile uint8_t *bytes = (volatile uint8_t *)key;
-    size_t remaining = key ? sizeof(*key) : 0U;
+    volatile uint8_t *bytes = (volatile uint8_t *)data;
+    size_t remaining = bytes ? size : 0U;
     while (remaining > 0U) {
         *bytes++ = 0U;
         remaining--;
     }
+}
+
+static void secure_zero_channel_key(d1l_channel_protocol_key_t *key)
+{
+    secure_zero_bytes(key, key ? sizeof(*key) : 0U);
 }
 
 static bool channel_metadata(uint64_t channel_id, d1l_channel_info_t *out_info)
@@ -4488,7 +4494,13 @@ esp_err_t d1l_meshcore_service_ensure_identity(void)
 
     uint8_t seed[D1L_MESHCORE_SEED_SIZE] = {0};
     for (int attempt = 0; attempt < 8; ++attempt) {
-        esp_fill_random(seed, sizeof(seed));
+        const esp_err_t random_ret =
+            d1l_secure_random_fill(seed, sizeof(seed));
+        if (random_ret != ESP_OK) {
+            secure_zero_bytes(seed, sizeof(seed));
+            s_status.identity_ready = false;
+            return random_ret;
+        }
         ed25519_create_keypair(settings.identity_public_key, settings.identity_private_key, seed);
         settings.identity_ready = true;
         if (d1l_settings_identity_state(&settings) ==
@@ -4497,7 +4509,7 @@ esp_err_t d1l_meshcore_service_ensure_identity(void)
         }
         settings.identity_ready = false;
     }
-    memset(seed, 0, sizeof(seed));
+    secure_zero_bytes(seed, sizeof(seed));
     if (!settings.identity_ready) {
         s_status.identity_ready = false;
         return ESP_FAIL;

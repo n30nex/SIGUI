@@ -22,6 +22,7 @@
 #include "mesh/route_store_worker.h"
 #include "mesh/meshcore_service.h"
 #include "platform/time_service.h"
+#include "platform/secure_random.h"
 #include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
@@ -32,6 +33,14 @@ static const char *TAG = "d1l_main";
 
 void app_main(void)
 {
+    /* This must remain the first application-owned initialization: the secure
+     * random service temporarily owns the boot entropy source before any ADC,
+     * radio, Wi-Fi, Bluetooth, board, storage, or UI subsystem can start. */
+    esp_err_t secure_random_ret = d1l_secure_random_init();
+    if (secure_random_ret != ESP_OK) {
+        ESP_LOGE(TAG, "secure random unavailable; identity/channel creation disabled: %s",
+                 esp_err_to_name(secure_random_ret));
+    }
     esp_err_t nvs_ret = nvs_flash_init();
     d1l_health_monitor_init(nvs_ret);
     if (nvs_ret != ESP_OK) {
@@ -49,9 +58,11 @@ void app_main(void)
                  esp_err_to_name(time_ret));
     }
 
-    printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\",\"boot_nonce\":%lu,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"retained_nvs_marker_ready\":%s,\"retained_nvs_markers_complete\":%s,\"retained_nvs_anchor_ready\":%s,\"retained_nvs_sentinel_ready\":%s,\"retained_nvs_external_init_required\":%s,\"retained_nvs_initialized_this_boot\":%s,\"retained_nvs_ready\":%s,\"retained_nvs_init_error\":\"%s\",\"retained_nvs_migration_error\":\"%s\"}\n",
+    printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\",\"boot_nonce\":%lu,\"secure_random_ready\":%s,\"secure_random_error\":\"%s\",\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"retained_nvs_marker_ready\":%s,\"retained_nvs_markers_complete\":%s,\"retained_nvs_anchor_ready\":%s,\"retained_nvs_sentinel_ready\":%s,\"retained_nvs_external_init_required\":%s,\"retained_nvs_initialized_this_boot\":%s,\"retained_nvs_ready\":%s,\"retained_nvs_init_error\":\"%s\",\"retained_nvs_migration_error\":\"%s\"}\n",
            D1L_CONSOLE_SCHEMA, D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION,
            (unsigned long)d1l_health_monitor_boot_nonce(),
+           d1l_secure_random_ready() ? "true" : "false",
+           esp_err_to_name(d1l_secure_random_status()),
            nvs_ret == ESP_OK ? "true" : "false", esp_err_to_name(nvs_ret),
            d1l_retained_blob_store_nvs_marker_ready() ? "true" : "false",
            d1l_retained_blob_store_nvs_markers_complete() ? "true" : "false",

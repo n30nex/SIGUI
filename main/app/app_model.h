@@ -265,6 +265,12 @@ esp_err_t d1l_app_model_add_channel(
     bool enabled, bool make_default,
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel);
+/* Creates an enabled shareable channel with a fresh 128-bit device-generated
+ * secret. Secret bytes are securely cleared after the retained-store call. */
+esp_err_t d1l_app_model_create_channel(
+    const char *name, bool make_default,
+    d1l_channel_mutation_result_t *out_result,
+    d1l_channel_info_t *out_channel);
 esp_err_t d1l_app_model_import_channel_uri(
     const char *uri, size_t uri_len,
     d1l_channel_mutation_result_t *out_result,

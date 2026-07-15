@@ -62,6 +62,7 @@ def test_app_channel_management_boundary_is_redacted_confirmed_and_persistent():
 
     for declaration in (
         "d1l_app_model_add_channel(",
+        "d1l_app_model_create_channel(",
         "d1l_app_model_import_channel_uri(",
         "d1l_app_model_update_channel(",
         "d1l_app_model_remove_channel(",
@@ -72,6 +73,9 @@ def test_app_channel_management_boundary_is_redacted_confirmed_and_persistent():
         assert declaration in source
 
     add_channel = c_function(source, "esp_err_t d1l_app_model_add_channel(")
+    create_channel = c_function(
+        source, "esp_err_t d1l_app_model_create_channel("
+    )
     import_channel = c_function(
         source, "esp_err_t d1l_app_model_import_channel_uri("
     )
@@ -86,6 +90,18 @@ def test_app_channel_management_boundary_is_redacted_confirmed_and_persistent():
     )
 
     assert "d1l_channel_store_add(" in add_channel
+    assert "d1l_secure_random_fill(secret, sizeof(secret))" in create_channel
+    assert "esp_fill_random" not in create_channel
+    assert "return random_ret" in create_channel
+    assert "D1L_CHANNEL_SECRET_128_LEN" in create_channel
+    assert "d1l_channel_store_add(" in create_channel
+    assert create_channel.index("d1l_secure_random_fill(") < create_channel.index(
+        "d1l_channel_store_add("
+    )
+    assert create_channel.index("d1l_channel_store_add(") < create_channel.rindex(
+        "clear_sensitive_bytes(secret, sizeof(secret))"
+    )
+    assert create_channel.count("clear_sensitive_bytes(secret, sizeof(secret))") == 2
     assert "d1l_channel_store_import_uri(" in import_channel
     assert "d1l_channel_store_update(" in update_channel
     for mutation in (add_channel, import_channel, update_channel, remove_channel):
@@ -100,8 +116,10 @@ def test_app_channel_management_boundary_is_redacted_confirmed_and_persistent():
     clear_export = c_function(
         source, "void d1l_app_model_clear_channel_share_uri("
     )
-    assert "volatile char *cursor" in clear_export
-    assert "*cursor++ = '\\0'" in clear_export
+    assert "clear_sensitive_bytes(dest, dest_size)" in clear_export
+    clear_sensitive = c_function(source, "static void clear_sensitive_bytes(")
+    assert "volatile uint8_t *cursor" in clear_sensitive
+    assert "*cursor++ = 0U" in clear_sensitive
 
     for ordinary_result in (
         add_channel,
@@ -210,6 +228,7 @@ def test_channel_management_mutation_outputs_clear_before_delegation(tmp_path):
 
 def test_channel_share_export_failure_and_explicit_clear_zero_full_buffer(tmp_path):
     source = read("main/app/app_model.c")
+    clear_sensitive = c_function(source, "static void clear_sensitive_bytes(")
     export = c_function(
         source, "esp_err_t d1l_app_model_export_channel_share_uri("
     )
@@ -239,6 +258,8 @@ def test_channel_share_export_failure_and_explicit_clear_zero_full_buffer(tmp_pa
         "  if (size >= 7) { memcpy(dest, \"secret\", 7); }\n"
         "  return ESP_OK; }\n"
         "void d1l_app_model_clear_channel_share_uri(char *dest, size_t dest_size);\n"
+        + clear_sensitive
+        + "\n"
         + export
         + "\n"
         + clear
