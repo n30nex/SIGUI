@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 53
+    assert len(views) == 59
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -720,6 +720,45 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         assert target["enabled"] is False
         assert target["rf_tx"] is False
         assert target["public_rf_tx"] is False
+    disabled_runtime_views = {
+        "compose_offline_sheet": "radio_waiting",
+        "compose_busy_sheet": "radio_busy",
+        "compose_protocol_time_sheet": "protocol_time_unavailable",
+        "compose_dm_no_contact_sheet": "contact_missing",
+        "compose_dm_active_sheet": "dm_delivery_active",
+    }
+    for view_name, reason in disabled_runtime_views.items():
+        metrics = views[view_name]["metrics"]
+        assert metrics["compose_send_enabled"] is False
+        assert metrics["compose_eligibility_reason"] == reason
+        send_action = "send_dm_text" if metrics["compose_is_dm"] else "send_public_text"
+        target = actions_by_view[view_name][send_action]
+        assert target["enabled"] is False
+        assert target["rf_tx"] is False
+        assert target["public_rf_tx"] is False
+        assert target["dm_tx"] is False
+    retry = views["compose_retry_sheet"]["metrics"]
+    assert retry["compose_send_enabled"] is True
+    assert retry["compose_retry_available"] is True
+    assert retry["compose_eligibility_reason"] == "retry_timeout"
+    retry_target = actions_by_view["compose_retry_sheet"]["send_public_text"]
+    assert retry_target["public_rf_tx"] is True
+    assert retry_target["enabled"] is True
+    for compose_view in (
+        "compose_sheet",
+        "compose_utf8_sheet",
+        "compose_byte_limit_sheet",
+        "compose_oversize_sheet",
+        "compose_invalid_sheet",
+        *disabled_runtime_views,
+        "compose_retry_sheet",
+    ):
+        for label in ("Send", "Clear", "Close"):
+            target = next(
+                item for item in views[compose_view]["touch_targets"]
+                if item["label"] == label
+            )
+            assert target["visual_box"][3] - target["visual_box"][1] >= 44
     assert {
         "toggle_more_tools",
         "toggle_more_connections",

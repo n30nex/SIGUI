@@ -107,6 +107,10 @@ typedef struct {
     bool storage_retained_sd_degraded;
     bool storage_retained_backup_degraded;
     bool time_available;
+    bool protocol_tx_ready;
+    esp_err_t protocol_tx_error;
+    esp_err_t settings_load_status;
+    d1l_identity_state_t identity_state;
     bool map_page_supported;
     bool map_tile_cache_ready;
     bool map_tile_download_supported;
@@ -182,6 +186,8 @@ typedef struct {
     uint32_t dm_content_revision;
     size_t dm_count;
     size_t dm_conversation_count;
+    uint8_t dm_delivery_state;
+    bool dm_delivery_active;
     uint32_t public_unread_count;
     uint32_t dm_unread_count;
     uint32_t muted_dm_unread_count;

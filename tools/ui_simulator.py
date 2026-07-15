@@ -196,12 +196,89 @@ class Snapshot:
     radio_applied: bool = True
     radio_apply_pending: bool = False
     identity_ready: bool = True
+    board_ready: bool = True
+    mesh_service_state: str = "ready"
+    path_hash_bytes: int = 2
+    protocol_tx_ready: bool = True
+    settings_load_ok: bool = True
+    identity_state: str = "consistent"
+    dm_delivery_active: bool = False
     muted_unread_dm: int = 0
     firmware_version: str = "1.0.0-rc1"
     map_cached_tile_count: int = 0
     map_visible_tile_count: int = 9
     map_progress_completed: int = 0
     map_progress_total: int = 0
+
+
+@dataclass(frozen=True)
+class ComposeEligibility:
+    send_enabled: bool
+    retry_available: bool
+    reason: str
+    status: str
+
+
+def compose_eligibility(
+    snap: Snapshot,
+    *,
+    validation: str,
+    is_dm: bool = False,
+    contact_found: bool = True,
+    contact_sendable: bool = True,
+    previous_send_error: str = "none",
+) -> ComposeEligibility:
+    """Mirror the firmware's pure, RF-silent compose admission projection."""
+
+    def result(enabled: bool, retry: bool, reason: str, status: str):
+        return ComposeEligibility(enabled, retry, reason, status)
+
+    if validation == "empty":
+        return result(False, False, "empty", "Enter a message")
+    if validation == "too_long":
+        return result(False, False, "too_long", "Message too long")
+    if validation not in ("valid", "valid_utf8", "valid_boundary"):
+        return result(False, False, "invalid_text", "Invalid text")
+    if not snap.board_ready:
+        return result(False, False, "radio_unavailable", "Runtime unavailable")
+    if snap.mesh_service_state == "tx_busy":
+        return result(False, False, "radio_busy", "Radio busy")
+    if snap.mesh_service_state == "radio_error":
+        return result(False, False, "radio_error", "Radio error")
+    if snap.mesh_service_state == "initializing":
+        return result(False, False, "radio_starting", "Radio starting")
+    if snap.mesh_service_state == "waiting_for_radio":
+        return result(False, False, "radio_waiting", "Radio unavailable")
+    if snap.mesh_service_state != "ready" or not snap.radio_ready:
+        return result(False, False, "radio_unavailable", "Radio unavailable")
+    if snap.path_hash_bytes < 1 or snap.path_hash_bytes > 3:
+        return result(False, False, "route_policy_invalid", "Route settings invalid")
+    if not snap.protocol_tx_ready:
+        return result(False, False, "protocol_time_unavailable", "Protocol time unavailable")
+    if is_dm:
+        if not snap.settings_load_ok:
+            return result(False, False, "settings_unavailable", "Settings need recovery")
+        if snap.identity_state == "inconsistent":
+            return result(False, False, "identity_inconsistent", "Identity needs recovery")
+        if not contact_found:
+            return result(False, False, "contact_missing", "Contact unavailable")
+        if not contact_sendable:
+            return result(False, False, "contact_not_sendable", "Contact cannot receive DM")
+        if snap.dm_delivery_active:
+            return result(False, False, "dm_delivery_active", "Prior DM still active")
+    if previous_send_error == "timeout":
+        return result(True, True, "retry_timeout", "Retry ready: timeout")
+    if previous_send_error == "no_memory":
+        return result(True, True, "retry_memory", "Retry ready: low memory")
+    if previous_send_error == "invalid_state":
+        return result(True, True, "retry_rejected", "Retry ready: rejected")
+    if previous_send_error in ("invalid_arg", "invalid_size"):
+        return result(False, False, "edit_required", "Edit message before retry")
+    if previous_send_error == "not_found" and is_dm:
+        return result(False, False, "reselect_contact", "Reselect contact to retry")
+    if previous_send_error != "none":
+        return result(False, False, "recovery_required", "Recovery required before retry")
+    return result(True, False, "ready", "Ready to send")
 
 
 def sample_snapshot() -> Snapshot:
@@ -2970,22 +3047,49 @@ def render_compose_state(
     validation: str,
     byte_count: int,
     character_count: int | None,
-    send_enabled: bool,
+    is_dm: bool = False,
+    contact_found: bool = True,
+    contact_sendable: bool = True,
+    previous_send_error: str = "none",
 ):
+    eligibility = compose_eligibility(
+        snap,
+        validation=validation,
+        is_dm=is_dm,
+        contact_found=contact_found,
+        contact_sendable=contact_sendable,
+        previous_send_error=previous_send_error,
+    )
+    send_enabled = eligibility.send_enabled
+    if validation in ("valid", "valid_utf8", "valid_boundary") and (
+        eligibility.reason != "ready"
+    ):
+        counter = f"{eligibility.status} | {byte_count}/138 B"
+    title = "DM YKF Corebot" if is_dm else "Compose Public"
+    placeholder = "Direct message" if is_dm else "Public message"
+    send_action = "send_dm_text" if is_dm else "send_public_text"
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
-    s.text("Compose Public", (16, 64, 240, 96), 22, TEXT, True)
-    draw_button(s, (252, 64, 314, 104), "Send", GREEN,
-                action="send_public_text", public_rf_tx=send_enabled,
-                enabled=send_enabled)
-    draw_button(s, (322, 64, 384, 104), "Clear", ACCENT, action="clear_public_message")
-    draw_button(s, (392, 64, 464, 104), "Close", MUTED, action="close_compose", destination="messages_public")
+    s.text(title, (16, 64, 240, 96), 22, TEXT, True)
+    draw_button(
+        s,
+        (252, 64, 314, 108),
+        "Send",
+        GREEN,
+        action=send_action,
+        public_rf_tx=send_enabled and not is_dm,
+        dm_tx=send_enabled and is_dm,
+        enabled=send_enabled,
+    )
+    draw_button(s, (322, 64, 384, 108), "Clear", ACCENT, action="clear_public_message")
+    draw_button(s, (392, 64, 464, 108), "Close", MUTED, action="close_compose", destination="messages_dm" if is_dm else "messages_public")
     s.round_rect((16, 114, 464, 192), SURFACE_2, BORDER, 8)
-    s.touch_target("Public message", (16, 114, 464, 192), kind="text_field", action="edit_public_message")
-    s.text("Public message", (28, 122, 220, 144), 13, MUTED, True)
+    s.touch_target(placeholder, (16, 114, 464, 192), kind="text_field", action="edit_dm_message" if is_dm else "edit_public_message")
+    s.text(placeholder, (28, 122, 220, 144), 13, MUTED, True)
     s.text(sample, (28, 150, 452, 188), 18, TEXT)
     s.text(counter, (216, 196, 464, 218), 12,
-           MUTED if send_enabled else RED, True, "right")
+           AMBER if eligibility.retry_available else
+           (MUTED if send_enabled else RED), True, "right")
     s.text("Keyboard", (28, 196, 180, 216), 13, MUTED, True)
     s.round_rect((16, 214, 464, 472), (10, 16, 24), BORDER, 8)
     keyboard_rows = (
@@ -3020,6 +3124,10 @@ def render_compose_state(
         "compose_character_count": character_count,
         "compose_limit_bytes": 138,
         "compose_send_enabled": send_enabled,
+        "compose_retry_available": eligibility.retry_available,
+        "compose_eligibility_reason": eligibility.reason,
+        "compose_eligibility_status": eligibility.status,
+        "compose_is_dm": is_dm,
     })
 
 
@@ -3027,7 +3135,7 @@ def render_compose_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s, snap, sample="test from DeskOS D1L",
         counter="20 chars | 20/138 B", validation="valid",
-        byte_count=20, character_count=20, send_enabled=True,
+        byte_count=20, character_count=20,
     )
 
 
@@ -3035,7 +3143,7 @@ def render_compose_utf8_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s, snap, sample="Café 東京",
         counter="7 chars | 12/138 B", validation="valid_utf8",
-        byte_count=12, character_count=7, send_enabled=True,
+        byte_count=12, character_count=7,
     )
 
 
@@ -3043,7 +3151,7 @@ def render_compose_byte_limit_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s, snap, sample="€ × 46 (exact byte boundary)",
         counter="46 chars | 138/138 B", validation="valid_boundary",
-        byte_count=138, character_count=46, send_enabled=True,
+        byte_count=138, character_count=46,
     )
 
 
@@ -3051,7 +3159,7 @@ def render_compose_oversize_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s, snap, sample="😀 × 35 (paste rejected)",
         counter="Too long | 140/138 B", validation="too_long",
-        byte_count=140, character_count=35, send_enabled=False,
+        byte_count=140, character_count=35,
     )
 
 
@@ -3059,7 +3167,84 @@ def render_compose_invalid_sheet(s: Surface, snap: Snapshot):
     render_compose_state(
         s, snap, sample="Invalid UTF-8 input rejected",
         counter="Invalid text | 3/138 B", validation="invalid_utf8",
-        byte_count=3, character_count=None, send_enabled=False,
+        byte_count=3, character_count=None,
+    )
+
+
+def render_compose_offline_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        replace(snap, mesh_service_state="waiting_for_radio", radio_ready=False),
+        sample="draft stays here",
+        counter="",
+        validation="valid",
+        byte_count=16,
+        character_count=16,
+    )
+
+
+def render_compose_busy_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        replace(snap, mesh_service_state="tx_busy"),
+        sample="send after current TX",
+        counter="",
+        validation="valid",
+        byte_count=21,
+        character_count=21,
+    )
+
+
+def render_compose_retry_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        snap,
+        sample="draft retained after timeout",
+        counter="",
+        validation="valid",
+        byte_count=28,
+        character_count=28,
+        previous_send_error="timeout",
+    )
+
+
+def render_compose_protocol_time_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        replace(snap, protocol_tx_ready=False),
+        sample="draft retained safely",
+        counter="",
+        validation="valid",
+        byte_count=21,
+        character_count=21,
+    )
+
+
+def render_compose_dm_no_contact_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        snap,
+        sample="private draft retained",
+        counter="",
+        validation="valid",
+        byte_count=22,
+        character_count=22,
+        is_dm=True,
+        contact_found=False,
+        contact_sendable=False,
+    )
+
+
+def render_compose_dm_active_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        replace(snap, dm_delivery_active=True),
+        sample="next private message",
+        counter="",
+        validation="valid",
+        byte_count=20,
+        character_count=20,
+        is_dm=True,
     )
 
 
@@ -4341,6 +4526,12 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "compose_byte_limit_sheet": render_compose_byte_limit_sheet,
     "compose_oversize_sheet": render_compose_oversize_sheet,
     "compose_invalid_sheet": render_compose_invalid_sheet,
+    "compose_offline_sheet": render_compose_offline_sheet,
+    "compose_busy_sheet": render_compose_busy_sheet,
+    "compose_retry_sheet": render_compose_retry_sheet,
+    "compose_protocol_time_sheet": render_compose_protocol_time_sheet,
+    "compose_dm_no_contact_sheet": render_compose_dm_no_contact_sheet,
+    "compose_dm_active_sheet": render_compose_dm_active_sheet,
     "public_history_sheet": render_public_history_sheet,
     "public_search_sheet": render_public_search_sheet,
     "radio_settings_sheet": render_radio_settings_sheet,
@@ -4496,6 +4687,12 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "compose_byte_limit_sheet": ("Compose Public", "46 chars | 138/138 B", "Send"),
     "compose_oversize_sheet": ("Compose Public", "Too long | 140/138 B", "Send"),
     "compose_invalid_sheet": ("Compose Public", "Invalid text | 3/138 B", "Send"),
+    "compose_offline_sheet": ("Compose Public", "Radio unavailable | 16/138 B", "Send"),
+    "compose_busy_sheet": ("Compose Public", "Radio busy | 21/138 B", "Send"),
+    "compose_retry_sheet": ("Compose Public", "Retry ready: timeout | 28/138 B", "Send"),
+    "compose_protocol_time_sheet": ("Compose Public", "Protocol time unavailable | 21/138 B", "Send"),
+    "compose_dm_no_contact_sheet": ("DM YKF Corebot", "Direct message", "Contact unavailable | 22/138 B", "Send"),
+    "compose_dm_active_sheet": ("DM YKF Corebot", "Prior DM still active | 20/138 B", "Send"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
     "radio_settings_sheet": (

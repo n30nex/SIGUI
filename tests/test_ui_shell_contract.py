@@ -909,10 +909,16 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     validation = send.index("d1l_user_text_validate(text)")
     assert validation < send.index("d1l_app_model_send_dm_text")
     assert validation < send.index("d1l_app_model_send_public_text")
-    rejected = send.split("if (info.result != D1L_USER_TEXT_OK)", 1)[1].split(
+    admission = send.index("compose_eligibility_for_text(&info)")
+    assert validation < admission < send.index("d1l_app_model_send_dm_text")
+    assert send.index("d1l_app_model_snapshot(&s_snapshot)") < admission
+    rejected = send.split("if (!eligibility.send_enabled)", 1)[1].split(
         "esp_err_t ret", 1
     )[0]
     assert "return;" in rejected
+    assert "s_compose_last_send_error = ret" in send
+    assert "show_toast_text(retry.status, false)" in send
+    assert "lv_textarea_set_text(s_compose_textarea, \"\")" in send
     assert "D1L_MESSAGE_MAX_CHARS" in source
     assert "lv_textarea_create" in source
     assert "lv_textarea_set_max_length" in source
