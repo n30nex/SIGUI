@@ -597,6 +597,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     console = read("main/comms/usb_console.c")
     ui = read("main/ui/ui_phase1.c")
     settings_ui = read("main/ui/ui_settings.c")
+    more_ui = read("main/ui/ui_more_view.c")
     simulator = read("tools/ui_simulator.py")
     rp2040_header = read("main/hal/rp2040_bridge.h")
     rp2040_source = read("main/hal/rp2040_bridge.c")
@@ -715,15 +716,16 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '"Card status"' in ui
     assert '"Data locations"' in ui
     assert "This device never formats cards." in ui
-    assert "const bool storage_needs_attention = settings_storage_needs_attention(snapshot)" in settings_ui
-    assert "const bool sd_needs_attention = settings_sd_needs_attention(snapshot)" in settings_ui
-    assert 'sd_needs_attention\n        ? "Needs attention"' in settings_ui
-    assert '"Backup needs attention"' in settings_ui
-    assert '"Storage needs attention"' in settings_ui
-    assert '? "Ready"' in settings_ui
-    assert '"Needs setup"' in settings_ui
-    assert '"Internal storage"' in settings_ui
-    assert "FAT32 only, no format" not in settings_ui
+    assert "const bool storage_attention =" in more_ui
+    assert "const bool sd_attention =" in more_ui
+    assert 'sd_attention ? "Needs attention"' in more_ui
+    assert '"Backup needs attention"' in more_ui
+    assert '"Storage needs attention"' in more_ui
+    assert 'storage_ready ? "Ready"' in more_ui
+    assert '"Needs setup"' in more_ui
+    assert '"Internal storage"' in more_ui
+    assert "FAT32 only, no format" not in more_ui
+    assert "snapshot->" not in settings_ui
     assert '"SD Card"' in simulator
     assert "FAT32 only - This device never formats cards." in simulator
     assert "Internal storage" in simulator

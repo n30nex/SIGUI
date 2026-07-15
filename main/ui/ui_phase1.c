@@ -27,6 +27,7 @@
 #include "ui_keyboard.h"
 #include "ui_map.h"
 #include "ui_messages.h"
+#include "ui_more_view.h"
 #include "ui_modal.h"
 #include "ui_navigation.h"
 #include "ui_nodes.h"
@@ -130,6 +131,8 @@ static d1l_ui_home_controller_t s_home_controller;
 static d1l_ui_messages_controller_t s_messages_controller;
 static d1l_ui_nodes_controller_t s_nodes_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_settings_controller_t s_settings_controller EXT_RAM_BSS_ATTR;
+static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
 static d1l_app_radio_profile_edit_t s_radio_edit;
@@ -271,8 +274,19 @@ typedef struct {
     bool storage_retained_sd_degraded;
     bool storage_retained_backup_degraded;
     bool map_tile_cache_ready;
+    bool map_location_set;
+    bool map_tile_render_supported;
+    bool identity_ready;
+    bool radio_ready;
+    bool radio_applied;
+    bool radio_apply_pending;
+    bool wifi_build_enabled;
+    bool wifi_enabled;
     bool wifi_connected;
     bool wifi_connecting;
+    bool ble_build_enabled;
+    bool ble_transport_supported;
+    bool ble_companion_enabled;
     const char *storage_sd_state;
     const char *storage_setup_action;
 } d1l_ui_content_generation_t;
@@ -353,8 +367,19 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .storage_retained_sd_degraded = snapshot->storage_retained_sd_degraded,
         .storage_retained_backup_degraded = snapshot->storage_retained_backup_degraded,
         .map_tile_cache_ready = snapshot->map_tile_cache_ready,
+        .map_location_set = snapshot->map_location_set,
+        .map_tile_render_supported = snapshot->map_tile_render_supported,
+        .identity_ready = snapshot->identity_ready,
+        .radio_ready = snapshot->radio_ready,
+        .radio_applied = snapshot->radio_applied,
+        .radio_apply_pending = snapshot->radio_apply_pending,
+        .wifi_build_enabled = snapshot->wifi_build_enabled,
+        .wifi_enabled = snapshot->wifi_enabled,
         .wifi_connected = snapshot->wifi_connected,
         .wifi_connecting = snapshot->wifi_connecting,
+        .ble_build_enabled = snapshot->ble_build_enabled,
+        .ble_transport_supported = snapshot->ble_transport_supported,
+        .ble_companion_enabled = snapshot->ble_companion_enabled,
         .storage_sd_state = snapshot->storage_sd_state,
         .storage_setup_action = snapshot->storage_setup_action,
     };
@@ -400,8 +425,19 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->storage_retained_sd_degraded == right->storage_retained_sd_degraded &&
         left->storage_retained_backup_degraded == right->storage_retained_backup_degraded &&
         left->map_tile_cache_ready == right->map_tile_cache_ready &&
+        left->map_location_set == right->map_location_set &&
+        left->map_tile_render_supported == right->map_tile_render_supported &&
+        left->identity_ready == right->identity_ready &&
+        left->radio_ready == right->radio_ready &&
+        left->radio_applied == right->radio_applied &&
+        left->radio_apply_pending == right->radio_apply_pending &&
+        left->wifi_build_enabled == right->wifi_build_enabled &&
+        left->wifi_enabled == right->wifi_enabled &&
         left->wifi_connected == right->wifi_connected &&
         left->wifi_connecting == right->wifi_connecting &&
+        left->ble_build_enabled == right->ble_build_enabled &&
+        left->ble_transport_supported == right->ble_transport_supported &&
+        left->ble_companion_enabled == right->ble_companion_enabled &&
         content_generation_text_equal(left->storage_sd_state,
                                       right->storage_sd_state) &&
         content_generation_text_equal(left->storage_setup_action,
@@ -1535,6 +1571,43 @@ static void home_view_input_from_snapshot(
     };
 }
 
+static void more_view_input_from_snapshot(
+    const d1l_app_snapshot_t *snapshot,
+    d1l_ui_more_view_input_t *out_input)
+{
+    if (!snapshot || !out_input) {
+        return;
+    }
+    *out_input = (d1l_ui_more_view_input_t) {
+        .packet_count = snapshot->packet_count,
+        .wifi_build_enabled = snapshot->wifi_build_enabled,
+        .wifi_enabled = snapshot->wifi_enabled,
+        .wifi_connected = snapshot->wifi_connected,
+        .wifi_connecting = snapshot->wifi_connecting,
+        .ble_build_enabled = snapshot->ble_build_enabled,
+        .ble_transport_supported = snapshot->ble_transport_supported,
+        .ble_companion_enabled = snapshot->ble_companion_enabled,
+        .radio_ready = snapshot->radio_ready,
+        .radio_applied = snapshot->radio_applied,
+        .radio_apply_pending = snapshot->radio_apply_pending,
+        .storage_sd_present = snapshot->storage_sd_present,
+        .storage_sd_data_root_ready = snapshot->storage_sd_data_root_ready,
+        .storage_sd_needs_fat32 = snapshot->storage_sd_needs_fat32,
+        .storage_setup_required = snapshot->storage_setup_required,
+        .storage_data_enabled = snapshot->storage_data_enabled,
+        .storage_retained_sd_degraded = snapshot->storage_retained_sd_degraded,
+        .storage_retained_backup_degraded =
+            snapshot->storage_retained_backup_degraded,
+        .map_location_set = snapshot->map_location_set,
+        .map_tile_cache_ready = snapshot->map_tile_cache_ready,
+        .map_tile_render_supported = snapshot->map_tile_render_supported,
+        .identity_ready = snapshot->identity_ready,
+        .storage_sd_state = snapshot->storage_sd_state,
+        .storage_setup_action = snapshot->storage_setup_action,
+        .firmware_version = D1L_FIRMWARE_VERSION,
+    };
+}
+
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
 {
     if (!snapshot || !s_title_label || !s_status_label || !s_identity_label) {
@@ -1819,8 +1892,9 @@ static void render_home_screen(lv_obj_t *content, const d1l_app_snapshot_t *snap
                        handle_home_action, NULL);
 }
 
-static void handle_settings_action(d1l_ui_settings_action_t action)
+static void handle_settings_action(d1l_ui_settings_action_t action, void *context)
 {
+    (void)context;
     switch (action) {
     case D1L_UI_SETTINGS_ACTION_PACKETS:
         request_tab_switch(D1L_UI_TAB_PACKETS);
@@ -1858,7 +1932,20 @@ static void handle_settings_action(d1l_ui_settings_action_t action)
 
 static void render_settings(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
-    d1l_ui_settings_render(content, snapshot, handle_settings_action);
+    d1l_ui_more_view_input_t input = {0};
+    more_view_input_from_snapshot(snapshot, &input);
+    if (!d1l_ui_more_view(&input, &s_settings_controller.rendered)) {
+        d1l_ui_settings_deactivate(&s_settings_controller);
+        return;
+    }
+    ++s_settings_render_generation;
+    if (s_settings_render_generation == 0U) {
+        s_settings_render_generation = 1U;
+    }
+    (void)d1l_ui_settings_render(&s_settings_controller, content,
+                                 &s_settings_controller.rendered,
+                                 s_settings_render_generation,
+                                 handle_settings_action, NULL);
 }
 
 static void render_health_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
@@ -6225,6 +6312,9 @@ static void render_active_tab(void)
     }
     if (d1l_ui_navigation_active() != D1L_UI_TAB_NODES) {
         d1l_ui_nodes_deactivate(&s_nodes_controller);
+    }
+    if (d1l_ui_navigation_active() != D1L_UI_TAB_SETTINGS) {
+        d1l_ui_settings_deactivate(&s_settings_controller);
     }
     (void)d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content,
                                renderers, sizeof(renderers) / sizeof(renderers[0]));

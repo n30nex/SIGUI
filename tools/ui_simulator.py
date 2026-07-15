@@ -164,9 +164,17 @@ class Snapshot:
     map_lat_e7: int
     map_lon_e7: int
     map_center_source: str
+    wifi_build_enabled: bool = True
     wifi_enabled: bool = False
     wifi_connecting: bool = False
     wifi_connected: bool = False
+    ble_build_enabled: bool = False
+    ble_companion_enabled: bool = False
+    radio_ready: bool = True
+    radio_applied: bool = True
+    radio_apply_pending: bool = False
+    identity_ready: bool = True
+    firmware_version: str = "1.0.0-rc1"
     map_cached_tile_count: int = 0
     map_visible_tile_count: int = 9
     map_progress_completed: int = 0
@@ -246,6 +254,48 @@ def sample_snapshot() -> Snapshot:
         map_lat_e7=0,
         map_lon_e7=0,
         map_center_source="unset",
+    )
+
+
+def more_connectivity_ready_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        wifi_build_enabled=True,
+        wifi_enabled=True,
+        wifi_connected=True,
+        ble_build_enabled=True,
+        ble_transport_supported=True,
+        ble_companion_enabled=True,
+        radio_ready=True,
+        radio_applied=True,
+        radio_apply_pending=False,
+    )
+
+
+def more_connectivity_applying_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        wifi_build_enabled=True,
+        wifi_enabled=True,
+        wifi_connecting=True,
+        wifi_connected=False,
+        ble_build_enabled=True,
+        ble_transport_supported=True,
+        ble_companion_enabled=False,
+        radio_ready=False,
+        radio_applied=False,
+        radio_apply_pending=True,
+    )
+
+
+def more_long_labels_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        node_name="DeskOS D1L Lab Companion With A Deliberately Long Device Name",
+        mesh_state="ready, listening, synchronized, and retaining a deliberately long state label",
+        firmware_version=(
+            "1.0.0-rc1+exact-commit-provenance-with-a-deliberately-long-label"
+        ),
     )
 
 
@@ -633,6 +683,9 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "map-ready": map_ready_snapshot,
     "map-downloading": map_downloading_snapshot,
     "map-cached-revisit": map_cached_revisit_snapshot,
+    "more-connectivity-ready": more_connectivity_ready_snapshot,
+    "more-connectivity-applying": more_connectivity_applying_snapshot,
+    "more-long-labels": more_long_labels_snapshot,
 }
 
 
@@ -2427,6 +2480,29 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
     storage_warning = storage_needs_attention(snap)
     sd_warning = storage_sd_needs_attention(snap)
     map_status = settings_map_status(snap)
+    wifi_status = (
+        "Unavailable"
+        if not snap.wifi_build_enabled
+        else (
+            "Connected"
+            if snap.wifi_connected
+            else (
+                "Connecting"
+                if snap.wifi_connecting
+                else ("On" if snap.wifi_enabled else "Off")
+            )
+        )
+    )
+    ble_status = (
+        "Unavailable"
+        if not snap.ble_build_enabled or not snap.ble_transport_supported
+        else ("On" if snap.ble_companion_enabled else "Off")
+    )
+    radio_status = (
+        "Applying"
+        if snap.radio_apply_pending
+        else ("Ready" if snap.radio_ready or snap.radio_applied else "Needs setup")
+    )
     return (
         {
             "key": "tools",
@@ -2448,9 +2524,9 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "warning": False,
             "action": "toggle_more_connections",
             "leaves": (
-                ("Wi-Fi", "Off", TEXT, "open_wifi_settings", "wifi_setup_sheet", False),
-                ("Bluetooth", "Unavailable", TEXT, "open_ble_settings", "ble_setup_sheet", False),
-                ("Radio", "Ready", GREEN, "open_radio_settings", "radio_settings_sheet", False),
+                ("Wi-Fi", wifi_status, GREEN if snap.wifi_connected else TEXT, "open_wifi_settings", "wifi_setup_sheet", False),
+                ("Bluetooth", ble_status, GREEN if snap.ble_companion_enabled else TEXT, "open_ble_settings", "ble_setup_sheet", False),
+                ("Radio", radio_status, GREEN if snap.radio_ready else TEXT, "open_radio_settings", "radio_settings_sheet", False),
             ),
         },
         {
@@ -2497,7 +2573,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "action": "toggle_more_device",
             "leaves": (
                 ("Display", "Brightness & theme", GREEN, "open_display_settings", "display_settings_sheet", False),
-                ("Identity", "Ready", TEXT, None, None, False),
+                ("Identity", "Ready" if snap.identity_ready else "Not set", TEXT, None, None, False),
             ),
         },
         {
@@ -2507,7 +2583,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "color": VIOLET,
             "warning": False,
             "action": "toggle_more_support",
-            "leaves": (("About", "Version 1.0.0-rc1", TEXT, None, None, False),),
+            "leaves": (("About", f"Version {snap.firmware_version}", TEXT, None, None, False),),
         },
         {
             "key": "advanced",
@@ -4470,7 +4546,13 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
         RENDERERS[view](surface, snap)
         screenshot = out_dir / f"{view}.png"
         surface.save(screenshot)
-        summary = surface.summary(screenshot, REQUIRED_LABELS.get(view, ()))
+        required_labels = REQUIRED_LABELS.get(view, ())
+        if view == "settings_support_expanded" and snap.firmware_version != "1.0.0-rc1":
+            required_labels = tuple(
+                f"Version {snap.firmware_version}" if label == "Version 1.0.0-rc1" else label
+                for label in required_labels
+            )
+        summary = surface.summary(screenshot, required_labels)
         overflow_count += len(summary["overflow"])
         truncated_count += len(summary["truncated_labels"])
         sibling_text_overlap_count += len(summary["sibling_text_overlaps"])

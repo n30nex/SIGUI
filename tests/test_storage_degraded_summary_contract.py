@@ -57,44 +57,43 @@ def test_home_and_top_bar_never_render_raw_storage_state_slugs():
 
 
 def test_more_sd_card_summary_uses_attention_status_and_warning_style_when_degraded():
-    source = read("main/ui/ui_settings.c")
-    render_body = source.split("void d1l_ui_settings_render", 1)[1]
+    source = read("main/ui/ui_more_view.c")
+    renderer = read("main/ui/ui_settings.c")
+    render_body = source.split("bool d1l_ui_more_view(", 1)[1]
     status = render_body.split("const char *storage_status", 1)[1].split(";", 1)[0]
 
-    assert "sd_needs_attention" in status
+    assert "sd_attention" in status
     assert '"Needs attention"' in status
     assert "storage_ready" in status
-    assert status.index("sd_needs_attention") < status.index("storage_ready")
+    assert status.index("sd_attention") < status.index("storage_ready")
 
     readiness = render_body.split("const bool storage_ready", 1)[1].split(";", 1)[0]
-    assert "snapshot->storage_data_enabled" in readiness
-    assert "snapshot->storage_sd_data_root_ready" in readiness
+    assert "input->storage_data_enabled" in readiness
+    assert "input->storage_sd_data_root_ready" in readiness
 
     storage_rows = render_body.split(
-        "const settings_menu_item_t storage_maps[]", 1
-    )[1].split("};", 1)[0]
-    assert "sd_needs_attention ? 0xF87171" in storage_rows
-    assert "storage_ready ? 0x5EEAD4" in storage_rows
-    assert "D1L_UI_SETTINGS_ACTION_STORAGE, sd_needs_attention" in storage_rows
+        "D1L_UI_MORE_CATEGORY_STORAGE_MAPS", 1
+    )[1].split("D1L_UI_MORE_CATEGORY_DEVICE", 1)[0]
+    assert "sd_attention ? COLOR_RED" in storage_rows
+    assert "storage_ready ? COLOR_GREEN" in storage_rows
+    assert "D1L_UI_SETTINGS_ACTION_STORAGE, sd_attention" in storage_rows
 
     category_summary = render_body.split(
-        "const char *storage_category_summary", 1
+        "const char *storage_summary", 1
     )[1].split(";", 1)[0]
-    assert "snapshot->storage_retained_backup_degraded" in category_summary
-    assert "sd_needs_attention" in category_summary
+    assert "input->storage_retained_backup_degraded" in category_summary
+    assert "sd_attention" in category_summary
     assert '"Storage needs attention"' in category_summary
     assert '"Backup needs attention"' in category_summary
     assert '"SD needs attention"' in category_summary
 
-    category_call = render_body.split(
-        "render_category(s_menu, SETTINGS_CATEGORY_STORAGE_MAPS", 1
-    )[1].split(");", 1)[0]
-    assert "storage_category_summary" in category_call
-    assert "storage_needs_attention" in category_call
+    assert "category->warning ? 0xFCA5A5 : 0xF4F7FB" in renderer
+    assert "settings_create_row(parent, 444, 54, item->warning)" in renderer
 
 
 def test_probe_and_reported_sd_errors_use_friendly_attention_summary_before_ready():
     home = read("main/ui/ui_home_view.c")
+    more = read("main/ui/ui_more_view.c")
     settings = read("main/ui/ui_settings.c")
     raw_faults = (
         '"error"',
@@ -108,14 +107,14 @@ def test_probe_and_reported_sd_errors_use_friendly_attention_summary_before_read
         "static bool storage_needs_attention",
         "const char *d1l_ui_home_sd_state",
     )
-    settings_classifier = function_body(
-        settings,
-        "static bool settings_storage_needs_attention",
-        "static lv_obj_t *settings_create_label",
+    more_classifier = function_body(
+        more,
+        "static bool sd_needs_attention",
+        "static const char *map_storage_state",
     )
     for raw_fault in raw_faults:
         assert raw_fault in home_classifier
-        assert raw_fault in settings_classifier
+        assert raw_fault in more_classifier
 
     home_summary = function_body(
         home,
@@ -127,18 +126,16 @@ def test_probe_and_reported_sd_errors_use_friendly_attention_summary_before_read
     )
     assert 'return "Needs attention";' in home_summary
 
-    settings_render = settings.split("void d1l_ui_settings_render", 1)[1]
-    assert settings_render.index("settings_storage_needs_attention(snapshot)") < settings_render.index(
+    more_render = more.split("bool d1l_ui_more_view(", 1)[1]
+    assert more_render.index("const bool sd_attention") < more_render.index(
         "const bool storage_ready"
     )
-    assert settings_render.index("settings_sd_needs_attention(snapshot)") < settings_render.index(
-        "const bool storage_ready"
-    )
-    settings_readiness = settings_render.split("const bool storage_ready", 1)[1].split(";", 1)[0]
-    assert "snapshot->storage_data_enabled" in settings_readiness
-    assert "snapshot->storage_sd_data_root_ready" in settings_readiness
-    assert 'sd_needs_attention\n        ? "Needs attention"' in settings_render
+    more_readiness = more_render.split("const bool storage_ready", 1)[1].split(";", 1)[0]
+    assert "input->storage_data_enabled" in more_readiness
+    assert "input->storage_sd_data_root_ready" in more_readiness
+    assert 'sd_attention ? "Needs attention"' in more_render
 
     for raw_fault in raw_faults:
         assert raw_fault not in home_summary
-        assert raw_fault not in settings_render
+        assert raw_fault not in settings
+    assert "snapshot->" not in settings
