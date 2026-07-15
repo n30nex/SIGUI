@@ -720,7 +720,12 @@ def test_touch_ui_actions_route_through_app_model():
 
 
 def test_ui_simulator_flow_names_match_lvgl_handlers():
-    source = read("main/ui/ui_phase1.c") + read("main/ui/ui_wifi.c")
+    source = (
+        read("main/ui/ui_phase1.c")
+        + read("main/ui/ui_wifi.c")
+        + read("main/ui/ui_radio_settings.c")
+        + read("main/ui/ui_radio_settings.h")
+    )
     actions = {
         step["action"]
         for flow in ui_simulator.EXPECTED_FLOWS
@@ -808,9 +813,9 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_mesh_repeaters": "open_mesh_repeater_candidates_event_cb",
         "close_mesh_repeaters": "mesh_roles_subpage_back_event_cb",
         "open_radio_settings": "open_radio_settings_event_cb",
-        "radio_freq_down": "radio_edit_adjust_event_cb",
-        "radio_cycle_bandwidth": "radio_edit_adjust_event_cb",
-        "save_radio_profile": "radio_save_event_cb",
+        "radio_freq_down": "D1L_UI_RADIO_SETTINGS_ACTION_FREQ_DOWN",
+        "radio_cycle_bandwidth": "D1L_UI_RADIO_SETTINGS_ACTION_BANDWIDTH",
+        "save_radio_profile": "D1L_UI_RADIO_SETTINGS_ACTION_SAVE",
         "open_storage_setup": "open_storage_sheet_event_cb",
         "wifi_scan": "D1L_UI_WIFI_ACTION_SCAN",
         "wifi_connect": "D1L_UI_WIFI_ACTION_CONNECT",
@@ -922,7 +927,7 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     source = read("main/ui/ui_phase1.c")
     messages_source = read("main/ui/ui_messages.c")
     create = source.split("static void create_dm_thread_sheet", 1)[1].split(
-        "static void create_radio_settings_sheet", 1
+        "static void create_storage_sheet", 1
     )[0]
     render = source.split("static void render_dm_thread_sheet(void)", 1)[1].split(
         "static void show_dm_thread_for", 1
@@ -1661,34 +1666,36 @@ def test_settings_screen_reports_companion_wireless_state():
 
 def test_settings_screen_has_safe_touch_radio_editor():
     source = read("main/ui/ui_phase1.c")
+    radio_module = read("main/ui/ui_radio_settings.c")
+    radio_header = read("main/ui/ui_radio_settings.h")
     more_module = read("main/ui/ui_more_view.c")
     model = read("main/app/app_model.c")
 
-    assert "static lv_obj_t *s_radio_settings_sheet" in source
-    assert "static d1l_app_radio_profile_edit_t s_radio_edit" in source
-    assert "create_radio_settings_sheet" in source
+    assert "static lv_obj_t *s_radio_settings_sheet" not in source
+    assert "static d1l_app_radio_profile_edit_t s_radio_edit" not in source
+    assert "create_radio_settings_sheet" not in source
+    assert "s_radio_settings_controller EXT_RAM_BSS_ATTR" in source
+    assert "d1l_ui_radio_settings_create(" in source
     assert "render_radio_settings_sheet" in source
     assert "open_radio_settings_event_cb" in source
-    assert "radio_edit_adjust_event_cb" in source
-    assert "radio_save_event_cb" in source
-    assert "radio_defaults_event_cb" in source
+    assert "radio_settings_action_handler" in source
     assert "radio_edit_from_snapshot" in source
-    assert "format_radio_profile_line" in source
+    assert "format_radio_profile_line" not in source
     assert '"Radio", radio_status' in more_module
-    assert '"Radio Settings"' in source
-    assert '"Live RF matches saved profile"' in source
-    assert '"Saved profile pending next radio start/apply"' in source
+    assert '"Radio Settings"' in radio_module
+    assert '"Live RF matches saved profile"' in radio_module
+    assert '"Saved profile pending next radio start/apply"' in radio_module
     assert '"Radio saved; RF apply pending"' in source
-    assert '"US/CAN"' in source
-    assert '"Save"' in source
-    assert '"RX Boost On"' in source
-    assert "D1L_RADIO_EDIT_FREQ_DOWN" in source
-    assert "s_radio_edit.frequency_hz -= 25000UL" in source
-    assert "s_radio_edit.frequency_hz += 25000UL" in source
-    assert "next_radio_bandwidth" in source
-    assert "s_radio_edit.rx_boost = !s_radio_edit.rx_boost" in source
-    assert "d1l_app_model_save_radio_profile(&s_radio_edit)" in source
-    assert "d1l_app_model_default_radio_profile(&s_radio_edit)" in source
+    assert '"US/CAN"' in radio_module
+    assert '"Save"' in radio_module
+    assert '"RX Boost On"' in radio_module
+    assert "D1L_UI_RADIO_SETTINGS_ACTION_FREQ_DOWN" in radio_header
+    assert "controller->edit.frequency_hz -= 25000UL" in radio_module
+    assert "controller->edit.frequency_hz += 25000UL" in radio_module
+    assert "next_bandwidth" in radio_module
+    assert "controller->edit.rx_boost = !controller->edit.rx_boost" in radio_module
+    assert "d1l_app_model_save_radio_profile(edit)" in source
+    assert "d1l_app_model_default_radio_profile(&defaults)" in source
     assert "d1l_settings_save(&settings)" in model
     assert "settings.tcxo_mode = D1L_TCXO_NONE" in model
 
