@@ -57,6 +57,7 @@ idf_component_register(
         "ui/ui_ble.c"
         "ui/ui_chrome.c"
         "ui/ui_connectivity.c"
+        "ui/ui_contact_sheets.c"
         "ui/ui_device_sheets.c"
         "ui/ui_home.c"
         "ui/ui_home_view.c"
