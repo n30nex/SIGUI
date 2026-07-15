@@ -156,7 +156,7 @@ def test_full_queues_latch_exact_terminal_recovery_on_the_owner_task():
 def test_radio_parsers_preserve_the_callback_copy_as_const():
     source = read("main/mesh/meshcore_service.c")
     for parser in (
-        "parse_rx_public_packet",
+        "parse_rx_channel_packet",
         "parse_rx_dm_packet",
         "parse_rx_ack_packet",
         "parse_rx_path_packet",

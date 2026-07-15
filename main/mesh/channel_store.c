@@ -15,7 +15,8 @@
 #define D1L_CHANNEL_STORE_KEY "channels"
 #define D1L_CHANNEL_STORE_MAGIC UINT32_C(0x43484e4c)
 #define D1L_CHANNEL_STORE_SCHEMA_V1 1U
-#define D1L_CHANNEL_STORE_SCHEMA 2U
+#define D1L_CHANNEL_STORE_SCHEMA_V2 2U
+#define D1L_CHANNEL_STORE_SCHEMA 3U
 #define D1L_CHANNEL_URI_SCHEME "meshcore://channel/add?"
 #define D1L_CHANNEL_PUBLIC_NAME "Public"
 
@@ -87,6 +88,26 @@ typedef struct {
     uint32_t count;
     uint32_t payload_reserved;
     d1l_channel_entry_t entries[D1L_CHANNEL_STORE_CAPACITY];
+} d1l_channel_store_blob_v2_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t schema;
+    uint32_t blob_length;
+    uint32_t payload_length;
+    uint32_t payload_checksum;
+    uint32_t envelope_reserved;
+    uint64_t lineage;
+    uint64_t generation;
+    uint64_t next_channel_id;
+    uint32_t revision;
+    uint32_t total_mutations;
+    uint32_t count;
+    uint32_t payload_reserved;
+    uint32_t message_epoch;
+    uint32_t message_next_seq;
+    uint64_t message_clear_lineage;
+    d1l_channel_entry_t entries[D1L_CHANNEL_STORE_CAPACITY];
 } d1l_channel_store_blob_t;
 
 _Static_assert(sizeof(d1l_channel_entry_v1_t) == 104U,
@@ -103,12 +124,20 @@ _Static_assert(offsetof(d1l_channel_entry_t, name) == 40U,
                "channel schema v2 name offset changed");
 _Static_assert(offsetof(d1l_channel_entry_t, secret) == 73U,
                "channel schema v2 secret offset changed");
-_Static_assert(offsetof(d1l_channel_store_blob_t, lineage) == 24U,
+_Static_assert(offsetof(d1l_channel_store_blob_v2_t, lineage) == 24U,
                "channel schema v2 payload offset changed");
-_Static_assert(offsetof(d1l_channel_store_blob_t, entries) == 64U,
+_Static_assert(offsetof(d1l_channel_store_blob_v2_t, entries) == 64U,
                "channel schema v2 entries offset changed");
-_Static_assert(sizeof(d1l_channel_store_blob_t) == 960U,
+_Static_assert(sizeof(d1l_channel_store_blob_v2_t) == 960U,
                "channel schema v2 blob layout changed");
+_Static_assert(offsetof(d1l_channel_store_blob_t, lineage) == 24U,
+               "channel schema v3 payload offset changed");
+_Static_assert(offsetof(d1l_channel_store_blob_t, message_epoch) == 64U,
+               "channel schema v3 message generation offset changed");
+_Static_assert(offsetof(d1l_channel_store_blob_t, entries) == 80U,
+               "channel schema v3 entries offset changed");
+_Static_assert(sizeof(d1l_channel_store_blob_t) == 976U,
+               "channel schema v3 blob layout changed");
 
 static d1l_channel_entry_t s_entries[D1L_CHANNEL_STORE_CAPACITY];
 static size_t s_count;
@@ -117,6 +146,9 @@ static uint64_t s_generation;
 static uint64_t s_next_channel_id;
 static uint32_t s_revision;
 static uint32_t s_total_mutations;
+static uint32_t s_message_epoch;
+static uint32_t s_message_next_seq;
+static uint64_t s_message_clear_lineage;
 static bool s_loaded;
 static esp_err_t s_load_status = ESP_ERR_INVALID_STATE;
 static d1l_channel_store_blob_t s_blob_scratch;
@@ -518,6 +550,9 @@ static esp_err_t seed_public_ram(uint64_t lineage, uint64_t generation,
     s_next_channel_id = next_channel_id;
     s_revision = 1U;
     s_total_mutations = 0U;
+    s_message_epoch = 0U;
+    s_message_next_seq = 0U;
+    s_message_clear_lineage = 0U;
 
     d1l_channel_entry_t *entry = &s_entries[0];
     entry->channel_id = D1L_CHANNEL_PUBLIC_ID;
@@ -542,6 +577,9 @@ static void clear_unloaded_ram(void)
     s_next_channel_id = 0U;
     s_revision = 0U;
     s_total_mutations = 0U;
+    s_message_epoch = 0U;
+    s_message_next_seq = 0U;
+    s_message_clear_lineage = 0U;
     s_loaded = false;
 }
 
@@ -559,6 +597,9 @@ static void fill_blob(d1l_channel_store_blob_t *blob)
     blob->revision = s_revision;
     blob->total_mutations = s_total_mutations;
     blob->count = (uint32_t)s_count;
+    blob->message_epoch = s_message_epoch;
+    blob->message_next_seq = s_message_next_seq;
+    blob->message_clear_lineage = s_message_clear_lineage;
     memcpy(blob->entries, s_entries, sizeof(s_entries));
     blob->payload_checksum = crc32_bytes(
         &blob->lineage, (size_t)blob->payload_length);
@@ -576,6 +617,9 @@ static void restore_blob(const d1l_channel_store_blob_t *blob)
     s_next_channel_id = blob->next_channel_id;
     s_revision = blob->revision;
     s_total_mutations = blob->total_mutations;
+    s_message_epoch = blob->message_epoch;
+    s_message_next_seq = blob->message_next_seq;
+    s_message_clear_lineage = blob->message_clear_lineage;
     memcpy(s_entries, blob->entries, s_count * sizeof(s_entries[0]));
 }
 
@@ -648,6 +692,47 @@ static bool entry_is_valid(const d1l_channel_entry_t *entry, uint64_t lineage)
            expected_hash == entry->channel_hash;
 }
 
+static bool stored_entries_are_valid(const d1l_channel_entry_t *entries,
+                                     size_t count, uint64_t lineage,
+                                     uint64_t next_channel_id)
+{
+    size_t public_count = 0U;
+    size_t default_count = 0U;
+    uint64_t max_id = 0U;
+    for (size_t i = 0U; i < count; ++i) {
+        const d1l_channel_entry_t *entry = &entries[i];
+        if (!entry_is_valid(entry, lineage)) {
+            return false;
+        }
+        if (entry->channel_id == D1L_CHANNEL_PUBLIC_ID) {
+            if (!public_entry_is_exact(entry, lineage)) {
+                return false;
+            }
+            public_count++;
+        } else if (entry->source == D1L_CHANNEL_SOURCE_BUILTIN) {
+            return false;
+        }
+        if (entry->is_default != 0U) {
+            default_count++;
+        }
+        if (entry->channel_id > max_id) {
+            max_id = entry->channel_id;
+        }
+        for (size_t j = 0U; j < i; ++j) {
+            const d1l_channel_entry_t *other = &entries[j];
+            if (other->channel_id == entry->channel_id ||
+                other->history_key == entry->history_key ||
+                names_equal(other->name, entry->name) ||
+                secrets_equal(other->secret, other->secret_len, entry->secret,
+                              entry->secret_len)) {
+                return false;
+            }
+        }
+    }
+    return public_count == 1U && default_count == 1U &&
+           next_channel_id > max_id;
+}
+
 static bool blob_is_valid(const d1l_channel_store_blob_t *blob, size_t len)
 {
     if (!blob || len != sizeof(*blob) ||
@@ -665,45 +750,39 @@ static bool blob_is_valid(const d1l_channel_store_blob_t *blob, size_t len)
         blob->count > D1L_CHANNEL_STORE_CAPACITY ||
         blob->next_channel_id <= D1L_CHANNEL_PUBLIC_ID ||
         blob->next_channel_id == UINT64_MAX ||
-        blob->revision == 0U) {
+        blob->revision == 0U ||
+        (blob->message_epoch == 0U &&
+         (blob->message_next_seq != 0U ||
+          blob->message_clear_lineage != 0U)) ||
+        (blob->message_epoch != 0U && blob->message_next_seq == 0U)) {
         return false;
     }
+    return stored_entries_are_valid(
+        blob->entries, blob->count, blob->lineage, blob->next_channel_id);
+}
 
-    size_t public_count = 0U;
-    size_t default_count = 0U;
-    uint64_t max_id = 0U;
-    for (size_t i = 0U; i < blob->count; ++i) {
-        const d1l_channel_entry_t *entry = &blob->entries[i];
-        if (!entry_is_valid(entry, blob->lineage)) {
-            return false;
-        }
-        if (entry->channel_id == D1L_CHANNEL_PUBLIC_ID) {
-            if (!public_entry_is_exact(entry, blob->lineage)) {
-                return false;
-            }
-            public_count++;
-        } else if (entry->source == D1L_CHANNEL_SOURCE_BUILTIN) {
-            return false;
-        }
-        if (entry->is_default != 0U) {
-            default_count++;
-        }
-        if (entry->channel_id > max_id) {
-            max_id = entry->channel_id;
-        }
-        for (size_t j = 0U; j < i; ++j) {
-            const d1l_channel_entry_t *other = &blob->entries[j];
-            if (other->channel_id == entry->channel_id ||
-                other->history_key == entry->history_key ||
-                names_equal(other->name, entry->name) ||
-                secrets_equal(other->secret, other->secret_len, entry->secret,
-                              entry->secret_len)) {
-                return false;
-            }
-        }
+static bool blob_v2_is_valid(const d1l_channel_store_blob_v2_t *blob,
+                             size_t len)
+{
+    if (!blob || len != sizeof(*blob) ||
+        blob->magic != D1L_CHANNEL_STORE_MAGIC ||
+        blob->schema != D1L_CHANNEL_STORE_SCHEMA_V2 ||
+        blob->blob_length != (uint32_t)sizeof(*blob) ||
+        blob->payload_length !=
+            (uint32_t)(sizeof(*blob) -
+                       offsetof(d1l_channel_store_blob_v2_t, lineage)) ||
+        blob->envelope_reserved != 0U || blob->payload_reserved != 0U ||
+        blob->payload_checksum !=
+            crc32_bytes(&blob->lineage, (size_t)blob->payload_length) ||
+        blob->lineage == 0U || blob->lineage == D1L_CHANNEL_PUBLIC_ID ||
+        blob->generation == 0U || blob->count == 0U ||
+        blob->count > D1L_CHANNEL_STORE_CAPACITY ||
+        blob->next_channel_id <= D1L_CHANNEL_PUBLIC_ID ||
+        blob->next_channel_id == UINT64_MAX || blob->revision == 0U) {
+        return false;
     }
-    return public_count == 1U && default_count == 1U &&
-           blob->next_channel_id > max_id;
+    return stored_entries_are_valid(
+        blob->entries, blob->count, blob->lineage, blob->next_channel_id);
 }
 
 static bool v1_entry_is_valid(const d1l_channel_entry_v1_t *entry)
@@ -775,6 +854,22 @@ static bool blob_v1_is_valid(const d1l_channel_store_blob_v1_t *blob,
            blob->next_channel_id > max_id;
 }
 
+static void migrate_v2_blob(const d1l_channel_store_blob_v2_t *old_blob)
+{
+    secure_zero(s_entries, sizeof(s_entries));
+    s_count = old_blob->count;
+    s_lineage = old_blob->lineage;
+    s_generation = old_blob->generation;
+    s_next_channel_id = old_blob->next_channel_id;
+    s_revision = old_blob->revision;
+    s_total_mutations = old_blob->total_mutations;
+    s_message_epoch = 0U;
+    s_message_next_seq = 0U;
+    s_message_clear_lineage = 0U;
+    memcpy(s_entries, old_blob->entries,
+           s_count * sizeof(s_entries[0]));
+}
+
 static void migrate_v1_blob(const d1l_channel_store_blob_v1_t *old_blob)
 {
     uint64_t lineage = 0U;
@@ -796,6 +891,9 @@ static void migrate_v1_blob(const d1l_channel_store_blob_v1_t *old_blob)
     s_next_channel_id = old_blob->next_channel_id;
     s_revision = 1U;
     s_total_mutations = 0U;
+    s_message_epoch = 0U;
+    s_message_next_seq = 0U;
+    s_message_clear_lineage = 0U;
     for (size_t i = 0U; i < s_count; ++i) {
         const d1l_channel_entry_v1_t *source = &old_blob->entries[i];
         d1l_channel_entry_t *dest = &s_entries[i];
@@ -851,12 +949,20 @@ esp_err_t d1l_channel_store_init(void)
     size_t len = sizeof(s_blob_scratch);
     ret = nvs_get_blob(handle, D1L_CHANNEL_STORE_KEY, &s_blob_scratch, &len);
     bool must_persist = false;
-    bool migrated_v1 = false;
+    bool migrated_legacy = false;
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
         ret = ESP_OK;
         must_persist = true;
     } else if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
         restore_blob(&s_blob_scratch);
+    } else if (ret == ESP_OK &&
+               blob_v2_is_valid(
+                   (const d1l_channel_store_blob_v2_t *)&s_blob_scratch,
+                   len)) {
+        migrate_v2_blob(
+            (const d1l_channel_store_blob_v2_t *)&s_blob_scratch);
+        must_persist = true;
+        migrated_legacy = true;
     } else if (ret == ESP_OK &&
                blob_v1_is_valid(
                    (const d1l_channel_store_blob_v1_t *)&s_blob_scratch,
@@ -864,7 +970,7 @@ esp_err_t d1l_channel_store_init(void)
         migrate_v1_blob(
             (const d1l_channel_store_blob_v1_t *)&s_blob_scratch);
         must_persist = true;
-        migrated_v1 = true;
+        migrated_legacy = true;
     } else if (ret == ESP_OK) {
         /* Preserve the corrupt/unknown blob for recovery. No channel secret
          * from an unproven layout is ever admitted into live state. */
@@ -876,7 +982,7 @@ esp_err_t d1l_channel_store_init(void)
     if (ret == ESP_OK && must_persist) {
         ret = persist_store();
     }
-    if (ret != ESP_OK && migrated_v1) {
+    if (ret != ESP_OK && migrated_legacy) {
         clear_unloaded_ram();
     }
     s_loaded = ret == ESP_OK;
@@ -1476,6 +1582,150 @@ esp_err_t d1l_channel_store_mark_all_read(uint64_t channel_id)
     return ret;
 }
 
+esp_err_t d1l_channel_store_reconcile_retained_rows(
+    const d1l_channel_retained_row_t *rows, size_t row_count,
+    const d1l_channel_message_generation_t *message_generation)
+{
+    if (!message_generation || message_generation->epoch == 0U ||
+        message_generation->next_seq == 0U ||
+        (row_count > 0U && !rows) ||
+        row_count > D1L_CHANNEL_RETAINED_ROW_CAPACITY) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint32_t previous_seq = 0U;
+    for (size_t i = 0U; i < row_count; ++i) {
+        if (rows[i].channel_id == 0U || rows[i].message_seq == 0U ||
+            rows[i].message_seq >= message_generation->next_seq ||
+            rows[i].message_seq <= previous_seq) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        previous_seq = rows[i].message_seq;
+    }
+
+    esp_err_t ret = ensure_loaded();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    uint32_t retained_newest[D1L_CHANNEL_STORE_CAPACITY] = {0};
+    uint32_t derived_newest[D1L_CHANNEL_STORE_CAPACITY] = {0};
+    uint32_t baseline_read_through[D1L_CHANNEL_STORE_CAPACITY] = {0};
+    uint32_t retained_unread[D1L_CHANNEL_STORE_CAPACITY] = {0};
+    for (size_t i = 0U; i < row_count; ++i) {
+        const int index = index_by_id(rows[i].channel_id);
+        if (index < 0) {
+            /* History for a removed channel remains identity-isolated until a
+             * later confirmed purge; it must not poison configured cursors. */
+            continue;
+        }
+        if (rows[i].message_seq > retained_newest[index]) {
+            retained_newest[index] = rows[i].message_seq;
+        }
+    }
+
+    const bool generation_known =
+        s_message_epoch != 0U && s_message_next_seq != 0U;
+    const bool same_message_generation = generation_known &&
+        s_message_epoch == message_generation->epoch &&
+        s_message_clear_lineage == message_generation->clear_lineage;
+    const bool sequence_rewound = generation_known &&
+        message_generation->next_seq < s_message_next_seq;
+    bool unknown_out_of_domain = false;
+    if (!generation_known) {
+        for (size_t i = 0U; i < s_count; ++i) {
+            if (s_entries[i].newest_message_seq >=
+                    message_generation->next_seq ||
+                s_entries[i].read_through_seq >=
+                    message_generation->next_seq) {
+                unknown_out_of_domain = true;
+                break;
+            }
+        }
+    }
+    const bool true_generation_reset =
+        (sequence_rewound && !same_message_generation) ||
+        unknown_out_of_domain;
+    const bool durability_rollback =
+        sequence_rewound && same_message_generation;
+
+    for (size_t i = 0U; i < s_count; ++i) {
+        const d1l_channel_entry_t *entry = &s_entries[i];
+        if (true_generation_reset) {
+            derived_newest[i] = retained_newest[i];
+            baseline_read_through[i] = 0U;
+        } else if (durability_rollback) {
+            derived_newest[i] = retained_newest[i];
+            baseline_read_through[i] =
+                entry->read_through_seq < retained_newest[i] ?
+                    entry->read_through_seq : retained_newest[i];
+        } else {
+            derived_newest[i] =
+                retained_newest[i] > entry->newest_message_seq ?
+                    retained_newest[i] : entry->newest_message_seq;
+            baseline_read_through[i] = entry->read_through_seq;
+        }
+    }
+    for (size_t i = 0U; i < row_count; ++i) {
+        const int index = index_by_id(rows[i].channel_id);
+        if (index >= 0 && rows[i].received &&
+            rows[i].message_seq > baseline_read_through[index]) {
+            retained_unread[index]++;
+        }
+    }
+
+    bool changed = s_message_epoch != message_generation->epoch ||
+        s_message_next_seq != message_generation->next_seq ||
+        s_message_clear_lineage != message_generation->clear_lineage;
+    for (size_t i = 0U; i < s_count; ++i) {
+        d1l_channel_entry_t *entry = &s_entries[i];
+        const uint32_t newest = derived_newest[i];
+        const uint32_t unread = retained_unread[i];
+        const uint32_t read_through = unread == 0U ?
+            newest : baseline_read_through[i];
+        if (entry->newest_message_seq != newest ||
+            entry->read_through_seq != read_through ||
+            entry->unread_count != unread) {
+            changed = true;
+            break;
+        }
+    }
+
+    if (!changed) {
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_OK;
+    }
+    if (!mutation_counter_available()) {
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    fill_blob(&s_rollback_scratch);
+    const uint32_t reconciled_at_ms = now_ms();
+    for (size_t i = 0U; i < s_count; ++i) {
+        d1l_channel_entry_t *entry = &s_entries[i];
+        const uint32_t newest = derived_newest[i];
+        const uint32_t unread = retained_unread[i];
+        const uint32_t read_through = unread == 0U ?
+            newest : baseline_read_through[i];
+        if (entry->newest_message_seq != newest ||
+            entry->read_through_seq != read_through ||
+            entry->unread_count != unread) {
+            entry->newest_message_seq = newest;
+            entry->read_through_seq = read_through;
+            entry->unread_count = unread;
+            entry->updated_ms = reconciled_at_ms;
+        }
+    }
+    s_message_epoch = message_generation->epoch;
+    s_message_next_seq = message_generation->next_seq;
+    s_message_clear_lineage = message_generation->clear_lineage;
+    note_mutation();
+    ret = persist_store_or_rollback(&s_rollback_scratch);
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
+}
+
 d1l_channel_store_stats_t d1l_channel_store_stats(void)
 {
     d1l_store_lock_take(&s_store_lock);
@@ -1483,8 +1733,12 @@ d1l_channel_store_stats_t d1l_channel_store_stats(void)
         .lineage = s_loaded ? s_lineage : 0U,
         .generation = s_loaded ? s_generation : 0U,
         .next_channel_id = s_loaded ? s_next_channel_id : 0U,
+        .message_clear_lineage =
+            s_loaded ? s_message_clear_lineage : 0U,
         .revision = s_loaded ? s_revision : 0U,
         .total_mutations = s_loaded ? s_total_mutations : 0U,
+        .message_epoch = s_loaded ? s_message_epoch : 0U,
+        .message_next_seq = s_loaded ? s_message_next_seq : 0U,
         .count = s_loaded ? s_count : 0U,
         .capacity = D1L_CHANNEL_STORE_CAPACITY,
         .load_status = s_load_status,
@@ -1531,8 +1785,11 @@ esp_err_t d1l_channel_store_snapshot(
             .lineage = s_lineage,
             .generation = s_generation,
             .next_channel_id = s_next_channel_id,
+            .message_clear_lineage = s_message_clear_lineage,
             .revision = s_revision,
             .total_mutations = s_total_mutations,
+            .message_epoch = s_message_epoch,
+            .message_next_seq = s_message_next_seq,
             .count = s_count,
             .capacity = D1L_CHANNEL_STORE_CAPACITY,
             .load_status = s_load_status,

@@ -20,6 +20,10 @@ typedef struct {
     uint32_t rx_packets;
     uint32_t rx_adverts;
     uint32_t tx_packets;
+    uint32_t channel_rx_unknown_hash;
+    uint32_t channel_rx_hash_collision;
+    uint32_t channel_rx_decrypt_failed;
+    uint32_t channel_rx_reconcile_blocked;
     uint32_t rejected_commands;
     uint32_t ack_tx_queued;
     uint32_t ack_tx_done;
@@ -98,6 +102,9 @@ esp_err_t d1l_meshcore_service_ensure_identity(void);
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
 void d1l_meshcore_service_trace_snapshot(d1l_meshcore_trace_snapshot_t *out_snapshot);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
+esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
+                                            const char *text);
+esp_err_t d1l_meshcore_service_send_active_channel(const char *text);
 esp_err_t d1l_meshcore_service_send_public(const char *text);
 esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text);
 esp_err_t d1l_meshcore_service_request_path_discovery_probe(

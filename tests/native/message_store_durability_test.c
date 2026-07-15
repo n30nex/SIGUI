@@ -9,11 +9,45 @@
 #include "mesh/message_store.h"
 #include "storage/retained_blob_store.h"
 
-#define TEST_SCHEMA 4U
+#define TEST_SCHEMA 5U
+#define TEST_SCHEMA_V4 4U
 #define TEST_SCHEMA_V3 3U
 #define TEST_SCHEMA_V2 2U
 #define TEST_SCHEMA_V1 1U
 #define TEST_TEXT_LEN_V1 96U
+
+typedef struct {
+    uint32_t seq;
+    uint32_t uptime_ms;
+    char direction[4];
+    char author[D1L_MESSAGE_AUTHOR_LEN];
+    char text[D1L_MESSAGE_TEXT_LEN];
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    bool delivered;
+} test_entry_v4_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t head;
+    uint32_t count;
+    uint32_t epoch;
+    uint32_t content_revision;
+    uint64_t clear_lineage;
+    test_entry_v4_t entries[D1L_MESSAGE_STORE_CAPACITY];
+} test_blob_v4_t;
+
+_Static_assert(sizeof(test_entry_v4_t) == 188U,
+               "native message v4 entry layout changed");
+_Static_assert(offsetof(test_blob_v4_t, entries) == 40U,
+               "native message v4 entries offset changed");
+_Static_assert(sizeof(test_blob_v4_t) == 3048U,
+               "native message v4 blob layout changed");
 
 typedef struct {
     uint32_t schema;
@@ -37,7 +71,7 @@ typedef struct {
     uint32_t count;
     uint32_t epoch;
     uint32_t content_revision;
-    d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY];
+    test_entry_v4_t entries[D1L_MESSAGE_STORE_CAPACITY];
 } test_blob_v3_t;
 
 typedef struct {
@@ -47,7 +81,7 @@ typedef struct {
     uint32_t dropped_oldest;
     uint32_t head;
     uint32_t count;
-    d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY];
+    test_entry_v4_t entries[D1L_MESSAGE_STORE_CAPACITY];
 } test_blob_v2_t;
 
 typedef struct {
@@ -127,6 +161,24 @@ static esp_err_t slot_read(const test_slot_t *slot, void *dst, size_t *len_inout
 
 static void fill_entry(d1l_message_entry_t *entry, uint32_t seq,
                        const char *prefix)
+{
+    memset(entry, 0, sizeof(*entry));
+    entry->seq = seq;
+    entry->uptime_ms = seq * 100U;
+    (void)snprintf(entry->direction, sizeof(entry->direction), "rx");
+    (void)snprintf(entry->author, sizeof(entry->author), "Node");
+    (void)snprintf(entry->text, sizeof(entry->text), "%s-%lu", prefix,
+                   (unsigned long)seq);
+    entry->rssi_dbm = -60;
+    entry->snr_tenths = 40;
+    entry->path_hash_bytes = 1U;
+    entry->path_hops = 1U;
+    entry->delivered = true;
+    entry->channel_id = UINT64_C(1);
+}
+
+static void fill_entry_v4(test_entry_v4_t *entry, uint32_t seq,
+                          const char *prefix)
 {
     memset(entry, 0, sizeof(*entry));
     entry->seq = seq;
@@ -606,7 +658,7 @@ static void test_periodic_flush_retries_transient_failed_initialization(void)
     assert(blob_contains(slot_blob(&s_nvs), "recovered-sd-1"));
 }
 
-static void test_v1_fallback_remains_readable_and_rewrites_as_v4(void)
+static void test_v1_fallback_remains_readable_and_rewrites_as_v5(void)
 {
     reset_mock(false);
     test_blob_v1_t legacy = {
@@ -636,7 +688,7 @@ static void test_v1_fallback_remains_readable_and_rewrites_as_v4(void)
     assert(blob_contains(slot_blob(&s_nvs), "legacy-public"));
 }
 
-static void test_v2_fallback_migrates_to_v4_without_lineage(void)
+static void test_v2_fallback_migrates_to_v5_without_lineage(void)
 {
     reset_mock(false);
     test_blob_v2_t legacy = {
@@ -646,7 +698,7 @@ static void test_v2_fallback_migrates_to_v4_without_lineage(void)
         .head = 1U,
         .count = 1U,
     };
-    fill_entry(&legacy.entries[0], 1U, "v2-public");
+    fill_entry_v4(&legacy.entries[0], 1U, "v2-public");
     slot_write(&s_nvs, &legacy, sizeof(legacy));
     assert(d1l_message_store_init() == ESP_OK);
     assert(d1l_message_store_stats().nvs_fallback_dirty);
@@ -657,7 +709,7 @@ static void test_v2_fallback_migrates_to_v4_without_lineage(void)
     assert(blob_contains(slot_blob(&s_nvs), "v2-public-1"));
 }
 
-static void test_v3_fallback_migrates_to_v4_without_inventing_clear(void)
+static void test_v3_fallback_migrates_to_v5_without_inventing_clear(void)
 {
     reset_mock(false);
     test_blob_v3_t legacy = {
@@ -669,7 +721,7 @@ static void test_v3_fallback_migrates_to_v4_without_inventing_clear(void)
         .epoch = 77U,
         .content_revision = 9U,
     };
-    fill_entry(&legacy.entries[0], 1U, "v3-public");
+    fill_entry_v4(&legacy.entries[0], 1U, "v3-public");
     slot_write(&s_nvs, &legacy, sizeof(legacy));
     assert(d1l_message_store_init() == ESP_OK);
     assert(d1l_message_store_stats().nvs_fallback_dirty);
@@ -678,6 +730,136 @@ static void test_v3_fallback_migrates_to_v4_without_inventing_clear(void)
     assert(slot_blob(&s_nvs)->epoch == 77U);
     assert(slot_blob(&s_nvs)->clear_lineage == 0U);
     assert(blob_contains(slot_blob(&s_nvs), "v3-public-1"));
+}
+
+static void test_v4_fallback_migrates_to_v5_public_identity(void)
+{
+    reset_mock(false);
+    test_blob_v4_t legacy = {
+        .schema = TEST_SCHEMA_V4,
+        .next_seq = 2U,
+        .total_written = 1U,
+        .head = 1U,
+        .count = 1U,
+        .epoch = 3U,
+        .content_revision = 4U,
+        .clear_lineage = UINT64_C(0x1122334455667788),
+    };
+    fill_entry_v4(&legacy.entries[0], 1U, "v4-public");
+    const char utf8_text[] = {
+        'C', 'a', 'f', (char)0xc3, (char)0xa9, ' ',
+        (char)0xe6, (char)0x9d, (char)0xb1,
+        (char)0xe4, (char)0xba, (char)0xac, ' ',
+        (char)0xf0, (char)0x9f, (char)0x98, (char)0x80, '\0'
+    };
+    memcpy(legacy.entries[0].text, utf8_text, sizeof(utf8_text));
+    slot_write(&s_nvs, &legacy, sizeof(legacy));
+    assert(d1l_message_store_init() == ESP_OK);
+    d1l_message_entry_t restored = {0};
+    assert(d1l_message_store_copy_recent(&restored, 1U) == 1U);
+    assert(restored.channel_id == UINT64_C(1));
+    assert(memcmp(restored.text, utf8_text, sizeof(utf8_text)) == 0);
+    assert(d1l_message_store_stats().nvs_fallback_dirty);
+    assert(d1l_message_store_flush() == ESP_OK);
+    assert(slot_blob(&s_nvs)->schema == TEST_SCHEMA);
+    assert(slot_blob(&s_nvs)->entries[0].channel_id == UINT64_C(1));
+    assert(memcmp(slot_blob(&s_nvs)->entries[0].text, utf8_text,
+                  sizeof(utf8_text)) == 0);
+    assert(d1l_message_store_init() == ESP_OK);
+    memset(&restored, 0, sizeof(restored));
+    assert(d1l_message_store_copy_recent(&restored, 1U) == 1U);
+    assert(restored.channel_id == UINT64_C(1));
+    assert(memcmp(restored.text, utf8_text, sizeof(utf8_text)) == 0);
+}
+
+static void test_mixed_channel_history_isolation_and_public_only_clear(void)
+{
+    reset_mock(false);
+    assert(d1l_message_store_init() == ESP_OK);
+    uint32_t seq = 0U;
+    assert(d1l_message_store_append_channel(
+               UINT64_C(1), "rx", "Public", "public-one", -60, 40,
+               1U, 1U, true, &seq) == ESP_OK && seq == 1U);
+    assert(d1l_message_store_append_channel(
+               UINT64_C(2), "rx", "Alpha", "alpha-one", -61, 30,
+               1U, 1U, true, &seq) == ESP_OK && seq == 2U);
+    assert(d1l_message_store_append_channel(
+               UINT64_C(1), "tx", "Self", "public-two", 0, 0,
+               1U, 0U, false, &seq) == ESP_OK && seq == 3U);
+    assert(d1l_message_store_append_channel(
+               UINT64_C(3), "rx", "Beta", "beta-only", -62, 20,
+               1U, 1U, true, &seq) == ESP_OK && seq == 4U);
+    assert(d1l_message_store_append_channel(
+               UINT64_C(2), "tx", "Self", "alpha-two", 0, 0,
+               1U, 0U, false, &seq) == ESP_OK && seq == 5U);
+
+    d1l_message_store_stats_t stats = d1l_message_store_stats();
+    assert(stats.count == 5U && stats.public_count == 2U &&
+           stats.next_seq == 6U);
+    d1l_message_entry_t rows[D1L_MESSAGE_STORE_CAPACITY + 1U] = {0};
+    assert(d1l_message_store_copy_recent(
+               rows, D1L_MESSAGE_STORE_CAPACITY) == 2U);
+    assert(rows[0].channel_id == UINT64_C(1) &&
+           strcmp(rows[0].text, "public-one") == 0);
+    assert(rows[1].channel_id == UINT64_C(1) &&
+           strcmp(rows[1].text, "public-two") == 0);
+    assert(d1l_message_store_copy_channel_recent(
+               UINT64_C(2), rows, D1L_MESSAGE_STORE_CAPACITY) == 2U);
+    assert(strcmp(rows[0].text, "alpha-one") == 0 &&
+           strcmp(rows[1].text, "alpha-two") == 0);
+
+    size_t total = 99U;
+    assert(d1l_message_store_query_page(
+               rows, D1L_MESSAGE_STORE_CAPACITY, 0U, "alpha", &total) ==
+           0U);
+    assert(total == 0U);
+    assert(d1l_message_store_query_channel_page(
+               UINT64_C(2), rows, 1U, 1U, "alpha", &total) == 1U);
+    assert(total == 2U && strcmp(rows[0].text, "alpha-one") == 0);
+
+    assert(d1l_message_store_append_channel_volatile(
+               UINT64_C(2), "rx", "Alpha", "alpha-preview", -63, 10,
+               1U, 1U, true) == ESP_OK);
+    assert(d1l_message_store_copy_recent(
+               rows, D1L_MESSAGE_STORE_CAPACITY + 1U) == 2U);
+    assert(d1l_message_store_copy_channel_recent(
+               UINT64_C(2), rows, D1L_MESSAGE_STORE_CAPACITY + 1U) == 3U);
+    assert(strcmp(rows[2].text, "alpha-preview") == 0);
+    size_t retained_count = 0U;
+    d1l_message_retained_snapshot_t retained_snapshot = {0};
+    assert(d1l_message_store_snapshot_retained(
+               rows, D1L_MESSAGE_STORE_CAPACITY, &retained_count,
+               &retained_snapshot) == ESP_OK);
+    assert(retained_count == 5U &&
+           retained_snapshot.persistence_revision != 0U &&
+           retained_snapshot.epoch == stats.epoch &&
+           retained_snapshot.next_seq == stats.next_seq &&
+           retained_snapshot.clear_lineage == stats.clear_lineage);
+    for (size_t i = 0U; i < retained_count; ++i) {
+        assert(strcmp(rows[i].text, "alpha-preview") != 0);
+    }
+
+    const uint64_t lineage_before = stats.clear_lineage;
+    assert(d1l_message_store_clear_channel(UINT64_C(1)) == ESP_OK);
+    stats = d1l_message_store_stats();
+    assert(stats.count == 3U && stats.public_count == 0U &&
+           stats.next_seq == 6U && stats.clear_lineage != lineage_before);
+    assert(d1l_message_store_copy_recent(
+               rows, D1L_MESSAGE_STORE_CAPACITY) == 0U);
+    assert(d1l_message_store_copy_channel_recent(
+               UINT64_C(2), rows, D1L_MESSAGE_STORE_CAPACITY) == 3U);
+    assert(d1l_message_store_copy_channel_recent(
+               UINT64_C(3), rows, D1L_MESSAGE_STORE_CAPACITY) == 1U);
+
+    assert(d1l_message_store_init() == ESP_OK);
+    assert(d1l_message_store_copy_channel_recent(
+               UINT64_C(2), rows, D1L_MESSAGE_STORE_CAPACITY) == 2U);
+    assert(d1l_message_store_append_channel(
+               UINT64_C(1), "rx", "Public", "public-after-clear", -60,
+               40, 1U, 1U, true, &seq) == ESP_OK && seq == 6U);
+    assert(d1l_message_store_copy_recent(rows, 1U) == 1U);
+    assert(rows[0].seq == 6U &&
+           strcmp(rows[0].text, "public-after-clear") == 0);
 }
 
 static void test_offline_clear_tombstone_blocks_sd_resurrection(void)
@@ -699,6 +881,59 @@ static void test_offline_clear_tombstone_blocks_sd_resurrection(void)
     assert(slot_blob(&s_sd)->epoch == 2U);
     assert(slot_blob(&s_sd)->count == 0U);
     assert(!blob_contains(slot_blob(&s_nvs), "must-stay-cleared-1"));
+}
+
+static void test_offline_public_clear_preserves_private_and_blocks_resurrection(void)
+{
+    reset_mock(true);
+    assert(d1l_message_store_init() == ESP_OK);
+    uint32_t seq = 0U;
+    assert(d1l_message_store_append_channel(
+               UINT64_C(1), "rx", "Public", "public-stale", -60,
+               40, 1U, 1U, true, &seq) == ESP_OK && seq == 1U);
+    assert(d1l_message_store_append_channel(
+               UINT64_C(2), "rx", "Private", "private-keep", -61, 30,
+               1U, 1U, true, &seq) == ESP_OK && seq == 2U);
+    assert(blob_contains(slot_blob(&s_sd), "public-stale"));
+    assert(blob_contains(slot_blob(&s_sd), "private-keep"));
+
+    set_sd_enabled(false);
+    assert(d1l_message_store_clear_channel(UINT64_C(1)) == ESP_OK);
+    d1l_message_entry_t rows[D1L_MESSAGE_STORE_CAPACITY] = {0};
+    assert(d1l_message_store_copy_recent(
+               rows, D1L_MESSAGE_STORE_CAPACITY) == 0U);
+    assert(d1l_message_store_copy_channel_recent(
+               UINT64_C(2), rows, D1L_MESSAGE_STORE_CAPACITY) == 1U);
+    assert(strcmp(rows[0].text, "private-keep") == 0);
+
+    set_sd_enabled(true);
+    assert(d1l_message_store_flush_if_due() == ESP_OK);
+    assert(d1l_message_store_copy_recent(
+               rows, D1L_MESSAGE_STORE_CAPACITY) == 0U);
+    assert(d1l_message_store_copy_channel_recent(
+               UINT64_C(2), rows, D1L_MESSAGE_STORE_CAPACITY) == 1U);
+    assert(strcmp(rows[0].text, "private-keep") == 0);
+    assert(!blob_contains(slot_blob(&s_sd), "public-stale"));
+    assert(blob_contains(slot_blob(&s_sd), "private-keep"));
+    assert(slot_blob(&s_sd)->clear_lineage ==
+           slot_blob(&s_nvs)->clear_lineage);
+}
+
+static void test_global_clear_never_reuses_channel_sequence(void)
+{
+    reset_mock(true);
+    assert(d1l_message_store_init() == ESP_OK);
+    uint32_t seq = 0U;
+    assert(d1l_message_store_append_channel(
+               UINT64_C(2), "tx", "Self", "before-global-clear", 0, 0,
+               1U, 0U, false, &seq) == ESP_OK && seq == 1U);
+    const uint32_t next_before = d1l_message_store_stats().next_seq;
+    assert(next_before == 2U);
+    assert(d1l_message_store_clear() == ESP_OK);
+    assert(d1l_message_store_stats().next_seq == next_before);
+    assert(d1l_message_store_append_channel(
+               UINT64_C(2), "rx", "Peer", "after-global-clear", -60, 40,
+               1U, 1U, true, &seq) == ESP_OK && seq == next_before);
 }
 
 static void test_replacement_same_seq_conflict_is_resequenced(void)
@@ -1008,10 +1243,14 @@ int main(void)
     test_corrupt_sd_stays_pending_while_valid_nvs_advances();
     test_corrupt_sources_are_never_erased_on_init();
     test_periodic_flush_retries_transient_failed_initialization();
-    test_v1_fallback_remains_readable_and_rewrites_as_v4();
-    test_v2_fallback_migrates_to_v4_without_lineage();
-    test_v3_fallback_migrates_to_v4_without_inventing_clear();
+    test_v1_fallback_remains_readable_and_rewrites_as_v5();
+    test_v2_fallback_migrates_to_v5_without_lineage();
+    test_v3_fallback_migrates_to_v5_without_inventing_clear();
+    test_v4_fallback_migrates_to_v5_public_identity();
+    test_mixed_channel_history_isolation_and_public_only_clear();
     test_offline_clear_tombstone_blocks_sd_resurrection();
+    test_offline_public_clear_preserves_private_and_blocks_resurrection();
+    test_global_clear_never_reuses_channel_sequence();
     test_replacement_same_seq_conflict_is_resequenced();
     test_valid_legacy_nvs_dominates_foreign_clear_lineage();
     test_sd_clear_lineage_can_seed_only_when_nvs_is_absent();

@@ -40,7 +40,8 @@ def test_channel_store_is_bounded_persistent_and_redacted_by_default():
     assert 'D1L_CHANNEL_STORE_NAMESPACE "d1l_channels"' in source
     assert 'D1L_CHANNEL_STORE_KEY "channels"' in source
     assert "D1L_CHANNEL_STORE_SCHEMA_V1 1U" in source
-    assert "D1L_CHANNEL_STORE_SCHEMA 2U" in source
+    assert "D1L_CHANNEL_STORE_SCHEMA_V2 2U" in source
+    assert "D1L_CHANNEL_STORE_SCHEMA 3U" in source
     assert "D1L_CHANNEL_STORE_MAGIC UINT32_C(0x43484e4c)" in source
     for field in [
         "uint32_t magic;",
@@ -53,10 +54,14 @@ def test_channel_store_is_bounded_persistent_and_redacted_by_default():
         assert field in source
     assert "crc32_bytes(&blob->lineage" in source
     assert "channel schema v2 payload offset changed" in source
+    assert "channel schema v3 message generation offset changed" in source
     assert "d1l_channel_store_blob_v1_t" in source
+    assert "d1l_channel_store_blob_v2_t" in source
     assert "migrate_v1_blob" in source
+    assert "migrate_v2_blob" in source
     assert "channel schema v1 blob layout changed" in source
     assert "channel schema v2 blob layout changed" in source
+    assert "channel schema v3 blob layout changed" in source
     assert "Preserve the corrupt/unknown blob for recovery" in source
     assert "persist_store_or_rollback" in source
     select = source.split("esp_err_t d1l_channel_store_select", 1)[1].split(

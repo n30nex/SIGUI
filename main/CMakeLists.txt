@@ -33,6 +33,7 @@ idf_component_register(
         "platform/time_service.c"
         "platform/time_service_core.c"
         "mesh/advert_data.c"
+        "mesh/channel_message_coordinator.c"
         "mesh/channel_store.c"
         "mesh/contact_store.c"
         "mesh/meshcore_path_state.c"

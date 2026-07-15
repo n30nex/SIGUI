@@ -8,6 +8,7 @@
 #include "comms/connectivity_manager.h"
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
+#include "mesh/channel_message_coordinator.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
 #include "platform/time_service.h"
@@ -430,7 +431,10 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->tx_packets = mesh.tx_packets;
     snapshot->rejected_commands = mesh.rejected_commands;
     snapshot->message_total_written = messages.total_written;
-    snapshot->message_count = messages.count;
+    /* The retained ring is shared by bounded group channels. Existing
+     * Messages/Public surfaces must remain exact-Public and never infer their
+     * total from private-channel occupancy. */
+    snapshot->message_count = messages.public_count;
     snapshot->dm_total_written = dms.total_written;
     snapshot->dm_content_revision = dms.content_revision;
     snapshot->dm_count = dms.count;
@@ -467,6 +471,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->channel_store_revision = channel_stats.revision;
     snapshot->channel_store_load_status = channel_stats.load_status;
     snapshot->channel_store_loaded = channel_stats.loaded;
+    snapshot->channel_message_reconcile_pending =
+        d1l_channel_message_reconcile_pending();
     d1l_mesh_inspector_signal_summary(&snapshot->signal_summary);
     snapshot->recent_room_count =
         d1l_mesh_inspector_copy_room_servers(snapshot->recent_rooms, D1L_APP_SNAPSHOT_ROOM_PREVIEW);
@@ -502,15 +508,37 @@ esp_err_t d1l_app_model_send_public_text(const char *text)
     return d1l_meshcore_service_send_public(text);
 }
 
+esp_err_t d1l_app_model_send_channel_text(uint64_t channel_id,
+                                          const char *text)
+{
+    return d1l_meshcore_service_send_channel(channel_id, text);
+}
+
+esp_err_t d1l_app_model_send_active_channel_text(const char *text)
+{
+    return d1l_meshcore_service_send_active_channel(text);
+}
+
 esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
                                       size_t max_channels,
                                       size_t *out_count,
                                       uint64_t *out_active_channel_id,
                                       d1l_channel_store_stats_t *out_stats)
 {
-    return d1l_channel_store_snapshot(
+    const esp_err_t ret = d1l_channel_store_snapshot(
         out_channels, max_channels, out_count, out_active_channel_id,
         out_stats);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const d1l_read_state_stats_t read_state = d1l_read_state_stats();
+    for (size_t i = 0U; i < *out_count; ++i) {
+        if (out_channels[i].channel_id == D1L_CHANNEL_PUBLIC_ID) {
+            out_channels[i].unread_count = read_state.public_unread_count;
+            break;
+        }
+    }
+    return ESP_OK;
 }
 
 esp_err_t d1l_app_model_select_channel(uint64_t channel_id,
@@ -555,6 +583,16 @@ size_t d1l_app_model_query_public_messages(d1l_message_entry_t *out_entries,
 {
     return d1l_app_model_query_public_messages_page(out_entries, max_entries, 0,
                                                     query, NULL);
+}
+
+size_t d1l_app_model_query_channel_messages_page(
+    uint64_t channel_id, d1l_message_entry_t *out_entries,
+    size_t max_entries, size_t skip_newest, const char *query,
+    size_t *out_total_matches)
+{
+    return d1l_message_store_query_channel_page(
+        channel_id, out_entries, max_entries, skip_newest, query,
+        out_total_matches);
 }
 
 esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text)
@@ -669,7 +707,27 @@ size_t d1l_app_model_query_nodes(const d1l_node_query_t *query, d1l_node_view_t 
 
 esp_err_t d1l_app_model_mark_public_read(void)
 {
-    return d1l_read_state_mark_public_read();
+    const esp_err_t reconcile_ret = d1l_channel_message_reconcile();
+    if (reconcile_ret != ESP_OK) {
+        return reconcile_ret;
+    }
+    const esp_err_t channel_ret =
+        d1l_channel_store_mark_all_read(D1L_CHANNEL_PUBLIC_ID);
+    return channel_ret == ESP_OK ? d1l_read_state_mark_public_read() :
+        channel_ret;
+}
+
+esp_err_t d1l_app_model_mark_channel_read(uint64_t channel_id)
+{
+    if (channel_id == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (channel_id == D1L_CHANNEL_PUBLIC_ID) {
+        return d1l_app_model_mark_public_read();
+    }
+    const esp_err_t reconcile_ret = d1l_channel_message_reconcile();
+    return reconcile_ret == ESP_OK ?
+        d1l_channel_store_mark_all_read(channel_id) : reconcile_ret;
 }
 
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint)

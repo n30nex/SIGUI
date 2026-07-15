@@ -13,6 +13,7 @@
 #define D1L_CHANNEL_SECRET_256_LEN 32U
 #define D1L_CHANNEL_SHARE_URI_LEN 256U
 #define D1L_CHANNEL_PUBLIC_ID UINT64_C(1)
+#define D1L_CHANNEL_RETAINED_ROW_CAPACITY 16U
 
 typedef enum {
     D1L_CHANNEL_SOURCE_BUILTIN = 1,
@@ -65,13 +66,30 @@ typedef struct {
     uint64_t lineage;
     uint64_t generation;
     uint64_t next_channel_id;
+    uint64_t message_clear_lineage;
     uint32_t revision;
     uint32_t total_mutations;
+    uint32_t message_epoch;
+    uint32_t message_next_seq;
     size_t count;
     size_t capacity;
     esp_err_t load_status;
     bool loaded;
 } d1l_channel_store_stats_t;
+
+/* Secret-free exact-channel projection of the bounded retained message ring.
+ * received is true only for an admitted RX text row. */
+typedef struct {
+    uint64_t channel_id;
+    uint32_t message_seq;
+    bool received;
+} d1l_channel_retained_row_t;
+
+typedef struct {
+    uint32_t epoch;
+    uint32_t next_seq;
+    uint64_t clear_lineage;
+} d1l_channel_message_generation_t;
 
 esp_err_t d1l_channel_store_init(void);
 esp_err_t d1l_channel_store_reset(void);
@@ -99,6 +117,12 @@ esp_err_t d1l_channel_store_note_message(uint64_t channel_id,
                                          uint32_t message_seq,
                                          bool unread);
 esp_err_t d1l_channel_store_mark_all_read(uint64_t channel_id);
+/* Recomputes retained unread counts for every configured channel in one
+ * persisted mutation. Cached note_message increments are never trusted as the
+ * app-facing source after eviction, persistence failure, or reboot. */
+esp_err_t d1l_channel_store_reconcile_retained_rows(
+    const d1l_channel_retained_row_t *rows, size_t row_count,
+    const d1l_channel_message_generation_t *message_generation);
 
 d1l_channel_store_stats_t d1l_channel_store_stats(void);
 /* Copies one coherent, redacted metadata generation under the store lock. */
