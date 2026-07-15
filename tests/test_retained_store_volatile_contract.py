@@ -28,7 +28,7 @@ def test_volatile_canaries_have_preview_slots_outside_durable_rings():
             "static esp_err_t append_internal",
             "d1l_dm_entry_t",
             "s_entries[s_head] = entry;",
-            ["d1l_dm_store_copy_recent_page", "d1l_dm_store_copy_thread_page"],
+            ["d1l_dm_store_copy_recent_page", "d1l_dm_store_query_thread_page"],
         ),
         (
             "main/mesh/packet_log.c",

@@ -239,6 +239,48 @@ static uint32_t now_ms(void)
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
+static unsigned char ascii_lower(unsigned char value)
+{
+    return value >= (unsigned char)'A' && value <= (unsigned char)'Z' ?
+        (unsigned char)(value + ((unsigned char)'a' - (unsigned char)'A')) :
+        value;
+}
+
+/* Deliberately folds ASCII only. UTF-8 continuation and leading bytes retain
+ * their exact values, so the scan cannot invent Unicode equivalence. */
+static bool contains_ascii_casefold(const char *haystack, const char *needle)
+{
+    if (!needle || needle[0] == '\0') {
+        return true;
+    }
+    if (!haystack) {
+        return false;
+    }
+    for (size_t i = 0U; haystack[i] != '\0'; ++i) {
+        size_t j = 0U;
+        while (needle[j] != '\0' && haystack[i + j] != '\0' &&
+               ascii_lower((unsigned char)haystack[i + j]) ==
+                   ascii_lower((unsigned char)needle[j])) {
+            j++;
+        }
+        if (needle[j] == '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool dm_entry_matches_query(const d1l_dm_entry_t *entry,
+                                   const char *query)
+{
+    return entry &&
+        (!query || query[0] == '\0' ||
+         contains_ascii_casefold(entry->contact_alias, query) ||
+         contains_ascii_casefold(entry->contact_fingerprint, query) ||
+         contains_ascii_casefold(entry->text, query) ||
+         contains_ascii_casefold(entry->direction, query));
+}
+
 static d1l_dm_ack_persistence_pending_t *find_ack_persistence_pending_locked(
     uint64_t delivery_session_id, uint32_t target_revision)
 {
@@ -3025,11 +3067,12 @@ size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries,
     return d1l_dm_store_copy_recent_page(out_entries, max_entries, 0U, NULL);
 }
 
-size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
-                                     d1l_dm_entry_t *out_entries,
-                                     size_t max_entries,
-                                     size_t skip_newest,
-                                     size_t *out_total_matches)
+size_t d1l_dm_store_query_thread_page(const char *contact_fingerprint,
+                                      d1l_dm_entry_t *out_entries,
+                                      size_t max_entries,
+                                      size_t skip_newest,
+                                      const char *query,
+                                      size_t *out_total_matches)
 {
     if (out_total_matches) {
         *out_total_matches = 0U;
@@ -3051,13 +3094,15 @@ size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
         const d1l_dm_entry_t *entry =
             &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
         if (strncmp(entry->contact_fingerprint, contact_fingerprint,
-                    sizeof(entry->contact_fingerprint)) == 0) {
+                    sizeof(entry->contact_fingerprint)) == 0 &&
+            dm_entry_matches_query(entry, query)) {
             total_matches++;
         }
     }
     const bool volatile_matches = s_volatile_valid &&
         strncmp(s_volatile_entry.contact_fingerprint, contact_fingerprint,
-                sizeof(s_volatile_entry.contact_fingerprint)) == 0;
+                sizeof(s_volatile_entry.contact_fingerprint)) == 0 &&
+        dm_entry_matches_query(&s_volatile_entry, query);
     if (volatile_matches) {
         total_matches++;
     }
@@ -3079,7 +3124,8 @@ size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
         const d1l_dm_entry_t *entry =
             &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
         if (strncmp(entry->contact_fingerprint, contact_fingerprint,
-                    sizeof(entry->contact_fingerprint)) != 0) {
+                    sizeof(entry->contact_fingerprint)) != 0 ||
+            !dm_entry_matches_query(entry, query)) {
             continue;
         }
         if (match_index >= first_match && match_index < last_match) {
@@ -3097,6 +3143,17 @@ size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
     }
     d1l_store_lock_give(&s_store_lock);
     return out_index;
+}
+
+size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
+                                     d1l_dm_entry_t *out_entries,
+                                     size_t max_entries,
+                                     size_t skip_newest,
+                                     size_t *out_total_matches)
+{
+    return d1l_dm_store_query_thread_page(
+        contact_fingerprint, out_entries, max_entries, skip_newest, NULL,
+        out_total_matches);
 }
 
 size_t d1l_dm_store_copy_thread(const char *contact_fingerprint,

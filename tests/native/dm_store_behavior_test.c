@@ -2388,6 +2388,149 @@ static void test_utf8_round_trip_and_invalid_input_have_no_side_effects(void)
     assert(memcmp(restored.text, mixed, sizeof(mixed)) == 0);
 }
 
+static void assert_query_did_not_mutate_store(d1l_dm_store_stats_t before,
+                                              d1l_dm_store_stats_t after)
+{
+    assert(after.next_seq == before.next_seq);
+    assert(after.total_written == before.total_written);
+    assert(after.dropped_oldest == before.dropped_oldest);
+    assert(after.epoch == before.epoch);
+    assert(after.content_revision == before.content_revision);
+    assert(after.clear_lineage == before.clear_lineage);
+    assert(after.persistence_commit_count == before.persistence_commit_count);
+    assert(after.persistence_fail_count == before.persistence_fail_count);
+    assert(after.persistence_stale_snapshot_count ==
+           before.persistence_stale_snapshot_count);
+    assert(after.sd_primary_commit_count == before.sd_primary_commit_count);
+    assert(after.sd_primary_fail_count == before.sd_primary_fail_count);
+    assert(after.sd_backend_generation == before.sd_backend_generation);
+    assert(after.sd_primary_last_error == before.sd_primary_last_error);
+    assert(after.nvs_fallback_commit_count ==
+           before.nvs_fallback_commit_count);
+    assert(after.nvs_fallback_fail_count == before.nvs_fallback_fail_count);
+    assert(after.nvs_fallback_last_error ==
+           before.nvs_fallback_last_error);
+    assert(after.persistence_revision == before.persistence_revision);
+    assert(after.count == before.count);
+    assert(after.capacity == before.capacity);
+    assert(after.loaded == before.loaded);
+    assert(after.persistence_dirty == before.persistence_dirty);
+    assert(after.sd_primary_required == before.sd_primary_required);
+    assert(after.sd_primary_dirty == before.sd_primary_dirty);
+    assert(after.sd_primary_reconcile_pending ==
+           before.sd_primary_reconcile_pending);
+    assert(after.nvs_fallback_dirty == before.nvs_fallback_dirty);
+}
+
+static void test_thread_query_is_exact_paged_and_read_only(void)
+{
+    static const char fingerprint_a[] = "0123456789abcdef";
+    static const char fingerprint_b[] = "fedcba9876543210";
+    static const char utf8_text[] = {
+        'C', 'a', 'f', (char)0xc3, (char)0xa9, ' ',
+        (char)0xe6, (char)0x9d, (char)0xb1,
+        (char)0xe4, (char)0xba, (char)0xac, '\0'
+    };
+    static const char utf8_query[] = {
+        'c', 'A', 'F', (char)0xc3, (char)0xa9, ' ',
+        (char)0xe6, (char)0x9d, (char)0xb1,
+        (char)0xe4, (char)0xba, (char)0xac, '\0'
+    };
+    static const char different_non_ascii[] = {
+        'c', 'a', 'f', (char)0xc3, (char)0x89, '\0'
+    };
+
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    assert(d1l_dm_store_append(
+               fingerprint_a, "Alpha Node", "rx", "Older Match",
+               -60, 40, 1U, 1U, 0U, true, false, 0x8101U) == ESP_OK);
+    assert(d1l_dm_store_append(
+               fingerprint_b, "Beta Node", "rx", "Cross MATCH",
+               -61, 30, 1U, 1U, 0U, true, false, 0x8102U) == ESP_OK);
+    assert(d1l_dm_store_append(
+               fingerprint_a, "Alpha Node", "tx", "middle row",
+               -62, 20, 1U, 1U, 0U, true, false, 0x8103U) == ESP_OK);
+    assert(d1l_dm_store_append(
+               fingerprint_a, "Alpha Node", "rx", utf8_text,
+               -63, 10, 1U, 1U, 0U, true, false, 0x8104U) == ESP_OK);
+    assert(d1l_dm_store_append(
+               fingerprint_a, "Alpha Node", "rx", "Newest mAtCh",
+               -64, 0, 1U, 1U, 0U, true, false, 0x8105U) == ESP_OK);
+    assert(d1l_dm_store_append_volatile(
+               fingerprint_a, "Alpha Node", "rx", "Volatile MATCH",
+               -65, -10, 1U, 1U, 0U, true, false, 0x8106U) == ESP_OK);
+
+    const d1l_dm_store_stats_t before = d1l_dm_store_stats();
+    const uint32_t sd_writes_before = s_sd_write_count;
+    const uint32_t nvs_writes_before = s_nvs_write_count;
+    const size_t operations_before = s_operation_count;
+    d1l_dm_entry_t rows[6] = {0};
+    size_t total = 99U;
+
+    /* Newest-page selection happens over matching rows, but each page is
+     * returned oldest-to-newest for chat rendering. The other fingerprint's
+     * matching text must never leak into this conversation. */
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 2U, 0U, "mAtCh", &total) == 2U);
+    assert(total == 3U);
+    assert(strcmp(rows[0].text, "Newest mAtCh") == 0);
+    assert(strcmp(rows[1].text, "Volatile MATCH") == 0);
+
+    memset(rows, 0, sizeof(rows));
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 2U, 1U, "MATCH", &total) == 2U);
+    assert(total == 3U);
+    assert(strcmp(rows[0].text, "Older Match") == 0);
+    assert(strcmp(rows[1].text, "Newest mAtCh") == 0);
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 1U, 3U, "match", &total) == 0U);
+    assert(total == 3U);
+
+    /* NULL/empty preserve the pre-search API exactly, including the optional
+     * volatile row. */
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 6U, 0U, NULL, &total) == 5U);
+    assert(total == 5U);
+    size_t copied_total = 0U;
+    d1l_dm_entry_t copied[6] = {0};
+    assert(d1l_dm_store_copy_thread_page(
+               fingerprint_a, copied, 6U, 0U, &copied_total) == 5U);
+    assert(copied_total == total);
+    assert(memcmp(rows, copied, 5U * sizeof(rows[0])) == 0);
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 6U, 0U, "", &total) == 5U);
+    assert(total == 5U);
+
+    /* ASCII letters fold, while every UTF-8 byte remains exact. */
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 6U, 0U, utf8_query, &total) == 1U);
+    assert(total == 1U && memcmp(rows[0].text, utf8_text,
+                                sizeof(utf8_text)) == 0);
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 6U, 0U, different_non_ascii,
+               &total) == 0U);
+    assert(total == 0U);
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 6U, 0U, "ALPHA NODE", &total) == 5U);
+    assert(total == 5U);
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 6U, 0U, "CDEF", &total) == 5U);
+    assert(total == 5U);
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, rows, 6U, 0U, "TX", &total) == 1U);
+    assert(total == 1U && strcmp(rows[0].direction, "tx") == 0);
+
+    total = 99U;
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint_a, NULL, 1U, 0U, "match", &total) == 0U);
+    assert(total == 0U);
+    assert_query_did_not_mutate_store(before, d1l_dm_store_stats());
+    assert(s_sd_write_count == sd_writes_before);
+    assert(s_nvs_write_count == nvs_writes_before);
+    assert(s_operation_count == operations_before);
+}
+
 int main(void)
 {
     test_late_ready_merges_before_primary_write();
@@ -2441,6 +2584,7 @@ int main(void)
     test_direct_timeout_flood_retry_then_final_timeout_is_one_session();
     test_awaiting_ack_owner_survives_transition_persistence_failure();
     test_utf8_round_trip_and_invalid_input_have_no_side_effects();
+    test_thread_query_is_exact_paged_and_read_only();
     puts("native DM retained durability: ok");
     return 0;
 }
