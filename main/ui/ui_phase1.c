@@ -24,6 +24,7 @@
 #include "ui_ble.h"
 #include "ui_chrome.h"
 #include "ui_connectivity.h"
+#include "ui_contact_sheets.h"
 #include "ui_device_sheets.h"
 #include "ui_home.h"
 #include "ui_keyboard.h"
@@ -92,14 +93,6 @@ static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_storage_sheet;
 static d1l_wifi_scan_result_t s_wifi_scan_result;
 static bool s_wifi_scan_loaded;
-static lv_obj_t *s_contact_detail_sheet;
-static lv_obj_t *s_contact_options_sheet;
-static lv_obj_t *s_contact_forget_sheet;
-static lv_obj_t *s_contact_edit_sheet;
-static lv_obj_t *s_contact_edit_title;
-static lv_obj_t *s_contact_edit_textarea;
-static lv_obj_t *s_contact_edit_keyboard;
-static lv_obj_t *s_contact_export_sheet;
 static lv_obj_t *s_node_detail_sheet;
 static lv_obj_t *s_route_detail_sheet;
 static lv_obj_t *s_route_trace_sheet;
@@ -130,14 +123,13 @@ static d1l_ui_map_sheets_controller_t s_map_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_ble_controller_t s_ble_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_device_sheets_controller_t s_device_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_radio_settings_controller_t s_radio_settings_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_contact_sheets_controller_t s_contact_sheets_controller EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
 static int32_t s_map_location_lat_e7;
 static int32_t s_map_location_lon_e7;
 static bool s_map_location_returns_to_options;
-static d1l_contact_entry_t s_contact_detail_contact;
-static d1l_contact_entry_t s_contact_export_contact;
 static d1l_node_view_t s_node_detail_node;
 static bool s_node_detail_returns_to_map;
 static d1l_route_entry_t s_route_detail_route;
@@ -152,9 +144,6 @@ static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY];
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
-static char s_contact_export_uri[D1L_CONTACT_EXPORT_URI_LEN];
-static const char s_contact_action_favorite[] = "favorite";
-static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
 static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
@@ -196,21 +185,15 @@ static d1l_ui_compose_probe_result_t s_compose_probe_result;
 #define D1L_UI_TASK_STACK_BYTES 6144U
 
 static void render_active_tab(void);
-static void render_contact_detail_sheet(void);
-static void show_contact_detail_sheet(void);
-static void render_contact_options_sheet(void);
-static void show_contact_options_sheet(void);
-static void render_contact_forget_sheet(void);
+static bool show_contact_detail_sheet(void);
+static bool show_contact_options_sheet(void);
 static void render_node_detail_sheet(void);
 static void open_public_history_event_cb(lv_event_t *event);
 static void open_public_search_event_cb(lv_event_t *event);
 static void open_home_dm_preview_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
-static void open_contact_options_event_cb(lv_event_t *event);
-static void open_contact_forget_event_cb(lv_event_t *event);
 static void open_map_node_detail(const char *fingerprint);
 static void node_detail_dm_event_cb(lv_event_t *event);
-static void open_contact_edit_event_cb(lv_event_t *event);
 static void open_route_trace_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
@@ -667,7 +650,6 @@ static bool render_display_sheet(void);
 static bool render_diagnostics_sheet(void);
 static bool render_map_location_sheet(void);
 static bool render_map_options_sheet(d1l_ui_map_options_page_t page);
-static void create_contact_edit_sheet(lv_obj_t *screen);
 static void hide_node_detail_sheet(void);
 static void request_tab_event_cb(lv_event_t *event);
 static void open_map_location_sheet_event_cb(lv_event_t *event);
@@ -1097,22 +1079,6 @@ static lv_obj_t *create_keyboard(lv_obj_t *parent, const char *name)
     return keyboard;
 }
 
-#if LV_USE_QRCODE
-static lv_obj_t *create_qrcode(lv_obj_t *parent, lv_coord_t size,
-                               lv_color_t dark, lv_color_t light, const char *name)
-{
-    if (!parent) {
-        ESP_LOGE(TAG, "%s parent missing", name ? name : "qrcode");
-        return NULL;
-    }
-    lv_obj_t *qr = lv_qrcode_create(parent, size, dark, light);
-    if (!qr) {
-        ESP_LOGE(TAG, "%s allocation failed", name ? name : "qrcode");
-    }
-    return qr;
-}
-#endif
-
 static lv_obj_t *create_label(lv_obj_t *parent, const char *text, uint32_t color)
 {
     if (!parent || !text) {
@@ -1176,21 +1142,6 @@ static lv_obj_t *create_button(lv_obj_t *parent, const char *text, int x, int y,
         lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, user_data);
     }
     return button;
-}
-
-static void style_danger_button(lv_obj_t *button)
-{
-    if (!button) {
-        return;
-    }
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x3A1720), 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x55202B), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(button, lv_color_hex(0xF87171), 0);
-    lv_obj_set_style_border_width(button, 1, 0);
-    lv_obj_t *label = lv_obj_get_child(button, 0);
-    if (label) {
-        lv_obj_set_style_text_color(label, lv_color_hex(0xFCA5A5), 0);
-    }
 }
 
 static void style_contact_option_button(lv_obj_t *button, uint32_t accent,
@@ -1398,49 +1349,34 @@ static void hide_map_options_sheet(void)
 
 static void hide_contact_edit_sheet(void)
 {
-    d1l_ui_modal_hide(s_contact_edit_sheet);
-    if (s_contact_edit_textarea) {
-        lv_textarea_set_text(s_contact_edit_textarea, "");
-    }
+    d1l_ui_contact_sheets_hide_edit(&s_contact_sheets_controller);
     restore_dock_for_active_tab();
 }
 
 static void hide_contact_options_sheet(void)
 {
-    d1l_ui_modal_hide(s_contact_options_sheet);
+    d1l_ui_contact_sheets_hide_options(&s_contact_sheets_controller);
     restore_dock_for_active_tab();
 }
 
 static void hide_contact_forget_sheet(void)
 {
-    d1l_ui_modal_hide(s_contact_forget_sheet);
+    d1l_ui_contact_sheets_hide_forget(&s_contact_sheets_controller);
     restore_dock_for_active_tab();
 }
 
 static void hide_contact_detail_sheet(void)
 {
-    d1l_ui_modal_hide(s_contact_detail_sheet);
-    d1l_ui_modal_hide(s_contact_options_sheet);
-    d1l_ui_modal_hide(s_contact_forget_sheet);
-    d1l_ui_modal_hide(s_contact_edit_sheet);
-    d1l_ui_modal_hide(s_contact_export_sheet);
+    d1l_ui_contact_sheets_hide_all(&s_contact_sheets_controller, true);
     d1l_ui_modal_hide(s_route_trace_sheet);
-    if (s_contact_edit_textarea) {
-        lv_textarea_set_text(s_contact_edit_textarea, "");
-    }
     hide_node_detail_sheet();
-    memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));
-    memset(&s_contact_export_contact, 0, sizeof(s_contact_export_contact));
     memset(&s_route_trace_contact, 0, sizeof(s_route_trace_contact));
-    s_contact_export_uri[0] = '\0';
     restore_dock_for_active_tab();
 }
 
 static void hide_contact_export_sheet(void)
 {
-    d1l_ui_modal_hide(s_contact_export_sheet);
-    memset(&s_contact_export_contact, 0, sizeof(s_contact_export_contact));
-    s_contact_export_uri[0] = '\0';
+    d1l_ui_contact_sheets_hide_export(&s_contact_sheets_controller);
     restore_dock_for_active_tab();
 }
 
@@ -2221,167 +2157,81 @@ static void open_node_dm_for(const d1l_node_view_t *view)
     open_dm_compose_for_contact(&contact);
 }
 
-static void close_contact_detail_event_cb(lv_event_t *event)
+static const d1l_contact_entry_t *selected_contact(void)
 {
-    (void)event;
-    hide_contact_detail_sheet();
+    return d1l_ui_contact_sheets_contact(&s_contact_sheets_controller);
 }
 
-static void contact_detail_dm_event_cb(lv_event_t *event)
+static bool set_selected_contact(const d1l_contact_entry_t *contact)
 {
-    (void)event;
-    open_dm_compose_for_contact(&s_contact_detail_contact);
+    return contact && d1l_ui_contact_sheets_set_contact(
+        &s_contact_sheets_controller,
+        contact,
+        contact_can_dm(contact),
+        contact_can_export(contact),
+        d1l_contact_store_meshcore_type_id(contact->type));
 }
 
-static void close_contact_options_event_cb(lv_event_t *event)
-{
-    (void)event;
-    hide_contact_options_sheet();
-    show_contact_detail_sheet();
-}
+static void contact_sheets_action_handler(
+    const d1l_ui_contact_action_event_t *event,
+    void *context);
 
-static void open_contact_options_event_cb(lv_event_t *event)
+static bool show_contact_detail_sheet(void)
 {
-    (void)event;
-    if (s_contact_detail_contact.fingerprint[0] == '\0') {
-        show_toast("Contact", ESP_ERR_INVALID_STATE);
-        return;
-    }
-    show_contact_options_sheet();
-}
-
-static void cancel_contact_forget_event_cb(lv_event_t *event)
-{
-    (void)event;
-    hide_contact_forget_sheet();
-    show_contact_options_sheet();
-}
-
-static void confirm_forget_contact_event_cb(lv_event_t *event)
-{
-    (void)event;
-    if (s_contact_detail_contact.fingerprint[0] == '\0') {
-        show_toast("Contact", ESP_ERR_INVALID_STATE);
-        return;
-    }
-    d1l_contact_entry_t removed = {0};
-    esp_err_t ret = d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint, &removed);
-    if (ret == ESP_OK) {
+    request_content_refresh();
+    if (!d1l_ui_contact_sheets_render_detail(
+            &s_contact_sheets_controller,
+            contact_sheets_action_handler,
+            NULL)) {
         hide_contact_detail_sheet();
-        request_content_refresh();
+        return false;
     }
-    show_toast("Forget contact", ret);
+    show_modal(d1l_ui_contact_sheets_detail(&s_contact_sheets_controller));
+    return true;
 }
 
-static void open_contact_forget_event_cb(lv_event_t *event)
+static bool show_contact_options_sheet(void)
 {
-    (void)event;
-    if (s_contact_detail_contact.fingerprint[0] == '\0') {
-        show_toast("Contact", ESP_ERR_INVALID_STATE);
-        return;
+    request_content_refresh();
+    if (!d1l_ui_contact_sheets_render_options(
+            &s_contact_sheets_controller,
+            contact_sheets_action_handler,
+            NULL)) {
+        hide_contact_options_sheet();
+        return false;
     }
-    render_contact_forget_sheet();
-    if (s_contact_forget_sheet) {
-        show_modal(s_contact_forget_sheet);
-    }
+    show_modal(d1l_ui_contact_sheets_options(&s_contact_sheets_controller));
+    return true;
 }
 
-static void close_contact_export_event_cb(lv_event_t *event)
+static bool show_contact_forget_sheet(void)
 {
-    (void)event;
-    hide_contact_export_sheet();
-    show_contact_options_sheet();
+    if (!d1l_ui_contact_sheets_render_forget(
+            &s_contact_sheets_controller,
+            contact_sheets_action_handler,
+            NULL)) {
+        hide_contact_forget_sheet();
+        return false;
+    }
+    show_modal(d1l_ui_contact_sheets_forget(&s_contact_sheets_controller));
+    return true;
 }
 
-static void render_contact_export_sheet(void)
+static bool show_contact_export_sheet(void)
 {
-    if (!s_contact_export_sheet) {
-        return;
+    if (!d1l_ui_contact_sheets_render_export(
+            &s_contact_sheets_controller,
+            contact_sheets_action_handler,
+            NULL)) {
+        hide_contact_export_sheet();
+        return false;
     }
-    lv_obj_clean(s_contact_export_sheet);
-
-    const d1l_contact_entry_t *entry = &s_contact_export_contact;
-    lv_obj_t *title = create_label(s_contact_export_sheet, "Contact Export", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 364);
-    lv_obj_set_pos(title, 100, 10);
-
-    create_button(s_contact_export_sheet, "Back", 12, 6, 72, 44,
-                  close_contact_export_event_cb, NULL);
-
-    lv_obj_t *subtitle = create_label(s_contact_export_sheet, "", 0x8EA0AE);
-    label_set_fmt(subtitle, "MeshCore QR  %.16s  type %u", entry->fingerprint,
-                  (unsigned)d1l_contact_store_meshcore_type_id(entry->type));
-    lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(subtitle, 448);
-    lv_obj_set_pos(subtitle, 16, 60);
-
-    if (s_contact_export_uri[0] == '\0') {
-        lv_obj_t *missing = create_label(s_contact_export_sheet,
-                                         "No retained public key for QR export", 0xF87171);
-        lv_obj_set_pos(missing, 16, 104);
-        return;
-    }
-
-#if LV_USE_QRCODE
-    lv_obj_t *qr = create_qrcode(s_contact_export_sheet, 166,
-                                 lv_color_hex(0x02060A), lv_color_hex(0xF8FAFC),
-                                 "contact export qr");
-    if (!qr) {
-        lv_obj_t *qr_error = create_label(s_contact_export_sheet, "QR allocation failed", 0xF87171);
-        lv_obj_set_pos(qr_error, 24, 150);
-        return;
-    }
-    lv_obj_set_pos(qr, 16, 92);
-    lv_obj_set_style_border_width(qr, 5, 0);
-    lv_obj_set_style_border_color(qr, lv_color_hex(0xF8FAFC), 0);
-    if (lv_qrcode_update(qr, s_contact_export_uri, strlen(s_contact_export_uri)) != LV_RES_OK) {
-        lv_obj_del(qr);
-        lv_obj_t *qr_error = create_label(s_contact_export_sheet, "QR payload too long", 0xF87171);
-        lv_obj_set_pos(qr_error, 24, 150);
-    }
-#else
-    lv_obj_t *qr_disabled = create_label(s_contact_export_sheet, "QR renderer disabled in LVGL", 0xFBBF24);
-    lv_obj_set_pos(qr_disabled, 24, 150);
-#endif
-
-    lv_obj_t *name = create_label(s_contact_export_sheet,
-                                  entry->alias[0] ? entry->alias : entry->fingerprint,
-                                  0xE5EDF5);
-    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(name, 264);
-    lv_obj_set_pos(name, 200, 100);
-
-    lv_obj_t *key = create_label(s_contact_export_sheet, "public key retained", 0x5EEAD4);
-    lv_obj_set_pos(key, 200, 134);
-
-    lv_obj_t *uri_title = create_label(s_contact_export_sheet, "URI", 0x8EA0AE);
-    lv_obj_set_pos(uri_title, 200, 168);
-    lv_obj_t *uri = create_label(s_contact_export_sheet, s_contact_export_uri, 0x93C5FD);
-    lv_label_set_long_mode(uri, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(uri, 264);
-    lv_obj_set_pos(uri, 200, 194);
-
-    lv_obj_t *note = create_label(s_contact_export_sheet,
-                                  "Scan with a MeshCore client or copy from serial",
-                                  0x8EA0AE);
-    lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(note, 448);
-    lv_obj_set_pos(note, 16, 278);
+    show_modal(d1l_ui_contact_sheets_export(&s_contact_sheets_controller));
+    return true;
 }
 
-static void contact_detail_export_event_cb(lv_event_t *event)
+static bool show_contact_edit_sheet(void)
 {
-    (void)event;
-    s_contact_export_contact = s_contact_detail_contact;
-    esp_err_t ret = d1l_app_model_export_contact_uri(s_contact_detail_contact.fingerprint,
-                                                     s_contact_export_uri,
-                                                     sizeof(s_contact_export_uri));
-    if (ret != ESP_OK) {
-        show_toast("Export", ret);
-        return;
-    }
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -2393,220 +2243,162 @@ static void contact_detail_export_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
-    render_contact_export_sheet();
-    if (s_contact_export_sheet) {
-        show_modal(s_contact_export_sheet);
+    d1l_ui_contact_sheets_hide_all(&s_contact_sheets_controller, false);
+    if (!d1l_ui_contact_sheets_render_edit(
+            &s_contact_sheets_controller,
+            contact_sheets_action_handler,
+            NULL)) {
+        hide_contact_edit_sheet();
+        return false;
     }
+    show_modal(d1l_ui_contact_sheets_edit(&s_contact_sheets_controller));
+    return true;
 }
 
-static void show_contact_detail_sheet(void)
+static void update_contact_detail_flags(bool favorite, bool muted)
 {
-    request_content_refresh();
-    render_contact_detail_sheet();
-    if (s_contact_detail_sheet) {
-        show_modal(s_contact_detail_sheet);
-    }
-}
-
-static void render_contact_options_sheet(void)
-{
-    if (!s_contact_options_sheet) {
-        return;
-    }
-    lv_obj_clean(s_contact_options_sheet);
-
-    const d1l_contact_entry_t *entry = &s_contact_detail_contact;
-    create_button(s_contact_options_sheet, "Back", 12, 6, 72, 44,
-                  close_contact_options_event_cb, NULL);
-    lv_obj_t *title = create_label(s_contact_options_sheet, "Contact Options", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 364);
-    lv_obj_set_pos(title, 100, 8);
-
-    lv_obj_t *subtitle = create_label(s_contact_options_sheet,
-                                      entry->alias[0] ? entry->alias : entry->fingerprint,
-                                      0x8EA0AE);
-    lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(subtitle, 364);
-    lv_obj_set_pos(subtitle, 100, 38);
-
-    lv_obj_t *route = create_button(s_contact_options_sheet, "Route trace", 16, 64, 448, 48,
-                                    open_route_trace_event_cb, NULL);
-    style_contact_option_button(route, 0x93C5FD, "Trace path  >");
-    lv_obj_t *rename = create_button(s_contact_options_sheet, "Rename", 16, 118, 448, 48,
-                                     open_contact_edit_event_cb, NULL);
-    style_contact_option_button(rename, 0x5EEAD4, "Change alias  >");
-    lv_obj_t *favorite = create_button(s_contact_options_sheet,
-                                       entry->favorite ? "Remove from favorites" : "Add to favorites",
-                                       16, 172, 448, 48, open_contact_detail_event_cb,
-                                       (void *)s_contact_action_favorite);
-    style_contact_option_button(favorite, 0xFBBF24,
-                                entry->favorite ? "On  >" : "Off  >");
-    lv_obj_t *mute = create_button(s_contact_options_sheet,
-                                   entry->muted ? "Unmute notifications" : "Mute notifications",
-                                   16, 226, 448, 48, open_contact_detail_event_cb,
-                                   (void *)s_contact_action_mute);
-    style_contact_option_button(mute, 0xC4B5FD,
-                                entry->muted ? "On  >" : "Off  >");
-    if (contact_can_export(entry)) {
-        lv_obj_t *export = create_button(s_contact_options_sheet, "Export QR", 16, 280,
-                                         448, 48, contact_detail_export_event_cb, NULL);
-        style_contact_option_button(export, 0xA7F3D0, "Share QR  >");
-    } else {
-        lv_obj_t *export = create_panel(s_contact_options_sheet, 16, 280, 448, 48);
-        if (export) {
-            lv_obj_set_style_pad_all(export, 0, 0);
-            lv_obj_t *title = create_label(export, "Export unavailable", 0x8EA0AE);
-            obj_align_if(title, LV_ALIGN_LEFT_MID, 12, 0);
-            lv_obj_t *reason = create_label(export, "Missing key or role", 0x8EA0AE);
-            obj_align_if(reason, LV_ALIGN_RIGHT_MID, -12, 0);
-        }
-    }
-    lv_obj_t *forget = create_button(s_contact_options_sheet, "Forget contact", 16, 334, 448, 48,
-                                     open_contact_forget_event_cb, NULL);
-    style_danger_button(forget);
-    style_contact_option_button(forget, 0xFCA5A5, "Requires confirmation  >");
-}
-
-static void show_contact_options_sheet(void)
-{
-    request_content_refresh();
-    render_contact_options_sheet();
-    if (s_contact_options_sheet) {
-        show_modal(s_contact_options_sheet);
-    }
-}
-
-static void render_contact_forget_sheet(void)
-{
-    if (!s_contact_forget_sheet) {
-        return;
-    }
-    lv_obj_clean(s_contact_forget_sheet);
-
-    create_button(s_contact_forget_sheet, "Back", 12, 6, 72, 44,
-                  cancel_contact_forget_event_cb, NULL);
-    lv_obj_t *title = create_label(s_contact_forget_sheet, "Forget Contact?", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 364);
-    lv_obj_set_pos(title, 100, 10);
-
-    lv_obj_t *alias = create_label(s_contact_forget_sheet,
-                                   s_contact_detail_contact.alias[0] ?
-                                   s_contact_detail_contact.alias :
-                                   s_contact_detail_contact.fingerprint,
-                                   0xFCA5A5);
-    lv_label_set_long_mode(alias, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(alias, 448);
-    lv_obj_set_pos(alias, 16, 76);
-
-    lv_obj_t *warning = create_panel(s_contact_forget_sheet, 16, 112, 448, 122);
-    if (warning) {
-        lv_obj_t *line1 = create_label(warning,
-                                       "This removes the saved contact and its routing preferences.",
-                                       0xF4F7FB);
-        lv_label_set_long_mode(line1, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(line1, 424);
-        lv_obj_set_pos(line1, 0, 2);
-        lv_obj_t *line2 = create_label(warning,
-                                       "Message history remains on this device.",
-                                       0x8EA0AE);
-        lv_label_set_long_mode(line2, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(line2, 424);
-        lv_obj_set_pos(line2, 0, 62);
-    }
-
-    create_button(s_contact_forget_sheet, "Cancel", 16, 274, 448, 52,
-                  cancel_contact_forget_event_cb, NULL);
-    lv_obj_t *confirm = create_button(s_contact_forget_sheet, "Forget Contact", 16, 340, 448, 52,
-                                      confirm_forget_contact_event_cb, NULL);
-    style_danger_button(confirm);
-}
-
-static void close_contact_edit_event_cb(lv_event_t *event)
-{
-    (void)event;
-    hide_contact_edit_sheet();
-    show_contact_options_sheet();
-}
-
-static void save_contact_edit_event_cb(lv_event_t *event)
-{
-    (void)event;
-    if (s_contact_detail_contact.fingerprint[0] == '\0' || !s_contact_edit_textarea) {
-        show_toast("Contact", ESP_ERR_INVALID_STATE);
-        return;
-    }
-    const char *alias = lv_textarea_get_text(s_contact_edit_textarea);
+    const d1l_contact_entry_t *contact = selected_contact();
     d1l_contact_entry_t updated = {0};
-    esp_err_t ret = d1l_app_model_rename_contact(s_contact_detail_contact.fingerprint,
-                                                  alias, &updated);
-    if (ret == ESP_OK) {
-        s_contact_detail_contact = updated;
+    esp_err_t ret = contact ?
+        d1l_app_model_set_contact_flags(
+            contact->fingerprint, favorite, muted, &updated) :
+        ESP_ERR_INVALID_STATE;
+    if (ret == ESP_OK && set_selected_contact(&updated)) {
+        request_content_refresh();
+        show_contact_options_sheet();
+    } else if (ret == ESP_OK) {
+        ret = ESP_ERR_INVALID_STATE;
+    }
+    show_toast("Contact", ret);
+}
+
+static void contact_sheets_action_handler(
+    const d1l_ui_contact_action_event_t *event,
+    void *context)
+{
+    (void)context;
+    if (!event) {
+        return;
+    }
+    const d1l_contact_entry_t *contact = event->contact;
+    switch (event->action) {
+    case D1L_UI_CONTACT_ACTION_CLOSE_DETAIL:
+        hide_contact_detail_sheet();
+        return;
+    case D1L_UI_CONTACT_ACTION_MESSAGE:
+        if (contact) {
+            open_dm_compose_for_contact(contact);
+        } else {
+            show_toast("DM", ESP_ERR_INVALID_STATE);
+        }
+        return;
+    case D1L_UI_CONTACT_ACTION_OPEN_OPTIONS:
+        if (!show_contact_options_sheet()) {
+            show_toast("Contact", ESP_ERR_NO_MEM);
+        }
+        return;
+    case D1L_UI_CONTACT_ACTION_CLOSE_OPTIONS:
+        hide_contact_options_sheet();
+        show_contact_detail_sheet();
+        return;
+    case D1L_UI_CONTACT_ACTION_ROUTE_TRACE:
+        open_route_trace_event_cb(NULL);
+        return;
+    case D1L_UI_CONTACT_ACTION_RENAME:
+        if (!show_contact_edit_sheet()) {
+            show_toast("Contact", ESP_ERR_NO_MEM);
+        }
+        return;
+    case D1L_UI_CONTACT_ACTION_TOGGLE_FAVORITE:
+        if (contact) {
+            update_contact_detail_flags(!contact->favorite, contact->muted);
+        } else {
+            show_toast("Contact", ESP_ERR_INVALID_STATE);
+        }
+        return;
+    case D1L_UI_CONTACT_ACTION_TOGGLE_MUTE:
+        if (contact) {
+            update_contact_detail_flags(contact->favorite, !contact->muted);
+        } else {
+            show_toast("Contact", ESP_ERR_INVALID_STATE);
+        }
+        return;
+    case D1L_UI_CONTACT_ACTION_EXPORT: {
+        char uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
+        esp_err_t ret = contact ?
+            d1l_app_model_export_contact_uri(
+                contact->fingerprint, uri, sizeof(uri)) :
+            ESP_ERR_INVALID_STATE;
+        if (ret != ESP_OK ||
+            !d1l_ui_contact_sheets_set_export_uri(
+                &s_contact_sheets_controller, uri)) {
+            show_toast("Export", ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret);
+            return;
+        }
+        hide_sheet();
+        hide_public_history_sheet();
+        hide_public_search_sheet();
+        hide_dm_thread_sheet();
+        hide_radio_settings_sheet();
+        hide_compose_sheet();
+        hide_route_detail_sheet();
+        hide_route_trace_sheet();
+        hide_packet_detail_sheet();
+        hide_packet_search_sheet();
+        hide_mesh_roles_sheet();
+        if (!show_contact_export_sheet()) {
+            show_toast("Export", ESP_ERR_NO_MEM);
+        }
+        return;
+    }
+    case D1L_UI_CONTACT_ACTION_OPEN_FORGET:
+        if (!show_contact_forget_sheet()) {
+            show_toast("Contact", ESP_ERR_NO_MEM);
+        }
+        return;
+    case D1L_UI_CONTACT_ACTION_CANCEL_FORGET:
+        hide_contact_forget_sheet();
+        show_contact_options_sheet();
+        return;
+    case D1L_UI_CONTACT_ACTION_CONFIRM_FORGET: {
+        d1l_contact_entry_t removed = {0};
+        esp_err_t ret = contact ?
+            d1l_app_model_delete_contact(contact->fingerprint, &removed) :
+            ESP_ERR_INVALID_STATE;
+        if (ret == ESP_OK) {
+            hide_contact_detail_sheet();
+            request_content_refresh();
+        }
+        show_toast("Forget contact", ret);
+        return;
+    }
+    case D1L_UI_CONTACT_ACTION_CLOSE_EXPORT:
+        hide_contact_export_sheet();
+        show_contact_options_sheet();
+        return;
+    case D1L_UI_CONTACT_ACTION_SAVE_EDIT: {
+        d1l_contact_entry_t updated = {0};
+        esp_err_t ret = contact && event->text ?
+            d1l_app_model_rename_contact(
+                contact->fingerprint, event->text, &updated) :
+            ESP_ERR_INVALID_STATE;
+        if (ret == ESP_OK && set_selected_contact(&updated)) {
+            hide_contact_edit_sheet();
+            show_contact_options_sheet();
+        } else if (ret == ESP_OK) {
+            ret = ESP_ERR_INVALID_STATE;
+        }
+        show_toast("Rename", ret);
+        return;
+    }
+    case D1L_UI_CONTACT_ACTION_CANCEL_EDIT:
         hide_contact_edit_sheet();
         show_contact_options_sheet();
-    }
-    show_toast("Rename", ret);
-}
-
-static void contact_edit_keyboard_event_cb(lv_event_t *event)
-{
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_READY) {
-        save_contact_edit_event_cb(event);
-    } else if (code == LV_EVENT_CANCEL) {
-        close_contact_edit_event_cb(event);
-    }
-}
-
-static void open_contact_edit_event_cb(lv_event_t *event)
-{
-    (void)event;
-    if (s_contact_detail_contact.fingerprint[0] == '\0') {
-        show_toast("Contact", ESP_ERR_INVALID_STATE);
+        return;
+    case D1L_UI_CONTACT_ACTION_NONE:
+    default:
         return;
     }
-    if (!s_contact_edit_sheet) {
-        create_contact_edit_sheet(s_screen);
-    }
-    if (!s_contact_edit_sheet || !s_contact_edit_textarea || !s_contact_edit_keyboard) {
-        show_toast("Contact", ESP_ERR_NO_MEM);
-        return;
-    }
-    hide_sheet();
-    hide_public_history_sheet();
-    hide_public_search_sheet();
-    hide_dm_thread_sheet();
-    hide_radio_settings_sheet();
-    hide_compose_sheet();
-    hide_contact_export_sheet();
-    hide_contact_edit_sheet();
-    hide_route_detail_sheet();
-    hide_route_trace_sheet();
-    hide_packet_detail_sheet();
-    hide_packet_search_sheet();
-    hide_mesh_roles_sheet();
-    d1l_ui_modal_hide(s_contact_options_sheet);
-    d1l_ui_modal_hide(s_contact_forget_sheet);
-    if (s_contact_detail_sheet) {
-        d1l_ui_modal_hide(s_contact_detail_sheet);
-    }
-    if (s_contact_edit_title) {
-        char title[48];
-        snprintf(title, sizeof(title), "Rename %.32s",
-                 s_contact_detail_contact.alias[0] ?
-                 s_contact_detail_contact.alias : s_contact_detail_contact.fingerprint);
-        lv_label_set_text(s_contact_edit_title, title);
-    }
-    if (s_contact_edit_textarea && s_contact_edit_keyboard) {
-        lv_textarea_set_text(s_contact_edit_textarea,
-                             s_contact_detail_contact.alias[0] ?
-                             s_contact_detail_contact.alias : s_contact_detail_contact.fingerprint);
-        lv_keyboard_set_textarea(s_contact_edit_keyboard, s_contact_edit_textarea);
-    }
-    show_modal(s_contact_edit_sheet);
 }
 
 static bool ui_route_trace_is_direct(const d1l_route_entry_t *entry)
@@ -2771,18 +2563,19 @@ static void render_route_trace_sheet(void)
 static void open_route_trace_event_cb(lv_event_t *event)
 {
     (void)event;
-    if (s_contact_detail_contact.fingerprint[0] == '\0') {
+    const d1l_contact_entry_t *contact = selected_contact();
+    if (!contact) {
         show_toast("Trace", ESP_ERR_INVALID_STATE);
         return;
     }
-    s_route_trace_contact = s_contact_detail_contact;
+    s_route_trace_contact = *contact;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_compose_sheet();
-    d1l_ui_modal_hide(s_contact_options_sheet);
+    d1l_ui_contact_sheets_hide_options(&s_contact_sheets_controller);
     hide_contact_export_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
@@ -2794,88 +2587,12 @@ static void open_route_trace_event_cb(lv_event_t *event)
     }
 }
 
-static void render_contact_detail_sheet(void)
-{
-    if (!s_contact_detail_sheet) {
-        return;
-    }
-    lv_obj_clean(s_contact_detail_sheet);
-
-    const d1l_contact_entry_t *entry = &s_contact_detail_contact;
-    create_button(s_contact_detail_sheet, "Back", 12, 6, 72, 44,
-                  close_contact_detail_event_cb, NULL);
-    lv_obj_t *title = create_label(s_contact_detail_sheet,
-                                   entry->alias[0] ? entry->alias : entry->fingerprint,
-                                   0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 364);
-    lv_obj_set_pos(title, 100, 10);
-
-    lv_obj_t *flags = create_label(s_contact_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(flags, "%s  %s  %s", entry->type[0] ? entry->type : "node",
-                  entry->favorite ? "favorite" : "normal",
-                  entry->muted ? "muted" : "audible");
-    lv_obj_set_pos(flags, 16, 64);
-
-    lv_obj_t *fingerprint = create_label(s_contact_detail_sheet, "", 0xE5EDF5);
-    label_set_fmt(fingerprint, "fp %.16s", entry->fingerprint);
-    lv_obj_set_pos(fingerprint, 16, 98);
-
-    lv_obj_t *key = create_label(s_contact_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(key, "%s  route %s  hops %u",
-                  entry->public_key_hex[0] ? "public key retained" : "no public key",
-                  entry->out_path_valid ? "direct" : "flood",
-                  entry->out_path_valid ? entry->path_hops : 0);
-    lv_label_set_long_mode(key, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(key, 448);
-    lv_obj_set_pos(key, 16, 132);
-
-    const int snr_abs = entry->last_snr_tenths < 0 ? -entry->last_snr_tenths : entry->last_snr_tenths;
-    lv_obj_t *signal = create_label(s_contact_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(signal, "rssi %d  snr %s%d.%d  heard %.18s",
-                  entry->last_rssi_dbm,
-                  entry->last_snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10,
-                  entry->heard_name[0] ? entry->heard_name : "-");
-    lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(signal, 448);
-    lv_obj_set_pos(signal, 16, 166);
-
-    lv_obj_t *actions = create_label(s_contact_detail_sheet, "Actions", 0x5EEAD4);
-    lv_obj_set_pos(actions, 16, 210);
-    if (contact_can_dm(entry)) {
-        create_button(s_contact_detail_sheet, "Message", 16, 238, 448, 52,
-                      contact_detail_dm_event_cb, NULL);
-    } else {
-        lv_obj_t *unavailable = create_label(s_contact_detail_sheet,
-                                             "Messaging unavailable for this role",
-                                             0x8EA0AE);
-        lv_obj_set_pos(unavailable, 16, 254);
-    }
-    create_button(s_contact_detail_sheet, "Contact options", 16, 304, 448, 52,
-                  open_contact_options_event_cb, NULL);
-}
-
-static void update_contact_detail_flags(bool favorite, bool muted)
-{
-    d1l_contact_entry_t updated = {0};
-    esp_err_t ret = d1l_app_model_set_contact_flags(s_contact_detail_contact.fingerprint,
-                                                    favorite, muted, &updated);
-    if (ret == ESP_OK) {
-        s_contact_detail_contact = updated;
-        request_content_refresh();
-        show_contact_options_sheet();
-    }
-    show_toast("Contact", ret);
-}
-
 static void show_contact_detail_for(const d1l_contact_entry_t *entry)
 {
-    if (!entry || entry->fingerprint[0] == '\0') {
+    if (!set_selected_contact(entry)) {
         show_toast("Contact", ESP_ERR_INVALID_STATE);
         return;
     }
-    s_contact_detail_contact = *entry;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -2889,26 +2606,17 @@ static void show_contact_detail_for(const d1l_contact_entry_t *entry)
     hide_mesh_roles_sheet();
     hide_contact_export_sheet();
     hide_contact_edit_sheet();
-    d1l_ui_modal_hide(s_contact_options_sheet);
-    d1l_ui_modal_hide(s_contact_forget_sheet);
+    d1l_ui_contact_sheets_hide_options(&s_contact_sheets_controller);
+    d1l_ui_contact_sheets_hide_forget(&s_contact_sheets_controller);
     hide_node_detail_sheet();
-    render_contact_detail_sheet();
-    if (s_contact_detail_sheet) {
-        show_modal(s_contact_detail_sheet);
+    if (!show_contact_detail_sheet()) {
+        show_toast("Contact", ESP_ERR_NO_MEM);
     }
 }
 
 static void open_contact_detail_event_cb(lv_event_t *event)
 {
     const void *user_data = event ? lv_event_get_user_data(event) : NULL;
-    if (user_data == s_contact_action_favorite) {
-        update_contact_detail_flags(!s_contact_detail_contact.favorite, s_contact_detail_contact.muted);
-        return;
-    }
-    if (user_data == s_contact_action_mute) {
-        update_contact_detail_flags(s_contact_detail_contact.favorite, !s_contact_detail_contact.muted);
-        return;
-    }
     show_contact_detail_for((const d1l_contact_entry_t *)user_data);
 }
 
@@ -6035,22 +5743,21 @@ static lv_obj_t *scroll_probe_open_contact_surface(const char *surface)
     d1l_contact_entry_t contact = {0};
     scroll_probe_contact_entry(&contact);
     hide_contact_detail_sheet();
-    s_contact_detail_contact = contact;
+    if (!set_selected_contact(&contact)) {
+        return NULL;
+    }
 
     if (strcmp(surface, "contact_detail") == 0) {
         show_contact_detail_sheet();
-        return s_contact_detail_sheet;
+        return d1l_ui_contact_sheets_detail(&s_contact_sheets_controller);
     }
     if (strcmp(surface, "contact_options") == 0) {
         show_contact_options_sheet();
-        return s_contact_options_sheet;
+        return d1l_ui_contact_sheets_options(&s_contact_sheets_controller);
     }
     if (strcmp(surface, "contact_forget") == 0) {
-        render_contact_forget_sheet();
-        if (s_contact_forget_sheet) {
-            show_modal(s_contact_forget_sheet);
-        }
-        return s_contact_forget_sheet;
+        show_contact_forget_sheet();
+        return d1l_ui_contact_sheets_forget(&s_contact_sheets_controller);
     }
     if (strcmp(surface, "contact_route") == 0) {
         s_route_trace_contact = contact;
@@ -6374,9 +6081,11 @@ static void fill_compose_probe_objects(const char *target, lv_obj_t **sheet,
         *textarea = s_packet_search_textarea;
         *keyboard = s_packet_search_keyboard;
     } else if (strcmp(target, "contact_edit") == 0) {
-        *sheet = s_contact_edit_sheet;
-        *textarea = s_contact_edit_textarea;
-        *keyboard = s_contact_edit_keyboard;
+        *sheet = d1l_ui_contact_sheets_edit(&s_contact_sheets_controller);
+        *textarea = d1l_ui_contact_sheets_edit_textarea(
+            &s_contact_sheets_controller);
+        *keyboard = d1l_ui_contact_sheets_edit_keyboard(
+            &s_contact_sheets_controller);
     } else if (d1l_ui_keyboard_probe_target_is_onboarding(target)) {
         *sheet = s_onboarding_sheet;
         *textarea = s_onboarding_name_textarea;
@@ -6469,16 +6178,17 @@ static void open_keyboard_probe_on_ui_task(const char *target)
             lv_keyboard_set_textarea(s_packet_search_keyboard, s_packet_search_textarea);
         }
     } else if (strcmp(target, "contact_edit") == 0) {
-        snprintf(s_contact_detail_contact.fingerprint,
-                 sizeof(s_contact_detail_contact.fingerprint),
+        d1l_contact_entry_t contact = {0};
+        snprintf(contact.fingerprint, sizeof(contact.fingerprint),
                  "%s", "0000000000000000");
-        snprintf(s_contact_detail_contact.public_key_hex,
-                 sizeof(s_contact_detail_contact.public_key_hex),
+        snprintf(contact.public_key_hex, sizeof(contact.public_key_hex),
                  "%s", "00");
-        snprintf(s_contact_detail_contact.alias,
-                 sizeof(s_contact_detail_contact.alias),
+        snprintf(contact.alias, sizeof(contact.alias),
                  "%s", "Probe Contact");
-        open_contact_edit_event_cb(NULL);
+        snprintf(contact.type, sizeof(contact.type), "%s", "chat");
+        if (set_selected_contact(&contact)) {
+            show_contact_edit_sheet();
+        }
     } else if (d1l_ui_keyboard_probe_target_is_onboarding(target)) {
         s_onboarding_probe_suppressed = false;
         if (s_onboarding_sheet) {
@@ -7024,54 +6734,6 @@ static void create_storage_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_storage_sheet);
 }
 
-static void create_contact_detail_sheet(lv_obj_t *screen)
-{
-    s_contact_detail_sheet = create_object(screen, "contact detail sheet");
-    if (!s_contact_detail_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_contact_detail_sheet, 480, 424);
-    lv_obj_set_pos(s_contact_detail_sheet, 0, 56);
-    lv_obj_set_style_radius(s_contact_detail_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_contact_detail_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_width(s_contact_detail_sheet, 0, 0);
-    lv_obj_set_style_pad_all(s_contact_detail_sheet, 0, 0);
-    lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_contact_detail_sheet);
-}
-
-static void create_contact_options_sheet(lv_obj_t *screen)
-{
-    s_contact_options_sheet = create_object(screen, "contact options sheet");
-    if (!s_contact_options_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_contact_options_sheet, 480, 424);
-    lv_obj_set_pos(s_contact_options_sheet, 0, 56);
-    lv_obj_set_style_radius(s_contact_options_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_contact_options_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_width(s_contact_options_sheet, 0, 0);
-    lv_obj_set_style_pad_all(s_contact_options_sheet, 0, 0);
-    lv_obj_clear_flag(s_contact_options_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_contact_options_sheet);
-}
-
-static void create_contact_forget_sheet(lv_obj_t *screen)
-{
-    s_contact_forget_sheet = create_object(screen, "contact forget sheet");
-    if (!s_contact_forget_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_contact_forget_sheet, 480, 424);
-    lv_obj_set_pos(s_contact_forget_sheet, 0, 56);
-    lv_obj_set_style_radius(s_contact_forget_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_contact_forget_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_width(s_contact_forget_sheet, 0, 0);
-    lv_obj_set_style_pad_all(s_contact_forget_sheet, 0, 0);
-    lv_obj_clear_flag(s_contact_forget_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_contact_forget_sheet);
-}
-
 static void create_node_detail_sheet(lv_obj_t *screen)
 {
     s_node_detail_sheet = create_object(screen, "node detail sheet");
@@ -7087,100 +6749,6 @@ static void create_node_detail_sheet(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_node_detail_sheet, 12, 0);
     lv_obj_clear_flag(s_node_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
     d1l_ui_modal_hide(s_node_detail_sheet);
-}
-
-static void create_contact_edit_sheet(lv_obj_t *screen)
-{
-    if (!screen || s_contact_edit_sheet) {
-        return;
-    }
-    s_contact_edit_sheet = create_object(screen, "contact edit sheet");
-    if (!s_contact_edit_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_contact_edit_sheet, 480, 424);
-    lv_obj_set_pos(s_contact_edit_sheet, 0, 56);
-    lv_obj_set_style_radius(s_contact_edit_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_contact_edit_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_width(s_contact_edit_sheet, 0, 0);
-    lv_obj_set_style_pad_all(s_contact_edit_sheet, 0, 0);
-    lv_obj_clear_flag(s_contact_edit_sheet, LV_OBJ_FLAG_SCROLLABLE);
-
-    s_contact_edit_title = create_label(s_contact_edit_sheet, "Rename Contact", 0xF4F7FB);
-    if (!s_contact_edit_title) {
-        goto fail;
-    }
-    lv_obj_set_style_text_font(s_contact_edit_title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(s_contact_edit_title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_contact_edit_title, 364);
-    lv_obj_set_pos(s_contact_edit_title, 100, 10);
-
-    create_button(s_contact_edit_sheet, "Back", 12, 6, 72, 44,
-                  close_contact_edit_event_cb, NULL);
-    create_button(s_contact_edit_sheet, "Save", 16, 360, 448, 52,
-                  save_contact_edit_event_cb, NULL);
-
-    lv_obj_t *meta = create_label(s_contact_edit_sheet,
-                                  "Alias only; retained history remains", 0x8EA0AE);
-    if (!meta) {
-        goto fail;
-    }
-    lv_obj_set_pos(meta, 16, 60);
-
-    s_contact_edit_textarea = create_textarea(s_contact_edit_sheet, "contact edit textarea");
-    if (!s_contact_edit_textarea) {
-        goto fail;
-    }
-    lv_obj_set_size(s_contact_edit_textarea, 448, 48);
-    lv_obj_set_pos(s_contact_edit_textarea, 16, 88);
-    lv_textarea_set_one_line(s_contact_edit_textarea, true);
-    lv_textarea_set_max_length(s_contact_edit_textarea, D1L_CONTACT_ALIAS_LEN - 1U);
-    lv_textarea_set_placeholder_text(s_contact_edit_textarea, "Contact alias");
-    lv_obj_set_style_radius(s_contact_edit_textarea, 8, 0);
-    lv_obj_set_style_bg_color(s_contact_edit_textarea, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_color(s_contact_edit_textarea, lv_color_hex(0x263241), 0);
-    lv_obj_set_style_text_color(s_contact_edit_textarea, lv_color_hex(0xF4F7FB), 0);
-    lv_obj_set_style_text_color(s_contact_edit_textarea, lv_color_hex(0x8EA0AE),
-                                LV_PART_TEXTAREA_PLACEHOLDER);
-
-    s_contact_edit_keyboard = create_keyboard(s_contact_edit_sheet, "contact edit keyboard");
-    if (!s_contact_edit_keyboard) {
-        goto fail;
-    }
-    d1l_ui_keyboard_configure_input(s_contact_edit_keyboard, s_contact_edit_textarea,
-                                    16, 148, 448, 200);
-    lv_obj_add_event_cb(s_contact_edit_keyboard, contact_edit_keyboard_event_cb,
-                        LV_EVENT_READY, NULL);
-    lv_obj_add_event_cb(s_contact_edit_keyboard, contact_edit_keyboard_event_cb,
-                        LV_EVENT_CANCEL, NULL);
-
-    d1l_ui_modal_hide(s_contact_edit_sheet);
-    return;
-
-fail:
-    if (s_contact_edit_sheet) {
-        lv_obj_del(s_contact_edit_sheet);
-    }
-    s_contact_edit_sheet = NULL;
-    s_contact_edit_title = NULL;
-    s_contact_edit_textarea = NULL;
-    s_contact_edit_keyboard = NULL;
-}
-
-static void create_contact_export_sheet(lv_obj_t *screen)
-{
-    s_contact_export_sheet = create_object(screen, "contact export sheet");
-    if (!s_contact_export_sheet) {
-        return;
-    }
-    lv_obj_set_size(s_contact_export_sheet, 480, 424);
-    lv_obj_set_pos(s_contact_export_sheet, 0, 56);
-    lv_obj_set_style_radius(s_contact_export_sheet, 0, 0);
-    lv_obj_set_style_bg_color(s_contact_export_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_width(s_contact_export_sheet, 0, 0);
-    lv_obj_set_style_pad_all(s_contact_export_sheet, 0, 0);
-    lv_obj_clear_flag(s_contact_export_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_contact_export_sheet);
 }
 
 static void create_route_detail_sheet(lv_obj_t *screen)
@@ -7480,10 +7048,10 @@ esp_err_t d1l_ui_phase1_show_home(void)
     if (!d1l_ui_map_sheets_create(&s_map_sheets_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
     }
-    create_contact_detail_sheet(s_screen);
-    create_contact_options_sheet(s_screen);
-    create_contact_forget_sheet(s_screen);
-    create_contact_export_sheet(s_screen);
+    if (!d1l_ui_contact_sheets_create(
+            &s_contact_sheets_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
     create_node_detail_sheet(s_screen);
     create_route_detail_sheet(s_screen);
     create_route_trace_sheet(s_screen);

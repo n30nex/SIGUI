@@ -202,6 +202,8 @@ def test_ui_console_and_smoke_expose_contacts():
     app_header = read("main/app/app_model.h")
     app_source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
+    contact_ui = read("main/ui/ui_contact_sheets.c")
+    contact_header = read("main/ui/ui_contact_sheets.h")
     nodes_ui = read("main/ui/ui_nodes.c")
     console = read("main/comms/usb_console.c")
     assert "recent_contacts" in app_header
@@ -217,46 +219,34 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "d1l_contact_store_delete(fingerprint, out_contact)" in app_source
     assert "nodes_render_contact_row" in nodes_ui
     assert 'entry->public_key_hex[0] ? "key" : "no key"' in nodes_ui
-    assert "create_contact_detail_sheet" in ui
-    assert "create_contact_options_sheet" in ui
-    assert "create_contact_forget_sheet" in ui
-    assert "create_contact_edit_sheet" in ui
-    assert "render_contact_detail_sheet" in ui
-    assert "render_contact_options_sheet" in ui
-    assert "render_contact_forget_sheet" in ui
-    assert "open_contact_edit_event_cb" in ui
-    assert "d1l_app_model_rename_contact(s_contact_detail_contact.fingerprint" in ui
-    assert "create_contact_export_sheet" in ui
-    assert "render_contact_export_sheet" in ui
-    assert "lv_qrcode_create" in ui
-    assert "lv_qrcode_update" in ui
+    assert "d1l_ui_contact_sheets_create(" in ui
+    for renderer in ("detail", "options", "forget", "edit", "export"):
+        assert f"d1l_ui_contact_sheets_render_{renderer}" in contact_ui
+    assert "D1L_UI_CONTACT_ACTION_RENAME" in contact_header
+    assert "d1l_app_model_rename_contact(" in ui
+    assert "lv_qrcode_create" in contact_ui
+    assert "lv_qrcode_update" in contact_ui
     assert "update_contact_detail_flags" in ui
-    assert "s_contact_action_favorite" in ui
-    assert "s_contact_action_mute" in ui
+    assert "D1L_UI_CONTACT_ACTION_TOGGLE_FAVORITE" in contact_header
+    assert "D1L_UI_CONTACT_ACTION_TOGGLE_MUTE" in contact_header
 
-    delete_call = "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint"
-    confirm = static_void_body(ui, "confirm_forget_contact_event_cb")
+    delete_call = "d1l_app_model_delete_contact(contact->fingerprint"
+    confirm = ui.split("case D1L_UI_CONTACT_ACTION_CONFIRM_FORGET:", 1)[1].split(
+        "case D1L_UI_CONTACT_ACTION_CLOSE_EXPORT:", 1
+    )[0]
     assert ui.count(delete_call) == 1
     assert delete_call in confirm
-    assert "forget_contact_edit_event_cb" not in ui
-    for symbol in (
-        "cancel_contact_forget_event_cb",
-        "close_contact_options_event_cb",
-        "close_contact_edit_event_cb",
-        "save_contact_edit_event_cb",
-        "close_contact_export_event_cb",
-        "close_route_trace_event_cb",
+    for action in (
+        "CANCEL_FORGET",
+        "CANCEL_EDIT",
+        "SAVE_EDIT",
+        "CLOSE_EXPORT",
     ):
-        callback = static_void_body(ui, symbol)
-        assert delete_call not in callback, symbol
-    for symbol in (
-        "cancel_contact_forget_event_cb",
-        "close_contact_edit_event_cb",
-        "save_contact_edit_event_cb",
-        "close_contact_export_event_cb",
-        "close_route_trace_event_cb",
-    ):
-        assert "show_contact_options_sheet();" in static_void_body(ui, symbol), symbol
+        branch = ui.split(f"case D1L_UI_CONTACT_ACTION_{action}:", 1)[1].split(
+            "case D1L_UI_CONTACT_ACTION_", 1
+        )[0]
+        assert delete_call not in branch
+        assert "show_contact_options_sheet();" in branch
 
     assert '"Contacts"' in nodes_ui
     assert 'ok_begin("contacts")' in console

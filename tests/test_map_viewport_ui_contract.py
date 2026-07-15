@@ -294,6 +294,7 @@ def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view
 
 def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
     source = read("main/ui/ui_phase1.c")
+    contact_source = read("main/ui/ui_contact_sheets.c")
     node_gate = function_body(
         source, "static bool node_view_can_dm", "static bool contact_can_dm"
     )
@@ -304,7 +305,9 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
         source, "static void open_dm_compose_for_contact", "static bool contact_from_node_view"
     )
     detail = function_body(
-        source, "static void render_contact_detail_sheet", "static void update_contact_detail_flags"
+        contact_source,
+        "bool d1l_ui_contact_sheets_render_detail",
+        "bool d1l_ui_contact_sheets_render_options",
     )
 
     assert "d1l_app_model_find_contact(view->node.fingerprint, &contact) == ESP_OK" in node_gate
@@ -313,7 +316,7 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
     assert "return d1l_contact_store_can_dm(entry);" in contact_gate
     assert 'strcmp(entry->type, "chat")' not in contact_gate
     assert "if (!contact_can_dm(entry))" in compose
-    assert "if (contact_can_dm(entry))" in detail
+    assert "if (controller->rendered.can_dm)" in detail
     assert '"Messaging unavailable for this role"' in detail
 
     nodes_source = read("main/ui/ui_nodes.c")
@@ -324,12 +327,13 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
     assert "if (can_dm)" in contact_row
 
     options = function_body(
-        source, "static void render_contact_options_sheet(void)\n{",
-        "static void show_contact_options_sheet"
+        contact_source,
+        "bool d1l_ui_contact_sheets_render_options",
+        "bool d1l_ui_contact_sheets_render_forget",
     )
-    assert "if (contact_can_export(entry))" in options
+    assert "if (controller->rendered.can_export)" in options
     assert '"Export unavailable"' in options
-    assert "create_panel(s_contact_options_sheet, 16, 280, 448, 48)" in options
+    assert "create_panel(sheet, 16, 280, 448, 48)" in options
 
 
 def test_map_copy_and_icon_do_not_imply_onboard_gps_positioning():

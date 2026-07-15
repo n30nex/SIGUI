@@ -130,6 +130,7 @@ def test_phase1_routes_sheet_visibility_through_modal_boundary():
 
 def test_exclusive_modal_parent_returns_and_onboarding_suppression_are_explicit():
     ui_source = read("main/ui/ui_phase1.c")
+    contact_source = read("main/ui/ui_contact_sheets.c")
 
     public_close = ui_source.split("static void close_public_search_event_cb", 1)[1].split(
         "static void public_history_load_older_event_cb", 1
@@ -142,39 +143,51 @@ def test_exclusive_modal_parent_returns_and_onboarding_suppression_are_explicit(
     )[0]
     assert "close_public_search_event_cb(event);" in public_keyboard
 
-    contact_options_close = static_void_body(ui_source, "close_contact_options_event_cb")
+    contact_options_close = ui_source.split(
+        "case D1L_UI_CONTACT_ACTION_CLOSE_OPTIONS:", 1
+    )[1].split("case D1L_UI_CONTACT_ACTION_ROUTE_TRACE:", 1)[0]
     assert "hide_contact_options_sheet();" in contact_options_close
     assert "show_contact_detail_sheet();" in contact_options_close
 
     contact_returns = {
-        "close_contact_edit_event_cb": "hide_contact_edit_sheet();",
-        "close_contact_export_event_cb": "hide_contact_export_sheet();",
-        "close_route_trace_event_cb": "hide_route_trace_sheet();",
-        "cancel_contact_forget_event_cb": "hide_contact_forget_sheet();",
+        "CANCEL_EDIT": "hide_contact_edit_sheet();",
+        "CLOSE_EXPORT": "hide_contact_export_sheet();",
+        "CANCEL_FORGET": "hide_contact_forget_sheet();",
     }
-    delete_call = "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint"
-    for symbol, hide_call in contact_returns.items():
-        callback = static_void_body(ui_source, symbol)
-        assert hide_call in callback, symbol
-        assert "show_contact_options_sheet();" in callback, symbol
-        assert delete_call not in callback, symbol
+    delete_call = "d1l_app_model_delete_contact(contact->fingerprint"
+    for action, hide_call in contact_returns.items():
+        callback = ui_source.split(
+            f"case D1L_UI_CONTACT_ACTION_{action}:", 1
+        )[1].split("case D1L_UI_CONTACT_ACTION_", 1)[0]
+        assert hide_call in callback, action
+        assert "show_contact_options_sheet();" in callback, action
+        assert delete_call not in callback, action
 
-    save_contact = static_void_body(ui_source, "save_contact_edit_event_cb")
+    save_contact = ui_source.split(
+        "case D1L_UI_CONTACT_ACTION_SAVE_EDIT:", 1
+    )[1].split("case D1L_UI_CONTACT_ACTION_CANCEL_EDIT:", 1)[0]
     assert "hide_contact_edit_sheet();" in save_contact
     assert "show_contact_options_sheet();" in save_contact
     assert "show_contact_detail_sheet();" not in save_contact
     assert delete_call not in save_contact
 
-    rename_keyboard = static_void_body(ui_source, "contact_edit_keyboard_event_cb")
+    rename_keyboard = contact_source.split("static void keyboard_event_cb", 1)[1].split(
+        "static lv_obj_t *create_label", 1
+    )[0]
     assert "code == LV_EVENT_CANCEL" in rename_keyboard
-    assert "close_contact_edit_event_cb(event);" in rename_keyboard
+    assert "D1L_UI_CONTACT_ACTION_CANCEL_EDIT" in rename_keyboard
+    assert "D1L_UI_CONTACT_ACTION_SAVE_EDIT" in rename_keyboard
     assert delete_call not in rename_keyboard
 
-    forget_page = static_void_body(ui_source, "render_contact_forget_sheet")
-    assert forget_page.count("cancel_contact_forget_event_cb") == 2
-    assert forget_page.count("confirm_forget_contact_event_cb") == 1
+    forget_page = contact_source.split(
+        "bool d1l_ui_contact_sheets_render_forget", 1
+    )[1].split("bool d1l_ui_contact_sheets_render_export", 1)[0]
+    assert forget_page.count("D1L_UI_CONTACT_ACTION_CANCEL_FORGET") == 2
+    assert forget_page.count("D1L_UI_CONTACT_ACTION_CONFIRM_FORGET") == 1
 
-    confirm_forget = static_void_body(ui_source, "confirm_forget_contact_event_cb")
+    confirm_forget = ui_source.split(
+        "case D1L_UI_CONTACT_ACTION_CONFIRM_FORGET:", 1
+    )[1].split("case D1L_UI_CONTACT_ACTION_CLOSE_EXPORT:", 1)[0]
     assert ui_source.count(delete_call) == 1
     assert delete_call in confirm_forget
 
