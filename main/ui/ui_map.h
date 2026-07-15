@@ -33,6 +33,45 @@ typedef struct {
     lv_obj_t *location_keyboard;
 } d1l_ui_map_controls_t;
 
+#define D1L_UI_MAP_SHEETS_CONTROLLER_MAX_BYTES 64U
+
+typedef struct {
+    lv_obj_t *location_sheet;
+    lv_obj_t *options_sheet;
+    d1l_ui_map_controls_t location_controls;
+    d1l_ui_map_options_page_t options_page;
+} d1l_ui_map_sheets_controller_t;
+
+bool d1l_ui_map_sheets_create(d1l_ui_map_sheets_controller_t *controller,
+                               lv_obj_t *parent);
+bool d1l_ui_map_sheets_render_options(
+    d1l_ui_map_sheets_controller_t *controller,
+    const d1l_app_snapshot_t *snapshot,
+    d1l_ui_map_options_page_t page,
+    const d1l_ui_map_callbacks_t *callbacks);
+bool d1l_ui_map_sheets_render_location(
+    d1l_ui_map_sheets_controller_t *controller,
+    const d1l_app_snapshot_t *snapshot,
+    int32_t latitude_e7,
+    int32_t longitude_e7,
+    const d1l_ui_map_callbacks_t *callbacks);
+void d1l_ui_map_sheets_hide_location(
+    d1l_ui_map_sheets_controller_t *controller);
+void d1l_ui_map_sheets_hide_options(
+    d1l_ui_map_sheets_controller_t *controller);
+void d1l_ui_map_sheets_deactivate(
+    d1l_ui_map_sheets_controller_t *controller);
+lv_obj_t *d1l_ui_map_location_sheet(
+    const d1l_ui_map_sheets_controller_t *controller);
+lv_obj_t *d1l_ui_map_options_sheet(
+    const d1l_ui_map_sheets_controller_t *controller);
+lv_obj_t *d1l_ui_map_latitude_textarea(
+    const d1l_ui_map_sheets_controller_t *controller);
+lv_obj_t *d1l_ui_map_longitude_textarea(
+    const d1l_ui_map_sheets_controller_t *controller);
+lv_obj_t *d1l_ui_map_location_keyboard(
+    const d1l_ui_map_sheets_controller_t *controller);
+
 void d1l_ui_map_render(lv_obj_t *parent,
                        const d1l_app_snapshot_t *snapshot,
                        const d1l_ui_map_callbacks_t *callbacks);

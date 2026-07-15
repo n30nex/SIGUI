@@ -11,6 +11,7 @@
 #include "map/map_view_service.h"
 #include "mesh/node_store.h"
 #include "ui_keyboard.h"
+#include "ui_modal.h"
 
 #define MAP_COLOR_BG 0x071018U
 #define MAP_COLOR_PANEL 0x111923U
@@ -35,6 +36,10 @@
 #define MAP_MARKER_LABEL_HEIGHT 20
 #define MAP_MARKER_LABEL_GAP 3
 #define MAP_MARKER_NAME_MAX_CHARS 14U
+
+_Static_assert(sizeof(d1l_ui_map_sheets_controller_t) <=
+                   D1L_UI_MAP_SHEETS_CONTROLLER_MAX_BYTES,
+               "Map sheets controller exceeded its persistent-owner size budget");
 
 typedef struct {
     int16_t x1;
@@ -1591,6 +1596,240 @@ static void map_render_cache_status(lv_obj_t *parent,
         lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_pos(attribution, 12, 298);
     }
+}
+
+static bool map_options_page_is_valid(d1l_ui_map_options_page_t page)
+{
+    return page == D1L_UI_MAP_OPTIONS_ROOT ||
+           page == D1L_UI_MAP_OPTIONS_CACHE_STATUS;
+}
+
+static void map_clear_location_controls(
+    d1l_ui_map_sheets_controller_t *controller)
+{
+    if (!controller) {
+        return;
+    }
+    lv_obj_t *keyboard = controller->location_controls.location_keyboard;
+    if (keyboard && lv_obj_is_valid(keyboard)) {
+        d1l_ui_keyboard_clear_textarea(keyboard);
+        lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+    memset(&controller->location_controls, 0,
+           sizeof(controller->location_controls));
+}
+
+static void map_delete_sheet(lv_obj_t **sheet)
+{
+    if (!sheet || !*sheet) {
+        return;
+    }
+    if (lv_obj_is_valid(*sheet)) {
+        d1l_ui_modal_hide(*sheet);
+        lv_obj_del(*sheet);
+    }
+    *sheet = NULL;
+}
+
+static void map_destroy_sheets(d1l_ui_map_sheets_controller_t *controller)
+{
+    if (!controller) {
+        return;
+    }
+    map_clear_location_controls(controller);
+    map_delete_sheet(&controller->location_sheet);
+    map_delete_sheet(&controller->options_sheet);
+    memset(controller, 0, sizeof(*controller));
+}
+
+static lv_obj_t *map_create_sheet(lv_obj_t *parent)
+{
+    lv_obj_t *sheet = lv_obj_create(parent);
+    if (!sheet) {
+        return NULL;
+    }
+    lv_obj_set_size(sheet, 480, 424);
+    lv_obj_set_pos(sheet, 0, 56);
+    lv_obj_set_style_radius(sheet, 0, 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_hex(MAP_COLOR_BG), 0);
+    lv_obj_set_style_border_width(sheet, 0, 0);
+    lv_obj_set_style_pad_all(sheet, 0, 0);
+    lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+    d1l_ui_modal_hide(sheet);
+    return sheet;
+}
+
+bool d1l_ui_map_sheets_create(d1l_ui_map_sheets_controller_t *controller,
+                               lv_obj_t *parent)
+{
+    if (!controller) {
+        return false;
+    }
+    map_destroy_sheets(controller);
+    if (!parent || !lv_obj_is_valid(parent)) {
+        return false;
+    }
+    controller->location_sheet = map_create_sheet(parent);
+    if (!controller->location_sheet) {
+        map_destroy_sheets(controller);
+        return false;
+    }
+    controller->options_sheet = map_create_sheet(parent);
+    if (!controller->options_sheet) {
+        map_destroy_sheets(controller);
+        return false;
+    }
+    controller->options_page = D1L_UI_MAP_OPTIONS_ROOT;
+    return true;
+}
+
+static void map_invalidate_options(
+    d1l_ui_map_sheets_controller_t *controller)
+{
+    if (!controller) {
+        return;
+    }
+    if (controller->options_sheet &&
+        lv_obj_is_valid(controller->options_sheet)) {
+        d1l_ui_modal_hide(controller->options_sheet);
+        lv_obj_clean(controller->options_sheet);
+    }
+    controller->options_page = D1L_UI_MAP_OPTIONS_ROOT;
+}
+
+static void map_invalidate_location(
+    d1l_ui_map_sheets_controller_t *controller)
+{
+    if (!controller) {
+        return;
+    }
+    map_clear_location_controls(controller);
+    if (controller->location_sheet &&
+        lv_obj_is_valid(controller->location_sheet)) {
+        d1l_ui_modal_hide(controller->location_sheet);
+        lv_obj_clean(controller->location_sheet);
+    }
+}
+
+bool d1l_ui_map_sheets_render_options(
+    d1l_ui_map_sheets_controller_t *controller,
+    const d1l_app_snapshot_t *snapshot,
+    d1l_ui_map_options_page_t page,
+    const d1l_ui_map_callbacks_t *callbacks)
+{
+    if (!controller || !snapshot || !callbacks ||
+        !map_options_page_is_valid(page) || !controller->options_sheet ||
+        !lv_obj_is_valid(controller->options_sheet)) {
+        map_invalidate_options(controller);
+        return false;
+    }
+    d1l_ui_map_render_options(controller->options_sheet, snapshot, page,
+                              callbacks);
+    controller->options_page = page;
+    return true;
+}
+
+bool d1l_ui_map_sheets_render_location(
+    d1l_ui_map_sheets_controller_t *controller,
+    const d1l_app_snapshot_t *snapshot,
+    int32_t latitude_e7,
+    int32_t longitude_e7,
+    const d1l_ui_map_callbacks_t *callbacks)
+{
+    if (!controller || !snapshot || !callbacks ||
+        !controller->location_sheet ||
+        !lv_obj_is_valid(controller->location_sheet)) {
+        map_invalidate_location(controller);
+        return false;
+    }
+    map_clear_location_controls(controller);
+    d1l_ui_map_render_location(controller->location_sheet, snapshot,
+                               latitude_e7, longitude_e7, callbacks,
+                               &controller->location_controls);
+    if (!controller->location_controls.latitude_textarea ||
+        !controller->location_controls.longitude_textarea ||
+        !controller->location_controls.location_keyboard ||
+        !lv_obj_is_valid(controller->location_controls.latitude_textarea) ||
+        !lv_obj_is_valid(controller->location_controls.longitude_textarea) ||
+        !lv_obj_is_valid(controller->location_controls.location_keyboard)) {
+        map_invalidate_location(controller);
+        return false;
+    }
+    return true;
+}
+
+void d1l_ui_map_sheets_hide_location(
+    d1l_ui_map_sheets_controller_t *controller)
+{
+    if (!controller) {
+        return;
+    }
+    map_clear_location_controls(controller);
+    if (controller->location_sheet &&
+        lv_obj_is_valid(controller->location_sheet)) {
+        d1l_ui_modal_hide(controller->location_sheet);
+    }
+}
+
+void d1l_ui_map_sheets_hide_options(
+    d1l_ui_map_sheets_controller_t *controller)
+{
+    if (!controller) {
+        return;
+    }
+    if (controller->options_sheet &&
+        lv_obj_is_valid(controller->options_sheet)) {
+        d1l_ui_modal_hide(controller->options_sheet);
+    }
+    controller->options_page = D1L_UI_MAP_OPTIONS_ROOT;
+}
+
+void d1l_ui_map_sheets_deactivate(
+    d1l_ui_map_sheets_controller_t *controller)
+{
+    d1l_ui_map_sheets_hide_location(controller);
+    d1l_ui_map_sheets_hide_options(controller);
+}
+
+static lv_obj_t *map_valid_object(lv_obj_t *object)
+{
+    return object && lv_obj_is_valid(object) ? object : NULL;
+}
+
+lv_obj_t *d1l_ui_map_location_sheet(
+    const d1l_ui_map_sheets_controller_t *controller)
+{
+    return controller ? map_valid_object(controller->location_sheet) : NULL;
+}
+
+lv_obj_t *d1l_ui_map_options_sheet(
+    const d1l_ui_map_sheets_controller_t *controller)
+{
+    return controller ? map_valid_object(controller->options_sheet) : NULL;
+}
+
+lv_obj_t *d1l_ui_map_latitude_textarea(
+    const d1l_ui_map_sheets_controller_t *controller)
+{
+    return controller ?
+        map_valid_object(controller->location_controls.latitude_textarea) :
+        NULL;
+}
+
+lv_obj_t *d1l_ui_map_longitude_textarea(
+    const d1l_ui_map_sheets_controller_t *controller)
+{
+    return controller ?
+        map_valid_object(controller->location_controls.longitude_textarea) :
+        NULL;
+}
+
+lv_obj_t *d1l_ui_map_location_keyboard(
+    const d1l_ui_map_sheets_controller_t *controller)
+{
+    return controller ?
+        map_valid_object(controller->location_controls.location_keyboard) :
+        NULL;
 }
 
 void d1l_ui_map_render_options(lv_obj_t *parent,

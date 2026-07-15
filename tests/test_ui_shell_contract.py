@@ -443,7 +443,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "tile_source_keyboard" not in map_source
     assert "tile_url_textarea" not in map_source
     assert "d1l_ui_keyboard_configure_input(controller->keyboard" in wifi_source
-    assert "d1l_ui_keyboard_focus_textarea_from_event(s_map_location_keyboard, event" in source
+    assert "d1l_ui_keyboard_focus_textarea_from_event(keyboard, event, latitude" in source
     assert "s_map_tiles_keyboard" not in source
     assert "d1l_ui_keyboard_focus_textarea_from_event(" in wifi_source
     assert 'strcmp(target, "public_search") == 0' in source
@@ -785,8 +785,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_map_options": "open_map_options_sheet_event_cb",
         "close_map_options": "close_map_options_sheet_event_cb",
         "open_map_location": "open_map_location_from_options_event_cb",
-        "edit_map_latitude": "s_map_lat_textarea",
-        "edit_map_longitude": "s_map_lon_textarea",
+        "edit_map_latitude": "d1l_ui_map_latitude_textarea",
+        "edit_map_longitude": "d1l_ui_map_longitude_textarea",
         "save_map_location": "map_location_save_event_cb",
         "close_map_location": "close_map_location_sheet_event_cb",
         "open_map_cache": "open_map_cache_status_event_cb",
@@ -1198,11 +1198,11 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
 
     assert "snapshot->map_tile_cache_ready" in map_source
     assert "snapshot->map_location_set" in map_source
-    assert "create_map_location_sheet(s_screen)" in source
+    assert "d1l_ui_map_sheets_create(&s_map_sheets_controller, s_screen)" in source
     assert "open_map_location_sheet_event_cb" in source
     assert "open_map_options_sheet_event_cb" in source
     assert "render_map_options_sheet" in source
-    assert "create_map_options_sheet(s_screen)" in source
+    assert "d1l_ui_map_sheets_render_options" in source
     assert "open_map_tiles_sheet_event_cb" not in source
     assert "create_map_tiles_sheet" not in source
     assert "map_provider" not in source
