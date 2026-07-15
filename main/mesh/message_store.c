@@ -276,8 +276,8 @@ static size_t blob_oldest_index(uint32_t head, uint32_t count)
         D1L_MESSAGE_STORE_CAPACITY;
 }
 
-static bool persisted_text_is_valid(const char *text, size_t capacity,
-                                    bool require_nonempty)
+static bool persisted_ascii_is_valid(const char *text, size_t capacity,
+                                     bool require_nonempty)
 {
     if (!text || capacity == 0U) {
         return false;
@@ -296,23 +296,35 @@ static bool persisted_text_is_valid(const char *text, size_t capacity,
 static bool entry_is_valid(const d1l_message_entry_t *entry)
 {
     return entry && entry->seq > 0U &&
-           persisted_text_is_valid(entry->direction,
-                                   sizeof(entry->direction), true) &&
-           persisted_text_is_valid(entry->author,
-                                   sizeof(entry->author), true) &&
-           persisted_text_is_valid(entry->text,
-                                   sizeof(entry->text), true);
+           persisted_ascii_is_valid(entry->direction,
+                                    sizeof(entry->direction), true) &&
+           persisted_ascii_is_valid(entry->author,
+                                    sizeof(entry->author), true) &&
+           d1l_user_text_validate_bounded(entry->text,
+                                          sizeof(entry->text), false).result ==
+               D1L_USER_TEXT_OK;
 }
 
 static bool entry_v1_is_valid(const d1l_message_entry_v1_t *entry)
 {
     return entry && entry->seq > 0U &&
-           persisted_text_is_valid(entry->direction,
-                                   sizeof(entry->direction), true) &&
-           persisted_text_is_valid(entry->author,
-                                   sizeof(entry->author), true) &&
-           persisted_text_is_valid(entry->text,
-                                   sizeof(entry->text), true);
+           persisted_ascii_is_valid(entry->direction,
+                                    sizeof(entry->direction), true) &&
+           persisted_ascii_is_valid(entry->author,
+                                    sizeof(entry->author), true) &&
+           persisted_ascii_is_valid(entry->text,
+                                    sizeof(entry->text), true);
+}
+
+static bool legacy_entry_is_valid(const d1l_message_entry_t *entry)
+{
+    return entry && entry->seq > 0U &&
+           persisted_ascii_is_valid(entry->direction,
+                                    sizeof(entry->direction), true) &&
+           persisted_ascii_is_valid(entry->author,
+                                    sizeof(entry->author), true) &&
+           persisted_ascii_is_valid(entry->text,
+                                    sizeof(entry->text), true);
 }
 
 static bool blob_is_valid(const d1l_message_store_blob_t *blob, size_t len)
@@ -354,7 +366,7 @@ static bool blob_v2_is_valid(const d1l_message_store_blob_v2_t *blob,
     for (size_t i = 0U; i < blob->count; ++i) {
         const d1l_message_entry_t *entry =
             &blob->entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
-        if (!entry_is_valid(entry) || entry->seq <= previous_seq ||
+        if (!legacy_entry_is_valid(entry) || entry->seq <= previous_seq ||
             entry->seq >= blob->next_seq) {
             return false;
         }
@@ -379,7 +391,7 @@ static bool blob_v3_is_valid(const d1l_message_store_blob_v3_t *blob,
     for (size_t i = 0U; i < blob->count; ++i) {
         const d1l_message_entry_t *entry =
             &blob->entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
-        if (!entry_is_valid(entry) || entry->seq <= previous_seq ||
+        if (!legacy_entry_is_valid(entry) || entry->seq <= previous_seq ||
             entry->seq >= blob->next_seq) {
             return false;
         }
@@ -1348,8 +1360,10 @@ static esp_err_t append_public_internal(const char *direction, const char *autho
                                         uint8_t path_hash_bytes, uint8_t path_hops,
                                         bool delivered, bool persist)
 {
-    if (!text || text[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
+    const d1l_user_text_info_t text_info = d1l_user_text_validate(text);
+    if (text_info.result != D1L_USER_TEXT_OK) {
+        return text_info.result == D1L_USER_TEXT_TOO_LONG ?
+            ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
     }
     const esp_err_t init_ret = ensure_store_initialized();
     if (init_ret != ESP_OK) {
@@ -1368,7 +1382,7 @@ static esp_err_t append_public_internal(const char *direction, const char *autho
     };
     sanitize_ascii(entry.direction, sizeof(entry.direction), direction ? direction : "rx");
     sanitize_ascii(entry.author, sizeof(entry.author), author ? author : "Public");
-    sanitize_ascii(entry.text, sizeof(entry.text), text);
+    memcpy(entry.text, text, text_info.byte_count + 1U);
     if (entry.direction[0] == '\0') {
         strncpy(entry.direction, "rx", sizeof(entry.direction) - 1U);
     }

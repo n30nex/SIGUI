@@ -39,6 +39,7 @@
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_route_selection.h"
 #include "mesh/meshcore_service.h"
+#include "mesh/user_text.h"
 #include "map/map_png_decoder.h"
 #include "map/map_view_service.h"
 #include "platform/time_service.h"
@@ -1361,14 +1362,25 @@ static void cmd_mesh_advert(const char *cmd, bool flood)
 static void cmd_mesh_send_public(const char *line)
 {
     const char *text = line + strlen("mesh send public ");
+    const d1l_user_text_info_t text_info = d1l_user_text_validate(text);
+    if (text_info.result != D1L_USER_TEXT_OK) {
+        err_result("mesh send public",
+                   text_info.result == D1L_USER_TEXT_EMPTY ? "EMPTY_MESSAGE" :
+                   text_info.result == D1L_USER_TEXT_TOO_LONG ? "MESSAGE_TOO_LONG" :
+                   "INVALID_MESSAGE",
+                   text_info.result == D1L_USER_TEXT_TOO_LONG ?
+                       "max 138 UTF-8 bytes" :
+                       "message must be valid printable UTF-8");
+        return;
+    }
     esp_err_t ret = d1l_meshcore_service_send_public(text);
     if (ret != ESP_OK) {
         err_result("mesh send public",
-                   ret == ESP_ERR_INVALID_ARG ? "EMPTY_MESSAGE" :
+                   ret == ESP_ERR_INVALID_ARG ? "INVALID_MESSAGE" :
                    ret == ESP_ERR_INVALID_SIZE ? "MESSAGE_TOO_LONG" :
                    ret == ESP_ERR_INVALID_STATE ? "MESHCORE_TX_BUSY_OR_RADIO_NOT_READY" :
                    ret == ESP_ERR_NOT_SUPPORTED ? "UNSUPPORTED_RADIO_PROFILE" : "MESHCORE_SEND_FAILED",
-                   ret == ESP_ERR_INVALID_SIZE ? "max 138 characters" :
+                   ret == ESP_ERR_INVALID_SIZE ? "max 138 UTF-8 bytes" :
                    "verify radio profile is US/CAN 910.525 BW62.5 SF7 CR5 and try again");
         return;
     }
@@ -4024,15 +4036,27 @@ static void cmd_messages_clear(void)
 
 static void print_dm_entry_json(const d1l_dm_entry_t *e)
 {
-    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"direction\":\"%s\",\"text\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"attempt\":%u,\"delivered\":%s,\"acked\":%s,\"ack_hash\":%lu,\"ack_response\":{\"identity_valid\":%s,\"state\":\"%s\",\"dispatch_count\":%u,\"last_kind\":\"%s\",\"last_error\":\"%s\"}}",
-           (unsigned long)e->seq, (unsigned long)e->uptime_ms,
-           e->contact_fingerprint, e->contact_alias, e->direction, e->text,
+    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"fingerprint\":",
+           (unsigned long)e->seq, (unsigned long)e->uptime_ms);
+    print_json_string(e->contact_fingerprint);
+    printf(",\"alias\":");
+    print_json_string(e->contact_alias);
+    printf(",\"direction\":");
+    print_json_string(e->direction);
+    printf(",\"text\":");
+    print_json_string(e->text);
+    printf(",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,"
+           "\"path_hops\":%u,\"attempt\":%u,\"delivered\":%s,\"acked\":%s,"
+           "\"ack_hash\":%lu,\"ack_response\":{\"identity_valid\":%s,\"state\":",
            e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
            e->attempt, bool_json(e->delivered), bool_json(e->acked),
-           (unsigned long)e->ack_hash, bool_json(e->identity_digest_valid),
-           d1l_dm_ack_state_name(e->ack_state), e->ack_dispatch_count,
-           d1l_dm_ack_dispatch_kind_name(e->ack_dispatch_kind),
-           esp_err_to_name(e->ack_last_error));
+           (unsigned long)e->ack_hash, bool_json(e->identity_digest_valid));
+    print_json_string(d1l_dm_ack_state_name(e->ack_state));
+    printf(",\"dispatch_count\":%u,\"last_kind\":", e->ack_dispatch_count);
+    print_json_string(d1l_dm_ack_dispatch_kind_name(e->ack_dispatch_kind));
+    printf(",\"last_error\":");
+    print_json_string(esp_err_to_name(e->ack_last_error));
+    printf("}}");
 }
 
 static void cmd_messages_dm(const char *line)
@@ -4759,11 +4783,21 @@ static void cmd_mesh_send_dm(const char *line)
         err_result("mesh send dm", "EMPTY_MESSAGE", "usage: mesh send dm <16-hex-fingerprint> <text>");
         return;
     }
+    const d1l_user_text_info_t text_info = d1l_user_text_validate(text);
+    if (text_info.result != D1L_USER_TEXT_OK) {
+        err_result("mesh send dm",
+                   text_info.result == D1L_USER_TEXT_TOO_LONG ?
+                       "MESSAGE_TOO_LONG" : "INVALID_MESSAGE",
+                   text_info.result == D1L_USER_TEXT_TOO_LONG ?
+                       "max 138 UTF-8 bytes" :
+                       "message must be valid printable UTF-8");
+        return;
+    }
     esp_err_t ret = d1l_meshcore_service_send_dm(fingerprint, text);
     if (ret != ESP_OK) {
         err_result("mesh send dm",
                    ret == ESP_ERR_INVALID_SIZE ? "MESSAGE_TOO_LONG" : esp_err_to_name(ret),
-                   ret == ESP_ERR_INVALID_SIZE ? "max 138 characters" :
+                   ret == ESP_ERR_INVALID_SIZE ? "max 138 UTF-8 bytes" :
                    "DM requires a promoted contact with a retained public key");
         return;
     }

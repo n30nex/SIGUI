@@ -25,6 +25,7 @@
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_runtime_guard.h"
 #include "mesh/meshcore_route_selection.h"
+#include "mesh/meshcore_text_plaintext.h"
 #include "mesh/meshcore_trace.h"
 #include "mesh/meshcore_wire.h"
 #include "mesh/message_store.h"
@@ -67,7 +68,7 @@
 #define D1L_MESHCORE_PATH_RESPONSE_TIMEOUT_MS 60000U
 #define D1L_MESHCORE_RECIPROCAL_PATH_DELAY_MS 500U
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
-               "MeshCore user text limit must reject 139+ chars");
+               "MeshCore user text limit must reject 139+ bytes");
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
                "MeshCore plaintext buffer must fit the user text limit");
 _Static_assert(D1L_MESHCORE_PUB_KEY_SIZE == D1L_MESHCORE_DM_IDENTITY_SENDER_BYTES,
@@ -753,15 +754,12 @@ static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t 
 
 static esp_err_t validate_user_text(const char *text)
 {
-    if (text == NULL || text[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
+    const d1l_user_text_info_t info = d1l_user_text_validate(text);
+    if (info.result == D1L_USER_TEXT_OK) {
+        return ESP_OK;
     }
-    for (size_t i = 0; i <= D1L_MESHCORE_USER_TEXT_MAX; ++i) {
-        if (text[i] == '\0') {
-            return ESP_OK;
-        }
-    }
-    return ESP_ERR_INVALID_SIZE;
+    return info.result == D1L_USER_TEXT_TOO_LONG ?
+        ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
 }
 
 static uint16_t radio_profile_bandwidth_tenths(const d1l_radio_profile_t *profile)
@@ -887,7 +885,11 @@ static void append_public_message_store_rx(const char *message, int rssi, int sn
             body_src = after;
         }
     }
-    sanitize_note(body, sizeof(body), body_src);
+    if (d1l_user_text_copy(body, sizeof(body), body_src) !=
+        D1L_USER_TEXT_OK) {
+        ESP_LOGW(TAG, "message store rejected invalid Public text");
+        return;
+    }
     esp_err_t ret = d1l_message_store_append_public("rx", author, body, rssi,
                                                     (snr_quarters * 10) / 4,
                                                     path_hash_bytes, path_hops, true);
@@ -948,7 +950,12 @@ static bool begin_pending_dm_tx(
                   sizeof(s_pending_dm_tx.fingerprint), contact->fingerprint);
     sanitize_note(s_pending_dm_tx.alias, sizeof(s_pending_dm_tx.alias),
                   contact->alias[0] ? contact->alias : contact->fingerprint);
-    sanitize_note(s_pending_dm_tx.text, sizeof(s_pending_dm_tx.text), text);
+    if (d1l_user_text_copy(s_pending_dm_tx.text,
+                           sizeof(s_pending_dm_tx.text), text) !=
+        D1L_USER_TEXT_OK) {
+        clear_pending_dm_tx();
+        return false;
+    }
     s_pending_dm_tx.selection = *selection;
     s_pending_dm_tx.attempt = attempt;
     s_pending_dm_tx.ack_hash = ack_hash;
@@ -1096,10 +1103,17 @@ static esp_err_t record_detached_dm_queue_failure(
     return ret;
 }
 
-static void remember_pending_public_tx(const char *message)
+static esp_err_t remember_pending_public_tx(const char *message)
 {
-    sanitize_note(s_pending_public_text, sizeof(s_pending_public_text), message);
-    s_pending_public_tx = s_pending_public_text[0] != '\0';
+    const d1l_user_text_result_t result = d1l_user_text_copy(
+        s_pending_public_text, sizeof(s_pending_public_text), message);
+    s_pending_public_tx = result == D1L_USER_TEXT_OK;
+    if (!s_pending_public_tx) {
+        s_pending_public_text[0] = '\0';
+        return result == D1L_USER_TEXT_TOO_LONG ?
+            ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
+    }
+    return ESP_OK;
 }
 
 static void flush_pending_public_tx(void)
@@ -2198,8 +2212,13 @@ static void parse_rx_public_packet(const uint8_t *payload, uint16_t size,
     if (plain_len < 6U || (plain[4] >> 2) != 0) {
         return;
     }
-    plain[plain_len] = '\0';
-    const char *message = (const char *)&plain[5];
+    d1l_meshcore_text_plaintext_view_t text_view = {0};
+    if (!d1l_meshcore_text_plaintext_view(
+            &plain[5], plain_len - 5U, false, 0U, &text_view)) {
+        return;
+    }
+    plain[5U + text_view.text_length] = '\0';
+    const char *message = (const char *)text_view.text;
     s_status.rx_packets++;
     esp_err_t route_ret = d1l_route_store_upsert_observation("public", "Public", "public_text",
                                                              route_name(packet.route), "rx", rssi,
@@ -2255,12 +2274,17 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
             memset(secret, 0, sizeof(secret));
             continue;
         }
-        plain[plain_len] = '\0';
-        const char *message = (const char *)&plain[5];
-        const size_t message_len = strlen(message);
-        const size_t extended_attempt_index = 6U + message_len;
-        const uint8_t extended_attempt =
-            extended_attempt_index < plain_len ? plain[extended_attempt_index] : 0U;
+        d1l_meshcore_text_plaintext_view_t text_view = {0};
+        if (!d1l_meshcore_text_plaintext_view(
+                &plain[5], plain_len - 5U, true, plain[4] & 0x03U,
+                &text_view)) {
+            memset(secret, 0, sizeof(secret));
+            continue;
+        }
+        plain[5U + text_view.text_length] = '\0';
+        const char *message = (const char *)text_view.text;
+        const size_t message_len = text_view.text_length;
+        const uint8_t extended_attempt = text_view.extended_attempt;
         const uint32_t ack_route_now_ms =
             (uint32_t)(esp_timer_get_time() / 1000ULL);
         d1l_contact_entry_t ack_contact = {0};
@@ -4473,7 +4497,11 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
         return ret;
     }
 
-    remember_pending_public_tx(text);
+    ret = remember_pending_public_tx(text);
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
     ret = meshcore_service_send_raw(raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     if (ret != ESP_OK) {
         s_pending_public_tx = false;

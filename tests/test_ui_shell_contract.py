@@ -898,7 +898,21 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "send_compose_text" in source
     assert "static lv_obj_t *s_compose_counter" in source
     assert "update_compose_counter" in source
-    assert 'label_set_fmt(s_compose_counter, "%u/%u"' in source
+    assert 'label_set_fmt(s_compose_counter, "%u chars | %u/%u B"' in source
+    assert "d1l_user_text_validate(text)" in source
+    assert "static lv_obj_t *s_compose_send_button" in source
+    assert "lv_obj_add_state(s_compose_send_button, LV_STATE_DISABLED)" in source
+    assert "lv_obj_clear_state(s_compose_send_button, LV_STATE_DISABLED)" in source
+    send = source.split("static void send_compose_text(void)", 1)[1].split(
+        "static void send_compose_event_cb", 1
+    )[0]
+    validation = send.index("d1l_user_text_validate(text)")
+    assert validation < send.index("d1l_app_model_send_dm_text")
+    assert validation < send.index("d1l_app_model_send_public_text")
+    rejected = send.split("if (info.result != D1L_USER_TEXT_OK)", 1)[1].split(
+        "esp_err_t ret", 1
+    )[0]
+    assert "return;" in rejected
     assert "D1L_MESSAGE_MAX_CHARS" in source
     assert "lv_textarea_create" in source
     assert "lv_textarea_set_max_length" in source

@@ -5,11 +5,15 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "mesh/user_text.h"
 
 #define D1L_MESSAGE_STORE_CAPACITY 16U
 #define D1L_MESSAGE_AUTHOR_LEN 24U
-#define D1L_MESSAGE_MAX_CHARS 138U
-#define D1L_MESSAGE_TEXT_LEN (D1L_MESSAGE_MAX_CHARS + 1U)
+#define D1L_MESSAGE_MAX_BYTES D1L_USER_TEXT_MAX_BYTES
+/* Compatibility alias for existing fixed buffers/UI callers.  The protocol
+ * limit is encoded UTF-8 bytes, not displayed characters. */
+#define D1L_MESSAGE_MAX_CHARS D1L_MESSAGE_MAX_BYTES
+#define D1L_MESSAGE_TEXT_LEN (D1L_MESSAGE_MAX_BYTES + 1U)
 #define D1L_MESSAGE_STORE_PERSIST_RETRY_MS 5000U
 
 typedef struct {

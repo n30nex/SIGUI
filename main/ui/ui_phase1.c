@@ -21,6 +21,7 @@
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
+#include "mesh/user_text.h"
 #include "ui_ble.h"
 #include "ui_chrome.h"
 #include "ui_connectivity.h"
@@ -82,6 +83,7 @@ static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_counter;
 static lv_obj_t *s_compose_keyboard;
+static lv_obj_t *s_compose_send_button;
 static lv_obj_t *s_public_history_sheet;
 static lv_obj_t *s_public_search_sheet;
 static lv_obj_t *s_public_search_textarea;
@@ -1985,12 +1987,35 @@ static void update_compose_counter(void)
         return;
     }
     const char *text = s_compose_textarea ? lv_textarea_get_text(s_compose_textarea) : "";
-    const size_t used = text ? strlen(text) : 0;
-    label_set_fmt(s_compose_counter, "%u/%u",
-                  (unsigned)used, (unsigned)D1L_MESSAGE_MAX_CHARS);
+    const size_t used = text ? strlen(text) : 0U;
+    const d1l_user_text_info_t info = d1l_user_text_validate(text);
+    const bool eligible = info.result == D1L_USER_TEXT_OK;
+    if (eligible) {
+        label_set_fmt(s_compose_counter, "%u chars | %u/%u B",
+                      (unsigned)info.character_count, (unsigned)info.byte_count,
+                      (unsigned)D1L_MESSAGE_MAX_BYTES);
+    } else if (info.result == D1L_USER_TEXT_EMPTY) {
+        label_set_fmt(s_compose_counter, "0 chars | 0/%u B",
+                      (unsigned)D1L_MESSAGE_MAX_BYTES);
+    } else if (info.result == D1L_USER_TEXT_TOO_LONG) {
+        label_set_fmt(s_compose_counter, "Too long | %u/%u B",
+                      (unsigned)used, (unsigned)D1L_MESSAGE_MAX_BYTES);
+    } else {
+        label_set_fmt(s_compose_counter, "Invalid text | %u/%u B",
+                      (unsigned)used, (unsigned)D1L_MESSAGE_MAX_BYTES);
+    }
     lv_obj_set_style_text_color(s_compose_counter,
-                                lv_color_hex(used >= D1L_MESSAGE_MAX_CHARS ? 0xFBBF24 : 0x8EA0AE),
+                                lv_color_hex(eligible ? 0x8EA0AE :
+                                             info.result == D1L_USER_TEXT_EMPTY ?
+                                                 0x8EA0AE : 0xF87171),
                                 0);
+    if (s_compose_send_button) {
+        if (eligible) {
+            lv_obj_clear_state(s_compose_send_button, LV_STATE_DISABLED);
+        } else {
+            lv_obj_add_state(s_compose_send_button, LV_STATE_DISABLED);
+        }
+    }
 }
 
 static void layout_compose_sheet_controls(void)
@@ -2009,8 +2034,9 @@ static void layout_compose_sheet_controls(void)
         lv_obj_set_pos(s_compose_textarea, 16, 58);
     }
     if (s_compose_counter) {
-        lv_obj_set_width(s_compose_counter, 86);
-        lv_obj_set_pos(s_compose_counter, 378, 140);
+        lv_obj_set_width(s_compose_counter, 248);
+        lv_obj_set_pos(s_compose_counter, 216, 140);
+        lv_obj_set_style_text_align(s_compose_counter, LV_TEXT_ALIGN_RIGHT, 0);
     }
     if (s_compose_keyboard) {
         lv_obj_set_size(s_compose_keyboard, 448, 258);
@@ -3614,6 +3640,14 @@ static void send_compose_text(void)
         return;
     }
     const char *text = lv_textarea_get_text(s_compose_textarea);
+    const d1l_user_text_info_t info = d1l_user_text_validate(text);
+    if (info.result != D1L_USER_TEXT_OK) {
+        const esp_err_t error = info.result == D1L_USER_TEXT_TOO_LONG ?
+            ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
+        show_toast(s_compose_dm ? "DM invalid" : "Public message invalid", error);
+        update_compose_counter();
+        return;
+    }
     esp_err_t ret = s_compose_dm ?
                     d1l_app_model_send_dm_text(s_compose_contact.fingerprint, text) :
                     d1l_app_model_send_public_text(text);
@@ -6516,7 +6550,12 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_set_width(s_compose_title, 210);
     lv_obj_set_pos(s_compose_title, 16, 8);
 
-    create_button(s_compose_sheet, "Send", 252, 8, 62, 40, send_compose_event_cb, NULL);
+    s_compose_send_button = create_button(s_compose_sheet, "Send", 252, 8, 62, 40,
+                                          send_compose_event_cb, NULL);
+    if (s_compose_send_button) {
+        lv_obj_set_style_opa(s_compose_send_button, LV_OPA_40, LV_STATE_DISABLED);
+        lv_obj_add_state(s_compose_send_button, LV_STATE_DISABLED);
+    }
     create_button(s_compose_sheet, "Clear", 322, 8, 62, 40, clear_compose_event_cb, NULL);
     create_button(s_compose_sheet, "Close", 392, 8, 72, 40, close_compose_event_cb, NULL);
 

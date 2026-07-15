@@ -362,10 +362,11 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
 
     assert '\\\"ack_response\\\":{' in console
     assert '\\\"identity_valid\\\":%s' in console
-    assert '\\\"state\\\":\\\"%s\\\"' in console
+    assert 'print_json_string(d1l_dm_ack_state_name(e->ack_state));' in console
     assert '\\\"dispatch_count\\\":%u' in console
-    assert '\\\"last_kind\\\":\\\"%s\\\"' in console
-    assert '\\\"last_error\\\":\\\"%s\\\"' in console
+    assert 'print_json_string(d1l_dm_ack_dispatch_kind_name(e->ack_dispatch_kind));' in console
+    assert 'print_json_string(esp_err_to_name(e->ack_last_error));' in console
+    assert "print_json_string(e->text);" in console
     assert "d1l_dm_ack_state_name(entry->ack_state)" in messages_ui
     assert "legacy_unverified" in limitations
     assert "never hydrated into the ACK cache" in limitations
@@ -391,6 +392,28 @@ def test_console_and_smoke_expose_dm_workflow():
     assert "MeshCore direct-message rows are kept in bounded retained storage" in console
     assert "MeshCore direct-message rows are kept in a bounded NVS store" not in console
     assert "messages dm" in SMOKE_COMMANDS
+
+
+def test_current_dm_rows_preserve_strict_utf8_while_legacy_rows_stay_ascii():
+    source = read("main/mesh/dm_store.c")
+    current = source.split("static bool persisted_entry_is_valid", 1)[1].split(
+        "static bool blob_is_valid", 1
+    )[0]
+    legacy = source.split("static bool legacy_entry_is_valid", 1)[1].split(
+        "static bool digest_bytes_are_zero", 1
+    )[0]
+    v5 = source.split("static bool v5_entry_is_valid", 1)[1].split(
+        "static bool persisted_entry_is_valid", 1
+    )[0]
+    append = source.split("static esp_err_t append_internal", 1)[1].split(
+        "esp_err_t d1l_dm_store_append(", 1
+    )[0]
+    assert "D1L_DM_STORE_SCHEMA 6U" in source
+    assert "d1l_user_text_validate_bounded(entry->text" in current
+    assert "persisted_ascii_is_valid(entry->text" in legacy
+    assert "persisted_ascii_is_valid(entry->text" in v5
+    assert "d1l_user_text_validate(text)" in append
+    assert "memcpy(entry.text, text, text_info.byte_count + 1U)" in append
 
 
 def test_app_model_and_ui_preview_recent_dms():

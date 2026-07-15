@@ -16,8 +16,9 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     blob_store = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
     assert "D1L_MESSAGE_STORE_CAPACITY 16U" in header
-    assert "D1L_MESSAGE_MAX_CHARS 138U" in header
-    assert "D1L_MESSAGE_TEXT_LEN (D1L_MESSAGE_MAX_CHARS + 1U)" in header
+    assert "D1L_MESSAGE_MAX_BYTES D1L_USER_TEXT_MAX_BYTES" in header
+    assert "D1L_MESSAGE_MAX_CHARS D1L_MESSAGE_MAX_BYTES" in header
+    assert "D1L_MESSAGE_TEXT_LEN (D1L_MESSAGE_MAX_BYTES + 1U)" in header
     assert "D1L_MESSAGE_STORE_SCHEMA 4U" in source
     assert "D1L_MESSAGE_STORE_SCHEMA_V3 3U" in source
     assert "D1L_MESSAGE_STORE_SCHEMA_V2 2U" in source
@@ -69,6 +70,10 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     assert "contains_casefold" in source
     assert "message_matches_query" in source
     assert '"mesh/message_store.c"' in cmake
+    assert '"mesh/user_text.c"' in cmake
+    assert "d1l_user_text_validate_bounded(entry->text" in source
+    assert "legacy_entry_is_valid" in source
+    assert "memcpy(entry.text, text, text_info.byte_count + 1U)" in source
 
 
 def test_public_rf_appends_to_message_store():

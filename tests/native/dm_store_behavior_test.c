@@ -720,6 +720,29 @@ static void test_v2_migrates_without_init_erase(void)
     assert(((const test_blob_v6_t *)s_nvs.data)->clear_lineage == 0U);
 }
 
+static void test_v2_non_ascii_text_fails_closed_without_migration(void)
+{
+    reset_backend();
+    test_blob_v2_t old = {
+        .schema = TEST_SCHEMA_V2,
+        .next_seq = 2U,
+        .total_written = 1U,
+        .head = 1U,
+        .count = 1U,
+    };
+    old.entries[0] = make_legacy_entry(1U, "legacy-ascii", "rx", 0U);
+    old.entries[0].text[0] = (char)0xc3;
+    old.entries[0].text[1] = (char)0xa9;
+    old.entries[0].text[2] = '\0';
+    assert(blob_write(&s_nvs, &old, sizeof(old)) == ESP_OK);
+    const mock_blob_t before = s_nvs;
+
+    assert(d1l_dm_store_init() == ESP_ERR_INVALID_STATE);
+    assert(!d1l_dm_store_stats().loaded);
+    assert(s_nvs_write_count == 0U);
+    assert(memcmp(&s_nvs, &before, sizeof(s_nvs)) == 0);
+}
+
 static void test_v3_migrates_without_inventing_clear_lineage(void)
 {
     reset_backend();
@@ -2327,6 +2350,44 @@ static void test_awaiting_ack_owner_survives_transition_persistence_failure(void
     assert(!d1l_dm_store_stats().persistence_dirty);
 }
 
+static void test_utf8_round_trip_and_invalid_input_have_no_side_effects(void)
+{
+    reset_backend();
+    assert(d1l_dm_store_init() == ESP_OK);
+    const char mixed[] = {
+        'C', 'a', 'f', (char)0xc3, (char)0xa9, ' ',
+        (char)0xe6, (char)0x9d, (char)0xb1,
+        (char)0xe4, (char)0xba, (char)0xac, ' ',
+        (char)0xf0, (char)0x9f, (char)0x98, (char)0x80,
+        ' ', '"', 'x', '\\', 'y', '"', '\0'
+    };
+    assert(d1l_dm_store_append(
+               "0123456789abcdef", "Node", "rx", mixed, -50, 50,
+               1U, 1U, 0U, true, false, 0U) == ESP_OK);
+
+    const d1l_dm_store_stats_t before = d1l_dm_store_stats();
+    const uint32_t nvs_writes_before = s_nvs_write_count;
+    const char invalid[] = {(char)0xed, (char)0xa0, (char)0x80, '\0'};
+    assert(d1l_dm_store_append(
+               "0123456789abcdef", "Node", "rx", invalid, -50, 50,
+               1U, 1U, 0U, true, false, 0U) == ESP_ERR_INVALID_ARG);
+    char oversized[D1L_MESSAGE_TEXT_LEN + 1U];
+    memset(oversized, 'q', sizeof(oversized) - 1U);
+    oversized[sizeof(oversized) - 1U] = '\0';
+    assert(d1l_dm_store_append(
+               "0123456789abcdef", "Node", "rx", oversized, -50, 50,
+               1U, 1U, 0U, true, false, 0U) == ESP_ERR_INVALID_SIZE);
+    const d1l_dm_store_stats_t after = d1l_dm_store_stats();
+    assert(after.count == before.count);
+    assert(after.total_written == before.total_written);
+    assert(s_nvs_write_count == nvs_writes_before);
+
+    assert(d1l_dm_store_init() == ESP_OK);
+    d1l_dm_entry_t restored = {0};
+    assert(d1l_dm_store_copy_recent(&restored, 1U) == 1U);
+    assert(memcmp(restored.text, mixed, sizeof(mixed)) == 0);
+}
+
 int main(void)
 {
     test_late_ready_merges_before_primary_write();
@@ -2338,6 +2399,7 @@ int main(void)
     test_generation_flip_after_merge_rolls_back_before_nvs_write();
     test_init_generation_flip_restores_nvs_before_loaded_commit();
     test_v2_migrates_without_init_erase();
+    test_v2_non_ascii_text_fails_closed_without_migration();
     test_v3_migrates_without_inventing_clear_lineage();
     test_volatile_preview_never_marks_persistence_dirty();
     test_append_path_limits_match_reboot_validator();
@@ -2378,6 +2440,7 @@ int main(void)
     test_retry_attempt_advances_once_and_fails_closed_at_overflow();
     test_direct_timeout_flood_retry_then_final_timeout_is_one_session();
     test_awaiting_ack_owner_survives_transition_persistence_failure();
+    test_utf8_round_trip_and_invalid_input_have_no_side_effects();
     puts("native DM retained durability: ok");
     return 0;
 }

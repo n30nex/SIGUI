@@ -27,6 +27,7 @@ def test_dm_retained_backend_reconciliation_and_split_retry(tmp_path):
         str(ROOT / "main"),
         str(ROOT / "main/mesh/dm_delivery_state.c"),
         str(ROOT / "main/mesh/dm_store.c"),
+        str(ROOT / "main/mesh/user_text.c"),
         str(ROOT / "tests/native/dm_store_behavior_test.c"),
         "-o",
         str(executable),

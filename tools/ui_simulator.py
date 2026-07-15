@@ -817,6 +817,7 @@ class Surface:
         marks_read: bool = False,
         destructive: bool = False,
         formats_sd: bool = False,
+        enabled: bool = True,
     ):
         target = self._minimum_touch_box(box)
         x0, y0, x1, y1 = target
@@ -849,6 +850,7 @@ class Surface:
                 "marks_read": marks_read,
                 "destructive": destructive,
                 "formats_sd": formats_sd,
+                "enabled": enabled,
             }
         )
 
@@ -1368,19 +1370,23 @@ def draw_button(
     dm_tx: bool = False,
     destructive: bool = False,
     formats_sd: bool = False,
+    enabled: bool = True,
 ):
-    s.round_rect(box, (24, 43, 54), (52, 92, 105), 8)
-    s.text(label, (box[0] + 8, box[1] + 8, box[2] - 8, box[3] - 8), 14, color, True, "center")
+    s.round_rect(box, (24, 43, 54) if enabled else (30, 34, 40),
+                 (52, 92, 105) if enabled else (58, 62, 68), 8)
+    s.text(label, (box[0] + 8, box[1] + 8, box[2] - 8, box[3] - 8), 14,
+           color if enabled else MUTED, True, "center")
     s.touch_target(
         label,
         box,
         action=action,
         destination=destination,
-        rf_tx=rf_tx,
-        public_rf_tx=public_rf_tx,
-        dm_tx=dm_tx,
+        rf_tx=rf_tx if enabled else False,
+        public_rf_tx=public_rf_tx if enabled else False,
+        dm_tx=dm_tx if enabled else False,
         destructive=destructive,
         formats_sd=formats_sd,
+        enabled=enabled,
     )
 
 
@@ -2882,18 +2888,31 @@ def draw_sheet_frame(s: Surface, title: str, subtitle: str | None = None):
         s.text(subtitle, (44, 124, 436, 146), 12, MUTED)
 
 
-def render_compose_sheet(s: Surface, snap: Snapshot):
+def render_compose_state(
+    s: Surface,
+    snap: Snapshot,
+    *,
+    sample: str,
+    counter: str,
+    validation: str,
+    byte_count: int,
+    character_count: int | None,
+    send_enabled: bool,
+):
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
     s.text("Compose Public", (16, 64, 240, 96), 22, TEXT, True)
-    draw_button(s, (252, 64, 314, 104), "Send", GREEN, action="send_public_text", public_rf_tx=True)
+    draw_button(s, (252, 64, 314, 104), "Send", GREEN,
+                action="send_public_text", public_rf_tx=send_enabled,
+                enabled=send_enabled)
     draw_button(s, (322, 64, 384, 104), "Clear", ACCENT, action="clear_public_message")
     draw_button(s, (392, 64, 464, 104), "Close", MUTED, action="close_compose", destination="messages_public")
     s.round_rect((16, 114, 464, 192), SURFACE_2, BORDER, 8)
     s.touch_target("Public message", (16, 114, 464, 192), kind="text_field", action="edit_public_message")
     s.text("Public message", (28, 122, 220, 144), 13, MUTED, True)
-    s.text("test from DeskOS D1L", (28, 150, 452, 188), 18, TEXT)
-    s.text("20/138", (374, 196, 464, 218), 12, MUTED, True, "right")
+    s.text(sample, (28, 150, 452, 188), 18, TEXT)
+    s.text(counter, (216, 196, 464, 218), 12,
+           MUTED if send_enabled else RED, True, "right")
     s.text("Keyboard", (28, 196, 180, 216), 13, MUTED, True)
     s.round_rect((16, 214, 464, 472), (10, 16, 24), BORDER, 8)
     keyboard_rows = (
@@ -2920,7 +2939,55 @@ def render_compose_sheet(s: Surface, snap: Snapshot):
             min_key = min(min_key, width, 52)
             x += width + gap
         y += 60
-    s.metrics.update({"compose_keyboard_rows": 4, "compose_keyboard_min_key_px": min_key})
+    s.metrics.update({
+        "compose_keyboard_rows": 4,
+        "compose_keyboard_min_key_px": min_key,
+        "compose_validation": validation,
+        "compose_byte_count": byte_count,
+        "compose_character_count": character_count,
+        "compose_limit_bytes": 138,
+        "compose_send_enabled": send_enabled,
+    })
+
+
+def render_compose_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s, snap, sample="test from DeskOS D1L",
+        counter="20 chars | 20/138 B", validation="valid",
+        byte_count=20, character_count=20, send_enabled=True,
+    )
+
+
+def render_compose_utf8_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s, snap, sample="Café 東京",
+        counter="7 chars | 12/138 B", validation="valid_utf8",
+        byte_count=12, character_count=7, send_enabled=True,
+    )
+
+
+def render_compose_byte_limit_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s, snap, sample="€ × 46 (exact byte boundary)",
+        counter="46 chars | 138/138 B", validation="valid_boundary",
+        byte_count=138, character_count=46, send_enabled=True,
+    )
+
+
+def render_compose_oversize_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s, snap, sample="😀 × 35 (paste rejected)",
+        counter="Too long | 140/138 B", validation="too_long",
+        byte_count=140, character_count=35, send_enabled=False,
+    )
+
+
+def render_compose_invalid_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s, snap, sample="Invalid UTF-8 input rejected",
+        counter="Invalid text | 3/138 B", validation="invalid_utf8",
+        byte_count=3, character_count=None, send_enabled=False,
+    )
 
 
 def render_public_history_sheet(s: Surface, snap: Snapshot):
@@ -4197,6 +4264,10 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "settings_support_expanded": render_settings_support_expanded,
     "settings_advanced_expanded": render_settings_advanced_expanded,
     "compose_sheet": render_compose_sheet,
+    "compose_utf8_sheet": render_compose_utf8_sheet,
+    "compose_byte_limit_sheet": render_compose_byte_limit_sheet,
+    "compose_oversize_sheet": render_compose_oversize_sheet,
+    "compose_invalid_sheet": render_compose_invalid_sheet,
     "public_history_sheet": render_public_history_sheet,
     "public_search_sheet": render_public_search_sheet,
     "radio_settings_sheet": render_radio_settings_sheet,
@@ -4347,7 +4418,11 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Mesh advertise",
         "Broadcast presence",
     ),
-    "compose_sheet": ("Compose Public", "Public message", "20/138", "Keyboard", "Send", "Clear", "Close"),
+    "compose_sheet": ("Compose Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"),
+    "compose_utf8_sheet": ("Compose Public", "Café 東京", "7 chars | 12/138 B", "Send"),
+    "compose_byte_limit_sheet": ("Compose Public", "46 chars | 138/138 B", "Send"),
+    "compose_oversize_sheet": ("Compose Public", "Too long | 140/138 B", "Send"),
+    "compose_invalid_sheet": ("Compose Public", "Invalid text | 3/138 B", "Send"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
     "radio_settings_sheet": (
