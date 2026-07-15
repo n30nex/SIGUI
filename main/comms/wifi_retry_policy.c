@@ -117,6 +117,10 @@ void d1l_wifi_retry_policy_mark_starting(d1l_wifi_retry_policy_t *policy)
     if (!policy) {
         return;
     }
+    if (policy->state == D1L_WIFI_RUNTIME_SCANNING && policy->enabled &&
+        !policy->user_cancelled && !policy->safe_mode) {
+        return;
+    }
     if (policy->enabled && policy->profile_available &&
         !policy->user_cancelled && !policy->safe_mode) {
         policy->state = D1L_WIFI_RUNTIME_STARTING;
@@ -138,10 +142,19 @@ void d1l_wifi_retry_policy_mark_connecting(d1l_wifi_retry_policy_t *policy)
     }
 }
 
-bool d1l_wifi_retry_policy_begin_scan(d1l_wifi_retry_policy_t *policy)
+bool d1l_wifi_retry_policy_scan_allowed(
+    const d1l_wifi_retry_policy_t *policy)
 {
     if (!policy || !policy->enabled || policy->user_cancelled ||
         policy->safe_mode) {
+        return false;
+    }
+    return true;
+}
+
+bool d1l_wifi_retry_policy_begin_scan(d1l_wifi_retry_policy_t *policy)
+{
+    if (!d1l_wifi_retry_policy_scan_allowed(policy)) {
         return false;
     }
     policy->state = D1L_WIFI_RUNTIME_SCANNING;

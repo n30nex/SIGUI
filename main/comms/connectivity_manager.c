@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "comms/connectivity_boot_guard.h"
 #include "comms/wifi_retry_policy.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -19,11 +20,16 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
+#include "nvs.h"
 #endif
 
 #define D1L_WIFI_RETRY_TASK_STACK_BYTES 3072U
 #define D1L_WIFI_RETRY_TASK_PRIORITY 5U
 #define D1L_WIFI_CONTROL_LOCK_TIMEOUT_MS 10000U
+#define D1L_CONNECTIVITY_GUARD_LOCK_TIMEOUT_MS 10000U
+#define D1L_CONNECTIVITY_GUARD_STABLE_WINDOW_MS 30000U
+#define D1L_CONNECTIVITY_GUARD_NAMESPACE "d1l_conn"
+#define D1L_CONNECTIVITY_GUARD_KEY "boot_guard"
 
 static bool s_wifi_started;
 static bool s_wifi_connected;
@@ -34,6 +40,11 @@ static uint16_t s_wifi_last_disconnect_reason;
 static d1l_wifi_retry_policy_t s_wifi_policy;
 static d1l_wifi_local_leave_token_t s_wifi_local_leave_token;
 static portMUX_TYPE s_wifi_policy_lock = portMUX_INITIALIZER_UNLOCKED;
+static d1l_connectivity_boot_guard_record_t s_boot_guard;
+static d1l_connectivity_boot_guard_decision_t s_boot_guard_decision;
+static bool s_boot_guard_ready;
+static bool s_boot_guard_recovered;
+static esp_err_t s_boot_guard_error = ESP_ERR_INVALID_STATE;
 
 #ifdef CONFIG_ESP_WIFI_ENABLED
 static bool s_wifi_initialized;
@@ -42,6 +53,10 @@ static esp_event_handler_instance_t s_wifi_event_instance;
 static esp_event_handler_instance_t s_ip_event_instance;
 static TaskHandle_t s_wifi_retry_task;
 static SemaphoreHandle_t s_wifi_control_lock;
+static SemaphoreHandle_t s_boot_guard_lock;
+static bool s_boot_guard_stable_ack_pending;
+static uint64_t s_boot_guard_stable_ack_due_ms;
+static uint32_t s_boot_guard_stable_ack_record_generation;
 #endif
 
 static bool build_wifi_enabled(void)
@@ -89,6 +104,303 @@ static void set_wifi_last_error(const char *reason)
 }
 
 #ifdef CONFIG_ESP_WIFI_ENABLED
+static bool reset_reason_is_crash_like(esp_reset_reason_t reason)
+{
+    return reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT ||
+           reason == ESP_RST_TASK_WDT || reason == ESP_RST_WDT ||
+           reason == ESP_RST_BROWNOUT;
+}
+
+static void set_boot_guard_result(esp_err_t error, bool recovered)
+{
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    s_boot_guard_ready = error == ESP_OK;
+    s_boot_guard_recovered = recovered;
+    s_boot_guard_error = error;
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+}
+
+static void cancel_boot_guard_stable_ack(void);
+
+static esp_err_t take_boot_guard_lock(void)
+{
+    if (!s_boot_guard_lock) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    TickType_t timeout_ticks =
+        pdMS_TO_TICKS(D1L_CONNECTIVITY_GUARD_LOCK_TIMEOUT_MS);
+    if (timeout_ticks == 0U) {
+        timeout_ticks = 1U;
+    }
+    return xSemaphoreTake(s_boot_guard_lock, timeout_ticks) == pdTRUE ?
+        ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static void give_boot_guard_lock(void)
+{
+    if (s_boot_guard_lock) {
+        xSemaphoreGive(s_boot_guard_lock);
+    }
+}
+
+static esp_err_t persist_boot_guard_record(
+    const d1l_connectivity_boot_guard_record_t *record)
+{
+    if (!record || !d1l_connectivity_boot_guard_valid(record)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(D1L_CONNECTIVITY_GUARD_NAMESPACE,
+                             NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = nvs_set_blob(handle, D1L_CONNECTIVITY_GUARD_KEY,
+                       record, sizeof(*record));
+    if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return ret;
+}
+
+static esp_err_t load_and_advance_boot_guard_unlocked(void)
+{
+    d1l_connectivity_boot_guard_record_t record = {0};
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(D1L_CONNECTIVITY_GUARD_NAMESPACE,
+                             NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        set_boot_guard_result(ret, false);
+        return ret;
+    }
+
+    size_t length = sizeof(record);
+    ret = nvs_get_blob(handle, D1L_CONNECTIVITY_GUARD_KEY,
+                       &record, &length);
+    const bool missing = ret == ESP_ERR_NVS_NOT_FOUND;
+    const bool valid = ret == ESP_OK && length == sizeof(record) &&
+        d1l_connectivity_boot_guard_valid(&record);
+    const bool recoverable = missing || ret == ESP_ERR_NVS_INVALID_LENGTH ||
+        (ret == ESP_OK && !valid);
+    if (!valid && !recoverable) {
+        nvs_close(handle);
+        set_boot_guard_result(ret, false);
+        return ret;
+    }
+    if (!valid) {
+        memset(&record, 0, sizeof(record));
+    }
+
+    const d1l_connectivity_boot_guard_decision_t decision =
+        d1l_connectivity_boot_guard_note_boot(
+            &record, reset_reason_is_crash_like(esp_reset_reason()));
+    ret = nvs_set_blob(handle, D1L_CONNECTIVITY_GUARD_KEY,
+                       &record, sizeof(record));
+    if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    if (ret != ESP_OK) {
+        set_boot_guard_result(ret, !missing && !valid);
+        return ret;
+    }
+
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    s_boot_guard = record;
+    s_boot_guard_decision = decision;
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+    set_boot_guard_result(ESP_OK, !missing && !valid);
+    return ESP_OK;
+}
+
+static esp_err_t load_and_advance_boot_guard(void)
+{
+    const esp_err_t lock_ret = take_boot_guard_lock();
+    if (lock_ret != ESP_OK) {
+        set_boot_guard_result(lock_ret, false);
+        return lock_ret;
+    }
+    const esp_err_t ret = load_and_advance_boot_guard_unlocked();
+    give_boot_guard_lock();
+    return ret;
+}
+
+static esp_err_t mark_boot_guard_active_unlocked(
+    d1l_connectivity_subsystem_t subsystem)
+{
+    d1l_connectivity_boot_guard_record_t record;
+    bool ready;
+    bool recovered;
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    record = s_boot_guard;
+    ready = s_boot_guard_ready;
+    recovered = s_boot_guard_recovered;
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+    if (ready && d1l_connectivity_boot_guard_valid(&record) &&
+        record.last_active_subsystem == (uint8_t)subsystem) {
+        return ESP_OK;
+    }
+    d1l_connectivity_boot_guard_mark_active(&record, subsystem);
+    const esp_err_t ret = persist_boot_guard_record(&record);
+    if (ret == ESP_OK) {
+        portENTER_CRITICAL(&s_wifi_policy_lock);
+        s_boot_guard = record;
+        portEXIT_CRITICAL(&s_wifi_policy_lock);
+    }
+    set_boot_guard_result(ret, recovered);
+    return ret;
+}
+
+static esp_err_t mark_boot_guard_active(
+    d1l_connectivity_subsystem_t subsystem)
+{
+    const esp_err_t lock_ret = take_boot_guard_lock();
+    if (lock_ret != ESP_OK) {
+        set_boot_guard_result(lock_ret, false);
+        return lock_ret;
+    }
+    const esp_err_t ret = mark_boot_guard_active_unlocked(subsystem);
+    give_boot_guard_lock();
+    return ret;
+}
+
+static esp_err_t clear_boot_guard_unlocked(void)
+{
+    d1l_connectivity_boot_guard_record_t record;
+    bool ready;
+    bool recovered;
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    record = s_boot_guard;
+    ready = s_boot_guard_ready;
+    recovered = s_boot_guard_recovered;
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+    if (ready && d1l_connectivity_boot_guard_valid(&record) &&
+        record.last_active_subsystem == D1L_CONNECTIVITY_SUBSYSTEM_NONE &&
+        record.consecutive_crash_boots == 0U) {
+        return ESP_OK;
+    }
+    d1l_connectivity_boot_guard_clear(&record);
+    const esp_err_t ret = persist_boot_guard_record(&record);
+    if (ret == ESP_OK) {
+        portENTER_CRITICAL(&s_wifi_policy_lock);
+        s_boot_guard = record;
+        s_boot_guard_decision =
+            (d1l_connectivity_boot_guard_decision_t){0};
+        portEXIT_CRITICAL(&s_wifi_policy_lock);
+    }
+    set_boot_guard_result(ret, recovered);
+    return ret;
+}
+
+static esp_err_t clear_boot_guard(void)
+{
+    cancel_boot_guard_stable_ack();
+    const esp_err_t lock_ret = take_boot_guard_lock();
+    if (lock_ret != ESP_OK) {
+        set_boot_guard_result(lock_ret, false);
+        return lock_ret;
+    }
+    const esp_err_t ret = clear_boot_guard_unlocked();
+    give_boot_guard_lock();
+    return ret;
+}
+
+static esp_err_t acknowledge_boot_guard_stable_unlocked(
+    d1l_connectivity_subsystem_t subsystem,
+    uint32_t expected_record_generation)
+{
+    d1l_connectivity_boot_guard_record_t record;
+    bool ready;
+    bool recovered;
+    esp_err_t prior_error;
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    record = s_boot_guard;
+    ready = s_boot_guard_ready;
+    recovered = s_boot_guard_recovered;
+    prior_error = s_boot_guard_error;
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+    if (!ready || !d1l_connectivity_boot_guard_valid(&record)) {
+        return prior_error == ESP_OK ? ESP_ERR_INVALID_STATE : prior_error;
+    }
+    if (record.generation != expected_record_generation) {
+        return ESP_OK;
+    }
+    if (!d1l_connectivity_boot_guard_acknowledge_stable(
+            &record, subsystem)) {
+        return ESP_OK;
+    }
+    const esp_err_t ret = persist_boot_guard_record(&record);
+    if (ret == ESP_OK) {
+        portENTER_CRITICAL(&s_wifi_policy_lock);
+        s_boot_guard = record;
+        s_boot_guard_decision.crash_attributed = false;
+        s_boot_guard_decision.crash_loop_detected = false;
+        s_boot_guard_decision.consecutive_crash_boots = 0U;
+        portEXIT_CRITICAL(&s_wifi_policy_lock);
+    }
+    set_boot_guard_result(ret, recovered);
+    return ret;
+}
+
+static esp_err_t acknowledge_boot_guard_stable(
+    d1l_connectivity_subsystem_t subsystem,
+    uint32_t expected_record_generation)
+{
+    const esp_err_t lock_ret = take_boot_guard_lock();
+    if (lock_ret != ESP_OK) {
+        set_boot_guard_result(lock_ret, false);
+        return lock_ret;
+    }
+    const esp_err_t ret = acknowledge_boot_guard_stable_unlocked(
+        subsystem, expected_record_generation);
+    give_boot_guard_lock();
+    return ret;
+}
+
+static void cancel_boot_guard_stable_ack(void)
+{
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    s_boot_guard_stable_ack_pending = false;
+    s_boot_guard_stable_ack_due_ms = 0U;
+    s_boot_guard_stable_ack_record_generation = 0U;
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+}
+
+static bool take_boot_guard_stable_ack_if_due(
+    uint64_t now_ms,
+    uint64_t *out_due_ms,
+    uint32_t *out_record_generation)
+{
+    if (!out_due_ms || !out_record_generation) {
+        return false;
+    }
+    *out_due_ms = 0U;
+    *out_record_generation = 0U;
+    bool due = false;
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    if (s_boot_guard_stable_ack_pending &&
+        s_wifi_policy.state != D1L_WIFI_RUNTIME_CONNECTED &&
+        s_wifi_policy.state != D1L_WIFI_RUNTIME_SCANNING) {
+        s_boot_guard_stable_ack_pending = false;
+        s_boot_guard_stable_ack_due_ms = 0U;
+        s_boot_guard_stable_ack_record_generation = 0U;
+    }
+    if (s_boot_guard_stable_ack_pending) {
+        *out_due_ms = s_boot_guard_stable_ack_due_ms;
+        *out_record_generation =
+            s_boot_guard_stable_ack_record_generation;
+        due = now_ms >= s_boot_guard_stable_ack_due_ms;
+        if (due) {
+            s_boot_guard_stable_ack_pending = false;
+            s_boot_guard_stable_ack_due_ms = 0U;
+            s_boot_guard_stable_ack_record_generation = 0U;
+        }
+    }
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+    return due;
+}
+
 static uint64_t wifi_now_ms(void)
 {
     const int64_t now_us = esp_timer_get_time();
@@ -179,14 +491,29 @@ static void wifi_retry_worker(void *context)
 {
     (void)context;
     while (true) {
+        const uint64_t now_ms = wifi_now_ms();
+        uint64_t stable_ack_due_ms = 0U;
+        uint32_t stable_ack_record_generation = 0U;
+        if (take_boot_guard_stable_ack_if_due(
+                now_ms, &stable_ack_due_ms,
+                &stable_ack_record_generation)) {
+            const esp_err_t guard_ret = acknowledge_boot_guard_stable(
+                D1L_CONNECTIVITY_SUBSYSTEM_WIFI,
+                stable_ack_record_generation);
+            if (guard_ret != ESP_OK) {
+                set_wifi_last_error("boot_guard_stable_ack_failed");
+            }
+            continue;
+        }
         const d1l_wifi_retry_policy_t snapshot = wifi_policy_snapshot();
         if (!snapshot.retry_scheduled ||
             snapshot.state == D1L_WIFI_RUNTIME_SCANNING) {
-            (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            const TickType_t wait_ticks = stable_ack_due_ms > now_ms ?
+                retry_wait_ticks(stable_ack_due_ms, now_ms) : portMAX_DELAY;
+            (void)ulTaskNotifyTake(pdTRUE, wait_ticks);
             continue;
         }
 
-        const uint64_t now_ms = wifi_now_ms();
         const TickType_t wait_ticks = retry_wait_ticks(snapshot.retry_due_ms,
                                                        now_ms);
         if (wait_ticks > 0U) {
@@ -293,6 +620,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 {
     (void)arg;
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        cancel_boot_guard_stable_ack();
         const wifi_event_sta_disconnected_t *event =
             (const wifi_event_sta_disconnected_t *)event_data;
         const uint8_t reason = event ? event->reason : WIFI_REASON_UNSPECIFIED;
@@ -339,11 +667,23 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         s_wifi_connecting = connection_accepted;
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *event = (const ip_event_got_ip_t *)event_data;
+        const uint64_t connected_at_ms = wifi_now_ms();
+        const uint64_t stable_due_ms =
+            UINT64_MAX - connected_at_ms <
+                    D1L_CONNECTIVITY_GUARD_STABLE_WINDOW_MS ?
+                UINT64_MAX :
+                connected_at_ms + D1L_CONNECTIVITY_GUARD_STABLE_WINDOW_MS;
         clear_local_leave_token();
         portENTER_CRITICAL(&s_wifi_policy_lock);
         d1l_wifi_retry_policy_connected(&s_wifi_policy);
         const bool connection_accepted =
             s_wifi_policy.state == D1L_WIFI_RUNTIME_CONNECTED;
+        if (connection_accepted) {
+            s_boot_guard_stable_ack_pending = true;
+            s_boot_guard_stable_ack_due_ms = stable_due_ms;
+            s_boot_guard_stable_ack_record_generation =
+                s_boot_guard.generation;
+        }
         portEXIT_CRITICAL(&s_wifi_policy_lock);
         if (!connection_accepted) {
             s_wifi_connected = false;
@@ -358,11 +698,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             snprintf(s_wifi_ip, sizeof(s_wifi_ip), IPSTR, IP2STR(&event->ip_info.ip));
         }
         set_wifi_last_error("none");
+        notify_wifi_retry_worker();
     }
 }
 
 static void stop_wifi_runtime(void)
 {
+    cancel_boot_guard_stable_ack();
     clear_local_leave_token();
     if (s_wifi_event_instance) {
         (void)esp_event_handler_instance_unregister(
@@ -413,6 +755,12 @@ static esp_err_t fail_closed_wifi_runtime(esp_err_t failure, const char *reason)
             set_wifi_last_error("rollback_save_failed");
             return rollback_ret;
         }
+    }
+
+    const esp_err_t guard_ret = clear_boot_guard();
+    if (guard_ret != ESP_OK) {
+        set_wifi_last_error("boot_guard_clear_failed");
+        return guard_ret;
     }
 
     set_wifi_last_error(original_reason);
@@ -565,6 +913,18 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     memset(out_status, 0, sizeof(*out_status));
     const d1l_settings_t *settings = d1l_settings_current();
     const d1l_wifi_retry_policy_t policy = wifi_policy_snapshot();
+    d1l_connectivity_boot_guard_record_t boot_guard;
+    d1l_connectivity_boot_guard_decision_t boot_decision;
+    bool boot_guard_ready;
+    bool boot_guard_recovered;
+    esp_err_t boot_guard_error;
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    boot_guard = s_boot_guard;
+    boot_decision = s_boot_guard_decision;
+    boot_guard_ready = s_boot_guard_ready;
+    boot_guard_recovered = s_boot_guard_recovered;
+    boot_guard_error = s_boot_guard_error;
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
     out_status->usb_console_ready = true;
     out_status->wifi_enabled_setting = settings->wifi_enabled;
     out_status->ble_companion_enabled_setting = settings->ble_companion_enabled;
@@ -577,6 +937,9 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     out_status->wifi_retry_scheduled = policy.retry_scheduled;
     out_status->wifi_user_cancelled = policy.user_cancelled;
     out_status->wifi_safe_mode = policy.safe_mode;
+    out_status->wifi_boot_guard_ready = boot_guard_ready;
+    out_status->wifi_boot_guard_recovered = boot_guard_recovered;
+    out_status->wifi_crash_loop_detected = boot_decision.crash_loop_detected;
     out_status->ble_stack_active = false;
     out_status->wifi_profile_saved = settings->wifi_profile_saved;
     out_status->wifi_password_saved = settings->wifi_password[0] != '\0';
@@ -588,11 +951,20 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     out_status->wifi_ssid = settings->wifi_ssid;
     out_status->wifi_ip = s_wifi_ip;
     out_status->wifi_retry_attempt = policy.retry_attempt;
+    out_status->wifi_consecutive_crash_boots =
+        boot_guard.consecutive_crash_boots;
     out_status->wifi_last_disconnect_reason = s_wifi_last_disconnect_reason;
     out_status->wifi_retry_delay_ms = policy.retry_delay_ms;
     out_status->wifi_last_error = s_wifi_last_error;
     out_status->wifi_last_failure_class =
         d1l_wifi_failure_class_name(policy.last_failure);
+    const d1l_connectivity_subsystem_t reported_subsystem =
+        boot_decision.crash_attributed ?
+            boot_decision.previous_active_subsystem :
+            (d1l_connectivity_subsystem_t)boot_guard.last_active_subsystem;
+    out_status->wifi_last_active_subsystem =
+        d1l_connectivity_subsystem_name(reported_subsystem);
+    out_status->wifi_boot_guard_error = esp_err_to_name(boot_guard_error);
 #ifdef CONFIG_ESP_WIFI_ENABLED
     if (s_wifi_retry_task) {
         out_status->wifi_retry_task_stack_high_water_bytes =
@@ -650,6 +1022,16 @@ esp_err_t d1l_connectivity_init(void)
         }
     }
     const d1l_settings_t *current = d1l_settings_current();
+#ifdef CONFIG_ESP_WIFI_ENABLED
+    if (!s_boot_guard_lock) {
+        s_boot_guard_lock = xSemaphoreCreateMutex();
+    }
+    const esp_err_t boot_guard_ret = s_boot_guard_lock ?
+        load_and_advance_boot_guard() : ESP_ERR_NO_MEM;
+    if (!s_boot_guard_lock) {
+        set_boot_guard_result(boot_guard_ret, false);
+    }
+#endif
     portENTER_CRITICAL(&s_wifi_policy_lock);
     d1l_wifi_retry_policy_init(
         &s_wifi_policy,
@@ -663,17 +1045,41 @@ esp_err_t d1l_connectivity_init(void)
 #ifdef CONFIG_ESP_WIFI_ENABLED
     if (current->wifi_enabled && current->wifi_profile_saved) {
         const char *recovery_reason = wifi_boot_recovery_reason();
-        if (recovery_reason) {
-            /* Boot-local containment only. Persisted repeated-crash counting
-             * and last-enabled-subsystem attribution remain a later WP-13
-             * slice; never claim this one-reset guard as that closure. */
+        d1l_connectivity_boot_guard_decision_t decision;
+        portENTER_CRITICAL(&s_wifi_policy_lock);
+        decision = s_boot_guard_decision;
+        portEXIT_CRITICAL(&s_wifi_policy_lock);
+        const bool repeated_wifi_crash = decision.crash_loop_detected &&
+            decision.previous_active_subsystem ==
+                D1L_CONNECTIVITY_SUBSYSTEM_WIFI;
+        /* A crash-like first boot after installing this schema has no prior
+         * marker to trust. Contain that one boot, but do not arm Wi-Fi until
+         * an explicit retry actually starts the subsystem. */
+        const bool conservative_first_recovery = recovery_reason &&
+            !decision.previous_record_valid;
+        if (boot_guard_ret != ESP_OK || repeated_wifi_crash ||
+            conservative_first_recovery) {
             portENTER_CRITICAL(&s_wifi_policy_lock);
             d1l_wifi_retry_policy_enter_safe_mode(&s_wifi_policy);
             portEXIT_CRITICAL(&s_wifi_policy_lock);
-            set_wifi_last_error(recovery_reason);
+            if (boot_guard_ret != ESP_OK) {
+                set_wifi_last_error("boot_guard_unavailable");
+            } else if (decision.crash_loop_detected) {
+                set_wifi_last_error("boot_recovery_wifi_crash_loop");
+            } else {
+                set_wifi_last_error(recovery_reason ? recovery_reason :
+                                    "boot_recovery_wifi_crash");
+            }
             return ESP_OK;
         }
         return d1l_connectivity_wifi_connect();
+    }
+    if (boot_guard_ret == ESP_OK) {
+        const esp_err_t clear_ret = clear_boot_guard();
+        if (clear_ret != ESP_OK) {
+            set_wifi_last_error("boot_guard_clear_failed");
+            return clear_ret;
+        }
     }
 #endif
     return ESP_OK;
@@ -709,16 +1115,42 @@ esp_err_t d1l_connectivity_wifi_scan(d1l_wifi_scan_result_t *out_result)
     out_result->last_error = ESP_ERR_NOT_SUPPORTED;
     return ESP_ERR_NOT_SUPPORTED;
 #else
-    esp_err_t ret = ensure_wifi_started();
+    portENTER_CRITICAL(&s_wifi_policy_lock);
+    const bool scan_eligible =
+        d1l_wifi_retry_policy_scan_allowed(&s_wifi_policy);
+    portEXIT_CRITICAL(&s_wifi_policy_lock);
+    if (!scan_eligible) {
+        out_result->reason = "scan_cancelled";
+        out_result->last_error = ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = mark_boot_guard_active(
+        D1L_CONNECTIVITY_SUBSYSTEM_WIFI);
+    if (ret != ESP_OK) {
+        out_result->reason = "boot_guard_unavailable";
+        out_result->last_error = ret;
+        return ret;
+    }
+    ret = ensure_wifi_started();
     if (ret != ESP_OK) {
         out_result->reason = s_wifi_last_error;
         out_result->last_error = ret;
         return ret;
     }
     portENTER_CRITICAL(&s_wifi_policy_lock);
-    const bool scan_allowed = d1l_wifi_retry_policy_begin_scan(&s_wifi_policy);
+    const bool scan_started =
+        d1l_wifi_retry_policy_begin_scan(&s_wifi_policy);
+    const d1l_wifi_retry_policy_t begin_policy = s_wifi_policy;
     portEXIT_CRITICAL(&s_wifi_policy_lock);
-    if (!scan_allowed) {
+    if (!scan_started) {
+        if (begin_policy.user_cancelled || !begin_policy.enabled) {
+            const esp_err_t guard_ret = clear_boot_guard();
+            if (guard_ret != ESP_OK) {
+                out_result->reason = "boot_guard_clear_failed";
+                out_result->last_error = guard_ret;
+                return guard_ret;
+            }
+        }
         out_result->reason = "scan_cancelled";
         out_result->last_error = ESP_ERR_INVALID_STATE;
         return ESP_ERR_INVALID_STATE;
@@ -728,6 +1160,21 @@ esp_err_t d1l_connectivity_wifi_scan(d1l_wifi_scan_result_t *out_result)
         out_result->reason = "scan_control_failed";
         out_result->last_error = ESP_FAIL;
         return ESP_FAIL;
+    }
+    const d1l_wifi_retry_policy_t scan_policy = wifi_policy_snapshot();
+    if (scan_policy.state != D1L_WIFI_RUNTIME_SCANNING) {
+        give_wifi_control();
+        if (scan_policy.user_cancelled || !scan_policy.enabled) {
+            const esp_err_t guard_ret = clear_boot_guard();
+            if (guard_ret != ESP_OK) {
+                out_result->reason = "boot_guard_clear_failed";
+                out_result->last_error = guard_ret;
+                return guard_ret;
+            }
+        }
+        out_result->reason = "scan_cancelled";
+        out_result->last_error = ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_STATE;
     }
     ret = esp_wifi_scan_start(NULL, true);
     if (ret != ESP_OK) {
@@ -796,6 +1243,9 @@ esp_err_t d1l_connectivity_wifi_connect(void)
         set_wifi_last_error("build_disabled");
         return ESP_ERR_NOT_SUPPORTED;
     }
+#ifdef CONFIG_ESP_WIFI_ENABLED
+    cancel_boot_guard_stable_ack();
+#endif
     portENTER_CRITICAL(&s_wifi_policy_lock);
     const bool connect_allowed =
         d1l_wifi_retry_policy_begin_manual_connect(&s_wifi_policy);
@@ -807,8 +1257,17 @@ esp_err_t d1l_connectivity_wifi_connect(void)
 #ifndef CONFIG_ESP_WIFI_ENABLED
     return ESP_ERR_NOT_SUPPORTED;
 #else
+    esp_err_t ret = mark_boot_guard_active(
+        D1L_CONNECTIVITY_SUBSYSTEM_WIFI);
+    if (ret != ESP_OK) {
+        portENTER_CRITICAL(&s_wifi_policy_lock);
+        d1l_wifi_retry_policy_enter_safe_mode(&s_wifi_policy);
+        portEXIT_CRITICAL(&s_wifi_policy_lock);
+        set_wifi_last_error("boot_guard_unavailable");
+        return ret;
+    }
     notify_wifi_retry_worker();
-    esp_err_t ret = ensure_wifi_started();
+    ret = ensure_wifi_started();
     if (ret != ESP_OK) {
         return ret;
     }
@@ -882,6 +1341,11 @@ esp_err_t d1l_connectivity_wifi_connect(void)
         s_wifi_connecting = false;
         s_wifi_ip[0] = '\0';
         give_wifi_control();
+        const esp_err_t guard_ret = clear_boot_guard();
+        if (guard_ret != ESP_OK) {
+            set_wifi_last_error("boot_guard_clear_failed");
+            return guard_ret;
+        }
         set_wifi_last_error("cancelled");
         return ESP_ERR_INVALID_STATE;
     }
@@ -915,6 +1379,13 @@ esp_err_t d1l_connectivity_wifi_disconnect(void)
     s_wifi_connected = false;
     s_wifi_connecting = false;
     s_wifi_ip[0] = '\0';
+#ifdef CONFIG_ESP_WIFI_ENABLED
+    const esp_err_t boot_guard_ret = clear_boot_guard();
+    if (boot_guard_ret != ESP_OK) {
+        set_wifi_last_error("boot_guard_clear_failed");
+        return boot_guard_ret;
+    }
+#endif
     set_wifi_last_error("cancelled");
     return ESP_OK;
 }
@@ -945,13 +1416,25 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
         if (s_wifi_control_lock) {
             give_wifi_control();
         }
+        const esp_err_t boot_guard_ret = clear_boot_guard();
+#else
+        const esp_err_t boot_guard_ret = ESP_OK;
 #endif
+        if (boot_guard_ret != ESP_OK) {
+            set_wifi_last_error("boot_guard_clear_failed");
+            return boot_guard_ret;
+        }
         set_wifi_last_error("none");
         return ESP_OK;
     }
 
     settings.ble_companion_enabled = false;
 #ifdef CONFIG_ESP_WIFI_ENABLED
+    ret = mark_boot_guard_active(D1L_CONNECTIVITY_SUBSYSTEM_WIFI);
+    if (ret != ESP_OK) {
+        set_wifi_last_error("boot_guard_unavailable");
+        return ret;
+    }
     ret = ensure_wifi_started();
     if (ret != ESP_OK) {
         return ret;
@@ -963,6 +1446,11 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
     if (ret != ESP_OK) {
 #ifdef CONFIG_ESP_WIFI_ENABLED
         stop_wifi_runtime();
+        const esp_err_t guard_ret = clear_boot_guard();
+        if (guard_ret != ESP_OK) {
+            set_wifi_last_error("boot_guard_clear_failed");
+            return guard_ret;
+        }
 #endif
         set_wifi_last_error(esp_err_to_name(ret));
         return ret;
@@ -1014,6 +1502,20 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
         }
 #endif
     }
+#ifdef CONFIG_ESP_WIFI_ENABLED
+    /* BLE transport is not a supported production runtime in this release.
+     * WP-20 must add symmetric boot handling before it can arm this guard. */
+    esp_err_t boot_guard_ret = ESP_OK;
+    if (enabled) {
+        boot_guard_ret = clear_boot_guard();
+    }
+#else
+    const esp_err_t boot_guard_ret = ESP_OK;
+#endif
+    if (boot_guard_ret != ESP_OK) {
+        set_wifi_last_error("boot_guard_unavailable");
+        return boot_guard_ret;
+    }
     return ESP_OK;
 }
 
@@ -1039,13 +1541,17 @@ esp_err_t d1l_connectivity_clear_wifi_profile(void)
 {
     esp_err_t ret = d1l_settings_clear_wifi_profile();
     if (ret == ESP_OK) {
-        (void)d1l_connectivity_wifi_disconnect();
+        const esp_err_t disconnect_ret =
+            d1l_connectivity_wifi_disconnect();
         const d1l_settings_t *settings = d1l_settings_current();
         portENTER_CRITICAL(&s_wifi_policy_lock);
         d1l_wifi_retry_policy_configure(
             &s_wifi_policy, settings->wifi_enabled && build_wifi_enabled(),
             false);
         portEXIT_CRITICAL(&s_wifi_policy_lock);
+        if (disconnect_ret != ESP_OK) {
+            return disconnect_ret;
+        }
         set_wifi_last_error(settings->wifi_enabled ? "profile_required" : "none");
     }
     return ret;

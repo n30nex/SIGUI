@@ -20,7 +20,10 @@ static void test_truthful_states_and_manual_controls(void)
 
     d1l_wifi_retry_policy_configure(&policy, true, false);
     assert_state(&policy, D1L_WIFI_RUNTIME_PROFILE_REQUIRED);
+    assert(d1l_wifi_retry_policy_scan_allowed(&policy));
     assert(d1l_wifi_retry_policy_begin_scan(&policy));
+    assert_state(&policy, D1L_WIFI_RUNTIME_SCANNING);
+    d1l_wifi_retry_policy_mark_starting(&policy);
     assert_state(&policy, D1L_WIFI_RUNTIME_SCANNING);
     d1l_wifi_retry_policy_finish_scan(&policy, false, false);
     assert_state(&policy, D1L_WIFI_RUNTIME_PROFILE_REQUIRED);
@@ -55,6 +58,7 @@ static void test_truthful_states_and_manual_controls(void)
     d1l_wifi_retry_policy_enter_safe_mode(&policy);
     assert_state(&policy, D1L_WIFI_RUNTIME_SAFE_MODE_DISABLED);
     assert(policy.safe_mode);
+    assert(!d1l_wifi_retry_policy_scan_allowed(&policy));
     /* Nor may a stale connection event escape boot-local safe mode. */
     d1l_wifi_retry_policy_connected(&policy);
     assert_state(&policy, D1L_WIFI_RUNTIME_SAFE_MODE_DISABLED);

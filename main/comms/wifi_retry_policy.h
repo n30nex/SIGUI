@@ -58,6 +58,8 @@ bool d1l_wifi_retry_policy_begin_manual_connect(
     d1l_wifi_retry_policy_t *policy);
 void d1l_wifi_retry_policy_mark_starting(d1l_wifi_retry_policy_t *policy);
 void d1l_wifi_retry_policy_mark_connecting(d1l_wifi_retry_policy_t *policy);
+bool d1l_wifi_retry_policy_scan_allowed(
+    const d1l_wifi_retry_policy_t *policy);
 bool d1l_wifi_retry_policy_begin_scan(d1l_wifi_retry_policy_t *policy);
 void d1l_wifi_retry_policy_finish_scan(d1l_wifi_retry_policy_t *policy,
                                        bool connected,
