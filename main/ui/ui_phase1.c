@@ -242,6 +242,7 @@ typedef struct {
     size_t dm_count;
     size_t node_count;
     size_t contact_count;
+    size_t dm_capable_contact_count;
     size_t route_count;
     size_t packet_count;
     bool storage_sd_present;
@@ -252,6 +253,12 @@ typedef struct {
     bool storage_data_enabled;
     bool storage_retained_sd_degraded;
     bool storage_retained_backup_degraded;
+    bool message_store_loaded;
+    bool dm_store_loaded;
+    bool message_store_persistence_degraded;
+    bool dm_store_persistence_degraded;
+    bool dm_retry_active;
+    bool dm_failure_latched;
     bool map_tile_cache_ready;
     bool map_location_set;
     bool map_tile_render_supported;
@@ -268,6 +275,8 @@ typedef struct {
     bool ble_companion_enabled;
     const char *storage_sd_state;
     const char *storage_setup_action;
+    const char *message_store_backend;
+    const char *dm_store_backend;
 } d1l_ui_content_generation_t;
 
 typedef struct {
@@ -323,6 +332,7 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .dm_count = snapshot->dm_count,
         .node_count = snapshot->node_count,
         .contact_count = snapshot->contact_count,
+        .dm_capable_contact_count = snapshot->dm_capable_contact_count,
         .route_count = snapshot->route_count,
         .packet_count = snapshot->packet_count,
         .storage_sd_present = snapshot->storage_sd_present,
@@ -333,6 +343,14 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .storage_data_enabled = snapshot->storage_data_enabled,
         .storage_retained_sd_degraded = snapshot->storage_retained_sd_degraded,
         .storage_retained_backup_degraded = snapshot->storage_retained_backup_degraded,
+        .message_store_loaded = snapshot->message_store_loaded,
+        .dm_store_loaded = snapshot->dm_store_loaded,
+        .message_store_persistence_degraded =
+            snapshot->message_store_persistence_degraded,
+        .dm_store_persistence_degraded =
+            snapshot->dm_store_persistence_degraded,
+        .dm_retry_active = snapshot->dm_retry_active,
+        .dm_failure_latched = snapshot->dm_failure_latched,
         .map_tile_cache_ready = snapshot->map_tile_cache_ready,
         .map_location_set = snapshot->map_location_set,
         .map_tile_render_supported = snapshot->map_tile_render_supported,
@@ -349,6 +367,8 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .ble_companion_enabled = snapshot->ble_companion_enabled,
         .storage_sd_state = snapshot->storage_sd_state,
         .storage_setup_action = snapshot->storage_setup_action,
+        .message_store_backend = snapshot->message_store_backend,
+        .dm_store_backend = snapshot->dm_store_backend,
     };
 }
 
@@ -382,6 +402,7 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->dm_count == right->dm_count &&
         left->node_count == right->node_count &&
         left->contact_count == right->contact_count &&
+        left->dm_capable_contact_count == right->dm_capable_contact_count &&
         left->route_count == right->route_count &&
         left->packet_count == right->packet_count &&
         left->storage_sd_present == right->storage_sd_present &&
@@ -392,6 +413,14 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->storage_data_enabled == right->storage_data_enabled &&
         left->storage_retained_sd_degraded == right->storage_retained_sd_degraded &&
         left->storage_retained_backup_degraded == right->storage_retained_backup_degraded &&
+        left->message_store_loaded == right->message_store_loaded &&
+        left->dm_store_loaded == right->dm_store_loaded &&
+        left->message_store_persistence_degraded ==
+            right->message_store_persistence_degraded &&
+        left->dm_store_persistence_degraded ==
+            right->dm_store_persistence_degraded &&
+        left->dm_retry_active == right->dm_retry_active &&
+        left->dm_failure_latched == right->dm_failure_latched &&
         left->map_tile_cache_ready == right->map_tile_cache_ready &&
         left->map_location_set == right->map_location_set &&
         left->map_tile_render_supported == right->map_tile_render_supported &&
@@ -409,7 +438,11 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         content_generation_text_equal(left->storage_sd_state,
                                       right->storage_sd_state) &&
         content_generation_text_equal(left->storage_setup_action,
-                                      right->storage_setup_action);
+                                      right->storage_setup_action) &&
+        content_generation_text_equal(left->message_store_backend,
+                                      right->message_store_backend) &&
+        content_generation_text_equal(left->dm_store_backend,
+                                      right->dm_store_backend);
 }
 
 static void remember_rendered_content_generation(const d1l_app_snapshot_t *snapshot)
@@ -4165,6 +4198,28 @@ static size_t load_dm_thread_rows(
         query, out_total_matches);
 }
 
+static bool messages_backend_available(const char *backend)
+{
+    return backend && strcmp(backend, "unavailable") != 0;
+}
+
+static d1l_ui_messages_store_state_t messages_store_state_from_snapshot(
+    const d1l_app_snapshot_t *snapshot,
+    bool direct_messages)
+{
+    if (!snapshot) {
+        return D1L_UI_MESSAGES_STORE_UNAVAILABLE;
+    }
+    return d1l_ui_messages_store_state(
+        direct_messages ? snapshot->dm_store_loaded :
+            snapshot->message_store_loaded,
+        messages_backend_available(
+            direct_messages ? snapshot->dm_store_backend :
+                snapshot->message_store_backend),
+        direct_messages ? snapshot->dm_store_persistence_degraded :
+            snapshot->message_store_persistence_degraded);
+}
+
 static bool render_dm_thread_sheet(void)
 {
     if (!d1l_ui_messages_thread_active(&s_messages_controller)) {
@@ -4172,10 +4227,19 @@ static bool render_dm_thread_sheet(void)
     }
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
+    s_messages_controller.rendered.dm_store_state =
+        messages_store_state_from_snapshot(&s_snapshot, true);
+    const char *fingerprint = d1l_ui_messages_thread_fingerprint(
+        &s_messages_controller);
+    d1l_contact_entry_t contact = {0};
+    const bool reply_available = fingerprint &&
+        d1l_app_model_find_contact(fingerprint, &contact) == ESP_OK &&
+        dm_identity_for_contact(&contact, NULL).can_open_compose;
     return d1l_ui_messages_render_thread(
         &s_messages_controller,
         load_dm_thread_rows,
         NULL,
+        reply_available,
         handle_messages_action,
         NULL);
 }
@@ -4318,6 +4382,12 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     view_model->dm_unread = snapshot->dm_unread_count;
     view_model->muted_dm_unread = snapshot->muted_dm_unread_count;
     view_model->last_public_read_seq = snapshot->last_public_read_seq;
+    view_model->dm_capable_contact_count =
+        snapshot->dm_capable_contact_count;
+    view_model->public_store_state =
+        messages_store_state_from_snapshot(snapshot, false);
+    view_model->dm_store_state =
+        messages_store_state_from_snapshot(snapshot, true);
 
     view_model->public_row_count = snapshot->recent_message_count;
     if (view_model->public_row_count > D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS) {
@@ -4340,6 +4410,8 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
                sizeof(view_model->dm_row_unread_count[0]));
     memcpy(view_model->dm_row_muted, snapshot->recent_dm_muted,
            view_model->dm_row_count * sizeof(view_model->dm_row_muted[0]));
+    view_model->dm_retry_active = snapshot->dm_retry_active;
+    view_model->dm_failure_latched = snapshot->dm_failure_latched;
 }
 
 static void handle_messages_action(const d1l_ui_messages_action_event_t *event,

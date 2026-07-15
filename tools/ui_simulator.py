@@ -25,6 +25,13 @@ DOCKED_VIEWS = frozenset(
         "messages",
         "messages_public",
         "messages_dm",
+        "messages_loading",
+        "messages_public_storage_degraded",
+        "messages_dm_storage_unavailable",
+        "messages_dm_no_contact",
+        "messages_dm_no_history",
+        "messages_dm_retry",
+        "messages_dm_failure",
         "nodes",
         "map",
         "packets",
@@ -123,6 +130,7 @@ class Node:
     advert_lat_e6: int | None = None
     advert_lon_e6: int | None = None
     public_key_hex: str = ""
+    dm_capable: bool = False
 
 
 @dataclass(frozen=True)
@@ -187,6 +195,10 @@ class Snapshot:
     map_lat_e7: int
     map_lon_e7: int
     map_center_source: str
+    message_store_loaded: bool = True
+    dm_store_loaded: bool = True
+    message_store_persistence_degraded: bool = False
+    dm_store_persistence_degraded: bool = False
     wifi_build_enabled: bool = True
     wifi_enabled: bool = False
     wifi_connecting: bool = False
@@ -204,6 +216,7 @@ class Snapshot:
     settings_load_ok: bool = True
     identity_state: str = "consistent"
     dm_delivery_active: bool = False
+    dm_delivery_state: str = "not_applicable"
     muted_unread_dm: int = 0
     firmware_version: str = "1.0.0-rc1"
     map_cached_tile_count: int = 0
@@ -294,6 +307,7 @@ def sample_snapshot() -> Snapshot:
         "YKF Corebot", "0BF0A701D5AE2DB6", "Companion",
         "-41 dBm / 30 dB", "direct route, public key",
         public_key_hex=SAMPLE_PUBLIC_KEY,
+        dm_capable=True,
     )
     repeater = Node("Krabs Lagoon", "60B6ABA17831F883", "Repeater", "-52 dBm / 22 dB", "1 hop via flood path")
     return Snapshot(
@@ -437,6 +451,10 @@ def large_mesh_snapshot() -> Snapshot:
             "Companion",
             f"-{38 + (i % 12)} dBm / {24 + (i % 8)} dB",
             "retained key, direct candidate",
+            public_key_hex=(
+                f"0BF0A701D5AE{i:04X}" + "0" * 48
+            ),
+            dm_capable=True,
         )
         for i in range(18)
     )
@@ -1946,6 +1964,32 @@ def render_home(s: Surface, snap: Snapshot):
     draw_home_body(s, snap)
 
 
+def messages_store_state(snap: Snapshot, *, direct: bool) -> str:
+    loaded = snap.dm_store_loaded if direct else snap.message_store_loaded
+    backend = snap.dm_store_backend if direct else snap.message_store_backend
+    available = backend != "unavailable"
+    degraded = (
+        snap.dm_store_persistence_degraded
+        if direct else snap.message_store_persistence_degraded
+    )
+    if not loaded:
+        return "loading" if available else "unavailable"
+    if not available:
+        return "unavailable"
+    return "degraded" if degraded else "ready"
+
+
+def draw_messages_notice(
+    s: Surface,
+    y: int,
+    text: str,
+    color: tuple[int, int, int],
+) -> int:
+    s.round_rect((26, y, 434, y + 44), SURFACE, BORDER, 8)
+    s.text(text, (36, y + 10, 424, y + 34), 11, color, True)
+    return y + 52
+
+
 def render_messages(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Messages", (18, 66, 220, 96), 24, TEXT, True)
@@ -1960,6 +2004,7 @@ def render_messages(s: Surface, snap: Snapshot):
             snap.unread_public,
             0,
             "messages",
+            messages_store_state(snap, direct=False),
             ACCENT,
             "open_messages_public",
             "messages_public",
@@ -1972,24 +2017,32 @@ def render_messages(s: Surface, snap: Snapshot):
             snap.unread_dm,
             snap.muted_unread_dm,
             "conversations",
+            messages_store_state(snap, direct=True),
             GREEN,
             "open_messages_dm",
             "messages_dm",
         ),
     )
-    for box, title, detail, total, unread, muted_unread, unit, color, action, destination in cards:
+    for box, title, detail, total, unread, muted_unread, unit, store_state, color, action, destination in cards:
         s.round_rect(box, SURFACE, BORDER, 8)
         s.text(title, (box[0] + 14, box[1] + 12, box[2] - 42, box[1] + 38), 18, color, True)
         s.text(">", (box[2] - 34, box[1] + 12, box[2] - 14, box[1] + 38), 18, MUTED, True, "center")
         s.text(detail, (box[0] + 14, box[1] + 48, box[2] - 14, box[1] + 68), 12, TEXT)
-        status = f"{total} {unit} | {unread} unread"
-        if muted_unread:
-            status += f" + {muted_unread} muted"
+        if store_state == "loading":
+            status = "Loading retained history"
+        elif store_state == "unavailable":
+            status = f"{total} readable in RAM | storage unavailable"
+        elif store_state == "degraded":
+            status = f"{total} {unit} | storage degraded"
+        else:
+            status = f"{total} {unit} | {unread} unread"
+            if muted_unread:
+                status += f" + {muted_unread} muted"
         s.text(
             status,
             (box[0] + 14, box[1] + 82, box[2] - 14, box[1] + 104),
             12,
-            AMBER if unread else MUTED,
+            AMBER if unread or store_state in ("degraded", "unavailable") else MUTED,
             True,
         )
         s.touch_target(title, box, kind="destination_card", action=action, destination=destination)
@@ -2003,6 +2056,9 @@ def render_messages(s: Surface, snap: Snapshot):
             "dm_rendered_count": 0,
             "messages_root_simple_destinations": True,
             "messages_navigation_rf_silent": True,
+            "public_store_state": messages_store_state(snap, direct=False),
+            "dm_store_state": messages_store_state(snap, direct=True),
+            "ram_history_readable_when_persistence_degraded": True,
         }
     )
     draw_dock(s, "Messages")
@@ -2031,8 +2087,20 @@ def render_messages_public(s: Surface, snap: Snapshot):
     )
     body = (18, 168, 442, 352)
     s.round_rect(body, (7, 16, 24), BORDER, 8)
-    visible = snap.public_messages[-2:]
+    store_state = messages_store_state(snap, direct=False)
+    visible_limit = 2 if store_state == "ready" else 1
+    visible = snap.public_messages[-visible_limit:]
     y = 176
+    if store_state == "loading":
+        y = draw_messages_notice(s, y, "Loading retained history...", BLUE)
+    elif store_state == "degraded":
+        y = draw_messages_notice(
+            s, y, "Storage degraded; readable RAM history remains.", AMBER
+        )
+    elif store_state == "unavailable":
+        y = draw_messages_notice(
+            s, y, "Persistence unavailable; readable RAM history remains.", RED
+        )
     outgoing_bubbles = 0
     incoming_bubbles = 0
     rendered_states: list[str] = []
@@ -2078,7 +2146,14 @@ def render_messages_public(s: Surface, snap: Snapshot):
         incoming_bubbles += int(not outgoing)
         y += 86
     if not visible:
-        s.text("No Public messages yet", (34, 188, 320, 212), 13, MUTED)
+        empty_text = (
+            "Loading retained Public history..."
+            if store_state == "loading" else
+            "No readable Public history in RAM."
+            if store_state == "unavailable" else
+            "No Public messages yet"
+        )
+        s.text(empty_text, (34, y + 12, 426, y + 38), 13, MUTED)
     draw_button(
         s, (18, 360, 442, 410), "Compose", ACCENT,
         action="open_public_compose", destination="compose_sheet",
@@ -2098,6 +2173,8 @@ def render_messages_public(s: Surface, snap: Snapshot):
             "public_rendered_states": rendered_states,
             "public_time_validity_truthful": True,
             "public_navigation_rf_silent": True,
+            "public_store_state": store_state,
+            "public_ram_rows_readable": bool(visible),
         }
     )
     draw_dock(s, "Messages")
@@ -2159,6 +2236,42 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
     dm_rendered = 0
     dm_rendered_states: list[str] = []
     summaries = dm_conversation_summaries(snap.dm_messages)
+    store_state = messages_store_state(snap, direct=True)
+    dm_capable_contact_count = sum(
+        1 for contact in snap.contacts if contact.dm_capable
+    )
+    retry_active = (
+        snap.dm_delivery_active
+        and snap.dm_delivery_state in ("retry_wait", "retry_tx")
+    )
+    failure_latched = any(
+        message.direction == "tx"
+        and message.delivery_state in (
+            "failed_radio",
+            "failed_timeout",
+            "failed_queue",
+            "interrupted_by_reboot",
+        )
+        for message in snap.dm_messages
+    )
+    if store_state == "loading":
+        y = draw_messages_notice(s, y, "Loading retained history...", BLUE)
+    elif store_state == "degraded":
+        y = draw_messages_notice(
+            s, y, "Storage degraded; readable RAM history remains.", AMBER
+        )
+    elif store_state == "unavailable":
+        y = draw_messages_notice(
+            s, y, "Persistence unavailable; readable RAM history remains.", RED
+        )
+    if retry_active:
+        y = draw_messages_notice(
+            s, y, "A bounded delivery retry is in progress.", BLUE
+        )
+    if failure_latched:
+        y = draw_messages_notice(
+            s, y, "A final delivery failure is retained; open for details.", RED
+        )
     unread_by_source: dict[str, int] = {}
     for message in snap.dm_messages:
         if message.unread:
@@ -2207,6 +2320,17 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
         )
         y += 66
         dm_rendered += 1
+    if not summaries:
+        empty_text = (
+            "Loading retained direct-message history..."
+            if store_state == "loading" else
+            "No readable direct-message history in RAM."
+            if store_state == "unavailable" else
+            "No DM contacts available. Add a verified chat contact."
+            if dm_capable_contact_count == 0 else
+            "No direct-message history yet."
+        )
+        s.text(empty_text, (36, y + 12, 444, y + 42), 12, MUTED, True)
     s.metrics.update(
         {
             "messages_mode": "dms",
@@ -2216,6 +2340,15 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
             "dm_conversation_count": len(summaries),
             "dm_rendered_count": dm_rendered,
             "dm_rendered_states": dm_rendered_states,
+            "dm_store_state": store_state,
+            "dm_retry_active": retry_active,
+            "dm_failure_latched": failure_latched,
+            "dm_capable_contact_count": dm_capable_contact_count,
+            "contact_source_count": len(snap.contacts),
+            "dm_no_contact": not summaries and dm_capable_contact_count == 0,
+            "dm_no_history": not summaries and dm_capable_contact_count > 0,
+            "dm_ram_rows_readable": bool(summaries),
+            "messages_state_navigation_rf_silent": True,
         }
     )
 
@@ -2238,6 +2371,137 @@ def render_messages_dm(s: Surface, snap: Snapshot):
     )
     render_messages_dm_list(s, snap)
     draw_dock(s, "Messages")
+
+
+def render_messages_loading(s: Surface, snap: Snapshot):
+    render_messages(
+        s,
+        replace(
+            snap,
+            public_messages=(),
+            dm_messages=(),
+            unread_public=0,
+            unread_dm=0,
+            message_store_loaded=False,
+            dm_store_loaded=False,
+            message_store_backend="nvs",
+            dm_store_backend="nvs",
+        ),
+    )
+
+
+def render_messages_public_storage_degraded(s: Surface, snap: Snapshot):
+    render_messages_public(
+        s,
+        replace(
+            snap,
+            message_store_loaded=True,
+            message_store_persistence_degraded=True,
+            message_store_backend="nvs",
+        ),
+    )
+
+
+def render_messages_dm_storage_unavailable(s: Surface, snap: Snapshot):
+    render_messages_dm(
+        s,
+        replace(
+            snap,
+            dm_store_loaded=True,
+            dm_store_backend="unavailable",
+        ),
+    )
+
+
+def render_messages_dm_no_contact(s: Surface, snap: Snapshot):
+    render_messages_dm(
+        s,
+        replace(
+            snap,
+            contacts=snap.rooms[:1],
+            dm_messages=(),
+            unread_dm=0,
+            muted_unread_dm=0,
+            dm_store_loaded=True,
+            dm_store_backend="nvs",
+        ),
+    )
+
+
+def render_messages_dm_no_history(s: Surface, snap: Snapshot):
+    render_messages_dm(
+        s,
+        replace(
+            snap,
+            dm_messages=(),
+            unread_dm=0,
+            muted_unread_dm=0,
+            dm_store_loaded=True,
+            dm_store_backend="nvs",
+        ),
+    )
+
+
+def messages_delivery_state_snapshot(
+    snap: Snapshot,
+    delivery_state: str,
+    delivery_reason: str,
+) -> Snapshot:
+    state_message = Message(
+        "D1L Desk",
+        "retained delivery state",
+        "open for exact delivery details",
+        direction="tx",
+        delivery_state=delivery_state,
+        delivery_reason=delivery_reason,
+        seq=9001,
+        delivery_revision=7,
+        delivery_session_id=0xD15E9001,
+        ack_hash=0xA11CE001,
+        attempt=2,
+        retry_count=1,
+        conversation="State contact",
+        conversation_id="5A7E000000000001",
+    )
+    newer_rows = tuple(
+        Message(
+            f"Newer contact {index}",
+            f"newer retained row {index}",
+            "acknowledged",
+            direction="tx",
+            delivery_state="acknowledged",
+            seq=9100 + index,
+            conversation=f"Newer contact {index}",
+            conversation_id=f"6A7E0000000000{index:02d}",
+        )
+        for index in range(6)
+    )
+    return replace(
+        snap,
+        dm_messages=(state_message,) + snap.dm_messages + newer_rows,
+        dm_store_loaded=True,
+        dm_store_backend="nvs",
+        dm_delivery_active=delivery_state in ("retry_wait", "retry_tx"),
+        dm_delivery_state=delivery_state,
+    )
+
+
+def render_messages_dm_retry(s: Surface, snap: Snapshot):
+    render_messages_dm(
+        s,
+        messages_delivery_state_snapshot(
+            snap, "retry_wait", "retry_scheduled"
+        ),
+    )
+
+
+def render_messages_dm_failure(s: Surface, snap: Snapshot):
+    render_messages_dm(
+        s,
+        messages_delivery_state_snapshot(
+            snap, "failed_timeout", "ack_timeout"
+        ),
+    )
 
 
 def render_nodes(s: Surface, snap: Snapshot):
@@ -4275,6 +4539,7 @@ def render_dm_thread_state(
     *,
     query: str = "",
     empty_history: bool = False,
+    contact_available: bool = True,
 ):
     dm_thread_page_limit = 5
     selected_conversation, selected_messages = dm_selected_thread(snap.dm_messages)
@@ -4315,6 +4580,12 @@ def render_dm_thread_state(
     s.text(count_line, (112, 90, 360, 112), 12, MUTED)
     s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
     y = 132
+    if not contact_available:
+        y = draw_messages_notice(
+            s, y,
+            "Contact unavailable; retained history remains readable.",
+            AMBER,
+        )
     rendered_states: list[str] = []
     outgoing_bubbles = 0
     incoming_bubbles = 0
@@ -4364,7 +4635,15 @@ def render_dm_thread_state(
         s.text(empty_text, (36, 220, 444, 250), 14, MUTED, True, "center")
     if load_older_available:
         draw_button(s, (28, 344, 166, 392), "Load Older", BLUE, action="load_older_dm_thread")
-    draw_button(s, (16, 420, 464, 472), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
+    draw_button(
+        s,
+        (16, 420, 464, 472),
+        "Reply" if contact_available else "Contact unavailable",
+        GREEN if contact_available else MUTED,
+        action="open_dm_reply" if contact_available else None,
+        destination="compose_sheet" if contact_available else None,
+        enabled=contact_available,
+    )
     s.metrics.update(
         {
             "dm_thread_source_count": len(retained_messages),
@@ -4392,6 +4671,10 @@ def render_dm_thread_state(
             "dm_thread_search_read_only": True,
             "dm_thread_search_no_match": bool(query) and not matches,
             "dm_thread_empty_history": not query and not retained_messages,
+            "dm_thread_contact_available": contact_available,
+            "dm_thread_reply_enabled": contact_available,
+            "dm_thread_history_readable_without_contact":
+                bool(visible_messages) and not contact_available,
         }
     )
 
@@ -4410,6 +4693,10 @@ def render_dm_thread_search_no_match(s: Surface, snap: Snapshot):
 
 def render_dm_thread_empty_sheet(s: Surface, snap: Snapshot):
     render_dm_thread_state(s, snap, empty_history=True)
+
+
+def render_dm_thread_no_contact(s: Surface, snap: Snapshot):
+    render_dm_thread_state(s, snap, contact_available=False)
 
 
 def render_dm_search_sheet(s: Surface, snap: Snapshot):
@@ -4784,6 +5071,13 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "messages": render_messages,
     "messages_public": render_messages_public,
     "messages_dm": render_messages_dm,
+    "messages_loading": render_messages_loading,
+    "messages_public_storage_degraded": render_messages_public_storage_degraded,
+    "messages_dm_storage_unavailable": render_messages_dm_storage_unavailable,
+    "messages_dm_no_contact": render_messages_dm_no_contact,
+    "messages_dm_no_history": render_messages_dm_no_history,
+    "messages_dm_retry": render_messages_dm_retry,
+    "messages_dm_failure": render_messages_dm_failure,
     "nodes": render_nodes,
     "map": render_map,
     "map_options": render_map_options,
@@ -4838,6 +5132,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "dm_thread_search_results": render_dm_thread_search_results,
     "dm_thread_search_no_match": render_dm_thread_search_no_match,
     "dm_thread_empty_sheet": render_dm_thread_empty_sheet,
+    "dm_thread_no_contact": render_dm_thread_no_contact,
     "route_detail_sheet": render_route_detail_sheet,
     "route_trace_sheet": render_route_trace_sheet,
     "packet_detail_sheet": render_packet_detail_sheet,
@@ -4873,6 +5168,37 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "messages_public": ("Public", "Back", "Mark read", "History", "Compose"),
     "messages_dm": ("Direct messages", "Back"),
+    "messages_loading": (
+        "Messages",
+        "Public",
+        "Direct messages",
+        "Loading retained history",
+    ),
+    "messages_public_storage_degraded": (
+        "Public",
+        "Storage degraded; readable RAM history remains.",
+        "Compose",
+    ),
+    "messages_dm_storage_unavailable": (
+        "Direct messages",
+        "Persistence unavailable; readable RAM history remains.",
+    ),
+    "messages_dm_no_contact": (
+        "Direct messages",
+        "No DM contacts available. Add a verified chat contact.",
+    ),
+    "messages_dm_no_history": (
+        "Direct messages",
+        "No direct-message history yet.",
+    ),
+    "messages_dm_retry": (
+        "Direct messages",
+        "A bounded delivery retry is in progress.",
+    ),
+    "messages_dm_failure": (
+        "Direct messages",
+        "A final delivery failure is retained; open for details.",
+    ),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"),
     "map": (
         "Options",
@@ -5174,6 +5500,12 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "dm_thread_search_results": ("Back", "Search", "Reply"),
     "dm_thread_search_no_match": ("Back", "Search", "No retained messages match this search.", "Reply"),
     "dm_thread_empty_sheet": ("Back", "Search", "No retained messages in this conversation.", "Reply"),
+    "dm_thread_no_contact": (
+        "Back",
+        "Search",
+        "Contact unavailable; retained history remains readable.",
+        "Contact unavailable",
+    ),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),

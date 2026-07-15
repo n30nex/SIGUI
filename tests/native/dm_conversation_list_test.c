@@ -66,6 +66,37 @@ int main(void)
     assert(d1l_dm_conversation_list_project(
                rows, NULL, 5U, summaries, 2U, NULL) == 0U);
 
+    d1l_dm_entry_t hidden_failure[7] = {
+        row(10U, "dddddddddddddddd", "tx", "failed then superseded"),
+        row(11U, "dddddddddddddddd", "tx", "newer success"),
+        row(12U, "eeeeeeeeeeeeeeee", "tx", "newer E"),
+        row(13U, "ffffffffffffffff", "tx", "newer F"),
+        row(14U, "1111111111111111", "tx", "newer 1"),
+        row(15U, "2222222222222222", "tx", "newer 2"),
+        row(16U, "3333333333333333", "tx", "newer 3"),
+    };
+    hidden_failure[0].delivery_state = D1L_DM_DELIVERY_FAILED_TIMEOUT;
+    hidden_failure[1].delivery_state = D1L_DM_DELIVERY_ACKNOWLEDGED;
+    bool hidden_failure_unread[7] = {0};
+    memset(summaries, 0, sizeof(summaries));
+    copied = d1l_dm_conversation_list_project(
+        hidden_failure, hidden_failure_unread, 7U,
+        summaries, 5U, &total);
+    assert(copied == 5U && total == 6U);
+    for (size_t i = 0U; i < copied; ++i) {
+        assert(strcmp(summaries[i].latest.contact_fingerprint,
+                      "dddddddddddddddd") != 0);
+    }
+    assert(d1l_dm_conversation_list_has_retained_failure(
+        hidden_failure, 7U));
+    hidden_failure[0].delivery_state = D1L_DM_DELIVERY_ACKNOWLEDGED;
+    assert(!d1l_dm_conversation_list_has_retained_failure(
+        hidden_failure, 7U));
+    hidden_failure[0].direction[0] = 'r';
+    hidden_failure[0].delivery_state = D1L_DM_DELIVERY_FAILED_TIMEOUT;
+    assert(!d1l_dm_conversation_list_has_retained_failure(
+        hidden_failure, 7U));
+
     d1l_dm_entry_t bounded[D1L_DM_CONVERSATION_SOURCE_CAPACITY + 2U] = {0};
     for (size_t i = 0U; i < sizeof(bounded) / sizeof(bounded[0]); ++i) {
         char fingerprint[D1L_NODE_FINGERPRINT_LEN];
@@ -80,6 +111,7 @@ int main(void)
     assert(total == D1L_DM_CONVERSATION_SOURCE_CAPACITY);
     assert(summaries[0].latest.seq ==
            D1L_DM_CONVERSATION_SOURCE_CAPACITY + 2U);
+    assert(!d1l_dm_conversation_list_has_retained_failure(NULL, 1U));
 
     puts("native DM conversation list: ok");
     return 0;
