@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp14_device_sheets_controller_exact_main_aggregate",
+  "generated_utc": "2026-07-15T03:53:22Z",
+  "claim_scope": "Portable retained-PR and exact-main software/artifact evidence for the eleventh bounded WP-14 extraction slice. One small external-RAM controller owns the Display and Diagnostics sheets, replaces both atomically, rolls back partial allocation failure, generation-guards close actions, keeps diagnostic rendering snapshot-only, and leaves staged controls visibly disabled. The slice is merged and strict-verified on exact main 31e763ce3154c63298414b3667f187b711960b8e. This aggregate does not claim live display persistence, diagnostic export/soak actions, physical UI, RF, SD, update, WP-14, or release closure.",
+  "exact_pair": {
+    "pull_request": 133,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/133",
+    "base_sha": "f61d40385594284f9e9f15a92bba81770c8fd24d",
+    "head_sha": "5219ee33d1eadd26bf52646b504ffb05fb90f316",
+    "head_tree_sha": "f273a0941acc3405a3a6ad7be41811df13a91027",
+    "synthetic_merge_sha": "e4f52e819d049fd7555ce71ab63f42681daa08f7",
+    "synthetic_merge_tree_sha": "f273a0941acc3405a3a6ad7be41811df13a91027",
+    "merged_main_sha": "31e763ce3154c63298414b3667f187b711960b8e",
+    "merged_main_parent_sha": "f61d40385594284f9e9f15a92bba81770c8fd24d",
+    "merged_main_tree_sha": "f273a0941acc3405a3a6ad7be41811df13a91027",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29385654735,
+    "conclusion": "success",
+    "cancelled_duplicate_push_run": 29385653028,
+    "cancelled_duplicate_excluded_from_gate": true,
+    "host_tests_passed": 1074,
+    "checksum_contract_tests_passed": 32,
+    "artifact_archives_verified": 5,
+    "artifact_zip_total_bytes": 23308594,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 74534667,
+    "downloaded_tree_sha256": "07aa17ba77658166dbe0d2b91ee0abdb960c950739fc09548853c97cd816a424",
+    "application_sha256": "0be755e2c38431c3f3a5a7fb6f601477aef30efae22aea88e79a496af028988f",
+    "full_flash_sha256": "18cb4253406fe68d10cec373843e2d36918fe95e9ab444b1c01f518a1f8253c5",
+    "provenance_sha256": "4999e243f789a8eb30a7f69698dad5aaee88838ad45ab229d667b2733349917d",
+    "sbom_sha256": "490261d3d02998b40283fd59f3b78230be585274fd96576fa2dc8c4019ee0856",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "firmware_embedded_source_identity_exact": true,
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr133-5219ee3/pr133_strict_gate_5219ee33d1eadd26bf52646b504ffb05fb90f316.json",
+    "strict_receipt_sha256": "af5cfa424d0a10e3db2238e36c724f74ed7d2e2ed04fafc530958cd9063826a6"
+  },
+  "implementation_boundary": {
+    "controller_files": [
+      "main/ui/ui_device_sheets.c",
+      "main/ui/ui_device_sheets.h"
+    ],
+    "integration_file": "main/ui/ui_phase1.c",
+    "single_bounded_external_ram_owner": true,
+    "owns_display_and_diagnostics_sheets": true,
+    "replace_both_and_rollback_partial_failure": true,
+    "generation_guarded_close_actions": true,
+    "diagnostics_snapshot_only": true,
+    "staged_display_and_diagnostic_actions_disabled": true,
+    "complete_display_persistence_or_diagnostic_export": false,
+    "thousand_transition_acceptance": false,
+    "physical_ui_acceptance": false
+  },
+  "exact_main_gate": {
+    "actions_run": 29386120240,
+    "validated_main_sha": "31e763ce3154c63298414b3667f187b711960b8e",
+    "validated_tree_sha": "f273a0941acc3405a3a6ad7be41811df13a91027",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 1074,
+    "checksum_contract_tests_passed": 32,
+    "artifact_archives_verified": 5,
+    "artifact_zip_total_bytes": 23308630,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "extracted_file_count": 219,
+    "extracted_total_bytes": 74534673,
+    "downloaded_tree_sha256": "ce9c32df42d80ae9aa91cd40b2b3eb5a1e73c6b0c17bc0a33f60a33a94c15d0f",
+    "application_sha256": "caf99b80a9ce64457f647d99f72245ea154889b27100100d957c1855a4abef5a",
+    "full_flash_sha256": "3d7b63423696d183fe4476cdff5ec260f115f6d645da9ca5da4e9e1b195b7e15",
+    "provenance_sha256": "39d841bcec57715354b44e9fa05b6d2bde7fd2fe120fb865a8a8ce59de77c2ff",
+    "sbom_sha256": "963f9a758757900878da0e238c9211241e376cf1fecb66c43dd3a1d63de06306",
+    "release_audit_p0_failed_count": 33,
+    "release_audit_failed_count": 35,
+    "firmware_embedded_source_identity_exact": true,
+    "receipt_path": "F:/SIGUI-artifact-gates/main-31e763c/main_strict_gate_31e763ce3154c63298414b3667f187b711960b8e.json",
+    "receipt_sha256": "0ae499707e8b4beedcb21c52507cec18ba2c9ddb4edaf0de3480b47012601f7b",
+    "verdict": "exact_merged_main_eleventh_wp14_device_sheets_controller_software_and_artifact_gate_banked"
+  },
+  "residual_wp14_gates": {
+    "closed": false,
+    "remaining": [
+      "complete_ui_runtime_owner_and_command_queue_extraction",
+      "extract_remaining_route_contact_tools_terminal_admin_update_surfaces",
+      "wire_display_persistence_and_diagnostic_export_or_soak_actions",
+      "lifecycle_generation_and_redraw_invariants",
+      "live_wifi_ble_and_location_integration",
+      "one_thousand_automated_navigation_transitions",
+      "exact_candidate_physical_ui_qualification",
+      "required_ui_runtime_safety_artifact"
+    ]
+  },
+  "release_truth": {
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "sd_hardware_closure_claimed": false,
+    "ui_hardware_closure_claimed": false,
+    "wp14_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "eleventh_wp14_device_sheets_controller_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "exact_main_gate_pending": false,
+    "proof_banked": true,
+    "physical_hardware_evidence": false,
+    "wp14_software_implementation_complete": false,
+    "wp14_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
