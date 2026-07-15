@@ -121,14 +121,15 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "static lv_obj_t *s_compose_counter" in ui
     assert "update_compose_counter()" in ui
     assert "LV_EVENT_VALUE_CHANGED" in ui
-    assert "No Public messages" in messages_ui
+    assert "No messages in this channel yet" in messages_ui
     assert "No direct-message history yet." in messages_ui
     assert "Loading retained direct-message history..." in messages_ui
     assert "Storage degraded; readable RAM history remains." in messages_ui
     assert "Persistence unavailable; readable RAM history remains." in messages_ui
     assert "static lv_obj_t *s_public_history_sheet" in ui
     assert "static lv_obj_t *s_public_search_sheet" in ui
-    assert "d1l_app_model_query_public_messages_page(s_public_history_entries" in ui
+    assert "d1l_app_model_query_channel_messages_page(" in ui
+    assert "s_public_history_channel_id, s_public_history_entries" in ui
     assert "public_history_load_older_event_cb" in ui
     assert "D1L_UI_MESSAGES_ACTION_OPEN_HISTORY" in messages_ui
     assert "create_public_history_sheet" in ui

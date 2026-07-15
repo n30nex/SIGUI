@@ -8,6 +8,8 @@ int main(void)
     assert(D1L_UI_MESSAGES_THREAD_MAX_ROWS == D1L_DM_STORE_CAPACITY + 1U);
     assert(sizeof(d1l_ui_messages_controller_t) <=
            D1L_UI_MESSAGES_CONTROLLER_MAX_BYTES);
+    assert(D1L_UI_MESSAGES_CHANNEL_CONTROL_BINDING_COUNT == 1U);
+    assert(D1L_CHANNEL_STORE_CAPACITY == 8U);
 
     d1l_ui_messages_controller_t controller = {0};
     controller.thread_row_count = D1L_UI_MESSAGES_THREAD_MAX_ROWS;

@@ -82,7 +82,16 @@ d1l_ui_compose_eligibility_t d1l_ui_compose_eligibility(
                       "Protocol time unavailable");
     }
 
-    if (input->is_dm) {
+    if (!input->is_dm) {
+        if (!input->channel_found) {
+            return result(false, false, D1L_UI_COMPOSE_CHANNEL_MISSING,
+                          "Channel unavailable");
+        }
+        if (!input->channel_sendable) {
+            return result(false, false, D1L_UI_COMPOSE_CHANNEL_NOT_SENDABLE,
+                          "Channel disabled");
+        }
+    } else {
         if (input->settings_load_status != ESP_OK) {
             return result(false, false, D1L_UI_COMPOSE_SETTINGS_UNAVAILABLE,
                           "Settings need recovery");

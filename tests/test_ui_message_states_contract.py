@@ -67,7 +67,7 @@ def test_messages_states_keep_ram_history_readable_and_distinguish_empty_cases()
 
     assert "Storage degraded; readable RAM history remains." in messages
     assert "Persistence unavailable; readable RAM history remains." in messages
-    assert "Loading retained Public history..." in messages
+    assert "Loading retained channel history..." in messages
     assert "Loading retained direct-message history..." in messages
     assert "No DM contacts available. Add a verified chat contact." in messages
     assert "No direct-message history yet." in messages

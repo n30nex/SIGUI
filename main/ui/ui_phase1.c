@@ -88,6 +88,7 @@ static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_compose_send_button;
 static lv_obj_t *s_public_history_sheet;
 static lv_obj_t *s_public_search_sheet;
+static lv_obj_t *s_public_search_title;
 static lv_obj_t *s_public_search_textarea;
 static lv_obj_t *s_public_search_keyboard;
 static lv_obj_t *s_dm_search_sheet;
@@ -115,6 +116,8 @@ static bool s_onboarding_probe_suppressed;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
+static uint64_t s_compose_channel_id;
+static char s_compose_channel_name[D1L_CHANNEL_NAME_LEN];
 static d1l_ui_messages_mode_t s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
 static d1l_ui_home_controller_t s_home_controller;
 static d1l_ui_messages_controller_t s_messages_controller EXT_RAM_BSS_ATTR;
@@ -145,6 +148,8 @@ static d1l_node_view_t s_map_node_rows[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR
 static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
+static uint64_t s_public_history_channel_id;
+static char s_public_history_channel_name[D1L_CHANNEL_NAME_LEN];
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
 static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
@@ -239,6 +244,8 @@ typedef struct {
     uint32_t last_public_read_seq;
     uint32_t last_dm_read_seq;
     uint32_t read_state_mark_count;
+    uint32_t channel_store_revision;
+    uint64_t active_channel_id;
     size_t message_count;
     size_t dm_count;
     size_t node_count;
@@ -330,6 +337,8 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .last_public_read_seq = snapshot->last_public_read_seq,
         .last_dm_read_seq = snapshot->last_dm_read_seq,
         .read_state_mark_count = snapshot->read_state_mark_count,
+        .channel_store_revision = snapshot->channel_store_revision,
+        .active_channel_id = snapshot->active_channel_id,
         .message_count = snapshot->message_count,
         .dm_count = snapshot->dm_count,
         .node_count = snapshot->node_count,
@@ -401,6 +410,8 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->last_public_read_seq == right->last_public_read_seq &&
         left->last_dm_read_seq == right->last_dm_read_seq &&
         left->read_state_mark_count == right->read_state_mark_count &&
+        left->channel_store_revision == right->channel_store_revision &&
+        left->active_channel_id == right->active_channel_id &&
         left->message_count == right->message_count &&
         left->dm_count == right->dm_count &&
         left->node_count == right->node_count &&
@@ -1300,6 +1311,8 @@ static void hide_compose_sheet(void)
     s_onboarding_probe_suppressed = false;
     restore_dock_for_active_tab();
     s_compose_dm = false;
+    s_compose_channel_id = 0U;
+    s_compose_channel_name[0] = '\0';
     s_compose_last_send_error = ESP_OK;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     request_full_screen_repaint();
@@ -1309,6 +1322,8 @@ static void hide_public_history_sheet(void)
 {
     d1l_ui_modal_hide(s_public_history_sheet);
     s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
+    s_public_history_channel_id = 0U;
+    s_public_history_channel_name[0] = '\0';
     restore_dock_for_active_tab();
 }
 
@@ -2089,9 +2104,48 @@ static void render_route_row(lv_obj_t *parent, int y, const d1l_route_entry_t *e
     obj_align_if(signal, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static bool snapshot_find_channel(const d1l_app_snapshot_t *snapshot,
+                                  uint64_t channel_id,
+                                  d1l_channel_info_t *out_channel)
+{
+    if (!snapshot || channel_id == 0U) {
+        return false;
+    }
+    size_t count = snapshot->channel_count;
+    if (count > D1L_APP_SNAPSHOT_CHANNEL_PREVIEW) {
+        count = D1L_APP_SNAPSHOT_CHANNEL_PREVIEW;
+    }
+    for (size_t i = 0U; i < count; ++i) {
+        if (snapshot->channels[i].channel_id != channel_id) {
+            continue;
+        }
+        if (out_channel) {
+            *out_channel = snapshot->channels[i];
+        }
+        return true;
+    }
+    return false;
+}
+
+static uint32_t snapshot_channel_read_seq(
+    const d1l_app_snapshot_t *snapshot,
+    const d1l_channel_info_t *channel)
+{
+    if (!snapshot || !channel) {
+        return 0U;
+    }
+    return channel->channel_id == D1L_CHANNEL_PUBLIC_ID ?
+        snapshot->last_public_read_seq : channel->read_through_seq;
+}
+
 static d1l_ui_compose_eligibility_t compose_eligibility_for_text(
     const d1l_user_text_info_t *text_info)
 {
+    d1l_channel_info_t channel = {0};
+    const bool channel_found = s_compose_dm || snapshot_find_channel(
+        &s_snapshot, s_compose_channel_id, &channel);
+    const bool channel_sendable = s_compose_dm ||
+        (channel_found && channel.enabled);
     bool contact_found = !s_compose_dm;
     bool contact_sendable = !s_compose_dm;
     if (s_compose_dm && s_compose_contact.fingerprint[0] != '\0') {
@@ -2115,6 +2169,8 @@ static d1l_ui_compose_eligibility_t compose_eligibility_for_text(
         .protocol_tx_ready = s_snapshot.protocol_tx_ready,
         .settings_load_status = s_snapshot.settings_load_status,
         .identity_state = s_snapshot.identity_state,
+        .channel_found = channel_found,
+        .channel_sendable = channel_sendable,
         .contact_found = contact_found,
         .contact_sendable = contact_sendable,
         .dm_delivery_active = s_snapshot.dm_delivery_active,
@@ -2196,8 +2252,20 @@ static void layout_compose_sheet_controls(void)
     }
 }
 
-static void show_public_compose_sheet(const char *title, const char *placeholder)
+static bool show_channel_compose_sheet(uint64_t channel_id,
+                                       const char *title,
+                                       const char *placeholder)
 {
+    d1l_app_model_snapshot(&s_snapshot);
+    d1l_channel_info_t channel = {0};
+    if (!snapshot_find_channel(&s_snapshot, channel_id, &channel)) {
+        show_toast("Channel", ESP_ERR_NOT_FOUND);
+        return false;
+    }
+    if (!channel.enabled) {
+        show_toast("Channel", ESP_ERR_INVALID_STATE);
+        return false;
+    }
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -2214,10 +2282,17 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     s_compose_dm = false;
+    s_compose_channel_id = channel.channel_id;
+    snprintf(s_compose_channel_name, sizeof(s_compose_channel_name), "%s",
+             channel.name);
     s_compose_last_send_error = ESP_OK;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
-        lv_label_set_text(s_compose_title, title && title[0] ? title : "Compose Public");
+        char default_title[64];
+        snprintf(default_title, sizeof(default_title), "Compose %.32s",
+                 channel.name);
+        lv_label_set_text(s_compose_title,
+                          title && title[0] ? title : default_title);
     }
     if (s_compose_sheet) {
         show_modal(s_compose_sheet);
@@ -2225,25 +2300,38 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
     if (s_compose_textarea && s_compose_keyboard) {
         lv_textarea_set_text(s_compose_textarea, "");
         lv_textarea_set_placeholder_text(s_compose_textarea,
-                                         placeholder && placeholder[0] ? placeholder : "Public message");
+                                         placeholder && placeholder[0] ?
+                                             placeholder :
+                                         channel.channel_id ==
+                                                 D1L_CHANNEL_PUBLIC_ID ?
+                                             "Public message" :
+                                             "Channel message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
         layout_compose_sheet_controls();
         update_compose_counter();
     }
     request_full_screen_repaint();
+    return true;
 }
 
 static void open_compose_event_cb(lv_event_t *event)
 {
     (void)event;
-    show_public_compose_sheet("Compose Public", "Public message");
+    const uint64_t channel_id =
+        s_messages_controller.rendered.active_channel_id;
+    (void)show_channel_compose_sheet(
+        channel_id, NULL,
+        channel_id == D1L_CHANNEL_PUBLIC_ID ?
+            "Public message" : "Channel message");
 }
 
 static void mark_public_read_event_cb(lv_event_t *event)
 {
     (void)event;
-    esp_err_t ret = d1l_app_model_mark_public_read();
-    show_toast("Public read", ret);
+    const uint64_t channel_id =
+        s_messages_controller.rendered.active_channel_id;
+    esp_err_t ret = d1l_app_model_mark_channel_read(channel_id);
+    show_toast("Channel read", ret);
     if (ret == ESP_OK) {
         request_content_refresh();
     }
@@ -2277,6 +2365,8 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     s_compose_dm = true;
+    s_compose_channel_id = 0U;
+    s_compose_channel_name[0] = '\0';
     s_compose_last_send_error = ESP_OK;
     s_compose_contact = selected;
     if (s_compose_title) {
@@ -3107,7 +3197,10 @@ static const char *message_delivery_label(const d1l_message_entry_t *entry)
     if (entry->direction[0] == 't') {
         return "sent over RF";
     }
-    return entry->seq > s_snapshot.last_public_read_seq ? "new" : "received";
+    d1l_channel_info_t channel = {0};
+    return snapshot_find_channel(&s_snapshot, entry->channel_id, &channel) &&
+            entry->seq > snapshot_channel_read_seq(&s_snapshot, &channel) ?
+        "new" : "received";
 }
 
 static void reply_message_detail_event_cb(lv_event_t *event)
@@ -3120,9 +3213,17 @@ static void reply_message_detail_event_cb(lv_event_t *event)
     }
     char title[48];
     char placeholder[64];
+    d1l_app_model_snapshot(&s_snapshot);
+    d1l_channel_info_t channel = {0};
+    if (!snapshot_find_channel(&s_snapshot, entry.channel_id, &channel) ||
+        !channel.enabled) {
+        show_toast("Reply", ESP_ERR_NOT_FOUND);
+        return;
+    }
     snprintf(title, sizeof(title), "Reply %.32s", entry.author);
     snprintf(placeholder, sizeof(placeholder), "Reply to %.48s", entry.author);
-    show_public_compose_sheet(title, placeholder);
+    (void)show_channel_compose_sheet(
+        entry.channel_id, title, placeholder);
 }
 
 static d1l_ui_dm_identity_eligibility_t public_sender_dm_eligibility(void)
@@ -3189,6 +3290,9 @@ static void render_message_detail_sheet(void)
     lv_obj_clean(s_message_detail_sheet);
 
     const d1l_message_entry_t *entry = &s_message_detail_message;
+    d1l_channel_info_t detail_channel = {0};
+    const bool channel_found = snapshot_find_channel(
+        &s_snapshot, entry->channel_id, &detail_channel);
     create_button(s_message_detail_sheet, "Back", 12, 6, 72, 44,
                   close_message_detail_event_cb, NULL);
     lv_obj_t *title = create_label(s_message_detail_sheet, "Message Detail", 0xF4F7FB);
@@ -3209,6 +3313,12 @@ static void render_message_detail_sheet(void)
                       entry->author[0] ? entry->author : "unknown",
                       message_delivery_label(entry));
     }
+
+    create_nested_page_label(body, "Channel", 0x5EEAD4, false);
+    create_nested_page_label(
+        body, channel_found && detail_channel.name[0] ?
+            detail_channel.name : "Channel unavailable",
+        channel_found ? 0xE5EDF5 : 0xFBBF24, false);
 
     const d1l_ui_dm_identity_eligibility_t sender_dm =
         public_sender_dm_eligibility();
@@ -3234,7 +3344,7 @@ static void render_message_detail_sheet(void)
         if (signal) {
             if (entry->direction[0] == 't') {
                 lv_label_set_text(signal,
-                                  "Signal  not measured for retained Public TxDone");
+                                  "Signal  not measured for retained channel TxDone");
             } else {
                 const int snr_abs = entry->snr_tenths < 0 ?
                     -entry->snr_tenths : entry->snr_tenths;
@@ -3248,7 +3358,7 @@ static void render_message_detail_sheet(void)
         if (path) {
             if (entry->direction[0] == 't') {
                 lv_label_set_text(path,
-                                  "Path hops  not measured for retained Public TxDone");
+                                  "Path hops  not measured for retained channel TxDone");
             } else {
                 label_set_fmt(path, "Path  %u hop%s",
                               entry->path_hops,
@@ -3287,6 +3397,7 @@ static void show_message_detail_for(const d1l_message_entry_t *entry)
     }
     s_message_detail_message = *entry;
     s_message_detail_advanced = false;
+    d1l_app_model_snapshot(&s_snapshot);
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -3879,10 +3990,11 @@ static void send_compose_text(void)
     }
     esp_err_t ret = s_compose_dm ?
                     d1l_app_model_send_dm_text(s_compose_contact.fingerprint, text) :
-                    d1l_app_model_send_public_text(text);
+                    d1l_app_model_send_channel_text(
+                        s_compose_channel_id, text);
     if (ret == ESP_OK) {
         s_compose_last_send_error = ESP_OK;
-        show_toast(s_compose_dm ? "DM" : "Public message", ret);
+        show_toast(s_compose_dm ? "DM" : "Channel message", ret);
         lv_textarea_set_text(s_compose_textarea, "");
         update_compose_counter();
         hide_compose_sheet();
@@ -3974,10 +4086,15 @@ static void onboarding_keyboard_event_cb(lv_event_t *event)
 
 static const char *public_row_state(const d1l_message_entry_t *entry)
 {
-    if (entry->direction[0] == 'r' && entry->seq > s_snapshot.last_public_read_seq) {
+    d1l_channel_info_t channel = {0};
+    const uint32_t read_seq = entry && snapshot_find_channel(
+        &s_snapshot, entry->channel_id, &channel) ?
+        snapshot_channel_read_seq(&s_snapshot, &channel) : 0U;
+    if (entry && entry->direction[0] == 'r' && entry->seq > read_seq) {
         return "new";
     }
-    return entry->direction[0] == 't' ? "sent over RF" : "received";
+    return entry && entry->direction[0] == 't' ?
+        "sent over RF" : "received";
 }
 
 static void close_public_history_event_cb(lv_event_t *event)
@@ -4018,7 +4135,15 @@ static void render_public_history_sheet(void)
     update_chrome(&s_snapshot);
     lv_obj_clean(s_public_history_sheet);
 
-    lv_obj_t *title = create_label(s_public_history_sheet, "Public History", 0xF4F7FB);
+    d1l_channel_info_t history_channel = {0};
+    const bool channel_found = snapshot_find_channel(
+        &s_snapshot, s_public_history_channel_id, &history_channel);
+    char history_title[64];
+    snprintf(history_title, sizeof(history_title), "%.32s History",
+             channel_found && history_channel.name[0] ?
+                 history_channel.name : "Channel");
+    lv_obj_t *title = create_label(
+        s_public_history_sheet, history_title, 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_set_width(title, 178);
@@ -4038,11 +4163,11 @@ static void render_public_history_sheet(void)
         s_public_history_limit = D1L_MESSAGE_STORE_CAPACITY;
     }
     size_t total_matches = 0;
-    const size_t history_count =
-        d1l_app_model_query_public_messages_page(s_public_history_entries,
-                                                 s_public_history_limit, 0,
-                                                 s_public_search_text,
-                                                 &total_matches);
+    const size_t history_count = channel_found ?
+        d1l_app_model_query_channel_messages_page(
+            s_public_history_channel_id, s_public_history_entries,
+            s_public_history_limit, 0, s_public_search_text,
+            &total_matches) : 0U;
     lv_obj_t *meta = create_label(s_public_history_sheet, "", 0x8EA0AE);
     if (s_public_search_text[0]) {
         label_set_fmt(meta, "showing %u/%u  find %.18s",
@@ -4069,9 +4194,12 @@ static void render_public_history_sheet(void)
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
 
     int y = 0;
+    const uint32_t read_seq = channel_found ?
+        snapshot_channel_read_seq(&s_snapshot, &history_channel) : 0U;
     for (size_t i = 0; i < history_count; ++i) {
         const d1l_message_entry_t *entry = &s_public_history_entries[i];
-        const bool unread = entry->direction[0] == 'r' && entry->seq > s_snapshot.last_public_read_seq;
+        const bool unread = entry->direction[0] == 'r' &&
+            entry->seq > read_seq;
         lv_obj_t *row = create_panel(list, 0, y, 404, 52);
         lv_obj_set_style_pad_all(row, 8, 0);
         lv_obj_t *author = create_label(row, entry->author,
@@ -4091,8 +4219,11 @@ static void render_public_history_sheet(void)
     }
     if (history_count == 0) {
         lv_obj_t *empty = create_label(list,
+                                       !channel_found ?
+                                       "Channel unavailable" :
                                        s_public_search_text[0] ?
-                                       "No Public rows match" : "No retained Public rows",
+                                       "No channel rows match" :
+                                       "No retained channel rows",
                                        0x8EA0AE);
         lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
     } else {
@@ -4159,6 +4290,17 @@ static void open_public_search_event_cb(lv_event_t *event)
     if (!s_public_search_sheet) {
         return;
     }
+    if (s_public_search_title) {
+        char title[64];
+        if (s_public_history_channel_id == D1L_CHANNEL_PUBLIC_ID) {
+            snprintf(title, sizeof(title), "%s", "Public Search");
+        } else {
+            snprintf(title, sizeof(title), "Search %.32s",
+                     s_public_history_channel_name[0] ?
+                         s_public_history_channel_name : "channel");
+        }
+        lv_label_set_text(s_public_search_title, title);
+    }
     if (s_public_search_textarea && s_public_search_keyboard) {
         lv_textarea_set_text(s_public_search_textarea, s_public_search_text);
         lv_keyboard_set_textarea(s_public_search_keyboard, s_public_search_textarea);
@@ -4170,6 +4312,7 @@ static void open_public_history_event_cb(lv_event_t *event)
 {
     (void)event;
     s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
+    s_public_search_text[0] = '\0';
     hide_sheet();
     hide_compose_sheet();
     hide_public_search_sheet();
@@ -4183,6 +4326,11 @@ static void open_public_history_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
+    s_public_history_channel_id =
+        s_messages_controller.rendered.active_channel_id;
+    snprintf(s_public_history_channel_name,
+             sizeof(s_public_history_channel_name), "%s",
+             s_messages_controller.rendered.active_channel_name);
     show_public_history_sheet();
 }
 
@@ -4380,12 +4528,9 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     }
     memset(view_model, 0, sizeof(*view_model));
     view_model->mode = s_messages_mode;
-    view_model->public_total = snapshot->message_count;
     view_model->dm_total = snapshot->dm_conversation_count;
-    view_model->public_unread = snapshot->public_unread_count;
     view_model->dm_unread = snapshot->dm_unread_count;
     view_model->muted_dm_unread = snapshot->muted_dm_unread_count;
-    view_model->last_public_read_seq = snapshot->last_public_read_seq;
     view_model->dm_capable_contact_count =
         snapshot->dm_capable_contact_count;
     view_model->public_store_state =
@@ -4393,12 +4538,37 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     view_model->dm_store_state =
         messages_store_state_from_snapshot(snapshot, true);
 
-    view_model->public_row_count = snapshot->recent_message_count;
-    if (view_model->public_row_count > D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS) {
-        view_model->public_row_count = D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS;
+    view_model->channel_store_loaded = snapshot->channel_store_loaded;
+    view_model->channel_count = snapshot->channel_count;
+    if (view_model->channel_count > D1L_CHANNEL_STORE_CAPACITY) {
+        view_model->channel_count = D1L_CHANNEL_STORE_CAPACITY;
     }
-    memcpy(view_model->public_rows, snapshot->recent_messages,
-           view_model->public_row_count * sizeof(view_model->public_rows[0]));
+    memcpy(view_model->channels, snapshot->channels,
+           view_model->channel_count * sizeof(view_model->channels[0]));
+    view_model->active_channel_id = snapshot->active_channel_id;
+    d1l_channel_info_t active_channel = {0};
+    if (snapshot_find_channel(snapshot, snapshot->active_channel_id,
+                              &active_channel)) {
+        snprintf(view_model->active_channel_name,
+                 sizeof(view_model->active_channel_name), "%s",
+                 active_channel.name);
+        view_model->active_channel_enabled = active_channel.enabled;
+        view_model->public_unread = active_channel.unread_count;
+        view_model->last_channel_read_seq = snapshot_channel_read_seq(
+            snapshot, &active_channel);
+        size_t total_matches = 0U;
+        view_model->public_row_count =
+            d1l_app_model_query_channel_messages_page(
+                active_channel.channel_id, view_model->public_rows,
+                D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS, 0U, NULL,
+                &total_matches);
+        if (view_model->public_row_count >
+            D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS) {
+            view_model->public_row_count =
+                D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS;
+        }
+        view_model->public_total = total_matches;
+    }
 
     view_model->dm_row_count = snapshot->recent_dm_count;
     if (view_model->dm_row_count > D1L_UI_MESSAGES_DM_PREVIEW_ROWS) {
@@ -4499,6 +4669,39 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
                 hide_dm_thread_sheet();
                 request_content_refresh();
                 show_toast("DM", ESP_ERR_NO_MEM);
+            }
+        }
+        break;
+    case D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR:
+        if (d1l_ui_messages_render_channel_selector(
+                &s_messages_controller, handle_messages_action, NULL)) {
+            show_modal(d1l_ui_messages_channel_selector_sheet(
+                &s_messages_controller));
+        } else {
+            show_toast("Channels", ESP_ERR_NO_MEM);
+            request_content_refresh();
+        }
+        break;
+    case D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR:
+        d1l_ui_messages_hide_channel_selector(&s_messages_controller);
+        request_content_refresh();
+        break;
+    case D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL:
+        if (!event->channel || !event->channel->enabled ||
+            event->channel->channel_id == 0U) {
+            show_toast("Channels", ESP_ERR_INVALID_STATE);
+            break;
+        }
+        {
+            d1l_channel_info_t selected = {0};
+            const esp_err_t ret = d1l_app_model_select_channel(
+                event->channel->channel_id, &selected);
+            show_toast("Channels", ret);
+            if (ret == ESP_OK) {
+                s_public_search_text[0] = '\0';
+                d1l_ui_messages_hide_channel_selector(
+                    &s_messages_controller);
+                request_content_refresh();
             }
         }
         break;
@@ -6021,6 +6224,8 @@ static void process_pending_content_refresh(void)
          d1l_ui_modal_visible(s_public_search_sheet));
     const bool refresh_dm_thread =
         d1l_ui_messages_thread_active(&s_messages_controller);
+    const bool refresh_channel_selector = messages_active &&
+        d1l_ui_messages_channel_selector_active(&s_messages_controller);
     const bool public_search_visible =
         d1l_ui_modal_visible(s_public_search_sheet);
     const bool dm_search_visible = d1l_ui_modal_visible(s_dm_search_sheet);
@@ -6043,6 +6248,20 @@ static void process_pending_content_refresh(void)
         } else {
             hide_dm_thread_sheet();
             show_toast("DM", ESP_ERR_NO_MEM);
+        }
+    }
+    if (refresh_channel_selector) {
+        if (d1l_ui_messages_render_channel_selector(
+                &s_messages_controller, handle_messages_action, NULL)) {
+            show_modal(d1l_ui_messages_channel_selector_sheet(
+                &s_messages_controller));
+        } else {
+            d1l_ui_messages_hide_channel_selector(&s_messages_controller);
+            /* Selector rendering owns the shared Messages action generation.
+             * Rebuild the exposed root controls after any partial allocation
+             * failure so no stale or inert bindings remain visible. */
+            request_content_refresh();
+            show_toast("Channels", ESP_ERR_NO_MEM);
         }
     }
     force_ui_layout_repaint();
@@ -6215,6 +6434,9 @@ static lv_obj_t *scroll_probe_open_surface(const char *surface)
     if (strcmp(surface, "public_messages") == 0) {
         s_messages_mode = D1L_UI_MESSAGES_MODE_PUBLIC;
         render_active_tab();
+        s_public_history_channel_id = D1L_CHANNEL_PUBLIC_ID;
+        snprintf(s_public_history_channel_name,
+                 sizeof(s_public_history_channel_name), "%s", "Public");
         show_public_history_sheet();
         return scroll_probe_find_target(s_public_history_sheet);
     }
@@ -6497,7 +6719,8 @@ static void open_compose_probe_on_ui_task(const char *target)
         snprintf(contact.alias, sizeof(contact.alias), "%s", "Probe DM");
         open_dm_compose_for_contact(&contact);
     } else {
-        show_public_compose_sheet("Compose Public", "Public message");
+        (void)show_channel_compose_sheet(
+            D1L_CHANNEL_PUBLIC_ID, "Compose Public", "Public message");
     }
 
     if (s_compose_textarea) {
@@ -6536,6 +6759,9 @@ static void open_keyboard_probe_on_ui_task(const char *target)
         s_messages_mode = D1L_UI_MESSAGES_MODE_PUBLIC;
         render_active_tab();
         hide_onboarding_sheet();
+        s_public_history_channel_id = D1L_CHANNEL_PUBLIC_ID;
+        snprintf(s_public_history_channel_name,
+                 sizeof(s_public_history_channel_name), "%s", "Public");
         open_public_search_event_cb(NULL);
         if (s_public_search_textarea) {
             lv_textarea_set_text(s_public_search_textarea, "probe");
@@ -7059,9 +7285,13 @@ static void create_public_search_sheet(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_public_search_sheet, 12, 0);
     lv_obj_clear_flag(s_public_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = create_label(s_public_search_sheet, "Public Search", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_pos(title, 8, 4);
+    s_public_search_title = create_label(
+        s_public_search_sheet, "Channel Search", 0xF4F7FB);
+    lv_obj_set_style_text_font(
+        s_public_search_title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(s_public_search_title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_public_search_title, 190);
+    lv_obj_set_pos(s_public_search_title, 8, 4);
 
     create_button(s_public_search_sheet, "Apply", 212, 0, 66, 40,
                   apply_public_search_event_cb, NULL);

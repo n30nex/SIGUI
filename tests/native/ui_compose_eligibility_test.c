@@ -15,6 +15,8 @@ static d1l_ui_compose_eligibility_input_t ready_public(void)
         .protocol_tx_ready = true,
         .settings_load_status = ESP_OK,
         .identity_state = D1L_IDENTITY_STATE_ABSENT,
+        .channel_found = true,
+        .channel_sendable = true,
         .previous_send_error = ESP_OK,
     };
 }
@@ -75,6 +77,13 @@ int main(void)
     input.path_hash_bytes = 2U;
     input.protocol_tx_ready = false;
     expect_reason(&input, D1L_UI_COMPOSE_PROTOCOL_TIME_UNAVAILABLE, false);
+
+    input = ready_public();
+    input.channel_found = false;
+    expect_reason(&input, D1L_UI_COMPOSE_CHANNEL_MISSING, false);
+    input.channel_found = true;
+    input.channel_sendable = false;
+    expect_reason(&input, D1L_UI_COMPOSE_CHANNEL_NOT_SENDABLE, false);
 
     input = ready_public();
     input.settings_load_status = ESP_FAIL;

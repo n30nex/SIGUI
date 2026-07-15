@@ -284,7 +284,8 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
 
     assert "messages_create_scroll_body(parent, 18, 112, 424, 184)" in messages_source
     assert "messages_create_scroll_body(parent, 18, 68, 424, 286)" in messages_source
-    assert 'parent, "Compose", 18, 304, 424, 50' in messages_source
+    assert '"Compose" : "Channel unavailable"' in messages_source
+    assert "18, 304, 424, 50" in messages_source
     assert "controller->rendered.public_row_count" in messages_source
     assert "controller->rendered.dm_row_count" in messages_source
 
@@ -307,8 +308,8 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert '"Sequence  %lu  uptime %lums  direction %s"' in detail
     assert '"Path hash  %u byte%s  retained after %s"' in detail
     assert 'return "sent over RF";' in source
-    assert '"Signal  not measured for retained Public TxDone"' in detail
-    assert '"Path hops  not measured for retained Public TxDone"' in detail
+    assert '"Signal  not measured for retained channel TxDone"' in detail
+    assert '"Path hops  not measured for retained channel TxDone"' in detail
 
     compose = source.split("static void create_compose_sheet", 1)[1].split(
         "static void create_public_history_sheet", 1
@@ -317,7 +318,7 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "set_dock_hidden(true)" in source
     assert "restore_dock_for_active_tab()" in source
     layout = source.split("static void layout_compose_sheet_controls", 1)[1].split(
-        "static void show_public_compose_sheet", 1
+        "static bool show_channel_compose_sheet", 1
     )[0]
     assert "lv_obj_set_size(s_compose_sheet, 480, 424)" in layout
     assert "lv_obj_set_pos(s_compose_sheet, 0, 56)" in layout
@@ -566,13 +567,13 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
     )[0]
     assert "request_full_screen_repaint();" in compose_hide
 
-    public_compose = source.split("static void show_public_compose_sheet", 1)[1].split(
+    channel_compose = source.split("static bool show_channel_compose_sheet", 1)[1].split(
         "static void open_compose_event_cb", 1
     )[0]
     dm_compose = source.split("static void open_dm_compose_for_contact", 1)[1].split(
         "static bool contact_from_node_view", 1
     )[0]
-    assert "request_full_screen_repaint();" in public_compose
+    assert "request_full_screen_repaint();" in channel_compose
     assert "request_full_screen_repaint();" in dm_compose
 
 
@@ -700,14 +701,15 @@ def test_touch_ui_actions_route_through_app_model():
     header = read("main/app/app_model.h")
     model = read("main/app/app_model.c")
     assert "d1l_app_model_send_public_test()" not in source
-    assert "d1l_app_model_send_public_text(text)" in source
+    assert "d1l_app_model_send_channel_text(" in source
+    assert "s_compose_channel_id, text" in source
     assert "d1l_app_model_send_dm_text(s_compose_contact.fingerprint, text)" in source
     assert "d1l_app_model_request_advert(false)" in source
     assert "d1l_app_model_request_advert(true)" in source
     assert "d1l_app_model_complete_onboarding(name)" in source
     assert "d1l_app_model_set_map_location(s_map_location_lat_e7" in source
     assert "d1l_app_model_clear_map_location()" in source
-    assert "d1l_app_model_send_public_text" in header
+    assert "d1l_app_model_send_channel_text" in header
     assert "d1l_app_model_send_dm_text" in header
     assert "d1l_app_model_complete_onboarding" in header
     assert "d1l_app_model_find_contact" in header
@@ -748,7 +750,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "lock_overlay_unlock",
         "home_launcher_navigation",
         "messages_hierarchy_navigation",
-        "public_compose_and_send",
+            "public_compose_and_send",
+            "channel_select_private_history_compose_and_return_public",
         "public_history_search",
         "dm_thread_open_and_reply",
         "node_detail_inspection",
@@ -766,7 +769,14 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "unlock": "unlock_event_cb",
         "open_public_compose": "open_compose_event_cb",
         "edit_public_message": "s_compose_textarea",
-        "send_public_text": "send_compose_text",
+        "send_channel_text": "send_compose_text",
+        "open_channel_selector": "D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR",
+        "select_channel_1": "D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL",
+        "select_channel_2": "D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL",
+        "mark_channel_read": "D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ",
+        "open_channel_history": "D1L_UI_MESSAGES_ACTION_OPEN_HISTORY",
+        "open_channel_search": "open_public_search_event_cb",
+        "open_channel_compose": "D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC",
         "mark_public_read": "D1L_UI_MESSAGES_ACTION_MARK_PUBLIC_READ",
         "open_messages_root": "D1L_UI_MESSAGES_ACTION_SHOW_ROOT",
         "open_messages_public": "D1L_UI_MESSAGES_ACTION_SHOW_PUBLIC",
@@ -898,7 +908,7 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     messages_source = read("main/ui/ui_messages.c")
     assert "create_compose_sheet" in source
     assert "open_compose_event_cb" in source
-    assert "show_public_compose_sheet" in source
+    assert "show_channel_compose_sheet" in source
     assert "send_compose_text" in source
     assert "static lv_obj_t *s_compose_counter" in source
     assert "update_compose_counter" in source
@@ -912,7 +922,7 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     )[0]
     validation = send.index("d1l_user_text_validate(text)")
     assert validation < send.index("d1l_app_model_send_dm_text")
-    assert validation < send.index("d1l_app_model_send_public_text")
+    assert validation < send.index("d1l_app_model_send_channel_text")
     admission = send.index("compose_eligibility_for_text(&info)")
     assert validation < admission < send.index("d1l_app_model_send_dm_text")
     assert send.index("d1l_app_model_snapshot(&s_snapshot)") < admission
@@ -956,7 +966,7 @@ def test_dm_composer_opens_from_contact_rows():
     assert "s_compose_contact = selected" in source
     assert 'lv_label_set_text(s_compose_title, title)' in source
     assert 'lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message")' in source
-    assert 'show_toast(s_compose_dm ? "DM" : "Public message", ret)' in source
+    assert 'show_toast(s_compose_dm ? "DM" : "Channel message", ret)' in source
 
 
 def test_dm_thread_sheet_opens_from_recent_dm_rows():
@@ -1091,11 +1101,12 @@ def test_public_message_detail_sheet_opens_from_public_rows():
     assert "D1L_UI_DM_IDENTITY_SOURCE_PUBLIC_SENDER_LABEL" in source
     assert 'snprintf(title, sizeof(title), "Reply %.32s"' in source
     assert 'snprintf(placeholder, sizeof(placeholder), "Reply to %.48s"' in source
-    assert "show_public_compose_sheet(title, placeholder)" in source
+    assert "show_channel_compose_sheet(" in source
+    assert "entry.channel_id, title, placeholder" in source
     assert '"Signal  rssi %d  snr %s%d.%d"' in render
-    assert '"Signal  not measured for retained Public TxDone"' in render
+    assert '"Signal  not measured for retained channel TxDone"' in render
     assert '"Path  %u hop%s"' in render
-    assert '"Path hops  not measured for retained Public TxDone"' in render
+    assert '"Path hops  not measured for retained channel TxDone"' in render
     assert '"Hide technical details" : "Technical details"' in render
     assert '"Sequence  %lu  uptime %lums  direction %s"' in source
     assert "message_delivery_label" in source
@@ -1360,11 +1371,12 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert "static size_t s_public_history_limit" in source
     assert "render_public_history_sheet" in source
     assert "public_history_load_older_event_cb" in source
-    assert "d1l_app_model_query_public_messages_page(s_public_history_entries" in source
+    assert "d1l_app_model_query_channel_messages_page(" in source
+    assert "s_public_history_channel_id, s_public_history_entries" in source
     assert "D1L_PUBLIC_HISTORY_UI_LOAD_OLDER_STEP" in source
     assert "lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF)" in source
     assert 'create_button(s_public_history_sheet, "Load Older"' in source
-    assert '"Public History"' in source
+    assert 'snprintf(history_title, sizeof(history_title), "%.32s History"' in source
     assert '"Public Search"' in source
     assert '"Search author or message"' in source
 

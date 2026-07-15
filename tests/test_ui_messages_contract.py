@@ -40,7 +40,8 @@ def test_messages_root_has_owned_view_model_action_and_lifetime_boundary():
     assert "freertos/" not in source
 
     assert "messages_view_model_from_snapshot(snapshot, &s_messages_controller.rendered);" in phase1
-    assert "snapshot->recent_message_count" in phase1
+    assert "snapshot->active_channel_id" in phase1
+    assert "d1l_app_model_query_channel_messages_page(" in phase1
     assert "snapshot->recent_dm_count" in phase1
     assert "D1L_UI_MESSAGES_PUBLIC_PREVIEW_ROWS" in phase1
     assert "D1L_UI_MESSAGES_DM_PREVIEW_ROWS" in phase1
@@ -65,7 +66,8 @@ def test_messages_hierarchy_is_simple_bounded_and_navigation_is_rf_silent():
     assert "messages_render_root_card(" in source
     assert "messages_create_scroll_body(parent, 18, 112, 424, 184)" in source
     assert "messages_create_scroll_body(parent, 18, 68, 424, 286)" in source
-    assert 'parent, "Compose", 18, 304, 424, 50' in source
+    assert '"Compose" : "Channel unavailable"' in source
+    assert "18, 304, 424, 50" in source
     assert "D1L_UI_MESSAGES_ACTION_SEND_PUBLIC_TEST" not in header
     assert "d1l_app_model_send_public_test()" not in phase1
     assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);" in source
@@ -137,7 +139,7 @@ def test_public_conversation_bubbles_align_and_show_truthful_time_and_state():
     assert '"queued"' not in bubble
 
 
-def test_public_mark_read_advances_only_the_public_cursor():
+def test_channel_mark_read_targets_the_exact_active_channel():
     app_header = read("main/app/app_model.h")
     app_source = read("main/app/app_model.c")
     phase1 = read("main/ui/ui_phase1.c")
@@ -151,7 +153,8 @@ def test_public_mark_read_advances_only_the_public_cursor():
     ui_action = phase1.split("static void mark_public_read_event_cb", 1)[1].split(
         "static void open_dm_compose_for_contact", 1
     )[0]
-    assert "d1l_app_model_mark_public_read()" in ui_action
+    assert "s_messages_controller.rendered.active_channel_id" in ui_action
+    assert "d1l_app_model_mark_channel_read(channel_id)" in ui_action
     assert "d1l_app_model_mark_messages_read" not in ui_action
 
 
@@ -171,7 +174,7 @@ def test_public_tx_truth_is_consistent_in_bubble_history_and_detail():
     assert '"sent over RF"' in history
     assert '"queued"' not in delivery
     assert '"queued"' not in history
-    assert '"Signal  not measured for retained Public TxDone"' in detail
-    assert '"Path hops  not measured for retained Public TxDone"' in detail
+    assert '"Signal  not measured for retained channel TxDone"' in detail
+    assert '"Path hops  not measured for retained channel TxDone"' in detail
     assert "retained after %s" in detail
     assert '"delivered"' not in detail

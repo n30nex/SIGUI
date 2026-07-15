@@ -46,6 +46,8 @@ static void messages_deactivate_actions(d1l_ui_messages_controller_t *controller
     memset(controller->dm_rows, 0, sizeof(controller->dm_rows));
     memset(controller->thread_controls, 0, sizeof(controller->thread_controls));
     memset(controller->thread_rows, 0, sizeof(controller->thread_rows));
+    memset(controller->channel_controls, 0, sizeof(controller->channel_controls));
+    memset(controller->channel_rows, 0, sizeof(controller->channel_rows));
     controller->action_handler = NULL;
     controller->action_context = NULL;
 }
@@ -60,7 +62,7 @@ static void messages_begin_actions(
     controller->action_context = action_context;
 }
 
-static lv_obj_t *messages_create_thread_sheet(lv_obj_t *parent)
+static lv_obj_t *messages_create_full_sheet(lv_obj_t *parent)
 {
     if (!messages_object_is_valid(parent)) {
         return NULL;
@@ -91,10 +93,26 @@ bool d1l_ui_messages_create(d1l_ui_messages_controller_t *controller,
         d1l_ui_modal_hide(controller->thread_sheet);
         lv_obj_del(controller->thread_sheet);
     }
+    if (messages_object_is_valid(controller->channel_sheet)) {
+        d1l_ui_modal_hide(controller->channel_sheet);
+        lv_obj_del(controller->channel_sheet);
+    }
     memset(controller, 0, sizeof(*controller));
     controller->thread_limit = D1L_UI_MESSAGES_THREAD_INITIAL_ROWS;
-    controller->thread_sheet = messages_create_thread_sheet(parent);
-    return controller->thread_sheet != NULL;
+    controller->thread_sheet = messages_create_full_sheet(parent);
+    controller->channel_sheet = messages_create_full_sheet(parent);
+    if (!controller->thread_sheet || !controller->channel_sheet) {
+        if (messages_object_is_valid(controller->thread_sheet)) {
+            lv_obj_del(controller->thread_sheet);
+        }
+        if (messages_object_is_valid(controller->channel_sheet)) {
+            lv_obj_del(controller->channel_sheet);
+        }
+        controller->thread_sheet = NULL;
+        controller->channel_sheet = NULL;
+        return false;
+    }
+    return true;
 }
 
 static lv_obj_t *messages_create_label(lv_obj_t *parent, const char *text, uint32_t color)
@@ -160,6 +178,7 @@ static void messages_dispatch_event_cb(lv_event_t *event)
         .action = binding->action,
         .public_message = NULL,
         .dm_message = NULL,
+        .channel = NULL,
     };
     if (binding->action == D1L_UI_MESSAGES_ACTION_OPEN_PUBLIC_MESSAGE) {
         if (binding->row_index >= controller->rendered.public_row_count) {
@@ -176,6 +195,11 @@ static void messages_dispatch_event_cb(lv_event_t *event)
             return;
         }
         action_event.dm_message = &controller->thread_entries[binding->row_index];
+    } else if (binding->action == D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL) {
+        if (binding->row_index >= controller->rendered.channel_count) {
+            return;
+        }
+        action_event.channel = &controller->rendered.channels[binding->row_index];
     }
     controller->action_handler(&action_event, controller->action_context);
 }
@@ -370,7 +394,7 @@ static void messages_render_public_row(d1l_ui_messages_controller_t *controller,
     const d1l_message_entry_t *entry = &controller->rendered.public_rows[index];
     const bool outgoing = entry->direction[0] == 't';
     const bool unread = !outgoing &&
-        entry->seq > controller->rendered.last_public_read_seq;
+        entry->seq > controller->rendered.last_channel_read_seq;
     lv_obj_t *bubble = messages_create_panel(body, outgoing ? 76 : 8, y, 332, 82);
     if (!bubble) {
         return;
@@ -625,7 +649,11 @@ static void messages_render_root(d1l_ui_messages_controller_t *controller,
         lv_obj_set_pos(copy, 18, 40);
     }
     messages_render_root_card(
-        controller, parent, 70, "Public", "Default channel conversation",
+        controller, parent, 70,
+        controller->rendered.active_channel_name[0] ?
+            controller->rendered.active_channel_name : "Channel unavailable",
+        controller->rendered.active_channel_id == D1L_CHANNEL_PUBLIC_ID ?
+            "Default channel conversation" : "Active group channel conversation",
         "messages",
         controller->rendered.public_total, controller->rendered.public_unread, 0U,
         controller->rendered.public_store_state,
@@ -692,10 +720,14 @@ static void messages_render_public(d1l_ui_messages_controller_t *controller,
         parent, "Back", 18, 8, 72, 44,
         messages_bind_control(controller, 0U,
                               D1L_UI_MESSAGES_ACTION_SHOW_ROOT));
-    lv_obj_t *title = messages_create_label(parent, "Public", 0x5EEAD4);
+    lv_obj_t *title = messages_create_label(
+        parent,
+        controller->rendered.active_channel_name[0] ?
+            controller->rendered.active_channel_name : "Channel unavailable",
+        0x5EEAD4);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        messages_set_dot_width(title, 200);
+        messages_set_dot_width(title, 226);
         lv_obj_set_pos(title, 104, 10);
     }
     char summary[96];
@@ -707,6 +739,10 @@ static void messages_render_public(d1l_ui_messages_controller_t *controller,
     if (meta) {
         lv_obj_set_pos(meta, 104, 36);
     }
+    messages_create_button(
+        parent, "Channels", 350, 8, 92, 44,
+        messages_bind_control(controller, 4U,
+                              D1L_UI_MESSAGES_ACTION_OPEN_CHANNEL_SELECTOR));
     messages_create_button(
         parent, "Mark read", 18, 60, 96, 44,
         messages_bind_control(controller, 1U,
@@ -735,23 +771,32 @@ static void messages_render_public(d1l_ui_messages_controller_t *controller,
     }
     if (controller->rendered.public_row_count == 0U) {
         const char *empty_text =
+            !controller->rendered.active_channel_enabled ?
+                "Channel unavailable or disabled." :
             controller->rendered.public_store_state ==
                     D1L_UI_MESSAGES_STORE_LOADING ?
-                "Loading retained Public history..." :
+                "Loading retained channel history..." :
             controller->rendered.public_store_state ==
                     D1L_UI_MESSAGES_STORE_UNAVAILABLE ?
-                "No readable Public history in RAM." :
-                "No Public messages yet";
+                "No readable channel history in RAM." :
+                "No messages in this channel yet";
         lv_obj_t *empty = messages_create_label(
             body, empty_text, 0x8EA0AE);
         if (empty) {
             lv_obj_set_pos(empty, 16, row_y + 8);
         }
     }
-    messages_create_button(
-        parent, "Compose", 18, 304, 424, 50,
-        messages_bind_control(controller, 3U,
-                              D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC));
+    lv_obj_t *compose = messages_create_button(
+        parent, controller->rendered.active_channel_enabled ?
+            "Compose" : "Channel unavailable",
+        18, 304, 424, 50,
+        controller->rendered.active_channel_enabled ?
+            messages_bind_control(controller, 3U,
+                                  D1L_UI_MESSAGES_ACTION_COMPOSE_PUBLIC) :
+            NULL);
+    if (compose && !controller->rendered.active_channel_enabled) {
+        lv_obj_add_state(compose, LV_STATE_DISABLED);
+    }
 }
 
 static void messages_render_direct(d1l_ui_messages_controller_t *controller,
@@ -859,6 +904,172 @@ void d1l_ui_messages_render(d1l_ui_messages_controller_t *controller,
     default:
         messages_render_root(controller, parent);
         break;
+    }
+}
+
+static d1l_ui_messages_action_binding_t *messages_bind_channel_control(
+    d1l_ui_messages_controller_t *controller,
+    size_t index,
+    d1l_ui_messages_action_t action)
+{
+    if (!controller ||
+        index >= D1L_UI_MESSAGES_CHANNEL_CONTROL_BINDING_COUNT) {
+        return NULL;
+    }
+    d1l_ui_messages_action_binding_t *binding =
+        &controller->channel_controls[index];
+    *binding = (d1l_ui_messages_action_binding_t) {
+        .controller = controller,
+        .action = action,
+        .row_index = 0U,
+        .generation = controller->generation,
+    };
+    return binding;
+}
+
+static bool messages_render_channel_selector_notice(lv_obj_t *parent,
+                                                    const char *text,
+                                                    uint32_t color)
+{
+    lv_obj_t *panel = messages_create_panel(parent, 8, 8, 408, 44);
+    if (!panel) {
+        return false;
+    }
+    lv_obj_set_style_pad_all(panel, 8, 0);
+    lv_obj_t *label = messages_create_label(panel, text, color);
+    if (!label) {
+        lv_obj_del(panel);
+        return false;
+    }
+    messages_set_dot_width(label, 390);
+    lv_obj_set_pos(label, 0, 4);
+    return true;
+}
+
+bool d1l_ui_messages_render_channel_selector(
+    d1l_ui_messages_controller_t *controller,
+    d1l_ui_messages_action_handler_t action_handler,
+    void *action_context)
+{
+    if (!controller || !messages_object_is_valid(controller->channel_sheet) ||
+        !action_handler) {
+        return false;
+    }
+    if (controller->rendered.channel_count > D1L_CHANNEL_STORE_CAPACITY) {
+        controller->rendered.channel_count = D1L_CHANNEL_STORE_CAPACITY;
+    }
+    messages_begin_actions(controller, action_handler, action_context);
+    lv_obj_t *sheet = controller->channel_sheet;
+    lv_obj_clean(sheet);
+    bool complete = messages_create_button(
+        sheet, "Close", 392, 6, 72, 44,
+        messages_bind_channel_control(
+            controller, 0U,
+            D1L_UI_MESSAGES_ACTION_CLOSE_CHANNEL_SELECTOR)) != NULL;
+    lv_obj_t *title = messages_create_label(sheet, "Channels", 0xF4F7FB);
+    if (title) {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        messages_set_dot_width(title, 340);
+        lv_obj_set_pos(title, 16, 10);
+    } else {
+        complete = false;
+    }
+    lv_obj_t *body = messages_create_scroll_body(sheet, 16, 60, 448, 352);
+    if (!body) {
+        complete = false;
+    } else if (!controller->rendered.channel_store_loaded) {
+        complete = messages_render_channel_selector_notice(
+            body, "Channel list unavailable; selection is unchanged.",
+            0xF87171) && complete;
+    } else if (controller->rendered.channel_count == 0U) {
+        complete = messages_render_channel_selector_notice(
+            body, "No configured channels.", 0x8EA0AE) && complete;
+    } else {
+        for (size_t i = 0U; i < controller->rendered.channel_count; ++i) {
+            const d1l_channel_info_t *channel =
+                &controller->rendered.channels[i];
+            lv_obj_t *row = messages_create_panel(
+                body, 8, 8 + (int)i * 52, 416, 44);
+            if (!row) {
+                complete = false;
+                continue;
+            }
+            lv_obj_set_style_pad_all(row, 8, 0);
+            const bool active = channel->channel_id ==
+                controller->rendered.active_channel_id;
+            if (active) {
+                lv_obj_set_style_border_color(row, lv_color_hex(0x5EEAD4), 0);
+            }
+            if (channel->enabled) {
+                d1l_ui_messages_action_binding_t *binding =
+                    &controller->channel_rows[i];
+                *binding = (d1l_ui_messages_action_binding_t) {
+                    .controller = controller,
+                    .action = D1L_UI_MESSAGES_ACTION_SELECT_CHANNEL,
+                    .row_index = i,
+                    .generation = controller->generation,
+                };
+                messages_make_clickable(row, binding);
+            } else {
+                lv_obj_add_state(row, LV_STATE_DISABLED);
+            }
+            lv_obj_t *name = messages_create_label(
+                row, channel->name[0] ? channel->name : "Unnamed channel",
+                channel->enabled ? (active ? 0x5EEAD4 : 0xF4F7FB) :
+                    0x8EA0AE);
+            if (name) {
+                messages_set_dot_width(name, 250);
+                lv_obj_set_pos(name, 0, 2);
+            } else {
+                complete = false;
+            }
+            char state[80];
+            snprintf(state, sizeof(state), "%s%s%lu unread",
+                     active ? "active | " : "",
+                     channel->enabled ? "" : "disabled | ",
+                     (unsigned long)channel->unread_count);
+            lv_obj_t *meta = messages_create_label(row, state, 0x8EA0AE);
+            if (meta) {
+                messages_set_dot_width(meta, 136);
+                lv_obj_set_pos(meta, 264, 2);
+            } else {
+                complete = false;
+            }
+        }
+    }
+    if (!complete) {
+        messages_deactivate_actions(controller);
+        lv_obj_clean(sheet);
+        d1l_ui_modal_hide(sheet);
+    }
+    return complete;
+}
+
+bool d1l_ui_messages_channel_selector_active(
+    const d1l_ui_messages_controller_t *controller)
+{
+    return controller && messages_object_is_valid(controller->channel_sheet) &&
+        d1l_ui_modal_visible(controller->channel_sheet);
+}
+
+lv_obj_t *d1l_ui_messages_channel_selector_sheet(
+    const d1l_ui_messages_controller_t *controller)
+{
+    return controller && messages_object_is_valid(controller->channel_sheet) ?
+        controller->channel_sheet : NULL;
+}
+
+void d1l_ui_messages_hide_channel_selector(
+    d1l_ui_messages_controller_t *controller)
+{
+    if (!controller) {
+        return;
+    }
+    if (d1l_ui_messages_channel_selector_active(controller)) {
+        messages_deactivate_actions(controller);
+    }
+    if (messages_object_is_valid(controller->channel_sheet)) {
+        d1l_ui_modal_hide(controller->channel_sheet);
     }
 }
 
@@ -1376,8 +1587,11 @@ void d1l_ui_messages_deactivate(d1l_ui_messages_controller_t *controller)
         return;
     }
     const bool thread_was_active = controller->thread_fingerprint[0] != '\0';
+    const bool channel_was_active =
+        d1l_ui_messages_channel_selector_active(controller);
+    d1l_ui_messages_hide_channel_selector(controller);
     d1l_ui_messages_hide_thread(controller);
-    if (!thread_was_active) {
+    if (!thread_was_active && !channel_was_active) {
         messages_deactivate_actions(controller);
     }
     memset(&controller->rendered, 0, sizeof(controller->rendered));
