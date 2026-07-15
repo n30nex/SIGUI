@@ -15,6 +15,18 @@ static bool messages_object_is_valid(const lv_obj_t *object)
     return object && lv_obj_is_valid(object);
 }
 
+static bool messages_text_fits(const char *text, size_t capacity)
+{
+    if (!text || capacity == 0U) {
+        return false;
+    }
+    size_t length = 0U;
+    while (length < capacity && text[length] != '\0') {
+        length++;
+    }
+    return length < capacity;
+}
+
 static void messages_advance_generation(d1l_ui_messages_controller_t *controller)
 {
     controller->generation++;
@@ -838,8 +850,8 @@ static bool messages_render_thread_bubble(
     lv_obj_t *body,
     size_t index)
 {
-    if (!controller || !messages_object_is_valid(body) ||
-        index >= controller->thread_row_count || index >= D1L_DM_STORE_CAPACITY) {
+    if (!messages_object_is_valid(body) ||
+        !d1l_ui_messages_thread_row_index_valid(controller, index)) {
         return false;
     }
     const d1l_dm_entry_t *entry = &controller->thread_entries[index];
@@ -966,11 +978,12 @@ bool d1l_ui_messages_select_thread(d1l_ui_messages_controller_t *controller,
                                    const char *alias)
 {
     if (!controller || !fingerprint || fingerprint[0] == '\0' ||
-        !memchr(fingerprint, '\0', sizeof(controller->thread_fingerprint))) {
+        !messages_text_fits(
+            fingerprint, sizeof(controller->thread_fingerprint))) {
         return false;
     }
     const char *display = alias && alias[0] ? alias : fingerprint;
-    if (!memchr(display, '\0', sizeof(controller->thread_alias))) {
+    if (!messages_text_fits(display, sizeof(controller->thread_alias))) {
         return false;
     }
     snprintf(controller->thread_fingerprint,
@@ -980,6 +993,7 @@ bool d1l_ui_messages_select_thread(d1l_ui_messages_controller_t *controller,
     controller->thread_limit = D1L_UI_MESSAGES_THREAD_INITIAL_ROWS;
     controller->thread_row_count = 0U;
     controller->thread_total_matches = 0U;
+    controller->thread_search_text[0] = '\0';
     controller->expanded_delivery_session_id = 0U;
     controller->expanded_row_seq = 0U;
     controller->expanded_row_valid = false;
@@ -1002,8 +1016,8 @@ bool d1l_ui_messages_render_thread(
     if (controller->thread_limit < D1L_UI_MESSAGES_THREAD_INITIAL_ROWS) {
         controller->thread_limit = D1L_UI_MESSAGES_THREAD_INITIAL_ROWS;
     }
-    if (controller->thread_limit > D1L_DM_STORE_CAPACITY) {
-        controller->thread_limit = D1L_DM_STORE_CAPACITY;
+    if (controller->thread_limit > D1L_UI_MESSAGES_THREAD_MAX_ROWS) {
+        controller->thread_limit = D1L_UI_MESSAGES_THREAD_MAX_ROWS;
     }
     messages_begin_actions(controller, action_handler, action_context);
     controller->thread_total_matches = 0U;
@@ -1013,13 +1027,14 @@ bool d1l_ui_messages_render_thread(
         controller->thread_unread,
         controller->thread_limit,
         0U,
+        controller->thread_search_text,
         &controller->thread_total_matches,
         loader_context);
     if (controller->thread_row_count > controller->thread_limit) {
         controller->thread_row_count = controller->thread_limit;
     }
-    if (controller->thread_row_count > D1L_DM_STORE_CAPACITY) {
-        controller->thread_row_count = D1L_DM_STORE_CAPACITY;
+    if (controller->thread_row_count > D1L_UI_MESSAGES_THREAD_MAX_ROWS) {
+        controller->thread_row_count = D1L_UI_MESSAGES_THREAD_MAX_ROWS;
     }
 
     lv_obj_t *sheet = controller->thread_sheet;
@@ -1035,7 +1050,7 @@ bool d1l_ui_messages_render_thread(
         controller->thread_fingerprint, 0xF4F7FB);
     if (title) {
         lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        messages_set_dot_width(title, 364);
+        messages_set_dot_width(title, 260);
         lv_obj_set_pos(title, 100, 10);
     } else {
         complete = false;
@@ -1044,15 +1059,23 @@ bool d1l_ui_messages_render_thread(
     if (!body) {
         complete = false;
     } else {
-        char meta_text[96];
-        snprintf(meta_text, sizeof(meta_text), "%.16s  showing %u/%u",
-                 controller->thread_fingerprint,
-                 (unsigned)controller->thread_row_count,
-                 (unsigned)controller->thread_total_matches);
+        char meta_text[160];
+        if (controller->thread_search_text[0]) {
+            snprintf(meta_text, sizeof(meta_text),
+                     "%.16s  showing %u/%u  search active",
+                     controller->thread_fingerprint,
+                     (unsigned)controller->thread_row_count,
+                     (unsigned)controller->thread_total_matches);
+        } else {
+            snprintf(meta_text, sizeof(meta_text), "%.16s  showing %u/%u",
+                     controller->thread_fingerprint,
+                     (unsigned)controller->thread_row_count,
+                     (unsigned)controller->thread_total_matches);
+        }
         complete = messages_create_wrapped_label(body, meta_text, 0x8EA0AE) != NULL &&
             complete;
         if (controller->thread_row_count < controller->thread_total_matches &&
-            controller->thread_limit < D1L_DM_STORE_CAPACITY) {
+            controller->thread_limit < D1L_UI_MESSAGES_THREAD_MAX_ROWS) {
             lv_obj_t *older = messages_create_button(
                 body, "Load Older", 0, 0, 424, 48,
                 messages_bind_thread_control(
@@ -1066,7 +1089,9 @@ bool d1l_ui_messages_render_thread(
         }
         if (controller->thread_row_count == 0U) {
             complete = messages_create_wrapped_label(
-                body, "No retained messages in this conversation.",
+                body, controller->thread_search_text[0] ?
+                    "No retained messages match this search." :
+                    "No retained messages in this conversation.",
                 0x8EA0AE) != NULL && complete;
         }
         for (size_t i = 0U; i < controller->thread_row_count; ++i) {
@@ -1078,6 +1103,12 @@ bool d1l_ui_messages_render_thread(
             lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);
         }
     }
+    complete = messages_create_button(
+        sheet, "Search", 376, 6, 88, 44,
+        messages_bind_thread_control(
+            controller, 3U,
+            D1L_UI_MESSAGES_ACTION_OPEN_DM_SEARCH)) != NULL &&
+        complete;
     complete = messages_create_button(
         sheet, "Reply", 16, 360, 448, 52,
         messages_bind_thread_control(
@@ -1094,15 +1125,50 @@ bool d1l_ui_messages_render_thread(
 bool d1l_ui_messages_expand_thread(d1l_ui_messages_controller_t *controller)
 {
     if (!controller || controller->thread_fingerprint[0] == '\0' ||
-        controller->thread_limit >= D1L_DM_STORE_CAPACITY ||
+        controller->thread_limit >= D1L_UI_MESSAGES_THREAD_MAX_ROWS ||
         controller->thread_row_count >= controller->thread_total_matches) {
         return false;
     }
     controller->thread_limit += D1L_UI_MESSAGES_THREAD_LOAD_OLDER_STEP;
-    if (controller->thread_limit > D1L_DM_STORE_CAPACITY) {
-        controller->thread_limit = D1L_DM_STORE_CAPACITY;
+    if (controller->thread_limit > D1L_UI_MESSAGES_THREAD_MAX_ROWS) {
+        controller->thread_limit = D1L_UI_MESSAGES_THREAD_MAX_ROWS;
     }
     return true;
+}
+
+bool d1l_ui_messages_set_thread_search(
+    d1l_ui_messages_controller_t *controller,
+    const char *query)
+{
+    if (!controller || controller->thread_fingerprint[0] == '\0') {
+        return false;
+    }
+    const char *source = query ? query : "";
+    size_t length = 0U;
+    while (length < sizeof(controller->thread_search_text) &&
+           source[length] != '\0') {
+        length++;
+    }
+    if (length >= sizeof(controller->thread_search_text)) {
+        return false;
+    }
+    memcpy(controller->thread_search_text, source, length + 1U);
+    controller->thread_limit = D1L_UI_MESSAGES_THREAD_INITIAL_ROWS;
+    controller->thread_row_count = 0U;
+    controller->thread_total_matches = 0U;
+    controller->expanded_delivery_session_id = 0U;
+    controller->expanded_row_seq = 0U;
+    controller->expanded_row_valid = false;
+    memset(controller->thread_entries, 0, sizeof(controller->thread_entries));
+    memset(controller->thread_unread, 0, sizeof(controller->thread_unread));
+    return true;
+}
+
+const char *d1l_ui_messages_thread_search(
+    const d1l_ui_messages_controller_t *controller)
+{
+    return controller && controller->thread_fingerprint[0] != '\0' ?
+        controller->thread_search_text : NULL;
 }
 
 bool d1l_ui_messages_toggle_thread_details(
@@ -1160,6 +1226,7 @@ void d1l_ui_messages_hide_thread(d1l_ui_messages_controller_t *controller)
     }
     controller->thread_fingerprint[0] = '\0';
     controller->thread_alias[0] = '\0';
+    controller->thread_search_text[0] = '\0';
     controller->thread_limit = D1L_UI_MESSAGES_THREAD_INITIAL_ROWS;
     controller->thread_row_count = 0U;
     controller->thread_total_matches = 0U;

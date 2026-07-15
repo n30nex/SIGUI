@@ -177,6 +177,16 @@ d1l_dm_store_stats_t d1l_dm_store_stats(void);
 size_t d1l_dm_store_copy_recent_page(d1l_dm_entry_t *out_entries, size_t max_entries,
                                      size_t skip_newest, size_t *out_total_matches);
 size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries, size_t max_entries);
+/* Searches one exact-fingerprint conversation across the bounded durable ring
+ * and its optional volatile tail.  Paging skips newest matching rows, while
+ * each returned page remains oldest-to-newest for conversation rendering.
+ * ASCII letters compare case-insensitively; every non-ASCII byte must match
+ * exactly.  A NULL or empty query is equivalent to copy_thread_page(). */
+size_t d1l_dm_store_query_thread_page(const char *contact_fingerprint,
+                                      d1l_dm_entry_t *out_entries,
+                                      size_t max_entries, size_t skip_newest,
+                                      const char *query,
+                                      size_t *out_total_matches);
 size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
                                      d1l_dm_entry_t *out_entries,
                                      size_t max_entries, size_t skip_newest,

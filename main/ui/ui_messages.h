@@ -47,6 +47,7 @@ typedef enum {
     D1L_UI_MESSAGES_ACTION_OPEN_DM_THREAD,
     D1L_UI_MESSAGES_ACTION_CLOSE_DM_THREAD,
     D1L_UI_MESSAGES_ACTION_LOAD_OLDER_DM_THREAD,
+    D1L_UI_MESSAGES_ACTION_OPEN_DM_SEARCH,
     D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD,
     D1L_UI_MESSAGES_ACTION_TOGGLE_DM_DETAILS,
 } d1l_ui_messages_action_t;
@@ -71,9 +72,10 @@ typedef struct {
 } d1l_ui_messages_action_binding_t;
 
 #define D1L_UI_MESSAGES_CONTROL_BINDING_COUNT 6U
-#define D1L_UI_MESSAGES_THREAD_CONTROL_BINDING_COUNT 3U
+#define D1L_UI_MESSAGES_THREAD_CONTROL_BINDING_COUNT 4U
 #define D1L_UI_MESSAGES_THREAD_INITIAL_ROWS 5U
 #define D1L_UI_MESSAGES_THREAD_LOAD_OLDER_STEP 5U
+#define D1L_UI_MESSAGES_THREAD_MAX_ROWS (D1L_DM_STORE_CAPACITY + 1U)
 #define D1L_UI_MESSAGES_CONTROLLER_MAX_BYTES 16384U
 
 typedef size_t (*d1l_ui_messages_thread_loader_t)(
@@ -82,6 +84,7 @@ typedef size_t (*d1l_ui_messages_thread_loader_t)(
     bool *out_unread,
     size_t max_entries,
     size_t skip_newest,
+    const char *query,
     size_t *out_total_matches,
     void *context);
 
@@ -96,11 +99,13 @@ typedef struct d1l_ui_messages_controller {
     d1l_ui_messages_action_binding_t dm_rows[D1L_UI_MESSAGES_DM_PREVIEW_ROWS];
     d1l_ui_messages_action_binding_t
         thread_controls[D1L_UI_MESSAGES_THREAD_CONTROL_BINDING_COUNT];
-    d1l_ui_messages_action_binding_t thread_rows[D1L_DM_STORE_CAPACITY];
-    d1l_dm_entry_t thread_entries[D1L_DM_STORE_CAPACITY];
-    bool thread_unread[D1L_DM_STORE_CAPACITY];
+    d1l_ui_messages_action_binding_t
+        thread_rows[D1L_UI_MESSAGES_THREAD_MAX_ROWS];
+    d1l_dm_entry_t thread_entries[D1L_UI_MESSAGES_THREAD_MAX_ROWS];
+    bool thread_unread[D1L_UI_MESSAGES_THREAD_MAX_ROWS];
     char thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char thread_alias[D1L_CONTACT_ALIAS_LEN];
+    char thread_search_text[D1L_MESSAGE_TEXT_LEN];
     size_t thread_limit;
     size_t thread_row_count;
     size_t thread_total_matches;
@@ -109,6 +114,15 @@ typedef struct d1l_ui_messages_controller {
     uint32_t generation;
     bool expanded_row_valid;
 } d1l_ui_messages_controller_t;
+
+static inline bool d1l_ui_messages_thread_row_index_valid(
+    const d1l_ui_messages_controller_t *controller,
+    size_t index)
+{
+    return controller &&
+        index < controller->thread_row_count &&
+        index < D1L_UI_MESSAGES_THREAD_MAX_ROWS;
+}
 
 bool d1l_ui_messages_create(d1l_ui_messages_controller_t *controller,
                             lv_obj_t *parent);
@@ -127,6 +141,11 @@ bool d1l_ui_messages_render_thread(
     d1l_ui_messages_action_handler_t action_handler,
     void *action_context);
 bool d1l_ui_messages_expand_thread(d1l_ui_messages_controller_t *controller);
+bool d1l_ui_messages_set_thread_search(
+    d1l_ui_messages_controller_t *controller,
+    const char *query);
+const char *d1l_ui_messages_thread_search(
+    const d1l_ui_messages_controller_t *controller);
 bool d1l_ui_messages_toggle_thread_details(
     d1l_ui_messages_controller_t *controller,
     const d1l_dm_entry_t *entry);

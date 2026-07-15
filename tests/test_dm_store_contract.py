@@ -21,6 +21,7 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "ack_hash" in header
     assert "d1l_dm_store_mark_acked" in header
     assert "d1l_dm_store_copy_recent_page" in header
+    assert "d1l_dm_store_query_thread_page" in header
     assert "d1l_dm_store_copy_thread_page" in header
     assert "d1l_dm_store_copy_thread" in header
     assert 'D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"' in blob_store
@@ -92,6 +93,10 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "blob->entries[i].seq <= previous_seq" in source
     assert "skip_newest" in source
     assert "out_total_matches" in source
+    assert "contains_ascii_casefold" in source
+    assert "dm_entry_matches_query" in source
+    assert "ascii_lower((unsigned char)haystack[i + j])" in source
+    assert "ascii_lower((unsigned char)needle[j])" in source
     assert "d1l_dm_store_copy_thread" in source
     assert "strncmp(entry->contact_fingerprint, contact_fingerprint" in source
     assert "static d1l_dm_store_raw_blob_t s_raw_scratch" in source
@@ -441,15 +446,23 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "d1l_dm_conversation_list_project(" in source
     assert "recent_dm_unread_count" in header
     assert "recent_dm_muted" in header
+    assert "d1l_app_model_query_dm_thread_page" in header
     assert "d1l_app_model_copy_dm_thread_page" in header
     assert "d1l_app_model_copy_dm_thread" in header
-    assert "d1l_dm_store_copy_thread_page(fingerprint, out_entries" in source
+    assert "d1l_dm_store_query_thread_page(" in source
+    assert "fingerprint, out_entries, max_entries, skip_newest, query" in source
+    assert "d1l_app_model_query_dm_thread_page(" in source
+    copy_page = source.split(
+        "size_t d1l_app_model_copy_dm_thread_page", 1
+    )[1].split("size_t d1l_app_model_copy_dm_thread(", 1)[0]
+    assert "d1l_app_model_query_dm_thread_page(" in copy_page
+    assert "skip_newest, NULL" in copy_page
     assert "d1l_read_state_dm_entry_is_unread(&out_entries[i])" in source
     assert "d1l_app_model_send_dm_text" in source
     assert "messages_render_dm_row" in messages_ui
     assert "load_dm_thread_rows" in thread_bridge
-    assert "d1l_app_model_copy_dm_thread_page(" in ui
-    assert "thread_entries[D1L_DM_STORE_CAPACITY]" in messages_header
+    assert "d1l_app_model_query_dm_thread_page(" in ui
+    assert "thread_entries[D1L_UI_MESSAGES_THREAD_MAX_ROWS]" in messages_header
     assert "d1l_ui_messages_expand_thread" in messages_ui
     assert 'body, "Load Older", 0, 0, 424, 48' in thread_render
     assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in thread_render
@@ -461,3 +474,34 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "read_dm_thread_event_cb" not in ui
     assert '"DM"' in ui
     assert "No direct messages" in messages_ui
+
+
+def test_dm_thread_search_bridge_is_observational_only():
+    store = read("main/mesh/dm_store.c")
+    app = read("main/app/app_model.c")
+    query = store.split(
+        "size_t d1l_dm_store_query_thread_page", 1
+    )[1].split("size_t d1l_dm_store_copy_thread_page", 1)[0]
+    bridge = app.split(
+        "size_t d1l_app_model_query_dm_thread_page", 1
+    )[1].split("size_t d1l_app_model_copy_dm_thread_page", 1)[0]
+
+    assert "d1l_store_lock_take(&s_store_lock)" in query
+    assert "d1l_store_lock_give(&s_store_lock)" in query
+    assert "s_volatile_entry" in query
+    assert "project_ack_persistence_truth_locked" in query
+    for mutation in (
+        "persist_store",
+        "append_internal",
+        "d1l_retained_blob_store_write",
+        "d1l_retained_blob_store_erase",
+        "s_content_revision++",
+        "s_next_seq++",
+        "s_total_written++",
+    ):
+        assert mutation not in query
+
+    assert "d1l_dm_store_query_thread_page(" in bridge
+    assert "d1l_read_state_dm_entry_is_unread(&out_entries[i])" in bridge
+    assert "d1l_app_model_mark_dm_thread_read" not in bridge
+    assert "d1l_meshcore_service_send" not in bridge

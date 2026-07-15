@@ -411,6 +411,7 @@ def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
     assert "ui compose-probe public" in report["commands"]
     assert "ui compose-probe dm-long" in report["commands"]
     assert "ui compose-probe public-search" in report["commands"]
+    assert "ui compose-probe dm-search" in report["commands"]
     assert "ui compose-probe packet-search" in report["commands"]
     assert "ui compose-probe contact-edit" in report["commands"]
     assert "ui compose-probe onboarding" in report["commands"]

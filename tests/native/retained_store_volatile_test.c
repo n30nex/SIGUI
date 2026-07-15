@@ -598,6 +598,23 @@ static void test_dm_volatile_preview_does_not_consume_history(void)
                                          &matches) == 1U);
     assert(visible[0].seq == D1L_DM_STORE_CAPACITY);
 
+    memset(visible, 0, sizeof(visible));
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint, visible, 3U, 0U, "DM-DURABLE", &matches) == 3U);
+    assert(matches == D1L_DM_STORE_CAPACITY);
+    assert(visible[0].seq == D1L_DM_STORE_CAPACITY - 2U);
+    assert(visible[1].seq == D1L_DM_STORE_CAPACITY - 1U);
+    assert(visible[2].seq == D1L_DM_STORE_CAPACITY);
+    memset(visible, 0, sizeof(visible));
+    assert(d1l_dm_store_query_thread_page(
+               fingerprint, visible, 1U, 0U, "UI-DATA-CANARY",
+               &matches) == 1U);
+    assert(matches == 1U);
+    assert(visible[0].seq == before.next_seq);
+    assert(strcmp(visible[0].text, "ui-data-canary dm-test") == 0);
+    assert_dm_stats_equal(d1l_dm_store_stats(), before);
+    assert(s_write_count[D1L_RETAINED_BLOB_STORE_DM_MESSAGES] == writes_before);
+
     assert(d1l_dm_store_append(fingerprint, "Node", "rx", "dm-real-next",
                                -50, 70, 1U, 1U, 1U, true, false,
                                0x9876U) == ESP_OK);

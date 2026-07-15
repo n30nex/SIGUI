@@ -521,21 +521,34 @@ esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
         fingerprint, out_token, out_token_size);
 }
 
-size_t d1l_app_model_copy_dm_thread_page(const char *fingerprint,
-                                         d1l_dm_entry_t *out_entries,
-                                         bool *out_unread, size_t max_entries,
-                                         size_t skip_newest,
-                                         size_t *out_total_matches)
+size_t d1l_app_model_query_dm_thread_page(const char *fingerprint,
+                                          d1l_dm_entry_t *out_entries,
+                                          bool *out_unread,
+                                          size_t max_entries,
+                                          size_t skip_newest,
+                                          const char *query,
+                                          size_t *out_total_matches)
 {
-    const size_t copied = d1l_dm_store_copy_thread_page(fingerprint, out_entries,
-                                                       max_entries, skip_newest,
-                                                       out_total_matches);
+    const size_t copied = d1l_dm_store_query_thread_page(
+        fingerprint, out_entries, max_entries, skip_newest, query,
+        out_total_matches);
     if (out_unread) {
         for (size_t i = 0; i < copied; ++i) {
             out_unread[i] = d1l_read_state_dm_entry_is_unread(&out_entries[i]);
         }
     }
     return copied;
+}
+
+size_t d1l_app_model_copy_dm_thread_page(const char *fingerprint,
+                                         d1l_dm_entry_t *out_entries,
+                                         bool *out_unread, size_t max_entries,
+                                         size_t skip_newest,
+                                         size_t *out_total_matches)
+{
+    return d1l_app_model_query_dm_thread_page(
+        fingerprint, out_entries, out_unread, max_entries, skip_newest, NULL,
+        out_total_matches);
 }
 
 size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,

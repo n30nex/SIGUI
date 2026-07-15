@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 59
+    assert len(views) == 63
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -127,20 +127,30 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert "Load Older" in set(views["packets"]["labels"])
 
     dm_thread = views["dm_thread_sheet"]["metrics"]
-    assert dm_thread["dm_thread_source_count"] == 32
+    assert dm_thread["dm_thread_source_count"] == 1
     assert dm_thread["dm_thread_rendered_count"] <= 3
     assert dm_thread["dm_thread_page_limit"] == 5
-    assert dm_thread["dm_thread_load_older_available"] is True
-    assert dm_thread["dm_thread_count_line"] == "5 of 32 messages"
+    assert dm_thread["dm_thread_load_older_available"] is False
+    assert dm_thread["dm_thread_count_line"] == "1 of 1 messages"
     assert dm_thread["dm_thread_marks_read_on_open"] is True
     assert dm_thread["dm_thread_sticky_reply"] is True
-    assert "Load Older" in set(views["dm_thread_sheet"]["labels"])
+    assert "Load Older" not in set(views["dm_thread_sheet"]["labels"])
     dm_thread_details = views["dm_thread_details_sheet"]["metrics"]
     assert dm_thread_details["dm_thread_details_expanded"] is True
     assert dm_thread_details["dm_thread_details_single_row"] is True
     assert dm_thread_details["dm_thread_details_rendered_lines"] > 0
     assert dm_thread_details["dm_thread_sticky_reply"] is True
     assert dm_thread_details["dm_thread_navigation_rf_silent"] is True
+    dm_search_results = views["dm_thread_search_results"]["metrics"]
+    assert dm_search_results["dm_thread_search_active"] is True
+    assert dm_search_results["dm_thread_total_matches"] > 0
+    assert dm_search_results["dm_thread_search_read_only"] is True
+    dm_search_empty = views["dm_thread_search_no_match"]["metrics"]
+    assert dm_search_empty["dm_thread_search_no_match"] is True
+    assert dm_search_empty["dm_thread_empty_history"] is False
+    dm_history_empty = views["dm_thread_empty_sheet"]["metrics"]
+    assert dm_history_empty["dm_thread_empty_history"] is True
+    assert dm_history_empty["dm_thread_search_no_match"] is False
     trace = views["route_trace_sheet"]["metrics"]
     assert trace["route_trace_rendered_count"] <= 2
 
@@ -241,6 +251,41 @@ def test_dm_simulator_keeps_exact_ids_distinct_and_muted_unread_separate() -> No
         "Received",
         "1 unread muted | New",
     ]
+
+
+def test_dm_thread_search_excludes_matching_rows_from_other_conversations() -> None:
+    snapshot = ui_simulator.sample_snapshot()
+    base = snapshot.dm_messages[0]
+    older_other = replace(
+        base,
+        source="Other contact",
+        text="shared search token",
+        conversation="Other contact",
+        conversation_id="AAAAAAAAAAAAAAAA",
+        seq=1,
+    )
+    selected = replace(
+        base,
+        source="Selected contact",
+        text="shared search token",
+        conversation="Selected contact",
+        conversation_id="BBBBBBBBBBBBBBBB",
+        seq=2,
+    )
+    snapshot = replace(snapshot, dm_messages=(older_other, selected))
+
+    surface = ui_simulator.Surface("dm_thread_search_results")
+    ui_simulator.render_dm_thread_state(surface, snapshot, query="shared")
+
+    assert surface.metrics["dm_thread_selected_conversation_id"] == "BBBBBBBBBBBBBBBB"
+    assert surface.metrics["dm_thread_source_count"] == 1
+    assert surface.metrics["dm_thread_total_matches"] == 1
+    assert "Other contact" not in surface.labels
+
+    details = ui_simulator.Surface("dm_thread_details_sheet")
+    ui_simulator.render_dm_thread_details_sheet(details, snapshot)
+    assert details.metrics["dm_thread_details_conversation_id"] == "BBBBBBBBBBBBBBBB"
+    assert "Other contact" not in details.labels
 
 
 def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
@@ -479,11 +524,14 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Cancel",
         "Forget contact",
     } <= labels_by_view["forget_contact_confirm_page"]
-    assert {"YKF Corebot", "2 of 2 messages", "Back", "Reply"} <= labels_by_view["dm_thread_sheet"]
+    assert {"YKF Corebot", "2 of 2 messages", "Back", "Search", "Reply"} <= labels_by_view["dm_thread_sheet"]
     assert "Read" not in labels_by_view["dm_thread_sheet"]
     assert "DM Thread" not in labels_by_view["dm_thread_sheet"]
     assert "new" not in labels_by_view["dm_thread_sheet"]
-    assert {"YKF Corebot", "Back", "Hide details", "Technical details", "Reply"} <= labels_by_view["dm_thread_details_sheet"]
+    assert {"YKF Corebot", "Back", "Hide details", "Search", "Technical details", "Reply"} <= labels_by_view["dm_thread_details_sheet"]
+    assert {"DM Search", "Search this conversation", "Apply", "Clear", "Close"} <= labels_by_view["dm_search_sheet"]
+    assert "No retained messages match this search." in labels_by_view["dm_thread_search_no_match"]
+    assert "No retained messages in this conversation." in labels_by_view["dm_thread_empty_sheet"]
     assert {"Route Trace", "YKF Corebot", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
@@ -565,11 +613,22 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["visual_box"] == [16, 420, 464, 472]
     assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["height"] >= 48
     assert actions_by_view["dm_thread_sheet"]["toggle_dm_details"]["destination"] == "dm_thread_details_sheet"
+    assert actions_by_view["dm_thread_sheet"]["open_dm_search"]["destination"] == "dm_search_sheet"
+    assert actions_by_view["dm_thread_sheet"]["open_dm_search"]["rf_tx"] is False
     assert actions_by_view["dm_thread_details_sheet"]["toggle_dm_details"]["destination"] == "dm_thread_sheet"
     assert actions_by_view["dm_thread_details_sheet"]["open_dm_reply"]["visual_box"] == [16, 420, 464, 472]
     assert actions_by_view["dm_thread_details_sheet"]["open_dm_reply"]["height"] >= 48
     assert views["dm_thread_details_sheet"]["metrics"]["dm_thread_details_expanded"] is True
     assert views["dm_thread_details_sheet"]["metrics"]["dm_thread_navigation_rf_silent"] is True
+    assert actions_by_view["dm_search_sheet"]["apply_dm_search"]["destination"] == "dm_thread_search_results"
+    assert actions_by_view["dm_search_sheet"]["clear_dm_search"]["destination"] == "dm_thread_sheet"
+    assert views["dm_search_sheet"]["metrics"]["dm_search_advances_read_cursor"] is False
+    for label in ("Apply", "Clear", "Close"):
+        target = next(
+            item for item in views["dm_search_sheet"]["touch_targets"]
+            if item["label"] == label
+        )
+        assert target["height"] >= 44
     assert "mark_dm_thread_read" not in actions_by_view["dm_thread_sheet"]
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])

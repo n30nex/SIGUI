@@ -89,6 +89,9 @@ static lv_obj_t *s_public_history_sheet;
 static lv_obj_t *s_public_search_sheet;
 static lv_obj_t *s_public_search_textarea;
 static lv_obj_t *s_public_search_keyboard;
+static lv_obj_t *s_dm_search_sheet;
+static lv_obj_t *s_dm_search_textarea;
+static lv_obj_t *s_dm_search_keyboard;
 static lv_obj_t *s_message_detail_sheet;
 static lv_obj_t *s_storage_sheet;
 static d1l_wifi_scan_result_t s_wifi_scan_result;
@@ -1278,6 +1281,12 @@ static void hide_public_search_sheet(void)
     restore_dock_for_active_tab();
 }
 
+static void hide_dm_search_sheet(void)
+{
+    d1l_ui_modal_hide(s_dm_search_sheet);
+    restore_dock_for_active_tab();
+}
+
 static void hide_message_detail_sheet(void)
 {
     d1l_ui_modal_hide(s_message_detail_sheet);
@@ -1288,6 +1297,7 @@ static void hide_message_detail_sheet(void)
 
 static void hide_dm_thread_sheet(void)
 {
+    d1l_ui_modal_hide(s_dm_search_sheet);
     d1l_ui_messages_hide_thread(&s_messages_controller);
     restore_dock_for_active_tab();
 }
@@ -4016,13 +4026,14 @@ static size_t load_dm_thread_rows(
     bool *out_unread,
     size_t max_entries,
     size_t skip_newest,
+    const char *query,
     size_t *out_total_matches,
     void *context)
 {
     (void)context;
-    return d1l_app_model_copy_dm_thread_page(
+    return d1l_app_model_query_dm_thread_page(
         fingerprint, out_entries, out_unread, max_entries, skip_newest,
-        out_total_matches);
+        query, out_total_matches);
 }
 
 static bool render_dm_thread_sheet(void)
@@ -4038,6 +4049,74 @@ static bool render_dm_thread_sheet(void)
         NULL,
         handle_messages_action,
         NULL);
+}
+
+static void show_dm_thread_after_search(void)
+{
+    hide_dm_search_sheet();
+    if (render_dm_thread_sheet()) {
+        show_modal(d1l_ui_messages_thread_sheet(&s_messages_controller));
+        return;
+    }
+    hide_dm_thread_sheet();
+    show_toast("DM", ESP_ERR_NO_MEM);
+}
+
+static void close_dm_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    show_dm_thread_after_search();
+}
+
+static void apply_dm_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const char *query = s_dm_search_textarea ?
+        lv_textarea_get_text(s_dm_search_textarea) : "";
+    if (!d1l_ui_messages_set_thread_search(
+            &s_messages_controller, query ? query : "")) {
+        show_toast("DM search", ESP_ERR_INVALID_ARG);
+        return;
+    }
+    show_dm_thread_after_search();
+}
+
+static void clear_dm_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!d1l_ui_messages_set_thread_search(&s_messages_controller, NULL)) {
+        show_toast("DM search", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    if (s_dm_search_textarea) {
+        lv_textarea_set_text(s_dm_search_textarea, "");
+    }
+    show_dm_thread_after_search();
+}
+
+static void dm_search_keyboard_event_cb(lv_event_t *event)
+{
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY) {
+        apply_dm_search_event_cb(event);
+    } else if (code == LV_EVENT_CANCEL) {
+        close_dm_search_event_cb(event);
+    }
+}
+
+static void open_dm_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const char *query = d1l_ui_messages_thread_search(&s_messages_controller);
+    if (!query || !s_dm_search_sheet) {
+        show_toast("DM search", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    if (s_dm_search_textarea && s_dm_search_keyboard) {
+        lv_textarea_set_text(s_dm_search_textarea, query);
+        lv_keyboard_set_textarea(s_dm_search_keyboard, s_dm_search_textarea);
+    }
+    show_modal(s_dm_search_sheet);
 }
 
 static void show_dm_thread_for(const char *fingerprint, const char *alias)
@@ -4187,6 +4266,9 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
                 show_toast("DM", ESP_ERR_NO_MEM);
             }
         }
+        break;
+    case D1L_UI_MESSAGES_ACTION_OPEN_DM_SEARCH:
+        open_dm_search_event_cb(NULL);
         break;
     case D1L_UI_MESSAGES_ACTION_REPLY_DM_THREAD: {
         const char *fingerprint = d1l_ui_messages_thread_fingerprint(
@@ -5721,10 +5803,12 @@ static void process_pending_content_refresh(void)
     }
     const bool refresh_dm_thread =
         d1l_ui_messages_thread_active(&s_messages_controller);
+    const bool dm_search_visible = d1l_ui_modal_visible(s_dm_search_sheet);
     render_active_tab();
     if (refresh_dm_thread) {
         if (render_dm_thread_sheet()) {
-            show_modal(d1l_ui_messages_thread_sheet(&s_messages_controller));
+            show_modal(dm_search_visible ? s_dm_search_sheet :
+                       d1l_ui_messages_thread_sheet(&s_messages_controller));
         } else {
             hide_dm_thread_sheet();
             show_toast("DM", ESP_ERR_NO_MEM);
@@ -6065,7 +6149,8 @@ static d1l_ui_tab_t compose_probe_tab_for_target(const char *target)
         return D1L_UI_TAB_HOME;
     }
     if (d1l_ui_keyboard_probe_target_is_compose(target) ||
-        strcmp(target, "public_search") == 0) {
+        strcmp(target, "public_search") == 0 ||
+        strcmp(target, "dm_search") == 0) {
         return D1L_UI_TAB_MESSAGES;
     }
     if (strcmp(target, "packet_search") == 0) {
@@ -6129,6 +6214,10 @@ static void fill_compose_probe_objects(const char *target, lv_obj_t **sheet,
         *sheet = s_public_search_sheet;
         *textarea = s_public_search_textarea;
         *keyboard = s_public_search_keyboard;
+    } else if (strcmp(target, "dm_search") == 0) {
+        *sheet = s_dm_search_sheet;
+        *textarea = s_dm_search_textarea;
+        *keyboard = s_dm_search_keyboard;
     } else if (strcmp(target, "packet_search") == 0) {
         *sheet = s_packet_search_sheet;
         *textarea = s_packet_search_textarea;
@@ -6222,6 +6311,21 @@ static void open_keyboard_probe_on_ui_task(const char *target)
         }
         if (s_public_search_keyboard) {
             lv_keyboard_set_textarea(s_public_search_keyboard, s_public_search_textarea);
+        }
+    } else if (strcmp(target, "dm_search") == 0) {
+        s_messages_mode = D1L_UI_MESSAGES_MODE_DIRECT;
+        render_active_tab();
+        hide_onboarding_sheet();
+        if (d1l_ui_messages_select_thread(
+                &s_messages_controller, "0000000000000000", "Probe DM") &&
+            render_dm_thread_sheet()) {
+            open_dm_search_event_cb(NULL);
+        }
+        if (s_dm_search_textarea) {
+            lv_textarea_set_text(s_dm_search_textarea, "probe");
+        }
+        if (s_dm_search_keyboard) {
+            lv_keyboard_set_textarea(s_dm_search_keyboard, s_dm_search_textarea);
         }
     } else if (strcmp(target, "packet_search") == 0) {
         open_packet_search_event_cb(NULL);
@@ -6350,7 +6454,9 @@ static void run_compose_probe_on_ui_task(const char *target,
     result->keyboard_visible = object_is_visible(keyboard);
     result->onboarding_visible = s_onboarding_visible;
     result->dock_hidden = object_is_hidden_or_missing(s_dock);
-    result->dm_mode = s_compose_dm;
+    result->dm_mode = s_compose_dm ||
+        (strcmp(canonical, "dm_search") == 0 &&
+         s_messages_mode == D1L_UI_MESSAGES_MODE_DIRECT);
     fill_compose_probe_geometry(result, sheet, textarea, keyboard);
 
     const bool sheet_inside_screen =
@@ -6378,7 +6484,8 @@ static void run_compose_probe_on_ui_task(const char *target,
     const bool dock_state_ok =
         !d1l_ui_keyboard_probe_requires_hidden_dock(canonical) || result->dock_hidden;
     const bool dm_state_ok =
-        !d1l_ui_keyboard_probe_target_is_compose(canonical) ||
+        (!d1l_ui_keyboard_probe_target_is_compose(canonical) &&
+         strcmp(canonical, "dm_search") != 0) ||
         result->dm_mode == d1l_ui_keyboard_probe_target_is_dm(canonical);
 
     result->ok = result->target_supported &&
@@ -6764,6 +6871,72 @@ static void create_public_search_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_public_search_sheet);
 }
 
+static void create_dm_search_sheet(lv_obj_t *screen)
+{
+    s_dm_search_sheet = create_object(screen, "dm search sheet");
+    if (!s_dm_search_sheet) {
+        return;
+    }
+    lv_obj_set_size(s_dm_search_sheet, 448, 320);
+    lv_obj_set_pos(s_dm_search_sheet, 16, 82);
+    lv_obj_set_style_radius(s_dm_search_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_dm_search_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_dm_search_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_dm_search_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_dm_search_sheet, 12, 0);
+    lv_obj_clear_flag(s_dm_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = create_label(s_dm_search_sheet, "DM Search", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+
+    create_button(s_dm_search_sheet, "Apply", 212, 0, 66, 44,
+                  apply_dm_search_event_cb, NULL);
+    create_button(s_dm_search_sheet, "Clear", 286, 0, 64, 44,
+                  clear_dm_search_event_cb, NULL);
+    create_button(s_dm_search_sheet, "Close", 358, 0, 66, 44,
+                  close_dm_search_event_cb, NULL);
+
+    s_dm_search_textarea = create_textarea(
+        s_dm_search_sheet, "dm search textarea");
+    if (!s_dm_search_textarea) {
+        d1l_ui_modal_hide(s_dm_search_sheet);
+        return;
+    }
+    lv_obj_set_size(s_dm_search_textarea, 424, 48);
+    lv_obj_set_pos(s_dm_search_textarea, 0, 58);
+    lv_textarea_set_one_line(s_dm_search_textarea, true);
+    lv_textarea_set_max_length(
+        s_dm_search_textarea, D1L_MESSAGE_TEXT_LEN - 1U);
+    lv_textarea_set_placeholder_text(
+        s_dm_search_textarea, "Search this conversation");
+    lv_obj_set_style_radius(s_dm_search_textarea, 8, 0);
+    lv_obj_set_style_bg_color(
+        s_dm_search_textarea, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(
+        s_dm_search_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_text_color(
+        s_dm_search_textarea, lv_color_hex(0xF4F7FB), 0);
+    lv_obj_set_style_text_color(
+        s_dm_search_textarea, lv_color_hex(0x8EA0AE),
+        LV_PART_TEXTAREA_PLACEHOLDER);
+
+    s_dm_search_keyboard = create_keyboard(
+        s_dm_search_sheet, "dm search keyboard");
+    if (!s_dm_search_keyboard) {
+        d1l_ui_modal_hide(s_dm_search_sheet);
+        return;
+    }
+    d1l_ui_keyboard_configure_input(
+        s_dm_search_keyboard, s_dm_search_textarea, 0, 118, 424, 190);
+    lv_obj_add_event_cb(s_dm_search_keyboard, dm_search_keyboard_event_cb,
+                        LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_dm_search_keyboard, dm_search_keyboard_event_cb,
+                        LV_EVENT_CANCEL, NULL);
+
+    d1l_ui_modal_hide(s_dm_search_sheet);
+}
+
 static void create_storage_sheet(lv_obj_t *screen)
 {
     s_storage_sheet = create_object(screen, "storage sheet");
@@ -7075,6 +7248,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_compose_sheet(s_screen);
     create_public_history_sheet(s_screen);
     create_public_search_sheet(s_screen);
+    create_dm_search_sheet(s_screen);
     create_message_detail_sheet(s_screen);
     if (!d1l_ui_messages_create(&s_messages_controller, s_screen)) {
         return ESP_ERR_NO_MEM;

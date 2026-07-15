@@ -167,6 +167,8 @@ bool d1l_ui_keyboard_normalize_probe_target(const char *name, char *out_target,
         target = "dm_long";
     } else if (strcmp(normalized, "public_search") == 0) {
         target = "public_search";
+    } else if (strcmp(normalized, "dm_search") == 0) {
+        target = "dm_search";
     } else if (strcmp(normalized, "packet_search") == 0) {
         target = "packet_search";
     } else if (strcmp(normalized, "contact_edit") == 0) {
@@ -214,6 +216,7 @@ bool d1l_ui_keyboard_probe_requires_hidden_dock(const char *target)
     return d1l_ui_keyboard_probe_target_is_compose(target) ||
         d1l_ui_keyboard_probe_target_is_onboarding(target) ||
         strcmp(target, "public_search") == 0 ||
+        strcmp(target, "dm_search") == 0 ||
         strcmp(target, "packet_search") == 0 ||
         strcmp(target, "contact_edit") == 0 ||
         strcmp(target, "map_location") == 0 ||
@@ -224,6 +227,7 @@ bool d1l_ui_keyboard_probe_requires_hidden_dock(const char *target)
 int32_t d1l_ui_keyboard_probe_min_width(const char *target)
 {
     if (strcmp(target, "public_search") == 0 ||
+        strcmp(target, "dm_search") == 0 ||
         strcmp(target, "packet_search") == 0 ||
         strcmp(target, "contact_edit") == 0 ||
         d1l_ui_keyboard_probe_target_is_onboarding(target)) {
@@ -238,6 +242,7 @@ int32_t d1l_ui_keyboard_probe_min_height(const char *target)
         return 250;
     }
     if (strcmp(target, "public_search") == 0 ||
+        strcmp(target, "dm_search") == 0 ||
         strcmp(target, "packet_search") == 0) {
         return 180;
     }

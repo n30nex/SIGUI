@@ -2053,25 +2053,27 @@ def render_messages_public(s: Surface, snap: Snapshot):
     draw_dock(s, "Messages")
 
 
+def dm_conversation_id(message: Message) -> str:
+    return message.conversation_id or message.conversation or message.source
+
+
 def dm_conversation_summaries(messages: tuple[Message, ...]) -> tuple[Message, ...]:
     """Mirror the firmware list: latest row per contact, newest first."""
 
     unread_sources = {
-        message.conversation_id or message.conversation or message.source
+        dm_conversation_id(message)
         for message in messages
         if message.unread
     }
     muted_sources = {
-        message.conversation_id or message.conversation or message.source
+        dm_conversation_id(message)
         for message in messages
         if message.muted
     }
     summaries: list[Message] = []
     seen: set[str] = set()
     for message in reversed(messages):
-        conversation_id = (
-            message.conversation_id or message.conversation or message.source
-        )
+        conversation_id = dm_conversation_id(message)
         if conversation_id in seen:
             continue
         seen.add(conversation_id)
@@ -2086,6 +2088,20 @@ def dm_conversation_summaries(messages: tuple[Message, ...]) -> tuple[Message, .
     return tuple(summaries)
 
 
+def dm_selected_thread(
+    messages: tuple[Message, ...],
+) -> tuple[Message | None, tuple[Message, ...]]:
+    summaries = dm_conversation_summaries(messages)
+    selected = summaries[0] if summaries else None
+    if not selected:
+        return None, ()
+    selected_id = dm_conversation_id(selected)
+    return selected, tuple(
+        message for message in messages
+        if dm_conversation_id(message) == selected_id
+    )
+
+
 def render_messages_dm_list(s: Surface, snap: Snapshot):
     body = (16, 124, 464, 410)
     s.round_rect(body, (7, 16, 24), BORDER, 8)
@@ -2096,9 +2112,7 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
     unread_by_source: dict[str, int] = {}
     for message in snap.dm_messages:
         if message.unread:
-            conversation_id = (
-                message.conversation_id or message.conversation or message.source
-            )
+            conversation_id = dm_conversation_id(message)
             unread_by_source[conversation_id] = (
                 unread_by_source.get(conversation_id, 0) + 1
             )
@@ -2107,7 +2121,7 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
             break
         s.round_rect((28, y, 452, y + 58), SURFACE, BORDER, 8)
         state = dm_list_delivery_label(msg)
-        conversation_id = msg.conversation_id or msg.conversation or msg.source
+        conversation_id = dm_conversation_id(msg)
         unread_count = unread_by_source.get(conversation_id, 0)
         if unread_count:
             state = (
@@ -4096,17 +4110,54 @@ def dm_list_delivery_label(message: Message) -> str:
     return DM_LIST_DELIVERY_LABELS.get(message.delivery_state, "Status unknown")
 
 
-def render_dm_thread_sheet(s: Surface, snap: Snapshot):
+def _dm_search_fold(text: str) -> str:
+    return "".join(chr(ord(ch) + 32) if "A" <= ch <= "Z" else ch for ch in text)
+
+
+def render_dm_thread_state(
+    s: Surface,
+    snap: Snapshot,
+    *,
+    query: str = "",
+    empty_history: bool = False,
+):
     dm_thread_page_limit = 5
-    load_older_available = len(snap.dm_messages) > dm_thread_page_limit
-    visible_messages = snap.dm_messages[-(2 if load_older_available else min(3, len(snap.dm_messages))):]
-    alias = snap.contacts[0].name if snap.contacts else "Direct message"
-    count_line = f"{min(len(snap.dm_messages), dm_thread_page_limit)} of {len(snap.dm_messages)} messages"
+    selected_conversation, selected_messages = dm_selected_thread(snap.dm_messages)
+    selected_conversation_id = (
+        dm_conversation_id(selected_conversation)
+        if selected_conversation else ""
+    )
+    retained_messages = (
+        () if empty_history else
+        selected_messages
+    )
+    folded_query = _dm_search_fold(query)
+    matches = tuple(
+        msg for msg in retained_messages
+        if not folded_query
+        or folded_query in _dm_search_fold(msg.source)
+        or folded_query in _dm_search_fold(msg.text)
+        or folded_query in _dm_search_fold(msg.direction)
+    )
+    load_older_available = len(matches) > dm_thread_page_limit
+    visible_messages = matches[-(
+        2 if load_older_available else min(3, len(matches))
+    ):]
+    alias = selected_conversation.source if selected_conversation else "Direct message"
+    count_line = (
+        f"{min(len(matches), dm_thread_page_limit)} of {len(matches)} matches | search active"
+        if query else
+        f"{min(len(matches), dm_thread_page_limit)} of {len(matches)} messages"
+    )
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
     draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="close_dm_thread", destination="messages_dm")
-    s.text(alias, (112, 62, 464, 90), 22, TEXT, True)
-    s.text(count_line, (112, 90, 464, 112), 12, MUTED)
+    s.text(alias, (112, 62, 360, 90), 22, TEXT, True)
+    draw_button(
+        s, (372, 64, 464, 108), "Search", BLUE,
+        action="open_dm_search", destination="dm_search_sheet",
+    )
+    s.text(count_line, (112, 90, 360, 112), 12, MUTED)
     s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
     y = 132
     rendered_states: list[str] = []
@@ -4149,12 +4200,20 @@ def render_dm_thread_sheet(s: Surface, snap: Snapshot):
             destination="dm_thread_details_sheet",
         )
         y += 74
+    if not visible_messages:
+        empty_text = (
+            "No retained messages match this search."
+            if query else
+            "No retained messages in this conversation."
+        )
+        s.text(empty_text, (36, 220, 444, 250), 14, MUTED, True, "center")
     if load_older_available:
         draw_button(s, (28, 344, 166, 392), "Load Older", BLUE, action="load_older_dm_thread")
     draw_button(s, (16, 420, 464, 472), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
     s.metrics.update(
         {
-            "dm_thread_source_count": len(snap.dm_messages),
+            "dm_thread_source_count": len(retained_messages),
+            "dm_thread_total_matches": len(matches),
             "dm_thread_page_limit": dm_thread_page_limit,
             "dm_thread_rendered_count": len(visible_messages),
             "dm_thread_load_older_available": load_older_available,
@@ -4163,6 +4222,7 @@ def render_dm_thread_sheet(s: Surface, snap: Snapshot):
             "dm_thread_marks_read_on_open": True,
             "dm_thread_sticky_reply": True,
             "dm_thread_alias": alias,
+            "dm_thread_selected_conversation_id": selected_conversation_id,
             "dm_thread_count_line": count_line,
             "dm_thread_directional_bubbles": True,
             "dm_thread_outgoing_bubbles": outgoing_bubbles,
@@ -4172,15 +4232,68 @@ def render_dm_thread_sheet(s: Surface, snap: Snapshot):
             "dm_thread_per_row_technical_disclosure": True,
             "dm_thread_primary_state_truthful": True,
             "dm_thread_navigation_rf_silent": True,
+            "dm_thread_search_query": query,
+            "dm_thread_search_active": bool(query),
+            "dm_thread_search_read_only": True,
+            "dm_thread_search_no_match": bool(query) and not matches,
+            "dm_thread_empty_history": not query and not retained_messages,
+        }
+    )
+
+
+def render_dm_thread_sheet(s: Surface, snap: Snapshot):
+    render_dm_thread_state(s, snap)
+
+
+def render_dm_thread_search_results(s: Surface, snap: Snapshot):
+    render_dm_thread_state(s, snap, query="d")
+
+
+def render_dm_thread_search_no_match(s: Surface, snap: Snapshot):
+    render_dm_thread_state(s, snap, query="missing phrase")
+
+
+def render_dm_thread_empty_sheet(s: Surface, snap: Snapshot):
+    render_dm_thread_state(s, snap, empty_history=True)
+
+
+def render_dm_search_sheet(s: Surface, snap: Snapshot):
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
+    s.text("DM Search", (24, 92, 210, 122), 24, TEXT, True)
+    draw_button(s, (228, 82, 294, 126), "Apply", GREEN,
+                action="apply_dm_search", destination="dm_thread_search_results")
+    draw_button(s, (302, 82, 366, 126), "Clear", BLUE,
+                action="clear_dm_search", destination="dm_thread_sheet")
+    draw_button(s, (374, 82, 440, 126), "Close", MUTED,
+                action="close_dm_search", destination="dm_thread_sheet")
+    s.round_rect((16, 140, 464, 188), SURFACE_2, BORDER, 8)
+    s.touch_target(
+        "Search this conversation", (16, 140, 464, 188),
+        kind="text_field", action="edit_dm_search",
+    )
+    s.text("Search this conversation", (28, 154, 444, 178), 14, MUTED, True)
+    s.round_rect((16, 200, 464, 472), (10, 16, 24), BORDER, 8)
+    for row, keys in enumerate(("q w e r t y u i o p", "a s d f g h j k l", "z x c v b n m")):
+        s.text(keys, (34, 220 + row * 54, 446, 258 + row * 54), 18, TEXT, True, "center")
+    s.text("123     space        <-", (34, 388, 446, 438), 16, MUTED, True, "center")
+    s.metrics.update(
+        {
+            "dm_search_query_retained": True,
+            "dm_search_thread_scoped": True,
+            "dm_search_navigation_rf_silent": True,
+            "dm_search_advances_read_cursor": False,
+            "dm_search_button_height": 44,
         }
     )
 
 
 def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
-    msg = snap.dm_messages[-1] if snap.dm_messages else Message(
+    selected_conversation, selected_messages = dm_selected_thread(snap.dm_messages)
+    msg = selected_messages[-1] if selected_messages else Message(
         "Direct message", "No retained message", "",
     )
-    alias = snap.contacts[0].name if snap.contacts else msg.source
+    alias = selected_conversation.source if selected_conversation else msg.source
     outgoing = msg.direction == "tx"
     state = dm_primary_delivery_label(msg)
     draw_top_bar(s, snap)
@@ -4189,10 +4302,14 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
         s, (16, 64, 96, 108), "Back", MUTED,
         action="close_dm_thread", destination="messages_dm",
     )
-    s.text(alias, (112, 62, 330, 90), 20, TEXT, True)
+    s.text(alias, (112, 62, 256, 90), 20, TEXT, True)
     draw_button(
-        s, (340, 64, 464, 108), "Hide details", BLUE,
+        s, (264, 64, 364, 108), "Hide details", BLUE,
         action="toggle_dm_details", destination="dm_thread_sheet",
+    )
+    draw_button(
+        s, (372, 64, 464, 108), "Search", BLUE,
+        action="open_dm_search", destination="dm_search_sheet",
     )
     s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
     bubble = (88, 130, 452, 398) if outgoing else (28, 130, 392, 398)
@@ -4266,6 +4383,10 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
     s.metrics.update(
         {
             "dm_thread_details_expanded": True,
+            "dm_thread_details_conversation_id": (
+                dm_conversation_id(selected_conversation)
+                if selected_conversation else ""
+            ),
             "dm_thread_details_single_row": True,
             "dm_thread_details_state": msg.delivery_state,
             "dm_thread_details_reason": msg.delivery_reason,
@@ -4554,6 +4675,10 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "public_tx_detail_technical_page": render_public_tx_detail_technical_page,
     "dm_thread_sheet": render_dm_thread_sheet,
     "dm_thread_details_sheet": render_dm_thread_details_sheet,
+    "dm_search_sheet": render_dm_search_sheet,
+    "dm_thread_search_results": render_dm_thread_search_results,
+    "dm_thread_search_no_match": render_dm_thread_search_no_match,
+    "dm_thread_empty_sheet": render_dm_thread_empty_sheet,
     "route_detail_sheet": render_route_detail_sheet,
     "route_trace_sheet": render_route_trace_sheet,
     "packet_detail_sheet": render_packet_detail_sheet,
@@ -4842,8 +4967,12 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Signal not measured for retained Public TxDone",
         "Path hops not measured for retained Public TxDone",
     ),
-    "dm_thread_sheet": ("Back", "Reply"),
-    "dm_thread_details_sheet": ("Back", "Hide details", "Technical details", "Reply"),
+    "dm_thread_sheet": ("Back", "Search", "Reply"),
+    "dm_thread_details_sheet": ("Back", "Hide details", "Search", "Technical details", "Reply"),
+    "dm_search_sheet": ("DM Search", "Search this conversation", "Apply", "Clear", "Close"),
+    "dm_thread_search_results": ("Back", "Search", "Reply"),
+    "dm_thread_search_no_match": ("Back", "Search", "No retained messages match this search.", "Reply"),
+    "dm_thread_empty_sheet": ("Back", "Search", "No retained messages in this conversation.", "Reply"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
@@ -5032,6 +5161,43 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             },
             {"view": "dm_thread_sheet", "action": "open_dm_reply", "destination": "compose_sheet"},
             {"view": "dm_thread_sheet", "action": "close_dm_thread", "destination": "messages_dm"},
+        ),
+    },
+    {
+        "name": "dm_retained_search",
+        "steps": (
+            {"view": "messages", "action": "open_messages_dm", "destination": "messages_dm"},
+            {
+                "view": "messages_dm",
+                "action": "open_dm_thread",
+                "destination": "dm_thread_sheet",
+                "marks_read": True,
+            },
+            {
+                "view": "dm_thread_sheet",
+                "action": "open_dm_search",
+                "destination": "dm_search_sheet",
+                "rf_tx": False,
+            },
+            {"view": "dm_search_sheet", "action": "edit_dm_search"},
+            {
+                "view": "dm_search_sheet",
+                "action": "apply_dm_search",
+                "destination": "dm_thread_search_results",
+                "rf_tx": False,
+            },
+            {
+                "view": "dm_thread_search_results",
+                "action": "open_dm_search",
+                "destination": "dm_search_sheet",
+                "rf_tx": False,
+            },
+            {
+                "view": "dm_search_sheet",
+                "action": "clear_dm_search",
+                "destination": "dm_thread_sheet",
+                "rf_tx": False,
+            },
         ),
     },
     {

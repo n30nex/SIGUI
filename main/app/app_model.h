@@ -255,6 +255,13 @@ esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text);
 esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
                                                      char *out_token,
                                                      size_t out_token_size);
+size_t d1l_app_model_query_dm_thread_page(const char *fingerprint,
+                                          d1l_dm_entry_t *out_entries,
+                                          bool *out_unread,
+                                          size_t max_entries,
+                                          size_t skip_newest,
+                                          const char *query,
+                                          size_t *out_total_matches);
 size_t d1l_app_model_copy_dm_thread_page(const char *fingerprint,
                                          d1l_dm_entry_t *out_entries,
                                          bool *out_unread, size_t max_entries,

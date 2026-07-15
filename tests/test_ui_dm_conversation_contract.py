@@ -18,9 +18,9 @@ def test_dm_conversation_controller_owns_bounded_state_and_stale_guards():
     assert "D1L_UI_MESSAGES_CONTROLLER_MAX_BYTES 16384U" in header
     assert "_Static_assert(sizeof(d1l_ui_messages_controller_t)" in source
     assert "lv_obj_t *thread_sheet" in header
-    assert "thread_entries[D1L_DM_STORE_CAPACITY]" in header
-    assert "thread_unread[D1L_DM_STORE_CAPACITY]" in header
-    assert "thread_rows[D1L_DM_STORE_CAPACITY]" in header
+    assert "thread_entries[D1L_UI_MESSAGES_THREAD_MAX_ROWS]" in header
+    assert "thread_unread[D1L_UI_MESSAGES_THREAD_MAX_ROWS]" in header
+    assert "thread_rows[D1L_UI_MESSAGES_THREAD_MAX_ROWS]" in header
     assert "thread_limit" in header
     assert "thread_row_count" in header
     assert "thread_total_matches" in header
@@ -35,7 +35,7 @@ def test_dm_conversation_controller_owns_bounded_state_and_stale_guards():
     )
     assert "binding->generation != binding->controller->generation" in source
     assert "binding->row_index >= controller->thread_row_count" in source
-    assert "controller->thread_row_count > D1L_DM_STORE_CAPACITY" in source
+    assert "controller->thread_row_count > D1L_UI_MESSAGES_THREAD_MAX_ROWS" in source
     assert "static lv_obj_t *s_dm_thread_sheet" not in phase1
     assert "static d1l_dm_entry_t s_dm_thread_entries" not in phase1
     assert "static bool s_dm_thread_unread" not in phase1
