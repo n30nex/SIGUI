@@ -82,11 +82,15 @@ def test_heard_node_query_supports_production_sort_filter_rows():
 
 def test_verified_adverts_upsert_heard_nodes():
     source = read("main/mesh/meshcore_service.c")
-    assert '#include "mesh/node_store.h"' in source
+    admission = read("main/mesh/meshcore_advert_admission.c")
+    cmake = read("main/CMakeLists.txt")
+    assert '#include "mesh/meshcore_advert_admission.h"' in source
     assert "verify_advert_signature" in source
     assert "D1L_NODE_PUBLIC_KEY_HEX_LEN" in source
     assert "hex_prefix(pub_key_hex" in source
-    assert "d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, advert.name" in source
+    assert "d1l_meshcore_advert_admit_verified(" in source
+    assert "d1l_node_store_upsert_advert(" in admission
+    assert '"mesh/meshcore_advert_admission.c"' in cmake
     assert "read_le32(timestamp)" in source
     assert "node store upsert failed" in source
     assert "d1l_node_store_find_by_fingerprint" in read("main/mesh/node_store.h")

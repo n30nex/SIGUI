@@ -44,11 +44,20 @@ Coverage:
   seed `13746277` (`0xD1C065`), upload
   `artifacts/meshcore-conformance/meshcore_conformance_<full-commit>.json`, and
   gate `firmware-build`. The result must report
-  `coverage_level="wire_envelope_only"` and `closure_ready=false`. This check
-  covers structural bidirectional envelopes, malformed inputs, and memory
-  safety only; it makes no semantic, cryptographic, duplicate/replay,
-  retained-state, hardware, real-peer, complete-surface, or issue #65 closure
-  claim. See [MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).
+  `coverage_level="wire_envelope_only"` and `closure_ready=false`. The job runs
+  the exact-commit signed-advert runtime before conformance, validates that
+  sanitized receipt, and binds its canonical SHA-256 plus five distinct signed
+  timestamp replay outcomes into the conformance receipt. Actions, release
+  packaging, reproducibility comparison, and release audit must recompute that
+  canonical digest from the supplied exact-commit signed-runtime receipt and
+  reject any substituted binding. The declared WP-05
+  host matrix is currently 7 production suites / 41 scenarios / 28 translation
+  units / 58 source pins, plus 1 pinned-upstream companion suite / 5 replay
+  cases. Identical-wire hash suppression remains separate evidence. These
+  bounded semantic checks do not prove the remaining cryptographic surface,
+  generic packet replay, retained-state recovery, hardware, real-peer RF,
+  complete-surface, or issue #65 closure. See
+  [MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).
 - Full MeshCore conformance release contract: the passing wire-envelope package
   gate is only a prerequisite. A separate P0
   `meshcore_full_conformance_complete` gate remains failed until issue #65 has

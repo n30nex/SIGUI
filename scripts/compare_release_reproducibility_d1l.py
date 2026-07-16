@@ -609,12 +609,6 @@ def validate_manifest_shape(
             package_dir / expected_conformance,
             "canonical MeshCore conformance evidence",
         )
-        validate_completed_report(
-            canonical_report,
-            source_commit,
-            build_inputs_path=root / ".github" / "d1l-build-inputs.json",
-            require_generated_at=False,
-        )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise ComparisonError(
             "invalid_conformance_semantics",
@@ -692,6 +686,20 @@ def validate_manifest_shape(
         raise ComparisonError(
             "invalid_signed_advert_semantics",
             f"canonical signed-advert evidence is incomplete: {exc}",
+        ) from exc
+    try:
+        validate_completed_report(
+            canonical_report,
+            source_commit,
+            build_inputs_path=root / ".github" / "d1l-build-inputs.json",
+            require_generated_at=False,
+            signed_advert_runtime_receipt=canonical_signed_advert,
+            signed_advert_runtime_receipt_is_canonical=True,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ComparisonError(
+            "invalid_conformance_semantics",
+            f"canonical conformance evidence is incomplete: {exc}",
         ) from exc
     signed_generated_at = parse_utc(
         signed_receipt.get("generated_at"), "signed-advert generated_at"

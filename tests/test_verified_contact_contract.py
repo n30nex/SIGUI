@@ -43,31 +43,14 @@ def test_signed_advert_rx_binds_exact_full_key_to_truthful_retained_contact_resu
 
     signature = receiver.index("verify_advert_signature")
     self_filter = receiver.index("memcmp(pub_key, settings->identity_public_key")
-    node_upsert = receiver.index("d1l_node_store_upsert_advert")
-    stale_filter = receiver.index("if (advert_stale)")
-    node_error = receiver.index('append_packet_log("rx", "advert_store_error"')
-    node_readback = receiver.index("d1l_node_store_find_by_fingerprint")
-    full_key_match = receiver.index(
-        "strcmp(verified_node.public_key_hex, pub_key_hex) == 0"
-    )
-    contact_upsert = receiver.index("d1l_contact_store_upsert_verified_advert")
+    admission = receiver.index("d1l_meshcore_advert_admit_verified")
+    outcome_dispatch = receiver.index("switch (admission.outcome)")
     accepted = receiver.index("s_status.rx_adverts++")
-    assert (
-        signature
-        < self_filter
-        < node_upsert
-        < stale_filter
-        < node_error
-        < node_readback
-        < full_key_match
-        < contact_upsert
-        < accepted
-    )
+    assert signature < self_filter < admission < outcome_dispatch < accepted
 
     assert "D1L_CONTACT_VERIFIED_ADVERT_CREATED" in service
     assert "D1L_CONTACT_VERIFIED_ADVERT_UPDATED" in service
     assert "D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER" in service
-    assert "D1L_CONTACT_VERIFIED_ADVERT_COLLISION" in receiver
     assert "D1L_CONTACT_VERIFIED_ADVERT_FULL" in service
     assert 'return "new";' in service
     assert 'return "updated";' in service
@@ -75,11 +58,69 @@ def test_signed_advert_rx_binds_exact_full_key_to_truthful_retained_contact_resu
     assert 'return "collision";' in service
     assert 'return "full";' in service
     assert "is_new" not in receiver
-    stale_body = receiver[stale_filter:node_error]
-    assert "retry_verified_contact_promotion" in stale_body
-    assert '"advert_contact_retry"' in stale_body
-    assert '"advert_contact_retry_error"' in stale_body
-    assert '"advert_key_collision"' in receiver
+    assert "d1l_node_store_upsert_advert" not in receiver
+    assert "d1l_contact_store_upsert_verified_advert" not in receiver
+    for outcome in (
+        "D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED",
+        "D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED",
+        "D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED",
+        "D1L_MESHCORE_ADVERT_ADMISSION_KEY_COLLISION",
+        "D1L_MESHCORE_ADVERT_ADMISSION_NODE_STORE_ERROR",
+        "D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED",
+    ):
+        assert outcome in receiver
+    for event in (
+        '"advert_contact_retry"',
+        '"advert_contact_retry_error"',
+        '"advert_replay"',
+        '"advert_key_collision"',
+        '"advert_store_error"',
+    ):
+        assert event in receiver
+
+
+def test_admission_owns_replay_recovery_and_exact_full_key_contact_promotion():
+    admission = (ROOT / "main/mesh/meshcore_advert_admission.c").read_text(
+        encoding="utf-8"
+    )
+    body = admission.split("esp_err_t d1l_meshcore_advert_admit_verified", 1)[1]
+
+    node_upsert = body.index("d1l_node_store_upsert_advert")
+    stale_filter = body.index("if (stale)")
+    retained_readback = body.index("d1l_node_store_find_by_fingerprint")
+    retained_timestamp = body.index("retained_node.advert_timestamp == advert_timestamp")
+    retained_key = body.index(
+        "strcmp(retained_node.public_key_hex, public_key_hex) == 0"
+    )
+    contact_absent = body.index("!d1l_contact_store_find_by_public_key")
+    retry_upsert = body.index("d1l_contact_store_upsert_verified_advert")
+    node_error = body.index("if (node_ret != ESP_OK)")
+    accepted_readback = body.index(
+        "d1l_node_store_find_by_fingerprint", retained_readback + 1
+    )
+    accepted_upsert = body.index(
+        "d1l_contact_store_upsert_verified_advert", retry_upsert + 1
+    )
+    accepted_outcome = body.index(
+        "D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED", accepted_upsert
+    )
+    assert (
+        node_upsert
+        < stale_filter
+        < retained_readback
+        < retained_timestamp
+        < retained_key
+        < contact_absent
+        < retry_upsert
+        < node_error
+        < accepted_readback
+        < accepted_upsert
+        < accepted_outcome
+    )
+    assert "D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED" in body
+    assert "D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED" in body
+    assert "D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED" in body
+    assert "D1L_MESHCORE_ADVERT_ADMISSION_KEY_COLLISION" in body
 
 
 def test_heard_node_rejects_full_key_prefix_collision_before_replay_or_mutation():

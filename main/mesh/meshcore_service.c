@@ -23,6 +23,7 @@
 #include "mesh/ed25519_canonical.h"
 #include "mesh/meshcore_ack_dispatch.h"
 #include "mesh/meshcore_admin_runtime.h"
+#include "mesh/meshcore_advert_admission.h"
 #include "mesh/meshcore_command_guard.h"
 #include "mesh/meshcore_dm_retry.h"
 #include "mesh/meshcore_identity_exchange.h"
@@ -3480,36 +3481,6 @@ static const char *verified_contact_result_name(
     }
 }
 
-static bool retry_verified_contact_promotion(
-    const char *fingerprint, const char *public_key_hex,
-    uint32_t advert_timestamp,
-    d1l_contact_verified_advert_result_t *out_result,
-    esp_err_t *out_ret)
-{
-    if (!fingerprint || !public_key_hex || !out_result || !out_ret) {
-        return false;
-    }
-    *out_result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
-    *out_ret = ESP_ERR_INVALID_STATE;
-
-    d1l_node_entry_t retained_node = {0};
-    if (!d1l_node_store_find_by_fingerprint(fingerprint, &retained_node) ||
-        retained_node.advert_timestamp != advert_timestamp ||
-        strcmp(retained_node.public_key_hex, public_key_hex) != 0) {
-        return false;
-    }
-
-    /* An equal signed advert is normally a replay. Retry only when the exact
-     * full key is still absent from the durable contact store, which occurs
-     * after a prior transient write failure or a retained placeholder. */
-    if (d1l_contact_store_find_by_public_key(public_key_hex, NULL)) {
-        return false;
-    }
-    *out_ret = d1l_contact_store_upsert_verified_advert(
-        fingerprint, &retained_node, out_result, NULL);
-    return true;
-}
-
 static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
                                    int16_t rssi, int8_t snr)
 {
@@ -3569,45 +3540,52 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
     }
 
     const uint32_t advert_timestamp = read_le32(timestamp);
-    bool advert_stale = false;
-    esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, advert.name,
-                                                 advert.type_code, rssi,
-                                                 (snr * 10) / 4,
-                                                 packet.path_hash_bytes, packet.path_hops,
-                                                 advert_timestamp, advert.location_valid,
-                                                 advert.lat_e6, advert.lon_e6,
-                                                 &advert_stale);
-    if (advert_stale) {
-        d1l_contact_verified_advert_result_t retry_result =
-            D1L_CONTACT_VERIFIED_ADVERT_NONE;
-        esp_err_t retry_ret = ESP_ERR_INVALID_STATE;
-        if (retry_verified_contact_promotion(pub_prefix, pub_key_hex,
-                                             advert_timestamp,
-                                             &retry_result, &retry_ret)) {
+    d1l_meshcore_advert_admission_receipt_t admission = {0};
+    const esp_err_t admission_ret = d1l_meshcore_advert_admit_verified(
+        pub_prefix, pub_key_hex, advert.name, advert.type_code, rssi,
+        (snr * 10) / 4, packet.path_hash_bytes, packet.path_hops,
+        advert_timestamp, advert.location_valid, advert.lat_e6, advert.lon_e6,
+        &admission);
+    if (admission_ret != ESP_OK) {
+        ESP_LOGW(TAG, "advert admission failed: %s", esp_err_to_name(admission_ret));
+        append_packet_log("rx", "advert_store_error", rssi, snr,
+                          packet.path_hash_bytes, packet.path_hops, size,
+                          payload, size, esp_err_to_name(admission_ret));
+        return;
+    }
+
+    switch (admission.outcome) {
+        case D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED:
+        case D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED: {
             char retry_note[D1L_PACKET_LOG_NOTE_LEN] = {0};
             snprintf(retry_note, sizeof(retry_note), "retry %.8s c=%s",
-                     pub_prefix, verified_contact_result_name(retry_result));
+                     pub_prefix,
+                     verified_contact_result_name(admission.contact_result));
             append_packet_log(
-                "rx", retry_ret == ESP_OK ? "advert_contact_retry" :
-                                             "advert_contact_retry_error",
+                "rx",
+                admission.outcome ==
+                        D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED
+                    ? "advert_contact_retry"
+                    : "advert_contact_retry_error",
                 rssi, snr, packet.path_hash_bytes, packet.path_hops, size,
                 payload, size, retry_note);
-            if (retry_ret != ESP_OK) {
+            if (admission.contact_store_error != ESP_OK) {
                 ESP_LOGW(TAG, "verified advert contact retry %s: %s",
-                         verified_contact_result_name(retry_result),
-                         esp_err_to_name(retry_ret));
+                         verified_contact_result_name(admission.contact_result),
+                         esp_err_to_name(admission.contact_store_error));
             }
             return;
         }
-        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-        snprintf(note, sizeof(note), "replay %.8s ts=%lu", pub_prefix,
-                 (unsigned long)advert_timestamp);
-        append_packet_log("rx", "advert_replay", rssi, snr, packet.path_hash_bytes,
-                          packet.path_hops, size, payload, size, note);
-        return;
-    }
-    if (ret != ESP_OK) {
-        if (ret == ESP_ERR_INVALID_STATE) {
+        case D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED: {
+            char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+            snprintf(note, sizeof(note), "replay %.8s ts=%lu", pub_prefix,
+                     (unsigned long)advert_timestamp);
+            append_packet_log("rx", "advert_replay", rssi, snr,
+                              packet.path_hash_bytes, packet.path_hops, size,
+                              payload, size, note);
+            return;
+        }
+        case D1L_MESHCORE_ADVERT_ADMISSION_KEY_COLLISION: {
             char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
             snprintf(note, sizeof(note), "key_collision %.8s", pub_prefix);
             append_packet_log("rx", "advert_key_collision", rssi, snr,
@@ -3615,28 +3593,28 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
                               payload, size, note);
             return;
         }
-        ESP_LOGW(TAG, "node store upsert failed: %s", esp_err_to_name(ret));
-        append_packet_log("rx", "advert_store_error", rssi, snr,
-                          packet.path_hash_bytes, packet.path_hops, size,
-                          payload, size, esp_err_to_name(ret));
-        return;
+        case D1L_MESHCORE_ADVERT_ADMISSION_NODE_STORE_ERROR:
+            ESP_LOGW(TAG, "node store upsert failed: %s",
+                     esp_err_to_name(admission.node_store_error));
+            append_packet_log("rx", "advert_store_error", rssi, snr,
+                              packet.path_hash_bytes, packet.path_hops, size,
+                              payload, size,
+                              esp_err_to_name(admission.node_store_error));
+            return;
+        case D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED:
+            break;
+        case D1L_MESHCORE_ADVERT_ADMISSION_INVALID:
+        default:
+            append_packet_log("rx", "advert_store_error", rssi, snr,
+                              packet.path_hash_bytes, packet.path_hops, size,
+                              payload, size, "invalid admission outcome");
+            return;
     }
 
-    d1l_node_entry_t verified_node = {0};
-    d1l_contact_verified_advert_result_t contact_result =
-        D1L_CONTACT_VERIFIED_ADVERT_NONE;
-    esp_err_t contact_ret = ESP_ERR_INVALID_STATE;
-    if (d1l_node_store_find_by_fingerprint(pub_prefix, &verified_node) &&
-        strcmp(verified_node.public_key_hex, pub_key_hex) == 0) {
-        contact_ret = d1l_contact_store_upsert_verified_advert(
-            pub_prefix, &verified_node, &contact_result, NULL);
-    } else {
-        contact_result = D1L_CONTACT_VERIFIED_ADVERT_COLLISION;
-    }
-    if (contact_ret != ESP_OK) {
+    if (admission.contact_store_error != ESP_OK) {
         ESP_LOGW(TAG, "verified advert contact promotion %s: %s",
-                 verified_contact_result_name(contact_result),
-                 esp_err_to_name(contact_ret));
+                 verified_contact_result_name(admission.contact_result),
+                 esp_err_to_name(admission.contact_store_error));
     }
 
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
@@ -3645,10 +3623,11 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
         sanitize_note(short_name, sizeof(short_name), advert.name);
         snprintf(note, sizeof(note), "adv %c %s %.8s c=%s", advert.type_code,
                  short_name, pub_prefix,
-                 verified_contact_result_name(contact_result));
+                 verified_contact_result_name(admission.contact_result));
     } else {
         snprintf(note, sizeof(note), "adv %c %.8s c=%s", advert.type_code,
-                 pub_prefix, verified_contact_result_name(contact_result));
+                 pub_prefix,
+                 verified_contact_result_name(admission.contact_result));
     }
     s_status.rx_packets++;
     s_status.rx_adverts++;

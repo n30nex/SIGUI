@@ -371,6 +371,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     signed_advert = write_meshcore_signed_advert_runtime(root, commit)
     monkeypatch.setenv("GITHUB_SHA", commit)
     install_fake_source_identity(monkeypatch, commit)
+    signed_advert = write_meshcore_signed_advert_runtime(tmp_path, commit)
 
     manifest = package_release_d1l.create_release_package(
         root=root,
@@ -627,6 +628,33 @@ def test_release_package_rejects_signed_advert_receipt_from_other_commit(
         )
 
 
+def test_release_package_rejects_substituted_signed_runtime_binding_hash(
+    tmp_path, monkeypatch
+):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    commit = "b" * 40
+    monkeypatch.setenv("GITHUB_SHA", commit)
+    install_fake_source_identity(monkeypatch, commit)
+    conformance = write_meshcore_conformance(tmp_path, commit)
+    signed_advert = write_meshcore_signed_advert_runtime(tmp_path, commit)
+    report = json.loads(conformance.read_text(encoding="utf-8"))
+    report["signed_advert_runtime"]["canonical_sha256"] = "0" * 64
+    conformance.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="signed_advert_runtime_receipt_binding"):
+        package_release_d1l.create_release_package(
+            root=tmp_path,
+            build_dir=build,
+            out_dir=tmp_path / "artifacts" / "release",
+            package_name="substituted-signed-runtime-binding",
+            full_size=0x20000,
+            meshcore_conformance_json=conformance,
+            meshcore_signed_advert_runtime_json=signed_advert,
+        )
+
+
 def test_release_package_rejects_signed_advert_receipt_without_sanitizer_commands(
     tmp_path, monkeypatch
 ):
@@ -815,6 +843,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
     commit = "b" * 40
     monkeypatch.setenv("GITHUB_SHA", commit)
     install_fake_source_identity(monkeypatch, commit)
+    signed_advert = write_meshcore_signed_advert_runtime(tmp_path, commit)
 
     mismatched = write_meshcore_conformance(
         tmp_path,
@@ -829,6 +858,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
             package_name="mismatch",
             full_size=0x20000,
             meshcore_conformance_json=mismatched,
+            meshcore_signed_advert_runtime_json=signed_advert,
         )
     except ValueError as exc:
         assert "source_commit" in str(exc)
@@ -849,6 +879,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
             package_name="expired",
             full_size=0x20000,
             meshcore_conformance_json=expired,
+            meshcore_signed_advert_runtime_json=signed_advert,
         )
     except ValueError as exc:
         assert "expired" in str(exc)
@@ -868,6 +899,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
             package_name="future-overflow",
             full_size=0x20000,
             meshcore_conformance_json=far_future,
+            meshcore_signed_advert_runtime_json=signed_advert,
         )
     except ValueError as exc:
         assert "future" in str(exc) or "supported range" in str(exc)

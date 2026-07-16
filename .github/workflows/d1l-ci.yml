@@ -249,6 +249,20 @@ jobs:
             --sanitizers required \
             --out "artifacts/meshcore-conformance/ed25519_defined_overlay_${GITHUB_SHA}.json"
 
+      - name: Run pinned MeshCore signed-advert semantic runtime
+        shell: bash
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          python ./scripts/meshcore_signed_advert_runtime_d1l.py \
+            --cc clang-18 \
+            --cxx clang++-18 \
+            --commit "$GITHUB_SHA" \
+            --sanitize \
+            --out "artifacts/meshcore-conformance/meshcore_signed_advert_runtime_${GITHUB_SHA}.json"
+
       - name: Run MeshCore wire-envelope conformance and RX fuzzing
         shell: bash
         env:
@@ -263,23 +277,10 @@ jobs:
             --cxx clang++-18 \
             --commit "$GITHUB_SHA" \
             --toolchain-receipt artifacts/meshcore-conformance/toolchain-inputs.json \
+            --signed-advert-runtime-receipt "artifacts/meshcore-conformance/meshcore_signed_advert_runtime_${GITHUB_SHA}.json" \
             --seed 13746277 \
             --runs 100000 \
             --out "artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json"
-
-      - name: Run pinned MeshCore signed-advert semantic runtime
-        shell: bash
-        env:
-          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
-          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: |
-          set -euo pipefail
-          python ./scripts/meshcore_signed_advert_runtime_d1l.py \
-            --cc clang-18 \
-            --cxx clang++-18 \
-            --commit "$GITHUB_SHA" \
-            --sanitize \
-            --out "artifacts/meshcore-conformance/meshcore_signed_advert_runtime_${GITHUB_SHA}.json"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ always() }}
@@ -473,9 +474,14 @@ jobs:
 
           with open(sys.argv[1], encoding="utf-8") as stream:
               report = json.load(stream)
-          validate_completed_report(report, os.environ["GITHUB_SHA"])
           with open(sys.argv[2], encoding="utf-8") as stream:
-              validate_signed_runtime(json.load(stream), os.environ["GITHUB_SHA"])
+              signed_runtime = json.load(stream)
+          validate_signed_runtime(signed_runtime, os.environ["GITHUB_SHA"])
+          validate_completed_report(
+              report,
+              os.environ["GITHUB_SHA"],
+              signed_advert_runtime_receipt=signed_runtime,
+          )
           PY
           printf 'D1L_MESHCORE_CONFORMANCE_JSON=%s\n' "$conformance_json" >> "$GITHUB_ENV"
           printf 'D1L_MESHCORE_SIGNED_ADVERT_RUNTIME_JSON=%s\n' "$signed_runtime_json" >> "$GITHUB_ENV"

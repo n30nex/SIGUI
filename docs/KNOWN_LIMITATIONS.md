@@ -84,7 +84,15 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   dispatch, RF, hardware, and WP-18 acceptance remain open.
 - The signed-advert runtime uses the independently checksum-verified
   `rweather/Crypto` 0.4.0 verifier and executes real
-  create/sign/send/filter/verify/dispatch/contact-promotion behavior. It does
+  create/sign/send/filter/verify/dispatch/contact-promotion behavior. It now
+  proves five distinct validly signed timestamp cases: equal and older reject
+  without mutation, strictly newer and `UINT32_MAX` accept, and zero after
+  `UINT32_MAX` rejects without wrap. Identical-wire hash suppression remains a
+  distinct result. The WP-05 conformance receipt validates the sanitized
+  exact-commit runtime receipt and binds its canonical SHA-256 and all five
+  outcomes. Actions and downstream package/audit consumers recompute and compare
+  the binding from the supplied receipt rather than accepting any shaped digest;
+  the matrix remains `closure_ready=false`. It does
   not prove firmware binding, persisted keypair consistency, retained-contact
   recovery, peer/RF interoperability, routing, ACK delivery, trace, admin
   sessions, or hardware. The pinned `BaseChatMesh` callback reports

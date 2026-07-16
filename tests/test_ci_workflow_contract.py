@@ -184,9 +184,16 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert 'D1L_MESHCORE_CONFORMANCE_CI: "1"' in job
     assert "UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1" in job
     assert "python ./scripts/meshcore_conformance_d1l.py" in job
+    assert job.index(
+        "Run pinned MeshCore signed-advert semantic runtime"
+    ) < job.index("Run MeshCore wire-envelope conformance and RX fuzzing")
     assert "--cc clang-18" in job
     assert "--cxx clang++-18" in job
     assert "--toolchain-receipt artifacts/meshcore-conformance/toolchain-inputs.json" in job
+    assert (
+        '--signed-advert-runtime-receipt "artifacts/meshcore-conformance/'
+        'meshcore_signed_advert_runtime_${GITHUB_SHA}.json"'
+    ) in job
     assert '--commit "$GITHUB_SHA"' in job
     assert "--seed 13746277" in job
     assert "--runs 100000" in job
@@ -209,7 +216,7 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "path: artifacts/meshcore-conformance-input" in firmware
     assert "name: Verify exact MeshCore conformance evidence" in firmware
     assert "from scripts.meshcore_conformance_d1l import validate_completed_report" in firmware
-    assert 'validate_completed_report(report, os.environ["GITHUB_SHA"])' in firmware
+    assert "signed_advert_runtime_receipt=signed_runtime" in firmware
     assert "D1L_MESHCORE_CONFORMANCE_JSON=" in firmware
 
 

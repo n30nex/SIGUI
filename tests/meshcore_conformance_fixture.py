@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from scripts import meshcore_conformance_d1l as conformance
+from scripts import meshcore_signed_advert_runtime_d1l as signed_runtime
 from scripts import verify_ci_tool_inputs
 
 
@@ -48,10 +49,30 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/mesh/user_text.h",
         "tests/native/meshcore_text_plaintext_test.c",
     }
-    all_dependencies = set(matrix["source_pins"])
-    time_service = all_dependencies - admin - runtime - trace - text_admission - {
-        "tests/native/settings_protocol_migration_test.c"
+    advert_admission = {
+        "main/mesh/contact_store.c",
+        "main/mesh/contact_store.h",
+        "main/mesh/contact_uri.c",
+        "main/mesh/contact_uri.h",
+        "main/mesh/meshcore_advert_admission.c",
+        "main/mesh/meshcore_advert_admission.h",
+        "main/mesh/meshcore_path_state.c",
+        "main/mesh/meshcore_path_state.h",
+        "main/mesh/node_store.c",
+        "main/mesh/node_store.h",
+        "tests/native/store_behavior_test.c",
+        "tests/native/stubs/esp_attr.h",
     }
+    all_dependencies = set(matrix["source_pins"])
+    time_service = (
+        all_dependencies
+        - admin
+        - runtime
+        - trace
+        - text_admission
+        - advert_admission
+        - {"tests/native/settings_protocol_migration_test.c"}
+    )
     suite_sets = [
         admin,
         runtime,
@@ -59,6 +80,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         migration,
         time_service,
         text_admission,
+        advert_admission,
     ]
     suite_specs = conformance.production_semantic_suite_specs()
     commands = [
@@ -132,6 +154,76 @@ def toolchain_receipt(build_inputs_path: Path, commit: str) -> dict:
             },
             "bytes_verified": True,
         },
+    }
+
+
+def completed_signed_advert_runtime_report(
+    commit: str,
+    *,
+    generated_at: datetime | None = None,
+) -> dict:
+    manifest = signed_runtime.load_manifest()
+    dependency = manifest["external_dependency"]
+    repository_files = {
+        path: {
+            "expected_sha256": digest,
+            "actual_sha256": digest,
+            "matched": True,
+        }
+        for group in signed_runtime._source_groups(manifest)
+        for path, digest in group.items()
+    }
+    return {
+        "schema_version": 1,
+        "artifact_type": signed_runtime.SIGNED_ADVERT_ARTIFACT_TYPE,
+        "status": "pass",
+        "passed": True,
+        "execution_complete": True,
+        "generated_at": (generated_at or datetime.now(timezone.utc)).isoformat(),
+        "work_package": "WP-04",
+        "capability": manifest["capability"],
+        "coverage_boundary": manifest["coverage_boundary"],
+        "wp04_closure_eligible": False,
+        "closure_ready": False,
+        "repository": {
+            "verified": True,
+            "repository_commit": commit,
+            "expected_repository_commit": commit,
+            "upstream_commit": manifest["upstream"]["commit"],
+            "gitlink_commit": manifest["upstream"]["commit"],
+            "source_hash_mode": manifest["source_hash_mode"],
+            "files": repository_files,
+        },
+        "external_archive": {
+            "verified": True,
+            "source": dependency["archive_url"],
+            "url": dependency["archive_url"],
+            "size": dependency["archive_size"],
+            "sha256": dependency["archive_sha256"],
+            "version": dependency["version"],
+            "registry_version_id": dependency["registry_version_id"],
+            "release_commit": dependency["release_commit"],
+        },
+        "external_sources": {
+            "verified": True,
+            "files": {
+                path: {"sha256": digest, "size": 1}
+                for path, digest in dependency["sources"].items()
+            },
+        },
+        "sanitizers_enabled": True,
+        "sanitizer_policy": manifest["sanitizer_policy"],
+        "full_ubsan_clean": True,
+        "commands": signed_runtime.command_plan(
+            "clang-18",
+            "clang++-18",
+            "/tmp/crypto",
+            "/tmp/build",
+            sanitize=True,
+        ),
+        "result": manifest["expected_result"],
+        "assertions": manifest["assertions"],
+        "residual_gaps": manifest["residual_gaps"],
     }
 
 
@@ -223,6 +315,10 @@ def completed_report(
         ],
         "failures": 0,
     }
+    signed_advert_report = completed_signed_advert_runtime_report(
+        commit,
+        generated_at=generated_at,
+    )
     return {
         "schema_version": 1,
         "artifact_type": "d1l_meshcore_wire_conformance",
@@ -266,6 +362,10 @@ def completed_report(
         "vector_matrix": conformance.EXPECTED_VECTOR_MATRIX,
         "payload_version_gate": conformance.EXPECTED_PAYLOAD_VERSION_GATE,
         "wp05_semantic_matrix": semantic_summary,
+        "signed_advert_runtime": conformance.bind_signed_advert_runtime_receipt(
+            signed_advert_report,
+            commit,
+        ),
         "source_verification": {
             "verified": True,
             "repository_commit": commit,

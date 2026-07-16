@@ -2178,6 +2178,44 @@ def test_meshcore_packaged_evidence_gate_rejects_mismatch_expiry_and_tampering(
     assert valid["details"]["closure_ready"] is False
     assert "does not close issue #65" in valid["message"]
 
+    binding_tamper_run = tmp_path / "binding-tamper"
+    binding_tamper_package = write_release_package(binding_tamper_run)
+    binding_tamper_receipt = (
+        binding_tamper_run
+        / audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
+        / f"meshcore_conformance_{COMMIT}.json"
+    )
+    binding_tamper_evidence = (
+        binding_tamper_package / f"evidence/meshcore_conformance_{COMMIT}.json"
+    )
+    for path in (binding_tamper_receipt, binding_tamper_evidence):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["signed_advert_runtime"]["canonical_sha256"] = "0" * 64
+        write_json(path, payload)
+    binding_manifest_path = binding_tamper_package / "manifest.json"
+    binding_manifest = json.loads(binding_manifest_path.read_text(encoding="utf-8"))
+    binding_metadata = binding_manifest["meshcore_conformance"]
+    binding_metadata["run_receipt"]["size"] = binding_tamper_receipt.stat().st_size
+    binding_metadata["run_receipt"]["sha256"] = hashlib.sha256(
+        binding_tamper_receipt.read_bytes()
+    ).hexdigest()
+    binding_metadata["size"] = binding_tamper_evidence.stat().st_size
+    binding_metadata["sha256"] = hashlib.sha256(
+        binding_tamper_evidence.read_bytes()
+    ).hexdigest()
+    write_json(binding_manifest_path, binding_manifest)
+    binding_tamper = audit.meshcore_conformance_evidence_gate(
+        binding_tamper_run,
+        tmp_path,
+        COMMIT,
+        expected_run_id=RUN_ID,
+    ).to_dict()
+    assert binding_tamper["ok"] is False
+    assert "run_receipt_semantics_incomplete" in binding_tamper["details"]["failures"]
+    assert "canonical_evidence_semantics_incomplete" in binding_tamper["details"][
+        "failures"
+    ]
+
     mismatched_run = tmp_path / "mismatched"
     write_release_package(mismatched_run, commit=STALE_COMMIT)
     mismatched = audit.meshcore_conformance_evidence_gate(

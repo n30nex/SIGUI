@@ -588,12 +588,26 @@ def meshcore_conformance_evidence_gate(
 
     canonical_report = json_report(evidence_path, "evidence_json_invalid")
     report = json_report(run_receipt_path, "run_receipt_json_invalid")
+    signed_runtime_path = (
+        receipt_root / f"meshcore_signed_advert_runtime_{commit}.json"
+        if receipt_root is not None and commit
+        else None
+    )
+    if signed_runtime_path is None or not signed_runtime_path.is_file():
+        failures.append("signed_runtime_receipt_for_binding_missing")
+        signed_runtime_report: dict[str, Any] = {}
+    else:
+        signed_runtime_report = json_report(
+            signed_runtime_path,
+            "signed_runtime_receipt_for_binding_invalid",
+        )
     if report and commit:
         try:
             validate_completed_report(
                 report,
                 commit,
                 build_inputs_path=root / SUPPORTED_ESP_IDF_BUILD_INPUTS,
+                signed_advert_runtime_receipt=signed_runtime_report,
             )
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
             failures.append("run_receipt_semantics_incomplete")
@@ -604,6 +618,7 @@ def meshcore_conformance_evidence_gate(
                 commit,
                 build_inputs_path=root / SUPPORTED_ESP_IDF_BUILD_INPUTS,
                 require_generated_at=False,
+                signed_advert_runtime_receipt=signed_runtime_report,
             )
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
             failures.append("canonical_evidence_semantics_incomplete")

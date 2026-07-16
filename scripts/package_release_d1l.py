@@ -420,6 +420,7 @@ def parse_utc_timestamp(value: object, field: str) -> datetime:
 
 def copy_meshcore_conformance_evidence(
     source: Path | None,
+    signed_advert_runtime_source: Path | None,
     root: Path,
     package_dir: Path,
     expected_commit: str | None,
@@ -431,7 +432,6 @@ def copy_meshcore_conformance_evidence(
         raise FileNotFoundError(f"Missing MeshCore conformance JSON {source}")
     if not expected_commit:
         raise ValueError("Cannot verify MeshCore conformance without an expected release commit")
-
     try:
         report = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -442,6 +442,32 @@ def copy_meshcore_conformance_evidence(
         report,
         expected_commit,
         build_inputs_path=root / BUILD_INPUTS_SOURCE,
+        require_signed_advert_runtime_receipt=False,
+    )
+    if signed_advert_runtime_source is None:
+        raise ValueError(
+            "Cannot verify MeshCore conformance without signed-advert runtime evidence"
+        )
+    signed_advert_runtime_source = signed_advert_runtime_source.resolve()
+    if not signed_advert_runtime_source.is_file():
+        raise FileNotFoundError(
+            "Missing MeshCore signed-advert runtime JSON "
+            f"{signed_advert_runtime_source}"
+        )
+    try:
+        signed_advert_runtime_report = json.loads(
+            signed_advert_runtime_source.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "MeshCore signed-advert runtime JSON is unreadable: "
+            f"{signed_advert_runtime_source}"
+        ) from exc
+    validate_completed_report(
+        report,
+        expected_commit,
+        build_inputs_path=root / BUILD_INPUTS_SOURCE,
+        signed_advert_runtime_receipt=signed_advert_runtime_report,
     )
 
     source_verification = report.get("source_verification")
@@ -1246,6 +1272,7 @@ def create_release_package(
     source_git["short_commit"] = expected_commit[:7]
     meshcore_conformance = copy_meshcore_conformance_evidence(
         meshcore_conformance_json,
+        meshcore_signed_advert_runtime_json,
         root,
         package_dir,
         expected_commit,
