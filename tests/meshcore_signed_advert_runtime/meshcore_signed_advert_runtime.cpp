@@ -406,6 +406,12 @@ struct ScenarioResult {
     std::array<uint8_t, PUB_KEY_SIZE> sender_key{};
     int receiver_filter_count = 0;
     int receiver_table_lookups = 0;
+    int signed_adverts_sent = 0;
+    int contact_callbacks = 0;
+    int stored_advert_writes = 0;
+    int timestamp_replay_cases = 0;
+    int timestamp_replay_rejections = 0;
+    int timestamp_newer_acceptances = 0;
     int allocations = 0;
     int releases = 0;
 
@@ -415,6 +421,12 @@ struct ScenarioResult {
                stored_advert == other.stored_advert && sender_key == other.sender_key &&
                receiver_filter_count == other.receiver_filter_count &&
                receiver_table_lookups == other.receiver_table_lookups &&
+               signed_adverts_sent == other.signed_adverts_sent &&
+               contact_callbacks == other.contact_callbacks &&
+               stored_advert_writes == other.stored_advert_writes &&
+               timestamp_replay_cases == other.timestamp_replay_cases &&
+               timestamp_replay_rejections == other.timestamp_replay_rejections &&
+               timestamp_newer_acceptances == other.timestamp_newer_acceptances &&
                allocations == other.allocations && releases == other.releases;
     }
 };
@@ -430,6 +442,25 @@ void pump_transmit(RuntimeChatMesh &sender, ManualMilliseconds &clock)
 void pump_receive(RuntimeChatMesh &receiver)
 {
     receiver.loop();
+}
+
+std::vector<uint8_t> transmit_signed_advert(
+    RuntimeChatMesh &sender, FixedRtc &rtc, ManualMilliseconds &clock,
+    DeterministicRadio &radio, FixedPacketManager &manager, uint32_t timestamp,
+    const char *name)
+{
+    rtc.setCurrentTime(timestamp);
+    const std::size_t captured_before = radio.captured().size();
+    mesh::Packet *advert = sender.createSelfAdvert(name, 43.6532, -79.3832);
+    require(advert != nullptr, "createSelfAdvert returned null");
+    sender.sendFlood(advert);
+    require(manager.live_count() == 1, "outbound queue did not own advert");
+    pump_transmit(sender, clock);
+    require(radio.captured().size() == captured_before + 1U,
+            "signed advert was not sent exactly once");
+    require(manager.live_count() == 0,
+            "sender retained signed advert after send completion");
+    return radio.captured().back();
 }
 
 ScenarioResult run_scenario()
@@ -455,15 +486,10 @@ ScenarioResult run_scenario()
     sender.begin();
     receiver.begin();
 
-    mesh::Packet *advert = sender.createSelfAdvert("semantic-node", 43.6532, -79.3832);
-    require(advert != nullptr, "createSelfAdvert returned null");
-    sender.sendFlood(advert);
-    require(sender_manager.live_count() == 1, "outbound queue did not own advert");
-    pump_transmit(sender, sender_ms);
-    require(sender_radio.captured().size() == 1U, "advert was not sent exactly once");
-    require(sender_manager.live_count() == 0, "sender retained advert after send completion");
-
-    const std::vector<uint8_t> wire = sender_radio.captured().front();
+    constexpr uint32_t baseline_timestamp = 1'750'000'123U;
+    const std::vector<uint8_t> wire = transmit_signed_advert(
+        sender, sender_rtc, sender_ms, sender_radio, sender_manager,
+        baseline_timestamp, "semantic-node");
     receiver_radio.inject(wire);
     pump_receive(receiver);
     require(receiver.callback_count() == 1, "valid advert did not invoke contact callback");
@@ -487,13 +513,84 @@ ScenarioResult run_scenario()
     require(receiver.blob_write_count() == 1, "duplicate advert rewrote storage");
     require(receiver_manager.live_count() == 0, "receiver retained duplicate packet");
 
+    std::vector<std::vector<uint8_t>> signed_wires = {wire};
+    const auto transmit_distinct = [&](uint32_t timestamp, const char *name) {
+        std::vector<uint8_t> next = transmit_signed_advert(
+            sender, sender_rtc, sender_ms, sender_radio, sender_manager,
+            timestamp, name);
+        require(std::find(signed_wires.begin(), signed_wires.end(), next) ==
+                    signed_wires.end(),
+                "timestamp scenario reused an earlier wire hash input");
+        signed_wires.push_back(next);
+        return next;
+    };
+
+    const std::vector<uint8_t> equal_timestamp_wire =
+        transmit_distinct(baseline_timestamp, "equal-replay");
+    receiver_radio.inject(equal_timestamp_wire);
+    pump_receive(receiver);
+    require(receiver.callback_count() == 1,
+            "distinct equal-timestamp advert reached callback");
+    require(receiver.blob_write_count() == 1,
+            "distinct equal-timestamp advert rewrote storage");
+
+    const std::vector<uint8_t> older_timestamp_wire =
+        transmit_distinct(baseline_timestamp - 1U, "older-replay");
+    receiver_radio.inject(older_timestamp_wire);
+    pump_receive(receiver);
+    require(receiver.callback_count() == 1,
+            "distinct older-timestamp advert reached callback");
+    require(receiver.blob_write_count() == 1,
+            "distinct older-timestamp advert rewrote storage");
+
+    const std::vector<uint8_t> newer_timestamp_wire =
+        transmit_distinct(baseline_timestamp + 1U, "newer-node");
+    receiver_radio.inject(newer_timestamp_wire);
+    pump_receive(receiver);
+    require(receiver.callback_count() == 2,
+            "strictly newer timestamp did not reach callback");
+    require(receiver.blob_write_count() == 2,
+            "strictly newer timestamp did not update storage");
+    require(receiver.last_contact().advert_timestamp == baseline_timestamp + 1U,
+            "strictly newer timestamp was not retained");
+    require(receiver.last_contact().name == "newer-node",
+            "strictly newer contact name was not retained");
+
+    const std::vector<uint8_t> max_timestamp_wire =
+        transmit_distinct(UINT32_MAX, "max-node");
+    receiver_radio.inject(max_timestamp_wire);
+    pump_receive(receiver);
+    require(receiver.callback_count() == 3,
+            "UINT32_MAX timestamp did not reach callback");
+    require(receiver.blob_write_count() == 3,
+            "UINT32_MAX timestamp did not update storage");
+    require(receiver.last_contact().advert_timestamp == UINT32_MAX,
+            "UINT32_MAX timestamp was not retained");
+    require(receiver.last_contact().name == "max-node",
+            "UINT32_MAX contact name was not retained");
+
+    const std::vector<uint8_t> wrapped_zero_wire =
+        transmit_distinct(0U, "wrapped-zero");
+    receiver_radio.inject(wrapped_zero_wire);
+    pump_receive(receiver);
+    require(receiver.callback_count() == 3,
+            "wrapped zero timestamp reached callback");
+    require(receiver.blob_write_count() == 3,
+            "wrapped zero timestamp rewrote storage");
+    require(receiver.last_contact().advert_timestamp == UINT32_MAX,
+            "wrapped zero timestamp replaced UINT32_MAX");
+    require(receiver.last_contact().name == "max-node",
+            "wrapped zero timestamp changed contact name");
+    require(receiver_manager.live_count() == 0,
+            "receiver retained a timestamp scenario packet");
+
     std::vector<uint8_t> forged = wire;
     constexpr std::size_t signature_offset = 2U + PUB_KEY_SIZE + 4U;
     require(forged.size() > signature_offset, "wire advert is shorter than signature");
     forged[signature_offset] ^= 0x80U;
     receiver_radio.inject(forged);
     pump_receive(receiver);
-    require(receiver.callback_count() == 1, "forged advert reached callback");
+    require(receiver.callback_count() == 3, "forged advert reached callback");
     require(receiver.getNumContacts() == 1, "forged advert changed contacts");
     require(receiver_manager.live_count() == 0, "receiver retained forged packet");
 
@@ -506,8 +603,10 @@ ScenarioResult run_scenario()
     ContactInfo persisted{};
     require(receiver.getContactByIdx(0U, persisted),
             "contact did not outlive receive packet ownership");
-    require(std::strcmp(persisted.name, "semantic-node") == 0,
+    require(std::strcmp(persisted.name, "max-node") == 0,
             "contact contents did not outlive receive packet");
+    require(persisted.last_advert_timestamp == UINT32_MAX,
+            "timestamp watermark did not outlive receive packet");
     require(!receiver.stored_advert().empty(), "stored advert did not outlive receive packet");
     require(sender_manager.allocations() == sender_manager.releases(),
             "sender packet ownership is imbalanced");
@@ -522,6 +621,12 @@ ScenarioResult run_scenario()
               result.sender_key.begin());
     result.receiver_filter_count = receiver.filter_count();
     result.receiver_table_lookups = receiver_seen.lookups();
+    result.signed_adverts_sent = static_cast<int>(sender_radio.captured().size());
+    result.contact_callbacks = receiver.callback_count();
+    result.stored_advert_writes = receiver.blob_write_count();
+    result.timestamp_replay_cases = 5;
+    result.timestamp_replay_rejections = 3;
+    result.timestamp_newer_acceptances = 2;
     result.allocations = sender_manager.allocations() + receiver_manager.allocations();
     result.releases = sender_manager.releases() + receiver_manager.releases();
     return result;
@@ -534,8 +639,18 @@ int main()
     const ScenarioResult first = run_scenario();
     const ScenarioResult second = run_scenario();
     require(first == second, "deterministic replay changed runtime results");
-    require(first.receiver_filter_count == 3,
+    require(first.receiver_filter_count == 8,
             "flood pre-dispatch filter was not exercised for each receive");
+    require(first.receiver_table_lookups == 8,
+            "seen-table lookup count did not cover distinct replay wires");
+    require(first.signed_adverts_sent == 6,
+            "signed timestamp scenario count drifted");
+    require(first.contact_callbacks == 3 && first.stored_advert_writes == 3,
+            "accepted signed-advert count drifted");
+    require(first.timestamp_replay_cases == 5 &&
+                first.timestamp_replay_rejections == 3 &&
+                first.timestamp_newer_acceptances == 2,
+            "timestamp replay window counts drifted");
     require(first.allocations == first.releases, "aggregate packet ownership is imbalanced");
 
     std::printf(
@@ -545,8 +660,19 @@ int main()
         "\"advert_timestamp\":%u,\"latitude_e6\":%d,\"longitude_e6\":%d,"
         "\"upstream_callback_is_new\":%s,"
         "\"filter_calls\":%d,\"table_lookups\":%d,"
+        "\"signed_adverts_sent\":%d,\"contact_callbacks\":%d,"
+        "\"stored_advert_writes\":%d,\"timestamp_replay_cases\":%d,"
+        "\"timestamp_replay_rejections\":%d,"
+        "\"timestamp_newer_acceptances\":%d,"
         "\"allocations\":%d,\"releases\":%d,"
-        "\"duplicate_suppressed\":true,\"bad_signature_rejected\":true,"
+        "\"duplicate_suppressed\":true,"
+        "\"identical_wire_hash_suppressed\":true,"
+        "\"distinct_equal_timestamp_rejected\":true,"
+        "\"distinct_older_timestamp_rejected\":true,"
+        "\"strictly_newer_timestamp_accepted\":true,"
+        "\"uint32_max_timestamp_accepted\":true,"
+        "\"wrapped_zero_timestamp_rejected\":true,"
+        "\"distinct_signed_wires\":true,\"bad_signature_rejected\":true,"
         "\"self_suppressed\":true,\"ownership_balanced\":true,"
         "\"deterministic_replay\":true}\n",
         hex(first.wire.data(), first.wire.size()).c_str(),
@@ -556,6 +682,9 @@ int main()
         first.contact.longitude,
         first.contact.upstream_is_new ? "true" : "false",
         first.receiver_filter_count,
-        first.receiver_table_lookups, first.allocations, first.releases);
+        first.receiver_table_lookups, first.signed_adverts_sent,
+        first.contact_callbacks, first.stored_advert_writes,
+        first.timestamp_replay_cases, first.timestamp_replay_rejections,
+        first.timestamp_newer_acceptances, first.allocations, first.releases);
     return 0;
 }

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "mesh/contact_store.h"
+#include "mesh/meshcore_advert_admission.h"
 #include "mesh/node_store.h"
 #include "mock_esp_nvs.h"
 
@@ -243,6 +244,18 @@ static void assert_contact_stats_equal(d1l_contact_store_stats_t left,
     assert(left.dropped_oldest == right.dropped_oldest);
     assert(left.count == right.count);
     assert(left.capacity == right.capacity);
+}
+
+static void assert_contact_stats_exact(d1l_contact_store_stats_t left,
+                                       d1l_contact_store_stats_t right)
+{
+    assert_contact_stats_equal(left, right);
+    assert(left.persistence_revision == right.persistence_revision);
+    assert(left.persistence_commit_count == right.persistence_commit_count);
+    assert(left.persistence_coalesced_count == right.persistence_coalesced_count);
+    assert(left.persistence_fail_count == right.persistence_fail_count);
+    assert(left.persistence_last_error == right.persistence_last_error);
+    assert(left.persistence_dirty == right.persistence_dirty);
 }
 
 static void fill_node_v3(node_entry_v3_t *entry, uint32_t seq,
@@ -717,7 +730,7 @@ static void seed_deferred_path_for_flush_race(
     mock_timer_set_us(1000LL * 1000LL);
     d1l_contact_entry_t contact = {0};
     assert(d1l_contact_store_update_path_from_source(
-        fingerprint, path, 0x22U, D1L_MESHCORE_PATH_SOURCE_ACK_PATH,
+        fingerprint, path, 0x02U, D1L_MESHCORE_PATH_SOURCE_ACK_PATH,
         &contact) == ESP_OK);
     assert(contact.out_path_state.generation != 0U);
     assert(d1l_contact_store_stats().persistence_dirty);
@@ -1084,62 +1097,277 @@ static void test_node_nvs_failure_rolls_back_and_retry_succeeds(void)
     assert(strcmp(after.name, "Changed") == 0);
 }
 
-static void test_verified_advert_retry_and_prefix_collision_preserve_node(void)
+static d1l_meshcore_advert_admission_receipt_t admit_verified_advert(
+    const char *fingerprint, const char *key, const char *name,
+    uint32_t timestamp, bool location_valid, int32_t lat_e6, int32_t lon_e6)
+{
+    d1l_meshcore_advert_admission_receipt_t receipt = {0};
+    assert(d1l_meshcore_advert_admit_verified(
+               fingerprint, key, name, 'C', -55, 80, 1U, 2U, timestamp,
+               location_valid, lat_e6, lon_e6, &receipt) == ESP_OK);
+    return receipt;
+}
+
+static void initialize_admission_stores(void)
 {
     mock_nvs_reset();
     assert(d1l_node_store_init() == ESP_OK);
     assert(d1l_contact_store_init() == ESP_OK);
+}
 
+/* d1l_first_zero_timestamp_accepted */
+static void test_d1l_first_zero_timestamp_accepted(void)
+{
+    initialize_admission_stores();
     char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
     char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
     make_public_key(key, 0x31U);
+    fingerprint_from_key(fingerprint, key);
+
+    const d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, key, "Zero First", 0U, false, 0, 0);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+    assert(receipt.node_store_error == ESP_OK);
+    assert(receipt.contact_store_error == ESP_OK);
+    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
+
+    d1l_node_entry_t node = {0};
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_node_store_find_by_fingerprint(fingerprint, &node));
+    assert(d1l_contact_store_find_by_public_key(key, &contact));
+    assert(node.advert_timestamp == 0U);
+    assert(contact.signed_advert_timestamp == 0U);
+}
+
+static void snapshot_admitted_identity(
+    const char *fingerprint, const char *key, d1l_node_entry_t *node,
+    d1l_contact_entry_t *contact, d1l_node_store_stats_t *node_stats,
+    d1l_contact_store_stats_t *contact_stats, uint32_t *marker_generation)
+{
+    assert(d1l_node_store_find_by_fingerprint(fingerprint, node));
+    assert(d1l_contact_store_find_by_public_key(key, contact));
+    *node_stats = d1l_node_store_stats();
+    *contact_stats = d1l_contact_store_stats();
+    *marker_generation = d1l_node_store_marker_generation();
+}
+
+static void assert_admitted_identity_unchanged(
+    const char *fingerprint, const char *key,
+    const d1l_node_entry_t *expected_node,
+    const d1l_contact_entry_t *expected_contact,
+    d1l_node_store_stats_t expected_node_stats,
+    d1l_contact_store_stats_t expected_contact_stats,
+    uint32_t expected_marker_generation)
+{
+    d1l_node_entry_t node = {0};
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_node_store_find_by_fingerprint(fingerprint, &node));
+    assert(d1l_contact_store_find_by_public_key(key, &contact));
+    assert(memcmp(&node, expected_node, sizeof(node)) == 0);
+    assert(memcmp(&contact, expected_contact, sizeof(contact)) == 0);
+    assert_node_stats_equal(d1l_node_store_stats(), expected_node_stats);
+    assert_contact_stats_exact(d1l_contact_store_stats(), expected_contact_stats);
+    assert(d1l_node_store_marker_generation() == expected_marker_generation);
+}
+
+/* d1l_equal_timestamp_rejected_non_mutating */
+static void test_d1l_equal_timestamp_rejected_non_mutating(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x32U);
+    fingerprint_from_key(fingerprint, key);
+    assert(admit_verified_advert(fingerprint, key, "Baseline", 100U, true,
+                                 43427977, -80316478)
+               .outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+
+    d1l_node_entry_t node = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_node_store_stats_t node_stats = {0};
+    d1l_contact_store_stats_t contact_stats = {0};
+    uint32_t marker_generation = 0U;
+    snapshot_admitted_identity(fingerprint, key, &node, &contact, &node_stats,
+                               &contact_stats, &marker_generation);
+    const d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, key, "Equal Replay", 100U, true,
+                              45000000, -79000000);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED);
+    assert_admitted_identity_unchanged(
+        fingerprint, key, &node, &contact, node_stats, contact_stats,
+        marker_generation);
+}
+
+/* d1l_older_timestamp_rejected_non_mutating */
+static void test_d1l_older_timestamp_rejected_non_mutating(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x33U);
+    fingerprint_from_key(fingerprint, key);
+    assert(admit_verified_advert(fingerprint, key, "Baseline", 100U, false,
+                                 0, 0)
+               .outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+
+    d1l_node_entry_t node = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_node_store_stats_t node_stats = {0};
+    d1l_contact_store_stats_t contact_stats = {0};
+    uint32_t marker_generation = 0U;
+    snapshot_admitted_identity(fingerprint, key, &node, &contact, &node_stats,
+                               &contact_stats, &marker_generation);
+    const d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, key, "Older Replay", 99U, true,
+                              45000000, -79000000);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED);
+    assert_admitted_identity_unchanged(
+        fingerprint, key, &node, &contact, node_stats, contact_stats,
+        marker_generation);
+}
+
+/* d1l_strictly_newer_timestamp_accepted */
+static void test_d1l_strictly_newer_timestamp_accepted(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x34U);
+    fingerprint_from_key(fingerprint, key);
+    assert(admit_verified_advert(fingerprint, key, "Baseline", 100U, true,
+                                 43427977, -80316478)
+               .outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+
+    const d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, key, "Newer", 101U, false, 0, 0);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_UPDATED);
+    assert(receipt.contact_store_error == ESP_OK);
+    d1l_node_entry_t node = {0};
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_node_store_find_by_fingerprint(fingerprint, &node));
+    assert(d1l_contact_store_find_by_public_key(key, &contact));
+    assert(node.advert_timestamp == 101U);
+    assert(strcmp(node.name, "Newer") == 0);
+    assert(node.location_valid);
+    assert(node.lat_e6 == 43427977);
+    assert(node.lon_e6 == -80316478);
+    assert(node.location_advert_timestamp == 100U);
+    assert(contact.signed_advert_timestamp == 101U);
+}
+
+/* d1l_uint32_max_then_zero_no_wrap */
+static void test_d1l_uint32_max_then_zero_no_wrap(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x35U);
+    fingerprint_from_key(fingerprint, key);
+    assert(admit_verified_advert(fingerprint, key, "Near Max", UINT32_MAX - 1U,
+                                 false, 0, 0)
+               .outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+    assert(admit_verified_advert(fingerprint, key, "At Max", UINT32_MAX,
+                                 false, 0, 0)
+               .outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+
+    d1l_node_entry_t node = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_node_store_stats_t node_stats = {0};
+    d1l_contact_store_stats_t contact_stats = {0};
+    uint32_t marker_generation = 0U;
+    snapshot_admitted_identity(fingerprint, key, &node, &contact, &node_stats,
+                               &contact_stats, &marker_generation);
+    const d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, key, "Wrapped Zero", 0U, false, 0, 0);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED);
+    assert(node.advert_timestamp == UINT32_MAX);
+    assert(contact.signed_advert_timestamp == UINT32_MAX);
+    assert_admitted_identity_unchanged(
+        fingerprint, key, &node, &contact, node_stats, contact_stats,
+        marker_generation);
+}
+
+/* d1l_equal_exact_key_contact_retry */
+static void test_d1l_equal_exact_key_contact_retry(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x36U);
     fingerprint_from_key(fingerprint, key);
     bool stale = true;
     assert(d1l_node_store_upsert_advert(
                fingerprint, key, "Retry Peer", 'C', -55, 80, 1U, 2U,
                300U, false, 0, 0, &stale) == ESP_OK);
     assert(!stale);
-
-    d1l_node_entry_t retained = {0};
-    assert(d1l_node_store_find_by_fingerprint(fingerprint, &retained));
-    d1l_contact_verified_advert_result_t result =
-        D1L_CONTACT_VERIFIED_ADVERT_NONE;
-    mock_nvs_fail_next_set(ESP_FAIL);
-    assert(d1l_contact_store_upsert_verified_advert(
-               fingerprint, &retained, &result, NULL) == ESP_FAIL);
-    assert(result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
     assert(!d1l_contact_store_find_by_public_key(key, NULL));
 
-    /* The node replay watermark is retained, but the exact equal advert can
-     * recover contact promotion from the retained full-key node. */
-    stale = false;
-    assert(d1l_node_store_upsert_advert(
-               fingerprint, key, "Retry Peer", 'C', -55, 80, 1U, 2U,
-               300U, false, 0, 0, &stale) == ESP_OK);
-    assert(stale);
-    assert(d1l_node_store_find_by_fingerprint(fingerprint, &retained));
-    result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
-    assert(d1l_contact_store_upsert_verified_advert(
-               fingerprint, &retained, &result, NULL) == ESP_OK);
-    assert(result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
-    assert(d1l_contact_store_find_by_public_key(key, NULL));
+    mock_nvs_fail_next_set(ESP_FAIL);
+    d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, key, "Retry Peer", 300U, false, 0, 0);
+    assert(receipt.outcome ==
+           D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED);
+    assert(receipt.contact_store_error == ESP_FAIL);
+    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
+    assert(!d1l_contact_store_find_by_public_key(key, NULL));
 
-    const d1l_node_entry_t baseline = retained;
-    const d1l_node_store_stats_t baseline_stats = d1l_node_store_stats();
+    receipt = admit_verified_advert(fingerprint, key, "Retry Peer", 300U,
+                                    false, 0, 0);
+    assert(receipt.outcome ==
+           D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED);
+    assert(receipt.contact_store_error == ESP_OK);
+    assert(receipt.contact_result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_contact_store_find_by_public_key(key, &contact));
+    assert(contact.signed_advert_timestamp == 300U);
+
+    receipt = admit_verified_advert(fingerprint, key, "Retry Peer", 300U,
+                                    false, 0, 0);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED);
+}
+
+/* d1l_full_key_prefix_collision_precedes_replay */
+static void test_d1l_full_key_prefix_collision_precedes_replay(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x37U);
+    fingerprint_from_key(fingerprint, key);
+    assert(admit_verified_advert(fingerprint, key, "Baseline", 400U, false,
+                                 0, 0)
+               .outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+
+    d1l_node_entry_t node = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_node_store_stats_t node_stats = {0};
+    d1l_contact_store_stats_t contact_stats = {0};
+    uint32_t marker_generation = 0U;
+    snapshot_admitted_identity(fingerprint, key, &node, &contact, &node_stats,
+                               &contact_stats, &marker_generation);
     char colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
     copy_field(colliding_key, sizeof(colliding_key), key);
     colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN - 2U] =
         colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN - 2U] == 'f' ? 'e' : 'f';
-    stale = true;
-    assert(d1l_node_store_upsert_advert(
-               fingerprint, colliding_key, "Collision", 'R', -20, 100,
-               2U, 3U, 301U, true, 45000000, -80000000, &stale) ==
-           ESP_ERR_INVALID_STATE);
-    assert(!stale);
-    memset(&retained, 0, sizeof(retained));
-    assert(d1l_node_store_find_by_fingerprint(fingerprint, &retained));
-    assert(memcmp(&retained, &baseline, sizeof(retained)) == 0);
-    assert_node_stats_equal(d1l_node_store_stats(), baseline_stats);
+
+    d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, colliding_key, "Equal Collision",
+                              400U, false, 0, 0);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_KEY_COLLISION);
+    assert(receipt.node_store_error == ESP_ERR_INVALID_STATE);
+    assert_admitted_identity_unchanged(
+        fingerprint, key, &node, &contact, node_stats, contact_stats,
+        marker_generation);
+
+    receipt = admit_verified_advert(fingerprint, colliding_key,
+                                    "Newer Collision", 401U, true,
+                                    45000000, -79000000);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_KEY_COLLISION);
+    assert(receipt.node_store_error == ESP_ERR_INVALID_STATE);
+    assert_admitted_identity_unchanged(
+        fingerprint, key, &node, &contact, node_stats, contact_stats,
+        marker_generation);
 }
 
 static d1l_node_entry_t make_heard_node(const char *name, const char *type)
@@ -1760,7 +1988,13 @@ int main(void)
     test_oversized_future_contact_schema_is_preserved_fail_closed();
     test_stale_advert_and_location_preservation();
     test_node_nvs_failure_rolls_back_and_retry_succeeds();
-    test_verified_advert_retry_and_prefix_collision_preserve_node();
+    test_d1l_first_zero_timestamp_accepted();
+    test_d1l_equal_timestamp_rejected_non_mutating();
+    test_d1l_older_timestamp_rejected_non_mutating();
+    test_d1l_strictly_newer_timestamp_accepted();
+    test_d1l_uint32_max_then_zero_no_wrap();
+    test_d1l_equal_exact_key_contact_retry();
+    test_d1l_full_key_prefix_collision_precedes_replay();
     test_contact_nvs_failure_rolls_back_and_retry_succeeds();
     test_prepare_after_concurrent_delete_fails_closed();
     test_verified_contact_create_reload_update_preserves_preferences();

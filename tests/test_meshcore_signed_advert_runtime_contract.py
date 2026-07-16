@@ -58,6 +58,18 @@ def test_signed_advert_runtime_manifest_is_bounded_and_pinned():
         "residual_gaps"
     ]
     assert "login_request_response_admin" in manifest["residual_gaps"]
+    assert (
+        "five_distinct_validly_signed_timestamp_cases_bypass_hash_suppression"
+        in manifest["assertions"]
+    )
+    assert manifest["expected_result"]["signed_adverts_sent"] == 6
+    assert manifest["expected_result"]["timestamp_replay_cases"] == 5
+    assert manifest["expected_result"]["timestamp_replay_rejections"] == 3
+    assert manifest["expected_result"]["timestamp_newer_acceptances"] == 2
+    assert manifest["expected_result"]["filter_calls"] == 8
+    assert manifest["expected_result"]["table_lookups"] == 8
+    assert manifest["expected_result"]["allocations"] == 15
+    assert manifest["expected_result"]["releases"] == 15
 
 
 def test_signed_advert_runtime_repository_sources_match_exact_pins():
@@ -215,6 +227,15 @@ def test_runtime_harness_uses_production_dispatch_not_projection_helpers():
     assert "sender.loop()" in harness
     assert "receiver.loop()" in harness
     assert "duplicate advert reached callback" in harness
+    assert "distinct equal-timestamp advert reached callback" in harness
+    assert "distinct older-timestamp advert reached callback" in harness
+    assert "strictly newer timestamp did not reach callback" in harness
+    assert "UINT32_MAX timestamp did not reach callback" in harness
+    assert "wrapped zero timestamp reached callback" in harness
+    assert "timestamp scenario reused an earlier wire hash input" in harness
+    assert 'transmit_distinct(baseline_timestamp, "equal-replay")' in harness
+    assert 'transmit_distinct(UINT32_MAX, "max-node")' in harness
+    assert 'transmit_distinct(0U, "wrapped-zero")' in harness
     assert "forged advert reached callback" in harness
     assert "self advert reached callback" in harness
     assert "packet ownership is imbalanced" in harness

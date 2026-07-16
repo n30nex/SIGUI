@@ -43,6 +43,7 @@ idf_component_register(
         "mesh/channel_message_coordinator.c"
         "mesh/channel_store.c"
         "mesh/contact_store.c"
+        "mesh/meshcore_advert_admission.c"
         "mesh/meshcore_path_state.c"
         "mesh/meshcore_text_plaintext.c"
         "mesh/dm_delivery_state.c"

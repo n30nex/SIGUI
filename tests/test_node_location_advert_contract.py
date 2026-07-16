@@ -118,10 +118,15 @@ def test_only_verified_non_self_newer_adverts_reach_node_and_route_stores():
     verify = receiver.index("verify_advert_signature")
     self_check = receiver.index("memcmp(pub_key, settings->identity_public_key")
     parse = receiver.index("d1l_advert_data_parse")
-    upsert = receiver.index("d1l_node_store_upsert_advert")
-    stale = receiver.index("if (advert_stale)")
+    admission = receiver.index("d1l_meshcore_advert_admit_verified")
+    outcome = receiver.index("switch (admission.outcome)")
     route = receiver.index("d1l_route_store_upsert_observation")
-    assert verify < self_check < parse < upsert < stale < route
+    assert verify < self_check < parse < admission < outcome < route
+    admission_source = read("main/mesh/meshcore_advert_admission.c")
+    node_upsert = admission_source.index("d1l_node_store_upsert_advert")
+    stale = admission_source.index("if (stale)")
+    accepted = admission_source.index("D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED")
+    assert node_upsert < stale < accepted
     assert 'append_packet_log("rx", "advert_bad_sig"' in receiver
     assert 'append_packet_log("rx", "advert_self"' in receiver
     assert 'append_packet_log("rx", "advert_bad_app"' in receiver

@@ -107,13 +107,16 @@ def test_authenticated_inbound_text_is_validated_before_visible_or_ack_side_effe
 
 def test_meshcore_service_decodes_verified_adverts():
     source = read("main/mesh/meshcore_service.c")
+    admission = read("main/mesh/meshcore_advert_admission.c")
     wire = read("main/mesh/meshcore_wire.h")
     cmake = read("main/CMakeLists.txt")
     header = read("main/mesh/meshcore_service.h")
     assert "D1L_MESHCORE_PAYLOAD_ADVERT 0x04U" in wire
     assert "D1L_MESHCORE_ADVERT_MIN_PAYLOAD" in source
     assert "ed25519_verify" in source
-    assert "d1l_node_store_upsert_advert" in source
+    assert "d1l_meshcore_advert_admit_verified" in source
+    assert "d1l_node_store_upsert_advert" in admission
+    assert '"mesh/meshcore_advert_admission.c"' in cmake
     assert 'append_packet_log("rx", "advert"' in source
     assert "parse_rx_advert_packet(payload, size, rssi, snr)" in source
     assert "../third_party/MeshCore/lib/ed25519/verify.c" in cmake

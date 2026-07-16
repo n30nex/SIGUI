@@ -68,7 +68,7 @@
     }
   },
   "production_binding_sources": {
-    "main/CMakeLists.txt": "dcefd43e138c68f5623ea13225cb5f8fdd91a2430e3e18758cd3595aabe1bd49",
+    "main/CMakeLists.txt": "f0c1642874be1fdced0be603b6cad0ae28f4b9bc2fd9e0b7a1777f4e04e84d85",
     "main/comms/usb_console.c": "c2db5626933b078675d703af1889adb7c2e193520c8f82ca1130a73a9af7df84",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "3f895213e9cb8fdf5da67a01fac26df35aa542c6f2ffcf179d1e0d276a1d9e14",
@@ -89,7 +89,7 @@
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
     "main/mesh/meshcore_runtime_guard.h": "5b3630e4a27b15d65a10f7b7524ee646123680b89efb9586f7b02ba33c899708",
-    "main/mesh/meshcore_service.c": "4da21ca94e2c89c623698e63da518098416237d9302061fb72413436aed2a7a7",
+    "main/mesh/meshcore_service.c": "4ded3d17c6996f3330fce449d8ef73cc9d004641d5895f759029555c44ce1470",
     "main/mesh/meshcore_service.h": "0d2d94e1bce716d87213cf875834c99ed4bb503dc0c1f5099ad6c017fdcdb809",
     "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
