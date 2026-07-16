@@ -295,6 +295,428 @@ static void test_admin_logout_and_owner_recursion_use_production_guard(void)
     assert(request_password_clear(&logout));
 }
 
+static void test_owner_scheduler_terminal_recovery_precedes_overload(void)
+{
+    d1l_mesh_owner_scheduler_t scheduler = {
+        .radio_event_burst = D1L_MESH_OWNER_RADIO_EVENT_BURST_MAX,
+        .priority_command_burst =
+            D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX,
+    };
+    bool forced_normal = true;
+    assert(d1l_mesh_owner_scheduler_choose(
+               &scheduler, true, true, true, true,
+               &forced_normal) ==
+           D1L_MESH_OWNER_WORK_TERMINAL_RECOVERY);
+    assert(!forced_normal);
+    assert(scheduler.radio_event_burst ==
+           D1L_MESH_OWNER_RADIO_EVENT_BURST_MAX);
+    assert(scheduler.priority_command_burst ==
+           D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX);
+}
+
+static void test_terminal_lane_publication_blocks_queue_dispatch(void)
+{
+    volatile uint32_t lane = 0U;
+    assert(!d1l_mesh_terminal_lane_has_pending(&lane));
+
+    /* A callback that linearizes before reservation blocks all ordinary
+     * dequeue work until the owner takes its immutable history slot. */
+    assert(d1l_mesh_terminal_lane_publish_slot(&lane, 4U));
+    assert(d1l_mesh_terminal_lane_has_pending(&lane));
+    assert(!d1l_mesh_terminal_lane_try_reserve_owner(&lane));
+    assert(d1l_mesh_terminal_lane_take_pending(&lane) == (1UL << 4U));
+    assert(!d1l_mesh_terminal_lane_has_pending(&lane));
+
+    /* Publication after reservation but before dequeue invalidates that same
+     * reservation; the post-dequeue validation observes the callback bit. */
+    assert(d1l_mesh_terminal_lane_try_reserve_owner(&lane));
+    assert(d1l_mesh_terminal_lane_publish_slot(&lane, 2U));
+    assert(!d1l_mesh_terminal_lane_owner_still_reserved(&lane));
+    d1l_mesh_terminal_lane_release_owner(&lane);
+    assert(d1l_mesh_terminal_lane_take_pending(&lane) == (1UL << 2U));
+
+    assert(d1l_mesh_terminal_lane_try_reserve_owner(&lane));
+    assert(d1l_mesh_terminal_lane_owner_still_reserved(&lane));
+    d1l_mesh_terminal_lane_release_owner(&lane);
+    assert(lane == 0U);
+}
+
+static void test_dequeued_send_raw_is_retained_across_terminal_race(void)
+{
+    volatile uint32_t lane = 0U;
+    bool send_raw_dequeued = false;
+    bool send_raw_held = false;
+    unsigned dispatch_order[2] = {0U, 0U};
+    unsigned dispatch_count = 0U;
+
+    assert(d1l_mesh_terminal_lane_try_reserve_owner(&lane));
+    send_raw_dequeued = true;
+
+    /* This is the exact reported race: the callback wins after dequeue but
+     * before admission. Validation must fail, so the accepted command moves
+     * to the owner-held slot without being rejected or requeued behind peers. */
+    assert(d1l_mesh_terminal_lane_publish_slot(&lane, 3U));
+    if (!d1l_mesh_terminal_lane_owner_still_reserved(&lane)) {
+        send_raw_held = send_raw_dequeued;
+    }
+    assert(send_raw_held);
+    d1l_mesh_terminal_lane_release_owner(&lane);
+
+    assert(d1l_mesh_terminal_lane_take_pending(&lane) == (1UL << 3U));
+    dispatch_order[dispatch_count++] = 1U; /* exact terminal */
+    assert(d1l_mesh_terminal_lane_try_reserve_owner(&lane));
+    assert(d1l_mesh_terminal_lane_owner_still_reserved(&lane));
+    if (send_raw_held) {
+        dispatch_order[dispatch_count++] = 2U; /* retained SEND_RAW */
+        send_raw_held = false;
+    }
+    d1l_mesh_terminal_lane_release_owner(&lane);
+
+    assert(dispatch_count == 2U);
+    assert(dispatch_order[0] == 1U);
+    assert(dispatch_order[1] == 2U);
+    assert(!send_raw_held);
+}
+
+static void test_accepted_send_raw_waits_for_active_tx_terminal(void)
+{
+    volatile uint32_t lane = 0U;
+    d1l_mesh_command_request_t request = {0};
+    const uint32_t request_id = 811U;
+    bool tx_busy = true;
+    bool send_raw_held = false;
+    unsigned executed = 0U;
+    unsigned rejected = 0U;
+
+    assert(d1l_mesh_command_request_claim(&request, request_id));
+    assert(d1l_mesh_command_request_publish(&request, request_id));
+    assert(d1l_mesh_terminal_lane_try_reserve_owner(&lane));
+    assert(d1l_mesh_terminal_lane_owner_still_reserved(&lane));
+    if (tx_busy) {
+        send_raw_held = true;
+    } else {
+        rejected++;
+    }
+    d1l_mesh_terminal_lane_release_owner(&lane);
+
+    /* Holding does not admit, reject, complete, or reorder the accepted
+     * request while the prior exact transmission remains active. */
+    assert(send_raw_held);
+    assert(d1l_mesh_command_request_state(&request) ==
+           D1L_MESH_REQUEST_PENDING);
+    assert(executed == 0U);
+    assert(rejected == 0U);
+
+    assert(d1l_mesh_terminal_lane_publish_slot(&lane, 5U));
+    assert(d1l_mesh_terminal_lane_take_pending(&lane) == (1UL << 5U));
+    tx_busy = false;
+    assert(d1l_mesh_terminal_lane_try_reserve_owner(&lane));
+    assert(d1l_mesh_terminal_lane_owner_still_reserved(&lane));
+    if (send_raw_held && !tx_busy &&
+        d1l_mesh_command_request_admit(&request, request_id)) {
+        executed++;
+        send_raw_held = false;
+        assert(d1l_mesh_command_request_complete(&request, request_id));
+    }
+    d1l_mesh_terminal_lane_release_owner(&lane);
+
+    assert(executed == 1U);
+    assert(rejected == 0U);
+    assert(!send_raw_held);
+    assert(d1l_mesh_command_request_release(
+        &request, request_id, D1L_MESH_REQUEST_COMPLETED));
+}
+
+static void test_older_queued_rx_timeout_defers_after_send_raw(void)
+{
+    /* An older RX_TIMEOUT may remain queued when the fairness selector admits
+     * SEND_RAW. Its eventual start-RX call must not reconfigure the radio
+     * while that exact transmission is active. */
+    d1l_mesh_owner_scheduler_t scheduler = {
+        .radio_event_burst = D1L_MESH_OWNER_RADIO_EVENT_BURST_MAX,
+    };
+    bool forced_normal = true;
+    assert(d1l_mesh_owner_scheduler_choose(
+               &scheduler, false, true, false, true,
+               &forced_normal) ==
+           D1L_MESH_OWNER_WORK_NORMAL_COMMAND);
+    assert(!forced_normal);
+
+    const d1l_mesh_tx_operation_identity_t send_raw = {
+        .operation_id = 501U,
+        .kind = D1L_MESH_TX_OPERATION_GENERIC,
+    };
+    const d1l_mesh_tx_operation_identity_t stale_terminal = {
+        .operation_id = 500U,
+        .kind = D1L_MESH_TX_OPERATION_GENERIC,
+    };
+    const d1l_mesh_tx_operation_identity_t exact_terminal = {
+        .operation_id = 501U,
+        .kind = D1L_MESH_TX_OPERATION_GENERIC,
+    };
+    volatile uint32_t pending_rx_restart = 0U;
+    bool tx_busy = true;
+    assert(!d1l_mesh_rx_restart_begin(
+        &pending_rx_restart, tx_busy, true));
+    assert(pending_rx_restart == 1U);
+
+    /* A predecessor terminal cannot release the pending restart. */
+    assert(!d1l_mesh_tx_operation_identity_equal(
+        &send_raw, &stale_terminal));
+    assert(!d1l_mesh_rx_restart_begin(
+        &pending_rx_restart, tx_busy, true));
+    assert(pending_rx_restart == 1U);
+
+    /* Only the exact terminal clears busy; that owner path consumes the one
+     * coalesced restart immediately before entering radio configuration. */
+    assert(d1l_mesh_tx_operation_identity_equal(
+        &send_raw, &exact_terminal));
+    tx_busy = false;
+    assert(d1l_mesh_rx_restart_begin(
+        &pending_rx_restart, tx_busy, true));
+    assert(pending_rx_restart == 0U);
+}
+
+static void test_latched_terminal_consumes_pending_rx_recovery_once(void)
+{
+    volatile uint32_t pending_rx_restart = 1U;
+    unsigned rx_restarts = 0U;
+
+    /* The owner has taken an exact terminal and sees an already-coalesced RX
+     * request. It must leave the shared bit for the terminal handler instead
+     * of also retaining a task-local recovery request. */
+    const bool local_rx_recovery = d1l_mesh_rx_recovery_take(
+        &pending_rx_restart, true);
+    assert(!local_rx_recovery);
+    assert(pending_rx_restart == 1U);
+
+    /* Model the exact terminal clearing TX and entering its sole RX restart.
+     * That path consumes the shared bit immediately before radio work. */
+    const bool tx_busy = false;
+    if (d1l_mesh_rx_restart_begin(
+            &pending_rx_restart, tx_busy, true)) {
+        rx_restarts++;
+    }
+    assert(pending_rx_restart == 0U);
+
+    /* No stale task-local copy remains to replay on the next owner pass. */
+    if (d1l_mesh_rx_recovery_take(
+            &pending_rx_restart, false) &&
+        d1l_mesh_rx_restart_begin(
+            &pending_rx_restart, tx_busy, true)) {
+        rx_restarts++;
+    }
+    assert(rx_restarts == 1U);
+}
+
+static void test_full_radio_backlog_exact_terminal_preempts_and_restarts_once(void)
+{
+    volatile uint32_t terminal_lane = 0U;
+    volatile uint32_t pending_rx_restart = 1U;
+    const d1l_mesh_tx_operation_identity_t stale = {
+        .operation_id = 700U,
+        .kind = D1L_MESH_TX_OPERATION_GENERIC,
+    };
+    const d1l_mesh_tx_operation_identity_t active = {
+        .operation_id = 701U,
+        .kind = D1L_MESH_TX_OPERATION_GENERIC,
+    };
+
+    /* Stale, exact, and duplicate callbacks coalesce into history-slot bits
+     * without entering the eight-deep ordinary radio FIFO. The owner scans
+     * those immutable snapshots and selects the newest exact operation. */
+    const uint8_t stale_slot = (uint8_t)((stale.operation_id - 1U) % 8U);
+    const uint8_t active_slot = (uint8_t)((active.operation_id - 1U) % 8U);
+    assert(d1l_mesh_terminal_lane_publish_slot(
+        &terminal_lane, stale_slot));
+    assert(d1l_mesh_terminal_lane_publish_slot(
+        &terminal_lane, active_slot));
+    assert(d1l_mesh_terminal_lane_publish_slot(
+        &terminal_lane, stale_slot));
+    const uint32_t pending_slots = d1l_mesh_terminal_lane_take_pending(
+        &terminal_lane);
+    assert(pending_slots ==
+           ((1UL << stale_slot) | (1UL << active_slot)));
+    const uint32_t terminal_origin = (uint32_t)active.operation_id;
+
+    d1l_mesh_owner_scheduler_t scheduler = {
+        .radio_event_burst = D1L_MESH_OWNER_RADIO_EVENT_BURST_MAX,
+        .priority_command_burst =
+            D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX,
+    };
+    const unsigned radio_backlog = 8U;
+    bool forced_normal = true;
+    assert(d1l_mesh_owner_scheduler_choose(
+               &scheduler, terminal_origin != 0U,
+               radio_backlog == 8U, true, true,
+               &forced_normal) ==
+           D1L_MESH_OWNER_WORK_TERMINAL_RECOVERY);
+    assert(!forced_normal);
+    assert(radio_backlog == 8U);
+
+    /* The exact terminal owns the shared pending RX bit. It clears TX and
+     * consumes one restart; no task-local recovery remains to replay it. */
+    unsigned rx_restarts = 0U;
+    assert(!d1l_mesh_rx_recovery_take(
+        &pending_rx_restart, true));
+    assert(d1l_mesh_tx_operation_identity_equal(&active, &active));
+    if (d1l_mesh_rx_restart_begin(
+            &pending_rx_restart, false, true)) {
+        rx_restarts++;
+    }
+    assert(pending_rx_restart == 0U);
+    assert(d1l_mesh_terminal_lane_take_pending(&terminal_lane) == 0U);
+    assert(!d1l_mesh_rx_recovery_take(
+        &pending_rx_restart, false));
+    assert(rx_restarts == 1U);
+}
+
+static void test_owner_scheduler_bounds_radio_and_priority_starvation(void)
+{
+    d1l_mesh_owner_scheduler_t scheduler = {0};
+    const unsigned maximum_non_normal =
+        D1L_MESH_OWNER_RADIO_EVENT_BURST_MAX *
+            (D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX + 1U) +
+        D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX;
+    unsigned non_normal = 0U;
+    unsigned normal_dispatches = 0U;
+    unsigned forced_dispatches = 0U;
+
+    /* Model permanent overload in both higher-priority lanes while a normal
+     * command is continuously ready. The production selector must still
+     * dispatch the normal lane within the exact finite action bound. */
+    for (unsigned decision = 0U; decision < 120U; ++decision) {
+        bool forced_normal = false;
+        const d1l_mesh_owner_work_t work =
+            d1l_mesh_owner_scheduler_choose(
+                &scheduler, false, true, true, true,
+                &forced_normal);
+        assert(scheduler.radio_event_burst <=
+               D1L_MESH_OWNER_RADIO_EVENT_BURST_MAX);
+        assert(scheduler.priority_command_burst <=
+               D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX);
+        if (work == D1L_MESH_OWNER_WORK_NORMAL_COMMAND) {
+            assert(forced_normal);
+            normal_dispatches++;
+            forced_dispatches++;
+            non_normal = 0U;
+        } else {
+            assert(work == D1L_MESH_OWNER_WORK_RADIO_EVENT ||
+                   work == D1L_MESH_OWNER_WORK_PRIORITY_COMMAND);
+            assert(!forced_normal);
+            non_normal++;
+            assert(non_normal <= maximum_non_normal);
+        }
+    }
+    assert(normal_dispatches >= 8U);
+    assert(forced_dispatches == normal_dispatches);
+}
+
+static void test_owner_scheduler_priority_burst_is_sticky_until_fairness(void)
+{
+    d1l_mesh_owner_scheduler_t scheduler = {0};
+    bool forced_normal = false;
+    for (unsigned i = 0U;
+         i < D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX + 4U; ++i) {
+        assert(d1l_mesh_owner_scheduler_choose(
+                   &scheduler, false, false, true, false,
+                   &forced_normal) ==
+               D1L_MESH_OWNER_WORK_PRIORITY_COMMAND);
+        assert(!forced_normal);
+    }
+    assert(scheduler.priority_command_burst ==
+           D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX);
+    assert(d1l_mesh_owner_scheduler_choose(
+               &scheduler, false, false, true, true,
+               &forced_normal) ==
+           D1L_MESH_OWNER_WORK_NORMAL_COMMAND);
+    assert(forced_normal);
+
+    assert(d1l_mesh_owner_scheduler_choose(
+               &scheduler, false, false, false, false,
+               &forced_normal) == D1L_MESH_OWNER_WORK_IDLE);
+    assert(!forced_normal);
+    assert(scheduler.radio_event_burst == 0U);
+    assert(scheduler.priority_command_burst == 0U);
+}
+
+static void test_fair_dispatch_preserves_sync_reply_and_secret_wipe(void)
+{
+    d1l_mesh_command_request_t request = {0};
+    d1l_mesh_owner_scheduler_t scheduler = {0};
+    publish_admin_login(&request, 141U, "bounded-reply");
+
+    unsigned priority_before_reply = 0U;
+    for (;;) {
+        bool forced_normal = false;
+        const d1l_mesh_owner_work_t work =
+            d1l_mesh_owner_scheduler_choose(
+                &scheduler, false, false, true, true,
+                &forced_normal);
+        if (work == D1L_MESH_OWNER_WORK_NORMAL_COMMAND) {
+            assert(forced_normal);
+            break;
+        }
+        assert(work == D1L_MESH_OWNER_WORK_PRIORITY_COMMAND);
+        priority_before_reply++;
+        assert(priority_before_reply <=
+               D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX);
+    }
+    finish_admitted_admin_login(&request, 141U, "bounded-reply");
+    assert(request_password_clear(&request));
+    assert(d1l_mesh_command_request_state(&request) ==
+           D1L_MESH_REQUEST_FREE);
+}
+
+static void test_forced_fairness_counts_only_admitted_generation(void)
+{
+    d1l_mesh_owner_scheduler_t scheduler = {
+        .priority_command_burst =
+            D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX,
+    };
+    bool forced_normal = false;
+    assert(d1l_mesh_owner_scheduler_choose(
+               &scheduler, false, false, true, true,
+               &forced_normal) ==
+           D1L_MESH_OWNER_WORK_NORMAL_COMMAND);
+    assert(forced_normal);
+
+    d1l_mesh_command_request_t cancelled = {0};
+    assert(d1l_mesh_command_request_claim(&cancelled, 151U));
+    assert(d1l_mesh_command_request_publish(&cancelled, 151U));
+    assert(d1l_mesh_command_request_cancel_and_release(&cancelled, 151U));
+    volatile uint32_t admitted_fairness_count = 0U;
+    if (d1l_mesh_command_request_admit(&cancelled, 151U)) {
+        (void)d1l_mesh_runtime_counter_increment_saturating(
+            &admitted_fairness_count);
+    }
+    assert(admitted_fairness_count == 0U);
+
+    d1l_mesh_command_request_t admitted = {0};
+    assert(d1l_mesh_command_request_claim(&admitted, 152U));
+    assert(d1l_mesh_command_request_publish(&admitted, 152U));
+    if (d1l_mesh_command_request_admit(&admitted, 152U)) {
+        (void)d1l_mesh_runtime_counter_increment_saturating(
+            &admitted_fairness_count);
+    }
+    assert(admitted_fairness_count == 1U);
+    assert(d1l_mesh_command_request_complete(&admitted, 152U));
+    assert(d1l_mesh_command_request_release(
+        &admitted, 152U, D1L_MESH_REQUEST_COMPLETED));
+}
+
+static void test_runtime_telemetry_counters_saturate(void)
+{
+    volatile uint32_t counter = UINT32_MAX - 1U;
+    assert(d1l_mesh_runtime_counter_increment_saturating(&counter) ==
+           UINT32_MAX);
+    assert(counter == UINT32_MAX);
+    assert(d1l_mesh_runtime_counter_increment_saturating(&counter) ==
+           UINT32_MAX);
+    assert(counter == UINT32_MAX);
+    assert(d1l_mesh_runtime_counter_increment_saturating(NULL) == 0U);
+}
+
 static bool consume_terminal_if_current(
     d1l_mesh_tx_operation_identity_t *active,
     const d1l_mesh_tx_operation_identity_t *terminal)
@@ -573,6 +995,18 @@ int main(void)
     test_admin_queue_saturation_and_admission_execute_production_guard();
     test_admin_slot_reuse_rejects_stale_generation_without_wipe();
     test_admin_logout_and_owner_recursion_use_production_guard();
+    test_owner_scheduler_terminal_recovery_precedes_overload();
+    test_terminal_lane_publication_blocks_queue_dispatch();
+    test_dequeued_send_raw_is_retained_across_terminal_race();
+    test_accepted_send_raw_waits_for_active_tx_terminal();
+    test_older_queued_rx_timeout_defers_after_send_raw();
+    test_latched_terminal_consumes_pending_rx_recovery_once();
+    test_full_radio_backlog_exact_terminal_preempts_and_restarts_once();
+    test_owner_scheduler_bounds_radio_and_priority_starvation();
+    test_owner_scheduler_priority_burst_is_sticky_until_fairness();
+    test_fair_dispatch_preserves_sync_reply_and_secret_wipe();
+    test_forced_fairness_counts_only_admitted_generation();
+    test_runtime_telemetry_counters_saturate();
     test_late_a_terminal_cannot_mutate_active_b();
     test_watchdog_recovers_when_full_irq_queue_drops_terminal();
     test_vendor_terminal_claim_defers_competing_watchdog_recovery();

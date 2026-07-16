@@ -1165,6 +1165,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "host_authenticated_admin_session_fixture",
         "production_admin_login_status_dispatch",
         "production_admin_single_owner_login_status_logout_dispatch",
+        "production_bounded_queue_saturation_and_fairness",
     ]
     assert pending["login_request_response_admin"]["host_only_receipt"] == (
         "RCPT-WP04-HOST-ADMIN-SESSION-20260714"
@@ -1190,6 +1191,29 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "single_owner_bounded_login_status_logout_commands_request_"
             "deadline_queue_saturation_and_zeroization_guards_no_ui_"
             "credential_storage_or_remote_mutating_admin_commands"
+        ),
+    }
+    assert pending["login_request_response_admin"]["queue_fairness_receipt"] == {
+        "id": "RCPT-WP06-QUEUE-FAIRNESS-20260716",
+        "status": (
+            "implemented_host_only_pending_actions_hardware_rf_and_wp06_closure"
+        ),
+        "sources": [
+            "main/comms/usb_console.c",
+            "main/mesh/meshcore_command_guard.h",
+            "main/mesh/meshcore_runtime_guard.h",
+            "main/mesh/meshcore_service.c",
+            "main/mesh/meshcore_service.h",
+        ],
+        "host_suite": "runtime_queue_fairness",
+        "scenario_count": 5,
+        "scope": (
+            "separate_fixed_normal_and_priority_command_queues_exact_"
+            "terminal_recovery_precedence_four_radio_event_and_two_priority_"
+            "command_burst_bounds_synchronous_request_cancellation_"
+            "credential_wipe_owner_recursion_guard_and_truthful_saturation_"
+            "fairness_maintenance_telemetry_no_actions_hardware_rf_wp06_or_"
+            "release_closure"
         ),
     }
 

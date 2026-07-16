@@ -279,7 +279,7 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
     assert "d1l_mesh_request_guard_release(" not in admit
     assert "d1l_mesh_command_request_enqueue" in send_claimed
     assert "xQueueSend(enqueue_context->queue, command" in enqueue
-    assert "runtime_note_queue_drop(false);" in send_claimed
+    assert "runtime_note_command_saturation(false);" in send_claimed
     assert "D1L_MESH_COMMAND_ENQUEUE_SATURATED" in send_claimed
     assert "meshcore_service_called_from_owner()" in send_login
     assert "meshcore_service_command_wipe(cmd);" in send_login
