@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import copy
@@ -18,6 +19,7 @@ SCRIPT = ROOT / "scripts" / "meshcore_conformance_d1l.py"
 MANIFEST = ROOT / "tests" / "meshcore_conformance" / "manifest.json"
 CORPUS = ROOT / "tests" / "meshcore_conformance" / "corpus.json"
 ADVERT_CORPUS = ROOT / "tests" / "meshcore_conformance" / "advert_corpus.json"
+WP05_MATRIX = ROOT / "tests" / "meshcore_oracle" / "wp05_semantic_matrix.json"
 
 
 def read(relative: str) -> str:
@@ -32,6 +34,30 @@ def dry_run_environment() -> dict[str, str]:
     env = os.environ.copy()
     env.pop("D1L_MESHCORE_CONFORMANCE_CI", None)
     return env
+
+
+def run_dependency_outputs(cc: str) -> list[str]:
+    outputs: list[str] = []
+    for command in conformance.production_semantic_dependency_command_plan(cc):
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"dependency scan failed ({result.returncode}): {command!r}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        outputs.append(result.stdout)
+    return outputs
+
+
+def dependency_test_compiler() -> str | None:
+    """Match the portable native-suite compiler choice used by host tests."""
+
+    return os.environ.get("CC") or shutil.which("gcc") or shutil.which("clang")
 
 
 def test_conformance_manifest_pins_exact_upstream_and_fixed_scope():
@@ -117,6 +143,181 @@ def test_advert_corpus_is_deterministic_and_covers_reject_boundaries():
         assert payload
         assert len(payload) <= 33
         assert hashlib.sha256(payload).hexdigest() == seed["sha256"]
+
+
+def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
+    oracle = conformance.load_oracle_manifest()
+    matrix = conformance.load_wp05_semantic_matrix(oracle)
+    summary = conformance.summarize_wp05_semantic_matrix(matrix, oracle)
+
+    assert summary["sha256"] == canonical_lf_sha256(WP05_MATRIX)
+    assert summary["closure_ready"] is False
+    assert summary["full_semantic_matrix_covered"] is False
+    assert (
+        summary["implemented_requirement_count"],
+        summary["partial_requirement_count"],
+        summary["missing_requirement_count"],
+    ) == (6, 8, 2)
+    assert (
+        summary["implemented_fuzz_target_count"],
+        summary["partial_fuzz_target_count"],
+        summary["missing_fuzz_target_count"],
+    ) == (2, 1, 5)
+    assert summary["oracle_semantic_vectors"] == 915
+    assert summary["unique_referenced_oracle_semantic_vectors"] == 890
+    assert summary["production_suite_count"] == 4
+    assert summary["production_scenario_count"] == 21
+    assert [suite["id"] for suite in summary["production_host_suites"]] == [
+        "admin_dispatch",
+        "contact_trace",
+        "legacy_protocol_timestamp_migration",
+        "time_service_migration_integration",
+    ]
+    source_verification = conformance.verify_wp05_semantic_sources(matrix)
+    assert source_verification["pins_verified"] is True
+    assert source_verification["verified"] is False
+    assert source_verification["dependency_closure_verified"] is False
+
+    cc = dependency_test_compiler()
+    assert cc is not None
+    dependency_outputs = run_dependency_outputs(cc)
+    dependency_verification = conformance.verify_wp05_semantic_dependencies(
+        matrix,
+        dependency_outputs,
+        cc,
+    )
+    conformance.finalize_wp05_semantic_source_verification(
+        source_verification,
+        dependency_verification,
+    )
+    assert source_verification["verified"] is True
+    assert dependency_verification["dependency_count"] == 38
+    assert dependency_verification["dependencies"] == sorted(
+        conformance.EXPECTED_WP05_SOURCE_PATHS
+    )
+
+    commands = "\n".join(
+        " ".join(command)
+        for command in conformance.production_semantic_command_plan(
+            "clang-18"
+        )
+    )
+    for binary in (
+        "meshcore_admin_dispatch_semantic",
+        "meshcore_trace_semantic",
+        "settings_protocol_migration_semantic",
+        "time_service_migration_semantic",
+    ):
+        assert binary in commands
+    assert commands.count("-fsanitize=address,undefined") == 4
+    assert not re.search(r"\bCOM\d+\b", commands, re.IGNORECASE)
+
+    build_plans = conformance.production_semantic_command_plan("clang-18")
+    dependency_plans = conformance.production_semantic_dependency_command_plan(
+        "clang-18"
+    )
+    assert len(build_plans) == 4
+    assert len(dependency_plans) == sum(
+        len(spec["sources"])
+        for spec in conformance.production_semantic_suite_specs()
+    )
+    dependency_cursor = 0
+    for build, spec in zip(
+        build_plans,
+        conformance.production_semantic_suite_specs(),
+        strict=True,
+    ):
+        suite_dependencies = dependency_plans[
+            dependency_cursor:dependency_cursor + len(spec["sources"])
+        ]
+        dependency_cursor += len(spec["sources"])
+        assert len(suite_dependencies) == len(spec["sources"])
+        for dependency in suite_dependencies:
+            assert dependency.count("-MM") == 1
+            assert dependency[0:2] == ["clang-18", "-std=c11"]
+            assert len([item for item in dependency if item.endswith(".c")]) == 1
+            assert not {
+                "-O1",
+                "-g",
+                "-fno-omit-frame-pointer",
+                "-fsanitize=address,undefined",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-pthread",
+            }.intersection(dependency)
+            assert {item for item in build if item.startswith(("-D", "-U"))} == {
+                item for item in dependency if item.startswith(("-D", "-U"))
+            }
+        assert {item for item in build if item.endswith(".c")} == {
+            item
+            for dependency in suite_dependencies
+            for item in dependency
+            if item.endswith(".c")
+        }
+
+
+def test_wp05_semantic_matrix_rejects_registry_closure_and_source_drift(tmp_path):
+    oracle = conformance.load_oracle_manifest()
+    matrix = json.loads(WP05_MATRIX.read_text(encoding="utf-8"))
+
+    mutations = []
+    closure_claim = copy.deepcopy(matrix)
+    closure_claim["closure_ready"] = True
+    mutations.append((closure_claim, "must remain fail closed"))
+    missing_requirement = copy.deepcopy(matrix)
+    missing_requirement["requirements"].pop()
+    mutations.append((missing_requirement, "requirement registry"))
+    missing_fuzz_target = copy.deepcopy(matrix)
+    missing_fuzz_target["fuzz_targets"].pop()
+    mutations.append((missing_fuzz_target, "fuzz-target registry"))
+    zero_evidence = copy.deepcopy(matrix)
+    zero_evidence["requirements"][0]["oracle_vector_groups"] = []
+    zero_evidence["requirements"][0]["production_host_suites"] = []
+    mutations.append((zero_evidence, "non-missing requirement lacks evidence"))
+
+    for index, (payload, failure) in enumerate(mutations):
+        changed = tmp_path / f"matrix-{index}.json"
+        changed.write_text(json.dumps(payload), encoding="utf-8")
+        with pytest.raises(conformance.GateFailure, match=failure):
+            conformance.load_wp05_semantic_matrix(
+                oracle, matrix_path=changed
+            )
+
+    stale_source = copy.deepcopy(matrix)
+    stale_source["source_pins"]["main/mesh/store_lock.h"] = "0" * 64
+    changed = tmp_path / "stale-source.json"
+    changed.write_text(json.dumps(stale_source), encoding="utf-8")
+    loaded = conformance.load_wp05_semantic_matrix(
+        oracle, matrix_path=changed
+    )
+    with pytest.raises(conformance.GateFailure, match="source hash mismatch"):
+        conformance.verify_wp05_semantic_sources(loaded)
+
+
+def test_wp05_semantic_dependency_closure_rejects_unpinned_transitive_header():
+    matrix = json.loads(WP05_MATRIX.read_text(encoding="utf-8"))
+    cc = dependency_test_compiler()
+    assert cc is not None
+    outputs = run_dependency_outputs(cc)
+
+    missing_pin = copy.deepcopy(matrix)
+    missing_pin["source_pins"].pop("main/mesh/store_lock.h")
+    source_verification = conformance.verify_wp05_semantic_sources(missing_pin)
+    dependency_verification = conformance.verify_wp05_semantic_dependencies(
+        missing_pin,
+        outputs,
+        cc,
+    )
+    assert dependency_verification["verified"] is False
+    assert dependency_verification["unpinned_dependencies"] == [
+        "main/mesh/store_lock.h"
+    ]
+    with pytest.raises(conformance.GateFailure, match="store_lock.h"):
+        conformance.finalize_wp05_semantic_source_verification(
+            source_verification,
+            dependency_verification,
+        )
 
 
 def test_corpus_pin_is_identical_after_windows_crlf_checkout(tmp_path):
@@ -279,6 +480,7 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["status"] == "dry_run"
     assert report["coverage_boundary"] == "wire_envelope_only"
     assert report["coverage_level"] == "wire_envelope_only"
+    assert report["semantic_coverage_level"] == "partial_declared_host_semantics"
     assert report["issue_65_closure_eligible"] is False
     assert report["closure_ready"] is False
     assert report["source_verification"]["verified"] is True
@@ -299,6 +501,15 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["scope"]["semantic_fuzz_targets"] == ["local_advert_parser"]
     assert report["scope"]["advert_parser_fuzz_covered"] is True
     assert report["scope"]["packet_semantics_covered"] is False
+    assert report["scope"]["bounded_production_semantics_covered"] is True
+    assert report["wp05_semantic_matrix"]["closure_ready"] is False
+    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 21
+    semantic_source = report["wp05_semantic_matrix"]["source_verification"]
+    assert semantic_source["pins_verified"] is True
+    assert semantic_source["dependency_closure_verified"] is False
+    assert semantic_source["dependency_verification"] is None
+    assert semantic_source["verified"] is False
+    assert report["wp05_semantic_matrix"]["result"] is None
     assert len(report["vector_matrix"]["payload_types"]) == 7
     assert report["payload_version_gate"] == {
         "permissive_envelope_versions": [0, 1, 2, 3],
@@ -356,7 +567,9 @@ def test_github_actions_cannot_turn_dry_run_into_a_green_gate(tmp_path):
     assert "dry-run is forbidden in GitHub Actions" in report["failure"]
 
 
-def test_completed_report_validator_rejects_semantically_incomplete_green_receipts():
+def test_completed_report_validator_rejects_semantically_incomplete_green_receipts(
+    tmp_path, monkeypatch
+):
     commit = "a" * 40
     report = completed_report(commit, ROOT / ".github" / "d1l-build-inputs.json")
     conformance.validate_completed_report(report, commit)
@@ -380,6 +593,40 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     incomplete_vectors = copy.deepcopy(report)
     incomplete_vectors["vector_result"]["vectors"]["total"] = 863
     mutations.append((incomplete_vectors, "vector_counts"))
+    incomplete_semantic_matrix = copy.deepcopy(report)
+    incomplete_semantic_matrix["wp05_semantic_matrix"]["result"][
+        "scenario_count"
+    ] = 20
+    mutations.append((incomplete_semantic_matrix, "wp05_semantic_matrix"))
+    fabricated_semantic_scenarios = copy.deepcopy(report)
+    fabricated_semantic_scenarios["wp05_semantic_matrix"]["result"]["suites"][
+        0
+    ]["scenario_ids"] = [f"fabricated-{index}" for index in range(4)]
+    mutations.append((fabricated_semantic_scenarios, "wp05_semantic_matrix"))
+    tampered_semantic_summary = copy.deepcopy(report)
+    tampered_requirement = tampered_semantic_summary["wp05_semantic_matrix"][
+        "requirements"
+    ][0]
+    tampered_requirement["oracle_vector_groups"] = []
+    tampered_requirement["production_host_suites"] = []
+    tampered_requirement["oracle_semantic_vector_evidence"] = {}
+    tampered_requirement["referenced_semantic_vectors"] = 0
+    mutations.append((tampered_semantic_summary, "wp05_semantic_matrix"))
+    incomplete_semantic_dependencies = copy.deepcopy(report)
+    incomplete_semantic_dependencies["wp05_semantic_matrix"][
+        "source_verification"
+    ]["dependency_verification"]["dependency_count"] = 37
+    mutations.append(
+        (incomplete_semantic_dependencies, "wp05_semantic_matrix")
+    )
+    substituted_semantic_compiler = copy.deepcopy(report)
+    for command in substituted_semantic_compiler["wp05_semantic_matrix"][
+        "source_verification"
+    ]["dependency_verification"]["commands"]:
+        command[0] = "attacker-cc"
+    mutations.append(
+        (substituted_semantic_compiler, "wp05_semantic_matrix")
+    )
     stale_source = copy.deepcopy(report)
     stale_source["source_verification"]["source_files"]["src/Packet.cpp"][
         "matched"
@@ -438,6 +685,32 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
                 commit,
                 require_generated_at=False,
             )
+
+    poisoned_matrix = json.loads(WP05_MATRIX.read_text(encoding="utf-8"))
+    poisoned_matrix["source_pins"]["main/mesh/store_lock.h"] = "0" * 64
+    poisoned_matrix_path = tmp_path / "poisoned-wp05-semantic-matrix.json"
+    poisoned_matrix_path.write_text(
+        json.dumps(poisoned_matrix, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    poisoned_receipt = copy.deepcopy(report)
+    poisoned_receipt["wp05_semantic_matrix"]["sha256"] = canonical_lf_sha256(
+        poisoned_matrix_path
+    )
+    monkeypatch.setattr(
+        conformance,
+        "WP05_SEMANTIC_MATRIX_PATH",
+        poisoned_matrix_path,
+    )
+    with pytest.raises(ValueError, match="wp05_semantic_matrix"):
+        conformance.validate_completed_report(poisoned_receipt, commit)
+    poisoned_canonical = conformance.canonicalize_release_report(poisoned_receipt)
+    with pytest.raises(ValueError, match="wp05_semantic_matrix"):
+        conformance.validate_completed_report(
+            poisoned_canonical,
+            commit,
+            require_generated_at=False,
+        )
 
 
 def test_runner_persists_fuzzer_reproducers_and_records_elapsed_time():

@@ -1,0 +1,364 @@
+{
+  "schema_version": 1,
+  "work_package": "WP-05",
+  "matrix_version": 1,
+  "upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+  "coverage_boundary": "declared_wp05_host_semantic_matrix",
+  "closure_ready": false,
+  "requirements": [
+    {
+      "id": "signed_adverts_names_roles_location",
+      "status": "partial",
+      "oracle_vector_groups": [
+        "advert_data_fields",
+        "signed_advert_packet_creation",
+        "signed_advert_verification",
+        "ed25519_point_validation"
+      ],
+      "remaining": [
+        "complete production identity verifier parity",
+        "complete replay-aware contact dispatch"
+      ]
+    },
+    {
+      "id": "public_and_configured_channels",
+      "status": "partial",
+      "oracle_vector_groups": [
+        "public_group_packets"
+      ],
+      "remaining": [
+        "execute every configured channel through production TX and RX"
+      ]
+    },
+    {
+      "id": "dm_attempts_0_through_255",
+      "status": "implemented",
+      "oracle_vector_groups": [
+        "dm_encrypt_decrypt"
+      ],
+      "remaining": []
+    },
+    {
+      "id": "shared_secret_derivation",
+      "status": "implemented",
+      "oracle_vector_groups": [
+        "identity_shared_secret_derivation"
+      ],
+      "remaining": []
+    },
+    {
+      "id": "mac_authentication_failure",
+      "status": "implemented",
+      "oracle_vector_groups": [
+        "public_group_packets",
+        "dm_encrypt_decrypt",
+        "anonymous_login_request_packets",
+        "regular_request_response_packets"
+      ],
+      "remaining": []
+    },
+    {
+      "id": "direct_flood_transport_codes",
+      "status": "implemented",
+      "oracle_vector_groups": [
+        "direct_flood_headers",
+        "path_return_route_codes"
+      ],
+      "remaining": []
+    },
+    {
+      "id": "ack_multi_ack_and_flood_ack_path",
+      "status": "partial",
+      "oracle_vector_groups": [
+        "ack_frames",
+        "expected_ack_hash_and_ack_path"
+      ],
+      "remaining": [
+        "execute production dispatch correlation and delivery transitions"
+      ]
+    },
+    {
+      "id": "path_hash_sizes_counts_and_maximums",
+      "status": "implemented",
+      "oracle_vector_groups": [
+        "expected_ack_hash_and_ack_path",
+        "path_return_route_codes",
+        "direct_flood_headers",
+        "trace_source_frames"
+      ],
+      "remaining": []
+    },
+    {
+      "id": "request_response_login_keepalive_status",
+      "status": "partial",
+      "oracle_vector_groups": [
+        "anonymous_login_request_packets",
+        "regular_request_response_packets",
+        "canonical_login_response_packets",
+        "login_password_authorization_fixtures",
+        "existing_acl_blank_login_reuse_fixtures",
+        "authorized_login_acl_transition_fixtures",
+        "authenticated_request_replay_transition_fixtures",
+        "authenticated_text_replay_response_session_fixtures",
+        "login_response_creation_dispatch_orchestration_fixtures"
+      ],
+      "production_host_suites": [
+        "admin_dispatch"
+      ],
+      "remaining": [
+        "execute the complete production admin operation allowlist",
+        "qualify official-peer RF"
+      ]
+    },
+    {
+      "id": "trace_and_path_discovery",
+      "status": "partial",
+      "oracle_vector_groups": [
+        "trace_source_frames"
+      ],
+      "production_host_suites": [
+        "contact_trace"
+      ],
+      "remaining": [
+        "execute multi-byte and multi-hop forwarding against the pinned upstream",
+        "qualify official-peer RF"
+      ]
+    },
+    {
+      "id": "replayed_advert_timestamp",
+      "status": "missing",
+      "oracle_vector_groups": [],
+      "remaining": [
+        "add production replay-window vectors for signed adverts"
+      ]
+    },
+    {
+      "id": "duplicate_packet_and_hash",
+      "status": "partial",
+      "oracle_vector_groups": [
+        "authenticated_request_replay_transition_fixtures",
+        "authenticated_text_replay_response_session_fixtures"
+      ],
+      "production_host_suites": [
+        "admin_dispatch",
+        "contact_trace"
+      ],
+      "remaining": [
+        "execute generic production packet-hash and advert duplicate suppression"
+      ]
+    },
+    {
+      "id": "truncated_oversize_and_empty_payload",
+      "status": "implemented",
+      "oracle_vector_groups": [
+        "packet_envelope",
+        "advert_data_fields",
+        "signed_advert_packet_creation",
+        "public_group_packets",
+        "dm_encrypt_decrypt",
+        "anonymous_login_request_packets",
+        "regular_request_response_packets",
+        "canonical_login_response_packets",
+        "ack_frames",
+        "trace_source_frames"
+      ],
+      "production_host_suites": [
+        "admin_dispatch",
+        "contact_trace"
+      ],
+      "remaining": []
+    },
+    {
+      "id": "malformed_utf8_and_embedded_nul",
+      "status": "missing",
+      "oracle_vector_groups": [],
+      "remaining": [
+        "integrate strict production text-admission vectors into this gate"
+      ]
+    },
+    {
+      "id": "self_message_unknown_peer_and_channel",
+      "status": "partial",
+      "oracle_vector_groups": [
+        "signed_advert_dispatch_transition_fixtures"
+      ],
+      "production_host_suites": [
+        "admin_dispatch"
+      ],
+      "remaining": [
+        "execute unknown-channel and self-message production dispatch"
+      ]
+    },
+    {
+      "id": "lifetime_and_expiry_boundaries",
+      "status": "partial",
+      "oracle_vector_groups": [
+        "authenticated_request_replay_transition_fixtures",
+        "authenticated_text_replay_response_session_fixtures"
+      ],
+      "production_host_suites": [
+        "admin_dispatch",
+        "contact_trace",
+        "legacy_protocol_timestamp_migration",
+        "time_service_migration_integration"
+      ],
+      "remaining": [
+        "execute contact, route, packet, and advert lifetime boundaries"
+      ]
+    }
+  ],
+  "fuzz_targets": [
+    {
+      "id": "raw_wire_decoder",
+      "status": "implemented"
+    },
+    {
+      "id": "semantic_packet_parser",
+      "status": "missing"
+    },
+    {
+      "id": "decrypt_auth_path",
+      "status": "missing"
+    },
+    {
+      "id": "advert_parser",
+      "status": "implemented"
+    },
+    {
+      "id": "dm_session_transition_input",
+      "status": "missing"
+    },
+    {
+      "id": "retained_envelope_decoder",
+      "status": "missing"
+    },
+    {
+      "id": "route_path_parser",
+      "status": "partial"
+    },
+    {
+      "id": "usb_protocol_command_parser",
+      "status": "missing"
+    }
+  ],
+  "production_host_suites": [
+    {
+      "id": "admin_dispatch",
+      "binary": "meshcore_admin_dispatch_semantic",
+      "scenario_ids": [
+        "login_status_codec",
+        "deadline_zeroization",
+        "login_replay_room_rejection",
+        "bounded_replay_eviction"
+      ],
+      "invocations": [
+        []
+      ],
+      "expected_stdout": "meshcore_admin_dispatch_test: ok"
+    },
+    {
+      "id": "contact_trace",
+      "binary": "meshcore_trace_semantic",
+      "scenario_ids": [
+        "contact_loop_plan",
+        "source_terminal_classification",
+        "correlation_timeout_duplicate"
+      ],
+      "invocations": [
+        []
+      ],
+      "expected_stdout": "meshcore_trace_test: ok"
+    },
+    {
+      "id": "legacy_protocol_timestamp_migration",
+      "binary": "settings_protocol_migration_semantic",
+      "scenario_ids": [
+        "absent_required_bounds",
+        "happy_idempotent",
+        "durable_power_cut_resume",
+        "commit_failure_windows",
+        "nvs_failure_retry",
+        "malformed_newer_checksum_domain_quarantine",
+        "future_receipt_preservation",
+        "downgrade_quarantine"
+      ],
+      "invocations": [
+        []
+      ],
+      "expected_stdout": "native legacy protocol migration: ok"
+    },
+    {
+      "id": "time_service_migration_integration",
+      "binary": "time_service_migration_semantic",
+      "scenario_ids": [
+        "wall_checkpoint_happy_retry",
+        "corrupt_checkpoint_isolation",
+        "rollback_guard",
+        "legacy_migration_after_protocol_start_idempotence",
+        "legacy_quarantine",
+        "legacy_preinit_failure"
+      ],
+      "invocations": [
+        [
+          "happy"
+        ],
+        [
+          "corrupt"
+        ],
+        [
+          "guard"
+        ],
+        [
+          "legacy-migration"
+        ],
+        [
+          "legacy-quarantine"
+        ],
+        [
+          "legacy-preinit-failure"
+        ]
+      ],
+      "expected_stdout": "native truthful-time checkpoint integration: ok"
+    }
+  ],
+  "source_pins": {
+    "main/app/identity_state.h": "2bdd654902a4d656ad5cb293d0c26f70d6d10dfb8893764b6732027742a8e03b",
+    "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
+    "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",
+    "main/app/settings_model.h": "17e976c5105e35978187c58cd81da756d8a20808cac0cce9cfffba2e97ce5795",
+    "main/app/settings_protocol_migration.c": "962da3f27cbb2a067499aab5399bc1ef317d5f90799881e0c80a3a42336cb407",
+    "main/app/settings_protocol_migration.h": "8955e2e503fe4919ef7fdb354afd97f573dc954d8ceb05173fb64f767b820cb9",
+    "main/app/settings_time_checkpoint.c": "0d27c2bd30e045025751ac1a79bb0ad01bbbf04f1b547b5b5f492d8bee0e6dbf",
+    "main/app/settings_time_checkpoint.h": "4721f99c3542bdcaea4b0ad513c23e819792fb2dcd7657aba8d90c9e1be08225",
+    "main/hal/rp2040_bridge.h": "57af77842713ec9f2c2eeb6cf6bd856ccc5a75c79ca9540e82cd4b5d9cff099c",
+    "main/mesh/meshcore_admin_dispatch.c": "3f91368320e13a138316d8a99ce9727d87695e1fbe2b770019ebda115e5be701",
+    "main/mesh/meshcore_admin_dispatch.h": "10e1e73af1046bbcf610457d6ae3adbb5e52e25962c4c249d2afc0d36567d43f",
+    "main/mesh/meshcore_radio_profile.h": "79fc333c543d2215dab414067515763113a70bdd62eb43a63038819322854e9a",
+    "main/mesh/meshcore_trace.h": "dcfd9d18f65555baa018412f1b7c9e6079a04b1b6ad89fda1452ec3943a6dc78",
+    "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
+    "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
+    "main/mesh/store_lock.h": "1fae71b73b643c37452a8da8d7c0a3c4bd0e839014e3a490af25206b41d2d7fe",
+    "main/platform/time_display.c": "824031a6e0d180651551cd61f424c0f76512b2c914ba574fa0d4c9883131c7a9",
+    "main/platform/time_display.h": "f65f6a98dd93a3a9243b55354923206831da45ed4d256f9c3c100c65ea2724d0",
+    "main/platform/time_service.c": "ef1602a22a9cc97580877bd42867ba04524e5a5697c8e14f7e955c268badc7b9",
+    "main/platform/time_service.h": "07d19b51dda5c0c18bd61b87b577fa402ce5c8befc5b6f421a15019d5e01b0b0",
+    "main/platform/time_service_core.c": "005c5b75126104f410584e81396e573ee48553564bc94d4b45628192a26c94e3",
+    "main/platform/time_service_core.h": "f3af332807f433d49344eaf45cee29473940a988c47e3c02c44fd44cd0306d75",
+    "main/storage/map_tile_store.h": "a5e8f257ee2413a4a5446646f750c989e39a1df79d3f0876f6684ae61065cea7",
+    "main/storage/retained_blob_store.h": "8b77c7eae01e4e9740b5e0d02f3fb5f33574a524069c68c66b89da65f989e8d5",
+    "main/storage/storage_status.h": "9da4c29e51e6345de70770649f7e92b583edeb668cbb4017152130c20001700d",
+    "tests/native/esp_nvs_stubs.c": "2ad701fb96d76e19518e193bcfafb7fada5d0e1a517a38406998fc386ad6b8ca",
+    "tests/native/meshcore_admin_dispatch_test.c": "830b262f3f15f95c27d374e93ad60eab2e52647e478346df70d604125312bfda",
+    "tests/native/meshcore_trace_test.c": "c046cdc354a40d5feae8e79eb8e8f66fa1426ecae97a083ef6f6ca7c56092eff",
+    "tests/native/mock_esp_nvs.h": "186a12a057672734ddeddeeba5667298aadf69fb2b074d42c4dbd588f9d552fd",
+    "tests/native/settings_protocol_migration_test.c": "6e0093fed3ac42bc02fe8f5d4e18185eb52f6f86febca805e489c2d794de0b93",
+    "tests/native/stubs/esp_err.h": "658995af2fd580d37a0198f559e9b8152c592bb0c13c2a140e007ad385e96efd",
+    "tests/native/stubs/esp_netif_sntp.h": "a545617a1203a4eea89e222848767e9a43b21ffded7cb3ea9514d5e19d944fd1",
+    "tests/native/stubs/esp_timer.h": "3fecee76f39abd79ad6cda09f4c27f37941bdd6924f49ff57688baf66a628786",
+    "tests/native/stubs/freertos/FreeRTOS.h": "dcd270de0dcd76852f2e7ff8e20f8575ae2ba536a5ad6992874df7ec04476a99",
+    "tests/native/stubs/freertos/semphr.h": "c9d32e56030d2fe51983e0aee854c9f7e7d39e89d9189d6bbc123ae1984a4aa9",
+    "tests/native/stubs/nvs.h": "a0895d23196ac486164d00e42ed6a7af09e40e5f60f4e1bc8918f00aaa747683",
+    "tests/native/stubs/sys/time.h": "251d586ea591ff51aa9d51e6843deadd6c578b5591658df50eb5121c9e6b39c7",
+    "tests/native/time_service_checkpoint_integration_test.c": "2de100718160702b5ab54f5d8ca0f3d802e8b89f3d16756185be1b0f82f0ad41"
+  }
+}

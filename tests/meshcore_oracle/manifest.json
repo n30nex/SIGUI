@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_version": 23,
+  "corpus_version": 24,
   "abi_version": 2,
   "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures_and_login_response_creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures",
   "wp04_closure_eligible": false,
@@ -105,12 +105,13 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "4fab5283f63930d754a44b3d27e76cf4dd983583a2bc557a68df954e2659943b",
+    "tests/meshcore_oracle/coverage_manifest.json": "285e9d00353b67c47bbe0e81dd9a1274d6ed6446f7e456d42e7914704bc67e84",
     "tests/meshcore_oracle/meshcore_admin_session_fixture.cpp": "0ccc70a6a0d8d0e6cea62f6a9da38e3513f1947d098a71718c9d6e419b5608d6",
     "tests/meshcore_oracle/meshcore_admin_session_fixture.h": "4ca2ffdb4598af5c30f4eaa5af5555545b1eee4afd4a231309ad52ce1c640688",
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "e6c7dd80368e956f6e1769919f9f16d91e096a841ab06739ed16dd71edb25264",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",

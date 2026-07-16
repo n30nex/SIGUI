@@ -8,6 +8,79 @@ from scripts import meshcore_conformance_d1l as conformance
 from scripts import verify_ci_tool_inputs
 
 
+def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
+    admin = {
+        "main/mesh/meshcore_admin_dispatch.c",
+        "main/mesh/meshcore_admin_dispatch.h",
+        "tests/native/meshcore_admin_dispatch_test.c",
+    }
+    trace = {
+        "main/mesh/meshcore_trace.h",
+        "main/mesh/meshcore_wire.c",
+        "main/mesh/meshcore_wire.h",
+        "tests/native/meshcore_trace_test.c",
+    }
+    migration = {
+        "main/app/settings_envelope.c",
+        "main/app/settings_envelope.h",
+        "main/app/settings_protocol_migration.c",
+        "main/app/settings_protocol_migration.h",
+        "main/mesh/store_lock.h",
+        "main/platform/time_service_core.h",
+        "tests/native/esp_nvs_stubs.c",
+        "tests/native/mock_esp_nvs.h",
+        "tests/native/settings_protocol_migration_test.c",
+        "tests/native/stubs/esp_err.h",
+        "tests/native/stubs/esp_timer.h",
+        "tests/native/stubs/freertos/FreeRTOS.h",
+        "tests/native/stubs/freertos/semphr.h",
+        "tests/native/stubs/nvs.h",
+    }
+    all_dependencies = set(matrix["source_pins"])
+    time_service = all_dependencies - admin - trace - {
+        "tests/native/settings_protocol_migration_test.c"
+    }
+    suite_sets = [admin, trace, migration, time_service]
+    suite_specs = conformance.production_semantic_suite_specs()
+    commands = [
+        [conformance._canonical_command_argument(argument) for argument in command]
+        for command in conformance.production_semantic_dependency_command_plan(cc)
+    ]
+    return {
+        "verified": True,
+        "compiler_generated": True,
+        "dependency_mode": "-MM",
+        "dependency_invocation_scope": "one_translation_unit_per_command",
+        "source_hash_mode": "canonical_lf_text_sha256",
+        "suite_count": len(suite_sets),
+        "translation_unit_count": sum(
+            len(spec["sources"]) for spec in suite_specs
+        ),
+        "dependency_count": len(all_dependencies),
+        "pinned_source_count": len(all_dependencies),
+        "dependencies": sorted(all_dependencies),
+        "suite_dependencies": [
+            {
+                "id": suite_id,
+                "translation_unit_count": len(spec["sources"]),
+                "dependency_count": len(dependencies),
+                "dependencies": sorted(dependencies),
+            }
+            for suite_id, dependencies, spec in zip(
+                conformance.EXPECTED_WP05_PRODUCTION_SUITES,
+                suite_sets,
+                suite_specs,
+                strict=True,
+            )
+        ],
+        "commands": commands,
+        "unpinned_dependencies": [],
+        "unused_pins": [],
+        "hash_mismatches": [],
+        "failures": [],
+    }
+
+
 def toolchain_receipt(build_inputs_path: Path, commit: str) -> dict:
     metadata = verify_ci_tool_inputs.load_metadata(build_inputs_path)
     contract = verify_ci_tool_inputs.clang_contract(metadata)
@@ -81,6 +154,53 @@ def completed_report(
         "clang++-18",
         temporary,
     )
+    oracle_manifest = json.loads(
+        conformance.ORACLE_MANIFEST_PATH.read_text(encoding="utf-8")
+    )
+    semantic_matrix = json.loads(
+        conformance.WP05_SEMANTIC_MATRIX_PATH.read_text(encoding="utf-8")
+    )
+    semantic_summary = conformance.summarize_wp05_semantic_matrix(
+        semantic_matrix, oracle_manifest
+    )
+    semantic_summary["source_verification"] = {
+        "verified": True,
+        "pins_verified": True,
+        "dependency_closure_verified": True,
+        "dependency_verification": semantic_dependency_receipt(
+            semantic_matrix, "clang-18"
+        ),
+        "source_hash_mode": "canonical_lf_text_sha256",
+        "files": {
+            relative: {
+                "expected_sha256": digest,
+                "actual_sha256": digest,
+                "matched": True,
+            }
+            for relative, digest in semantic_matrix["source_pins"].items()
+        },
+        "failures": [],
+    }
+    semantic_summary["result"] = {
+        "passed": True,
+        "coverage_boundary": "declared_wp05_host_semantic_matrix",
+        "closure_ready": False,
+        "sanitizers": ["address", "undefined"],
+        "suite_count": 4,
+        "scenario_count": 21,
+        "suites": [
+            {
+                "id": suite["id"],
+                "passed": True,
+                "scenario_count": len(suite["scenario_ids"]),
+                "invocation_count": len(suite["invocations"]),
+                "scenario_ids": suite["scenario_ids"],
+                "expected_stdout": suite["expected_stdout"],
+            }
+            for suite in semantic_matrix["production_host_suites"]
+        ],
+        "failures": 0,
+    }
     return {
         "schema_version": 1,
         "artifact_type": "d1l_meshcore_wire_conformance",
@@ -92,6 +212,7 @@ def completed_report(
         "execution_complete": True,
         "coverage_boundary": "wire_envelope_only",
         "coverage_level": "wire_envelope_only",
+        "semantic_coverage_level": "partial_declared_host_semantics",
         "closure_ready": False,
         "issue_65_closure_eligible": False,
         "excluded_coverage": {
@@ -107,6 +228,7 @@ def completed_report(
             "semantic_fuzz_targets": ["local_advert_parser"],
             "advert_parser_fuzz_covered": True,
             "packet_semantics_covered": False,
+            "bounded_production_semantics_covered": True,
             "crypto_oracle_available": False,
         },
         "requested": {
@@ -121,6 +243,7 @@ def completed_report(
         "sanitizer_policy_passed": True,
         "vector_matrix": conformance.EXPECTED_VECTOR_MATRIX,
         "payload_version_gate": conformance.EXPECTED_PAYLOAD_VERSION_GATE,
+        "wp05_semantic_matrix": semantic_summary,
         "source_verification": {
             "verified": True,
             "repository_commit": commit,

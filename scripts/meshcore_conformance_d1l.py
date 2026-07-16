@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Run the bounded D1L/Pinned-MeshCore host conformance gate.
 
-This covers the wire envelope plus the explicitly versioned oracle capabilities.
-It is not a full crypto/session, retained-state, delivery, RF, or complete
-MeshCore claim.
+This covers the wire envelope, the explicitly versioned oracle capabilities,
+and the bounded production Admin, contact-TRACE, and protocol-timestamp host
+semantic matrix. It is not a full delivery, RF, hardware, or complete MeshCore
+claim.
 """
 
 from __future__ import annotations
@@ -70,6 +71,9 @@ ORACLE_MANIFEST_PATH = ROOT / "tests" / "meshcore_oracle" / "manifest.json"
 ORACLE_COVERAGE_MANIFEST_PATH = (
     ROOT / "tests" / "meshcore_oracle" / "coverage_manifest.json"
 )
+WP05_SEMANTIC_MATRIX_PATH = (
+    ROOT / "tests" / "meshcore_oracle" / "wp05_semantic_matrix.json"
+)
 ORACLE_ADAPTER_PATH = ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle.cpp"
 ORACLE_VECTORS_PATH = (
     ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle_vectors.cpp"
@@ -113,7 +117,7 @@ ED25519_SANITIZER_POLICY = {
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 23
+ORACLE_CORPUS_VERSION = 24
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
     "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
@@ -226,6 +230,100 @@ EXPECTED_ADVERT_FUZZ = {
         "main/mesh/advert_data.h",
     ],
     "invalid_output_policy": "canonical_zeroed_with_type_N",
+}
+EXPECTED_WP05_REQUIREMENT_STATUSES = {
+    "signed_adverts_names_roles_location": "partial",
+    "public_and_configured_channels": "partial",
+    "dm_attempts_0_through_255": "implemented",
+    "shared_secret_derivation": "implemented",
+    "mac_authentication_failure": "implemented",
+    "direct_flood_transport_codes": "implemented",
+    "ack_multi_ack_and_flood_ack_path": "partial",
+    "path_hash_sizes_counts_and_maximums": "implemented",
+    "request_response_login_keepalive_status": "partial",
+    "trace_and_path_discovery": "partial",
+    "replayed_advert_timestamp": "missing",
+    "duplicate_packet_and_hash": "partial",
+    "truncated_oversize_and_empty_payload": "implemented",
+    "malformed_utf8_and_embedded_nul": "missing",
+    "self_message_unknown_peer_and_channel": "partial",
+    "lifetime_and_expiry_boundaries": "partial",
+}
+EXPECTED_WP05_FUZZ_TARGET_STATUSES = {
+    "raw_wire_decoder": "implemented",
+    "semantic_packet_parser": "missing",
+    "decrypt_auth_path": "missing",
+    "advert_parser": "implemented",
+    "dm_session_transition_input": "missing",
+    "retained_envelope_decoder": "missing",
+    "route_path_parser": "partial",
+    "usb_protocol_command_parser": "missing",
+}
+EXPECTED_WP05_PRODUCTION_SUITES = {
+    "admin_dispatch": {
+        "binary": "meshcore_admin_dispatch_semantic",
+        "scenario_count": 4,
+        "invocation_count": 1,
+        "expected_stdout": "meshcore_admin_dispatch_test: ok",
+    },
+    "contact_trace": {
+        "binary": "meshcore_trace_semantic",
+        "scenario_count": 3,
+        "invocation_count": 1,
+        "expected_stdout": "meshcore_trace_test: ok",
+    },
+    "legacy_protocol_timestamp_migration": {
+        "binary": "settings_protocol_migration_semantic",
+        "scenario_count": 8,
+        "invocation_count": 1,
+        "expected_stdout": "native legacy protocol migration: ok",
+    },
+    "time_service_migration_integration": {
+        "binary": "time_service_migration_semantic",
+        "scenario_count": 6,
+        "invocation_count": 6,
+        "expected_stdout": "native truthful-time checkpoint integration: ok",
+    },
+}
+EXPECTED_WP05_SOURCE_PATHS = {
+    "main/app/identity_state.h",
+    "main/app/settings_envelope.c",
+    "main/app/settings_envelope.h",
+    "main/app/settings_model.h",
+    "main/app/settings_protocol_migration.c",
+    "main/app/settings_protocol_migration.h",
+    "main/app/settings_time_checkpoint.c",
+    "main/app/settings_time_checkpoint.h",
+    "main/hal/rp2040_bridge.h",
+    "main/mesh/meshcore_admin_dispatch.c",
+    "main/mesh/meshcore_admin_dispatch.h",
+    "main/mesh/meshcore_radio_profile.h",
+    "main/mesh/meshcore_trace.h",
+    "main/mesh/meshcore_wire.c",
+    "main/mesh/meshcore_wire.h",
+    "main/mesh/store_lock.h",
+    "main/platform/time_display.c",
+    "main/platform/time_display.h",
+    "main/platform/time_service.c",
+    "main/platform/time_service.h",
+    "main/platform/time_service_core.c",
+    "main/platform/time_service_core.h",
+    "main/storage/map_tile_store.h",
+    "main/storage/retained_blob_store.h",
+    "main/storage/storage_status.h",
+    "tests/native/esp_nvs_stubs.c",
+    "tests/native/meshcore_admin_dispatch_test.c",
+    "tests/native/meshcore_trace_test.c",
+    "tests/native/mock_esp_nvs.h",
+    "tests/native/settings_protocol_migration_test.c",
+    "tests/native/stubs/esp_err.h",
+    "tests/native/stubs/esp_netif_sntp.h",
+    "tests/native/stubs/esp_timer.h",
+    "tests/native/stubs/freertos/FreeRTOS.h",
+    "tests/native/stubs/freertos/semphr.h",
+    "tests/native/stubs/nvs.h",
+    "tests/native/stubs/sys/time.h",
+    "tests/native/time_service_checkpoint_integration_test.c",
 }
 EXPECTED_ORACLE_CAPABILITIES = [
     {
@@ -2041,6 +2139,7 @@ def load_oracle_manifest() -> dict[str, Any]:
         "tests/meshcore_oracle/meshcore_admin_session_fixture.cpp",
         "tests/meshcore_oracle/meshcore_admin_session_fixture.h",
         "tests/meshcore_oracle/meshcore_oracle_vectors.cpp",
+        "tests/meshcore_oracle/wp05_semantic_matrix.json",
         "tests/meshcore_oracle/stubs/AES.h",
         "tests/meshcore_oracle/stubs/Arduino.h",
         "tests/meshcore_oracle/stubs/SHA256.h",
@@ -2048,6 +2147,211 @@ def load_oracle_manifest() -> dict[str, Any]:
     }:
         raise GateFailure("oracle source allowlist drifted")
     return manifest
+
+
+def load_wp05_semantic_matrix(
+    oracle_manifest: dict[str, Any],
+    *,
+    matrix_path: Path = WP05_SEMANTIC_MATRIX_PATH,
+) -> dict[str, Any]:
+    try:
+        matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GateFailure(f"cannot read WP-05 semantic matrix: {exc}") from exc
+    if matrix.get("schema_version") != 1:
+        raise GateFailure("WP-05 semantic matrix schema version drifted")
+    if matrix.get("work_package") != "WP-05" or matrix.get("matrix_version") != 1:
+        raise GateFailure("WP-05 semantic matrix identity drifted")
+    if matrix.get("upstream_commit") != EXPECTED_UPSTREAM["commit"]:
+        raise GateFailure("WP-05 semantic matrix upstream pin drifted")
+    if matrix.get("coverage_boundary") != "declared_wp05_host_semantic_matrix":
+        raise GateFailure("WP-05 semantic matrix boundary drifted")
+    if matrix.get("closure_ready") is not False:
+        raise GateFailure("WP-05 semantic matrix must remain fail closed")
+
+    oracle_vectors = oracle_manifest.get("vectors")
+    if not isinstance(oracle_vectors, dict):
+        raise GateFailure("WP-05 semantic matrix cannot resolve oracle vectors")
+    vector_groups = {
+        key for key, value in oracle_vectors.items() if isinstance(value, dict)
+    }
+
+    requirements = matrix.get("requirements")
+    if not isinstance(requirements, list) or [
+        item.get("id") if isinstance(item, dict) else None for item in requirements
+    ] != list(EXPECTED_WP05_REQUIREMENT_STATUSES):
+        raise GateFailure("WP-05 semantic requirement registry drifted")
+    for requirement in requirements:
+        requirement_id = requirement["id"]
+        status = requirement.get("status")
+        if status != EXPECTED_WP05_REQUIREMENT_STATUSES[requirement_id]:
+            raise GateFailure(f"WP-05 semantic requirement status drifted: {requirement_id}")
+        groups = requirement.get("oracle_vector_groups")
+        if (
+            not isinstance(groups, list)
+            or len(groups) != len(set(groups))
+            or any(group not in vector_groups for group in groups)
+        ):
+            raise GateFailure(f"WP-05 oracle vector mapping is invalid: {requirement_id}")
+        suites = requirement.get("production_host_suites", [])
+        if (
+            not isinstance(suites, list)
+            or len(suites) != len(set(suites))
+            or any(suite not in EXPECTED_WP05_PRODUCTION_SUITES for suite in suites)
+        ):
+            raise GateFailure(f"WP-05 production-suite mapping is invalid: {requirement_id}")
+        remaining = requirement.get("remaining")
+        if (
+            not isinstance(remaining, list)
+            or any(not isinstance(item, str) or not item for item in remaining)
+            or (status == "implemented" and remaining)
+            or (status != "implemented" and not remaining)
+        ):
+            raise GateFailure(f"WP-05 remaining-gap receipt drifted: {requirement_id}")
+        if status == "missing" and (groups or suites):
+            raise GateFailure(f"WP-05 missing requirement claims evidence: {requirement_id}")
+        if status != "missing" and not groups and not suites:
+            raise GateFailure(
+                f"WP-05 non-missing requirement lacks evidence: {requirement_id}"
+            )
+
+    fuzz_targets = matrix.get("fuzz_targets")
+    if not isinstance(fuzz_targets, list) or [
+        item.get("id") if isinstance(item, dict) else None for item in fuzz_targets
+    ] != list(EXPECTED_WP05_FUZZ_TARGET_STATUSES):
+        raise GateFailure("WP-05 fuzz-target registry drifted")
+    for target in fuzz_targets:
+        if target.get("status") != EXPECTED_WP05_FUZZ_TARGET_STATUSES[target["id"]]:
+            raise GateFailure(f"WP-05 fuzz-target status drifted: {target['id']}")
+
+    suites = matrix.get("production_host_suites")
+    if not isinstance(suites, list) or [
+        item.get("id") if isinstance(item, dict) else None for item in suites
+    ] != list(EXPECTED_WP05_PRODUCTION_SUITES):
+        raise GateFailure("WP-05 production host-suite registry drifted")
+    scenario_ids: set[str] = set()
+    for suite in suites:
+        contract = EXPECTED_WP05_PRODUCTION_SUITES[suite["id"]]
+        scenarios = suite.get("scenario_ids")
+        invocations = suite.get("invocations")
+        if (
+            suite.get("binary") != contract["binary"]
+            or suite.get("expected_stdout") != contract["expected_stdout"]
+            or not isinstance(scenarios, list)
+            or len(scenarios) != contract["scenario_count"]
+            or len(scenarios) != len(set(scenarios))
+            or any(not isinstance(item, str) or not item for item in scenarios)
+            or scenario_ids.intersection(scenarios)
+            or not isinstance(invocations, list)
+            or len(invocations) != contract["invocation_count"]
+            or any(
+                not isinstance(arguments, list)
+                or any(not isinstance(argument, str) for argument in arguments)
+                for arguments in invocations
+            )
+        ):
+            raise GateFailure(f"WP-05 production host-suite contract drifted: {suite['id']}")
+        scenario_ids.update(scenarios)
+
+    source_pins = matrix.get("source_pins")
+    if not isinstance(source_pins, dict) or set(source_pins) != EXPECTED_WP05_SOURCE_PATHS:
+        raise GateFailure("WP-05 production semantic source allowlist drifted")
+    for relative, digest in source_pins.items():
+        if (
+            "\\" in relative
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            raise GateFailure("WP-05 production semantic source pin is invalid")
+    if re.search(r"\bCOM(?:8|11|29)\b", json.dumps(matrix), re.IGNORECASE):
+        raise GateFailure("WP-05 semantic matrix contains a forbidden port")
+    return matrix
+
+
+def verify_wp05_semantic_sources(matrix: dict[str, Any]) -> dict[str, Any]:
+    failures: list[str] = []
+    files: dict[str, Any] = {}
+    root = ROOT.resolve()
+    for relative, expected_hash in matrix["source_pins"].items():
+        source = (ROOT / relative).resolve()
+        try:
+            source.relative_to(root)
+        except ValueError as exc:
+            raise GateFailure(f"WP-05 semantic source escapes repository root: {relative}") from exc
+        actual_hash = sha256_lf_text_file(source) if source.is_file() else None
+        matched = actual_hash == expected_hash
+        files[relative] = {
+            "expected_sha256": expected_hash,
+            "actual_sha256": actual_hash,
+            "matched": matched,
+        }
+        if not matched:
+            failures.append(f"WP-05 semantic source hash mismatch: {relative}")
+    result = {
+        "verified": False,
+        "pins_verified": not failures,
+        "dependency_closure_verified": False,
+        "dependency_verification": None,
+        "source_hash_mode": "canonical_lf_text_sha256",
+        "files": files,
+        "failures": failures,
+    }
+    if failures:
+        raise GateFailure("; ".join(failures))
+    return result
+
+
+def summarize_wp05_semantic_matrix(
+    matrix: dict[str, Any], oracle_manifest: dict[str, Any]
+) -> dict[str, Any]:
+    oracle_vectors = oracle_manifest["vectors"]
+    requirements: list[dict[str, Any]] = []
+    referenced_groups: set[str] = set()
+    for requirement in matrix["requirements"]:
+        groups = requirement["oracle_vector_groups"]
+        referenced_groups.update(groups)
+        evidence = {
+            group: oracle_vectors[group]["semantic"] for group in groups
+        }
+        requirements.append(
+            {
+                **requirement,
+                "oracle_semantic_vector_evidence": evidence,
+                "referenced_semantic_vectors": sum(evidence.values()),
+            }
+        )
+    requirement_statuses = [item["status"] for item in requirements]
+    fuzz_statuses = [item["status"] for item in matrix["fuzz_targets"]]
+    return {
+        "path": str(WP05_SEMANTIC_MATRIX_PATH.relative_to(ROOT)).replace("\\", "/"),
+        "sha256": sha256_lf_text_file(WP05_SEMANTIC_MATRIX_PATH),
+        "validated": True,
+        "coverage_boundary": matrix["coverage_boundary"],
+        "closure_ready": False,
+        "full_semantic_matrix_covered": False,
+        "requirement_count": len(requirements),
+        "implemented_requirement_count": requirement_statuses.count("implemented"),
+        "partial_requirement_count": requirement_statuses.count("partial"),
+        "missing_requirement_count": requirement_statuses.count("missing"),
+        "fuzz_target_count": len(fuzz_statuses),
+        "implemented_fuzz_target_count": fuzz_statuses.count("implemented"),
+        "partial_fuzz_target_count": fuzz_statuses.count("partial"),
+        "missing_fuzz_target_count": fuzz_statuses.count("missing"),
+        "oracle_semantic_vectors": oracle_vectors["semantic"],
+        "unique_referenced_oracle_semantic_vectors": sum(
+            oracle_vectors[group]["semantic"] for group in referenced_groups
+        ),
+        "production_suite_count": len(matrix["production_host_suites"]),
+        "production_scenario_count": sum(
+            len(suite["scenario_ids"])
+            for suite in matrix["production_host_suites"]
+        ),
+        "requirements": requirements,
+        "fuzz_targets": matrix["fuzz_targets"],
+        "production_host_suites": matrix["production_host_suites"],
+        "source_verification": None,
+        "result": None,
+    }
 
 
 def parse_local_packet_types(
@@ -2460,6 +2764,300 @@ def verify_sources(manifest: dict[str, Any], expected_commit: str | None) -> dic
     return result
 
 
+def production_semantic_suite_specs(
+    build_dir: str = "$BUILD_DIR",
+) -> list[dict[str, Any]]:
+    native = ROOT / "tests" / "native"
+    common_includes = [native / "stubs", native, ROOT / "main"]
+    return [
+        {
+            "id": "admin_dispatch",
+            "binary": Path(build_dir) / "meshcore_admin_dispatch_semantic",
+            "flags": [],
+            "include_dirs": [ROOT / "main"],
+            "sources": [
+                native / "meshcore_admin_dispatch_test.c",
+                ROOT / "main" / "mesh" / "meshcore_admin_dispatch.c",
+            ],
+        },
+        {
+            "id": "contact_trace",
+            "binary": Path(build_dir) / "meshcore_trace_semantic",
+            "flags": [],
+            "include_dirs": [ROOT / "main"],
+            "sources": [
+                native / "meshcore_trace_test.c",
+                ROOT / "main" / "mesh" / "meshcore_wire.c",
+            ],
+        },
+        {
+            "id": "legacy_protocol_timestamp_migration",
+            "binary": Path(build_dir) / "settings_protocol_migration_semantic",
+            "flags": ["-DD1L_TEST_REAL_MUTEX=1", "-pthread"],
+            "include_dirs": common_includes,
+            "sources": [
+                ROOT / "main" / "app" / "settings_envelope.c",
+                ROOT / "main" / "app" / "settings_protocol_migration.c",
+                native / "esp_nvs_stubs.c",
+                native / "settings_protocol_migration_test.c",
+            ],
+        },
+        {
+            "id": "time_service_migration_integration",
+            "binary": Path(build_dir) / "time_service_migration_semantic",
+            "flags": [
+                "-DD1L_BUILD_EPOCH_SEC=1784068276ULL",
+                "-Dtime=d1l_test_time",
+                "-Dsettimeofday=d1l_test_settimeofday",
+            ],
+            "include_dirs": common_includes,
+            "sources": [
+                ROOT / "main" / "app" / "settings_envelope.c",
+                ROOT / "main" / "app" / "settings_protocol_migration.c",
+                ROOT / "main" / "app" / "settings_time_checkpoint.c",
+                ROOT / "main" / "platform" / "time_service_core.c",
+                ROOT / "main" / "platform" / "time_display.c",
+                ROOT / "main" / "platform" / "time_service.c",
+                native / "esp_nvs_stubs.c",
+                native / "time_service_checkpoint_integration_test.c",
+            ],
+        },
+    ]
+
+
+def _include_arguments(include_dirs: Sequence[Path]) -> list[str]:
+    return [
+        argument
+        for include_dir in include_dirs
+        for argument in ("-I", str(include_dir))
+    ]
+
+
+def production_semantic_common_arguments(cc: str) -> list[str]:
+    return [
+        cc,
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fno-omit-frame-pointer",
+        "-fsanitize=address,undefined",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ]
+
+
+def production_semantic_dependency_arguments(
+    cc: str, suite_flags: Sequence[str]
+) -> list[str]:
+    """Keep dependency scans bound to the build's preprocessing inputs."""
+
+    preprocessing_flags = [
+        flag for flag in suite_flags if flag.startswith(("-D", "-U"))
+    ]
+    return [cc, "-std=c11", *preprocessing_flags]
+
+
+def production_semantic_command_plan(
+    cc: str, build_dir: str = "$BUILD_DIR"
+) -> list[list[str]]:
+    common = production_semantic_common_arguments(cc)
+    return [
+        [
+            *common,
+            *spec["flags"],
+            *_include_arguments(spec["include_dirs"]),
+            *[str(source) for source in spec["sources"]],
+            "-o",
+            str(spec["binary"]),
+        ]
+        for spec in production_semantic_suite_specs(build_dir)
+    ]
+
+
+def production_semantic_dependency_command_plan(cc: str) -> list[list[str]]:
+    return [
+        [
+            *production_semantic_dependency_arguments(cc, spec["flags"]),
+            *_include_arguments(spec["include_dirs"]),
+            "-MM",
+            str(source),
+        ]
+        for spec in production_semantic_suite_specs()
+        for source in spec["sources"]
+    ]
+
+
+def _split_makefile_dependency_words(value: str) -> list[str]:
+    """Split a make dependency payload without corrupting Windows paths."""
+
+    words: list[str] = []
+    current: list[str] = []
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char.isspace():
+            if current:
+                words.append("".join(current))
+                current = []
+            index += 1
+            continue
+        if (
+            char == "\\"
+            and index + 1 < len(value)
+            and value[index + 1].isspace()
+        ):
+            current.append(value[index + 1])
+            index += 2
+            continue
+        current.append(char)
+        index += 1
+    if current:
+        words.append("".join(current))
+    return words
+
+
+def parse_repo_local_make_dependencies(output: str) -> list[str]:
+    """Return the complete repository-local dependency set from compiler -MM."""
+
+    logical_lines = re.sub(r"\\\r?\n", " ", output).splitlines()
+    dependencies: set[str] = set()
+    rule_count = 0
+    root = ROOT.resolve()
+    for raw_line in logical_lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = re.match(r"^(.+?):(?:\s+|$)(.*)$", line)
+        if match is None or not match.group(1).strip():
+            raise GateFailure("WP-05 compiler dependency output is malformed")
+        words = _split_makefile_dependency_words(match.group(2))
+        if not words:
+            raise GateFailure("WP-05 compiler dependency rule is empty")
+        rule_count += 1
+        for word in words:
+            candidate = Path(word)
+            if not candidate.is_absolute():
+                candidate = ROOT / candidate
+            resolved = candidate.resolve()
+            try:
+                relative = resolved.relative_to(root).as_posix()
+            except ValueError as exc:
+                raise GateFailure(
+                    "WP-05 compiler dependency escapes repository root: "
+                    f"{word}"
+                ) from exc
+            if not resolved.is_file():
+                raise GateFailure(
+                    f"WP-05 compiler dependency is not a file: {relative}"
+                )
+            dependencies.add(relative)
+    if rule_count == 0 or not dependencies:
+        raise GateFailure("WP-05 compiler dependency output is empty")
+    return sorted(dependencies)
+
+
+def verify_wp05_semantic_dependencies(
+    matrix: dict[str, Any],
+    suite_outputs: Sequence[str],
+    cc: str,
+) -> dict[str, Any]:
+    specs = production_semantic_suite_specs()
+    expected_output_count = sum(len(spec["sources"]) for spec in specs)
+    if len(suite_outputs) != expected_output_count:
+        raise GateFailure("WP-05 compiler dependency translation-unit count drifted")
+
+    suite_dependencies: list[dict[str, Any]] = []
+    derived: set[str] = set()
+    output_index = 0
+    for spec in specs:
+        dependencies: set[str] = set()
+        for _source in spec["sources"]:
+            dependencies.update(
+                parse_repo_local_make_dependencies(suite_outputs[output_index])
+            )
+            output_index += 1
+        ordered_dependencies = sorted(dependencies)
+        derived.update(ordered_dependencies)
+        suite_dependencies.append(
+            {
+                "id": spec["id"],
+                "translation_unit_count": len(spec["sources"]),
+                "dependency_count": len(ordered_dependencies),
+                "dependencies": ordered_dependencies,
+            }
+        )
+
+    pins = matrix["source_pins"]
+    pinned = set(pins)
+    unpinned = sorted(derived - pinned)
+    unused = sorted(pinned - derived)
+    hash_mismatches: list[str] = []
+    for relative in sorted(derived & pinned):
+        source = ROOT / relative
+        if sha256_lf_text_file(source) != pins[relative]:
+            hash_mismatches.append(relative)
+
+    failures: list[str] = []
+    if unpinned:
+        failures.append(
+            "WP-05 compiler dependencies are unpinned: " + ", ".join(unpinned)
+        )
+    if unused:
+        failures.append(
+            "WP-05 semantic source pins are not compiler dependencies: "
+            + ", ".join(unused)
+        )
+    if hash_mismatches:
+        failures.append(
+            "WP-05 compiler dependency hash mismatch: "
+            + ", ".join(hash_mismatches)
+        )
+
+    commands = [
+        [_canonical_command_argument(argument) for argument in command]
+        for command in production_semantic_dependency_command_plan(cc)
+    ]
+    return {
+        "verified": not failures,
+        "compiler_generated": True,
+        "dependency_mode": "-MM",
+        "dependency_invocation_scope": "one_translation_unit_per_command",
+        "source_hash_mode": "canonical_lf_text_sha256",
+        "suite_count": len(specs),
+        "translation_unit_count": expected_output_count,
+        "dependency_count": len(derived),
+        "pinned_source_count": len(pinned),
+        "dependencies": sorted(derived),
+        "suite_dependencies": suite_dependencies,
+        "commands": commands,
+        "unpinned_dependencies": unpinned,
+        "unused_pins": unused,
+        "hash_mismatches": hash_mismatches,
+        "failures": failures,
+    }
+
+
+def finalize_wp05_semantic_source_verification(
+    source_verification: dict[str, Any],
+    dependency_verification: dict[str, Any],
+) -> None:
+    source_verification["dependency_verification"] = dependency_verification
+    source_verification["dependency_closure_verified"] = dependency_verification.get(
+        "verified"
+    ) is True
+    source_verification["verified"] = bool(
+        source_verification.get("pins_verified") is True
+        and source_verification["dependency_closure_verified"]
+    )
+    source_verification["failures"] = [
+        *source_verification.get("failures", []),
+        *dependency_verification.get("failures", []),
+    ]
+    if not source_verification["verified"]:
+        raise GateFailure("; ".join(source_verification["failures"]))
+
+
 def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[str]]:
     common_sanitizers = "-fsanitize=address,undefined"
     fuzzer_compile_sanitizers = "-fsanitize=fuzzer-no-link,address,undefined"
@@ -2790,7 +3388,12 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
         ]
         for source in ED25519_ORACLE_SOURCES
     ]
-    return commands[:5] + ed25519_commands + commands[5:]
+    return (
+        commands[:5]
+        + ed25519_commands
+        + commands[5:]
+        + production_semantic_command_plan(cc, build_dir)
+    )
 
 
 def _canonical_command_argument(value: str) -> str:
@@ -2897,8 +3500,11 @@ def validate_completed_report(
     corpus = corpus if isinstance(corpus, dict) else {}
     advert_corpus = report.get("advert_corpus")
     advert_corpus = advert_corpus if isinstance(advert_corpus, dict) else {}
+    wp05_semantic_matrix = report.get("wp05_semantic_matrix")
     compiler = report.get("compiler")
     compiler = compiler if isinstance(compiler, dict) else {}
+    scope = report.get("scope")
+    scope = scope if isinstance(scope, dict) else {}
     expected_source_names = set(EXPECTED_UPSTREAM["sources"])
     source_hashes_complete = set(source_files) == expected_source_names and all(
         isinstance(item, dict)
@@ -3001,6 +3607,13 @@ def validate_completed_report(
         "execution_complete": report.get("execution_complete") is True,
         "coverage_boundary": report.get("coverage_boundary") == "wire_envelope_only",
         "coverage_level": report.get("coverage_level") == "wire_envelope_only",
+        "semantic_coverage_level": report.get("semantic_coverage_level")
+        == "partial_declared_host_semantics",
+        "bounded_production_semantics": scope.get(
+            "bounded_production_semantics_covered"
+        )
+        is True
+        and scope.get("packet_semantics_covered") is False,
         "closure_ready_false": report.get("closure_ready") is False,
         "issue_65_false": report.get("issue_65_closure_eligible") is False,
         "source_verified": source.get("verified") is True,
@@ -3029,6 +3642,10 @@ def validate_completed_report(
         and advert_corpus.get("seed_count")
         == EXPECTED_ADVERT_FUZZ_CORPUS["seed_count"]
         and advert_corpus_seeds_complete,
+        "wp05_semantic_matrix": wp05_semantic_summary_valid(
+            wp05_semantic_matrix,
+            expected_cc=cc_command,
+        ),
         "vector_passed": vector.get("passed") is True,
         "vector_counts": vector.get("vectors")
         == {"local_to_upstream": 504, "upstream_to_local": 504, "total": 1008},
@@ -3135,6 +3752,260 @@ def parse_oracle_output(stdout: str) -> dict[str, Any]:
     raise GateFailure("MeshCore oracle did not emit its JSON result")
 
 
+def run_wp05_semantic_suites(
+    matrix: dict[str, Any],
+    build_dir: Path,
+    *,
+    timeout: int,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    suite_results: list[dict[str, Any]] = []
+    completed_scenarios = 0
+    for suite in matrix["production_host_suites"]:
+        invocation_count = 0
+        for arguments in suite["invocations"]:
+            completed = run_process(
+                [str(build_dir / suite["binary"]), *arguments],
+                timeout=timeout,
+                env=env,
+            )
+            if completed.stdout.strip() != suite["expected_stdout"]:
+                raise GateFailure(
+                    f"WP-05 semantic suite output drifted: {suite['id']}"
+                )
+            invocation_count += 1
+        scenario_count = len(suite["scenario_ids"])
+        completed_scenarios += scenario_count
+        suite_results.append(
+            {
+                "id": suite["id"],
+                "passed": True,
+                "scenario_count": scenario_count,
+                "invocation_count": invocation_count,
+                "scenario_ids": suite["scenario_ids"],
+                "expected_stdout": suite["expected_stdout"],
+            }
+        )
+    return {
+        "passed": True,
+        "coverage_boundary": matrix["coverage_boundary"],
+        "closure_ready": False,
+        "sanitizers": ["address", "undefined"],
+        "suite_count": len(suite_results),
+        "scenario_count": completed_scenarios,
+        "suites": suite_results,
+        "failures": 0,
+    }
+
+
+def wp05_semantic_result_valid(
+    value: Any, expected_suites: Any
+) -> bool:
+    if not isinstance(value, dict) or not isinstance(expected_suites, list):
+        return False
+    suites = value.get("suites")
+    if not isinstance(suites, list) or [
+        item.get("id") if isinstance(item, dict) else None for item in suites
+    ] != list(EXPECTED_WP05_PRODUCTION_SUITES):
+        return False
+    if [
+        item.get("id") if isinstance(item, dict) else None
+        for item in expected_suites
+    ] != list(EXPECTED_WP05_PRODUCTION_SUITES):
+        return False
+    for suite, declared_suite in zip(suites, expected_suites, strict=True):
+        contract = EXPECTED_WP05_PRODUCTION_SUITES[suite["id"]]
+        if (
+            suite.get("passed") is not True
+            or suite.get("scenario_count") != contract["scenario_count"]
+            or suite.get("invocation_count") != contract["invocation_count"]
+            or suite.get("scenario_ids") != declared_suite.get("scenario_ids")
+            or suite.get("expected_stdout") != contract["expected_stdout"]
+        ):
+            return False
+    return (
+        value.get("passed") is True
+        and value.get("coverage_boundary") == "declared_wp05_host_semantic_matrix"
+        and value.get("closure_ready") is False
+        and value.get("sanitizers") == ["address", "undefined"]
+        and value.get("suite_count") == len(EXPECTED_WP05_PRODUCTION_SUITES)
+        and value.get("scenario_count") == sum(
+            contract["scenario_count"]
+            for contract in EXPECTED_WP05_PRODUCTION_SUITES.values()
+        )
+        and value.get("failures") == 0
+    )
+
+
+def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
+    if not isinstance(value, dict):
+        return False
+    requirements = value.get("requirements")
+    fuzz_targets = value.get("fuzz_targets")
+    source = value.get("source_verification")
+    source = source if isinstance(source, dict) else {}
+    files = source.get("files")
+    files = files if isinstance(files, dict) else {}
+    try:
+        oracle_manifest = load_oracle_manifest()
+        matrix_document = load_wp05_semantic_matrix(oracle_manifest)
+        expected_summary = summarize_wp05_semantic_matrix(
+            matrix_document, oracle_manifest
+        )
+    except (GateFailure, OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        return False
+    static_summary_complete = all(
+        value.get(key) == expected
+        for key, expected in expected_summary.items()
+        if key not in {"source_verification", "result"}
+    )
+    matrix_source_pins = matrix_document.get("source_pins")
+    matrix_pins_complete = (
+        isinstance(matrix_source_pins, dict)
+        and set(matrix_source_pins) == EXPECTED_WP05_SOURCE_PATHS
+        and all(
+            isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+            for digest in matrix_source_pins.values()
+        )
+    )
+    source_complete = matrix_pins_complete and set(files) == set(
+        matrix_source_pins
+    ) and all(
+        isinstance(item, dict)
+        and item.get("matched") is True
+        and item.get("expected_sha256") == matrix_source_pins[relative]
+        and item.get("actual_sha256") == matrix_source_pins[relative]
+        and matrix_source_pins[relative] == sha256_lf_text_file(ROOT / relative)
+        and re.fullmatch(
+            r"[0-9a-f]{64}", str(item.get("actual_sha256") or "")
+        )
+        is not None
+        for relative, item in files.items()
+    )
+    dependency = source.get("dependency_verification")
+    dependency = dependency if isinstance(dependency, dict) else {}
+    dependencies = dependency.get("dependencies")
+    suites = dependency.get("suite_dependencies")
+    commands = dependency.get("commands")
+    suite_dependency_union: set[str] = set()
+    expected_suite_specs = production_semantic_suite_specs()
+    suites_complete = (
+        isinstance(suites, list)
+        and [item.get("id") if isinstance(item, dict) else None for item in suites]
+        == list(EXPECTED_WP05_PRODUCTION_SUITES)
+    )
+    if suites_complete:
+        for suite, spec in zip(suites, expected_suite_specs, strict=True):
+            suite_files = suite.get("dependencies")
+            if (
+                not isinstance(suite_files, list)
+                or not suite_files
+                or suite_files != sorted(set(suite_files))
+                or not set(suite_files).issubset(EXPECTED_WP05_SOURCE_PATHS)
+                or suite.get("translation_unit_count") != len(spec["sources"])
+                or suite.get("dependency_count") != len(suite_files)
+            ):
+                suites_complete = False
+                break
+            suite_dependency_union.update(suite_files)
+    command_plan_complete = False
+    if (
+        isinstance(expected_cc, str)
+        and bool(expected_cc)
+        and isinstance(commands, list)
+        and len(commands)
+        == sum(
+            len(spec["sources"])
+            for spec in expected_suite_specs
+        )
+        and all(
+            isinstance(command, list)
+            and bool(command)
+            and all(isinstance(argument, str) for argument in command)
+            for command in commands
+        )
+    ):
+        expected_commands = [
+            [_canonical_command_argument(argument) for argument in command]
+            for command in production_semantic_dependency_command_plan(expected_cc)
+        ]
+        command_plan_complete = commands == expected_commands
+    dependency_complete = (
+        dependency.get("verified") is True
+        and dependency.get("compiler_generated") is True
+        and dependency.get("dependency_mode") == "-MM"
+        and dependency.get("dependency_invocation_scope")
+        == "one_translation_unit_per_command"
+        and dependency.get("source_hash_mode") == "canonical_lf_text_sha256"
+        and dependency.get("suite_count") == len(EXPECTED_WP05_PRODUCTION_SUITES)
+        and dependency.get("translation_unit_count")
+        == sum(
+            len(spec["sources"])
+            for spec in expected_suite_specs
+        )
+        and dependency.get("dependency_count") == len(EXPECTED_WP05_SOURCE_PATHS)
+        and dependency.get("pinned_source_count") == len(EXPECTED_WP05_SOURCE_PATHS)
+        and dependencies == sorted(EXPECTED_WP05_SOURCE_PATHS)
+        and suites_complete
+        and suite_dependency_union == EXPECTED_WP05_SOURCE_PATHS
+        and command_plan_complete
+        and dependency.get("unpinned_dependencies") == []
+        and dependency.get("unused_pins") == []
+        and dependency.get("hash_mismatches") == []
+        and dependency.get("failures") == []
+    )
+    return (
+        static_summary_complete
+        and value.get("path")
+        == "tests/meshcore_oracle/wp05_semantic_matrix.json"
+        and value.get("sha256") == sha256_lf_text_file(WP05_SEMANTIC_MATRIX_PATH)
+        and value.get("validated") is True
+        and value.get("coverage_boundary") == "declared_wp05_host_semantic_matrix"
+        and value.get("closure_ready") is False
+        and value.get("full_semantic_matrix_covered") is False
+        and value.get("requirement_count") == 16
+        and value.get("implemented_requirement_count") == 6
+        and value.get("partial_requirement_count") == 8
+        and value.get("missing_requirement_count") == 2
+        and value.get("fuzz_target_count") == 8
+        and value.get("implemented_fuzz_target_count") == 2
+        and value.get("partial_fuzz_target_count") == 1
+        and value.get("missing_fuzz_target_count") == 5
+        and value.get("oracle_semantic_vectors") == 915
+        and isinstance(value.get("unique_referenced_oracle_semantic_vectors"), int)
+        and 0 < value["unique_referenced_oracle_semantic_vectors"] <= 915
+        and value.get("production_suite_count") == 4
+        and value.get("production_scenario_count") == 21
+        and isinstance(requirements, list)
+        and all(isinstance(item, dict) for item in requirements)
+        and [item.get("id") for item in requirements]
+        == list(EXPECTED_WP05_REQUIREMENT_STATUSES)
+        and all(
+            item.get("status") == EXPECTED_WP05_REQUIREMENT_STATUSES[item["id"]]
+            for item in requirements
+        )
+        and isinstance(fuzz_targets, list)
+        and all(isinstance(item, dict) for item in fuzz_targets)
+        and [item.get("id") for item in fuzz_targets]
+        == list(EXPECTED_WP05_FUZZ_TARGET_STATUSES)
+        and all(
+            item.get("status") == EXPECTED_WP05_FUZZ_TARGET_STATUSES[item["id"]]
+            for item in fuzz_targets
+        )
+        and source.get("verified") is True
+        and source.get("pins_verified") is True
+        and source.get("dependency_closure_verified") is True
+        and source.get("source_hash_mode") == "canonical_lf_text_sha256"
+        and source.get("failures") == []
+        and source_complete
+        and dependency_complete
+        and wp05_semantic_result_valid(
+            value.get("result"), matrix_document["production_host_suites"]
+        )
+    )
+
+
 def validate_host_admin_session_receipt(value: Any) -> None:
     if not isinstance(value, dict):
         raise GateFailure("host admin-session receipt is missing")
@@ -3238,6 +4109,7 @@ def base_report(
     manifest: dict[str, Any],
     oracle_manifest: dict[str, Any],
     oracle_coverage: dict[str, Any],
+    wp05_semantic_matrix: dict[str, Any],
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     return {
@@ -3249,6 +4121,7 @@ def base_report(
         "execution_complete": False,
         "coverage_boundary": "wire_envelope_only",
         "coverage_level": "wire_envelope_only",
+        "semantic_coverage_level": "partial_declared_host_semantics",
         "issue_65_closure_eligible": False,
         "closure_ready": False,
         "excluded_coverage": {
@@ -3265,11 +4138,15 @@ def base_report(
             "semantic_fuzz_targets": ["local_advert_parser"],
             "advert_parser_fuzz_covered": True,
             "packet_semantics_covered": False,
+            "bounded_production_semantics_covered": True,
             "crypto_oracle_available": False,
             "public_group_crypto_oracle_available": True,
             "dm_crypto_oracle_available": True,
             "expected_ack_path_oracle_available": True,
             "path_return_route_codes_oracle_available": True,
+            "production_host_semantic_suites": list(
+                EXPECTED_WP05_PRODUCTION_SUITES
+            ),
         },
         "requested": {
             "commit": args.commit,
@@ -3305,6 +4182,9 @@ def base_report(
             "result": None,
             "artifact_path": None,
         },
+        "wp05_semantic_matrix": summarize_wp05_semantic_matrix(
+            wp05_semantic_matrix, oracle_manifest
+        ),
         "vector_matrix": manifest["vector_matrix"],
         "payload_version_gate": manifest["payload_version_gate"],
         "corpus": None,
@@ -3367,6 +4247,7 @@ def build_oracle_artifact(report: dict[str, Any]) -> dict[str, Any]:
         "source_verification": source_verification,
         "oracle_result": result,
         "capabilities": oracle["capabilities"],
+        "wp05_semantic_matrix": report["wp05_semantic_matrix"],
         "pending_capabilities": [
             capability["id"]
             for capability in oracle["capabilities"]
@@ -3380,7 +4261,14 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     manifest = load_manifest()
     oracle_manifest = load_oracle_manifest()
     oracle_coverage = load_oracle_coverage_manifest(oracle_manifest, manifest)
-    report = base_report(manifest, oracle_manifest, oracle_coverage, args)
+    wp05_semantic_matrix = load_wp05_semantic_matrix(oracle_manifest)
+    report = base_report(
+        manifest,
+        oracle_manifest,
+        oracle_coverage,
+        wp05_semantic_matrix,
+        args,
+    )
     try:
         if args.dry_run and os.environ.get("D1L_MESHCORE_CONFORMANCE_CI") == "1":
             raise GateFailure("dry-run is forbidden in GitHub Actions")
@@ -3392,6 +4280,9 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         report["source_verification"] = source_verification
         report["oracle"]["source_verification"] = verify_oracle_sources(
             oracle_manifest
+        )
+        report["wp05_semantic_matrix"]["source_verification"] = (
+            verify_wp05_semantic_sources(wp05_semantic_matrix)
         )
         _corpus, corpus_seeds = load_corpus(manifest)
         _advert_corpus, advert_corpus_seeds = load_advert_corpus(manifest)
@@ -3462,6 +4353,24 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             report["commands"] = commands
             for command in commands:
                 run_process(command, timeout=args.timeout_sec, env=sanitizer_env)
+
+            dependency_outputs = [
+                run_process(
+                    command,
+                    timeout=args.timeout_sec,
+                    env=sanitizer_env,
+                ).stdout
+                for command in production_semantic_dependency_command_plan(args.cc)
+            ]
+            dependency_verification = verify_wp05_semantic_dependencies(
+                wp05_semantic_matrix,
+                dependency_outputs,
+                args.cc,
+            )
+            finalize_wp05_semantic_source_verification(
+                report["wp05_semantic_matrix"]["source_verification"],
+                dependency_verification,
+            )
 
             oracle = run_process(
                 [str(build_dir / "meshcore_oracle_vectors")],
@@ -3538,6 +4447,19 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 or vector_result.get("failures") != 0
             ):
                 raise GateFailure("vector harness result did not satisfy the fixed matrix")
+
+            semantic_result = run_wp05_semantic_suites(
+                wp05_semantic_matrix,
+                build_dir,
+                timeout=args.timeout_sec,
+                env=sanitizer_env,
+            )
+            if not wp05_semantic_result_valid(
+                semantic_result,
+                wp05_semantic_matrix["production_host_suites"],
+            ):
+                raise GateFailure("WP-05 production semantic matrix result drifted")
+            report["wp05_semantic_matrix"]["result"] = semantic_result
 
             findings_dir = (
                 args.out.parent
@@ -3746,6 +4668,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "execution_complete": False,
             "coverage_boundary": "wire_envelope_only",
             "coverage_level": "wire_envelope_only",
+            "semantic_coverage_level": "partial_declared_host_semantics",
             "issue_65_closure_eligible": False,
             "closure_ready": False,
             "failure": str(exc),
