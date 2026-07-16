@@ -24,11 +24,23 @@ from pathlib import Path
 from typing import Any, Sequence
 
 if __package__:
+    from .meshcore_signed_advert_runtime_d1l import (
+        SIGNED_ADVERT_ARTIFACT_TYPE,
+        SIGNED_ADVERT_EVIDENCE_PROFILE,
+        canonicalize_release_report as canonicalize_signed_advert_runtime,
+        validate_completed_report as validate_signed_advert_runtime,
+    )
     from .verify_ci_tool_inputs import (
         load_metadata as load_build_inputs,
         validate_clang_receipt,
     )
 else:
+    from meshcore_signed_advert_runtime_d1l import (  # type: ignore[no-redef]
+        SIGNED_ADVERT_ARTIFACT_TYPE,
+        SIGNED_ADVERT_EVIDENCE_PROFILE,
+        canonicalize_release_report as canonicalize_signed_advert_runtime,
+        validate_completed_report as validate_signed_advert_runtime,
+    )
     from verify_ci_tool_inputs import (  # type: ignore[no-redef]
         load_metadata as load_build_inputs,
         validate_clang_receipt,
@@ -242,7 +254,7 @@ EXPECTED_WP05_REQUIREMENT_STATUSES = {
     "path_hash_sizes_counts_and_maximums": "implemented",
     "request_response_login_keepalive_status": "partial",
     "trace_and_path_discovery": "partial",
-    "replayed_advert_timestamp": "missing",
+    "replayed_advert_timestamp": "implemented",
     "duplicate_packet_and_hash": "partial",
     "truncated_oversize_and_empty_payload": "implemented",
     "malformed_utf8_and_embedded_nul": "implemented",
@@ -296,6 +308,27 @@ EXPECTED_WP05_PRODUCTION_SUITES = {
         "invocation_count": 1,
         "expected_stdout": "native MeshCore text plaintext: ok",
     },
+    "advert_replay_admission": {
+        "binary": "meshcore_advert_admission_semantic",
+        "scenario_count": 7,
+        "invocation_count": 1,
+        "expected_stdout": "native node/contact store behavior: ok",
+    },
+}
+EXPECTED_WP05_COMPANION_UPSTREAM_SUITES = {
+    "pinned_signed_advert_runtime": {
+        "artifact_type": SIGNED_ADVERT_ARTIFACT_TYPE,
+        "capability": "identity_signed_advert_semantic_runtime",
+        "case_ids": [
+            "distinct_equal_timestamp_rejected",
+            "distinct_older_timestamp_rejected",
+            "strictly_newer_timestamp_accepted",
+            "uint32_max_timestamp_accepted",
+            "wrapped_zero_timestamp_rejected",
+        ],
+        "identical_wire_hash_case": "identical_wire_hash_suppressed",
+        "closure_ready": False,
+    },
 }
 EXPECTED_WP05_SOURCE_PATHS = {
     "main/app/identity_state.h",
@@ -309,7 +342,15 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/hal/rp2040_bridge.h",
     "main/mesh/meshcore_admin_dispatch.c",
     "main/mesh/meshcore_admin_dispatch.h",
+    "main/mesh/contact_store.c",
+    "main/mesh/contact_store.h",
+    "main/mesh/contact_uri.c",
+    "main/mesh/contact_uri.h",
     "main/mesh/meshcore_command_guard.h",
+    "main/mesh/meshcore_advert_admission.c",
+    "main/mesh/meshcore_advert_admission.h",
+    "main/mesh/meshcore_path_state.c",
+    "main/mesh/meshcore_path_state.h",
     "main/mesh/meshcore_radio_profile.h",
     "main/mesh/meshcore_runtime_guard.h",
     "main/mesh/meshcore_trace.h",
@@ -318,6 +359,8 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/mesh/meshcore_wire.c",
     "main/mesh/meshcore_wire.h",
     "main/mesh/store_lock.h",
+    "main/mesh/node_store.c",
+    "main/mesh/node_store.h",
     "main/mesh/user_text.c",
     "main/mesh/user_text.h",
     "main/platform/time_display.c",
@@ -337,6 +380,7 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "tests/native/mock_esp_nvs.h",
     "tests/native/settings_protocol_migration_test.c",
     "tests/native/stubs/esp_err.h",
+    "tests/native/stubs/esp_attr.h",
     "tests/native/stubs/esp_netif_sntp.h",
     "tests/native/stubs/esp_timer.h",
     "tests/native/stubs/freertos/FreeRTOS.h",
@@ -344,6 +388,36 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "tests/native/stubs/nvs.h",
     "tests/native/stubs/sys/time.h",
     "tests/native/time_service_checkpoint_integration_test.c",
+    "tests/native/store_behavior_test.c",
+}
+SIGNED_ADVERT_REPLAY_OUTCOME_KEYS = (
+    "distinct_equal_timestamp_rejected",
+    "distinct_older_timestamp_rejected",
+    "strictly_newer_timestamp_accepted",
+    "uint32_max_timestamp_accepted",
+    "wrapped_zero_timestamp_rejected",
+)
+SIGNED_ADVERT_CANONICAL_FIELDS = {
+    "schema_version",
+    "artifact_type",
+    "evidence_profile",
+    "status",
+    "passed",
+    "execution_complete",
+    "work_package",
+    "capability",
+    "coverage_boundary",
+    "wp04_closure_eligible",
+    "closure_ready",
+    "repository",
+    "external_archive",
+    "external_sources",
+    "sanitizers_enabled",
+    "sanitizer_policy",
+    "full_ubsan_clean",
+    "result",
+    "assertions",
+    "residual_gaps",
 }
 EXPECTED_ORACLE_CAPABILITIES = [
     {
@@ -2251,6 +2325,18 @@ def load_wp05_semantic_matrix(
             or any(suite not in EXPECTED_WP05_PRODUCTION_SUITES for suite in suites)
         ):
             raise GateFailure(f"WP-05 production-suite mapping is invalid: {requirement_id}")
+        companion_suites = requirement.get("companion_upstream_suites", [])
+        if (
+            not isinstance(companion_suites, list)
+            or len(companion_suites) != len(set(companion_suites))
+            or any(
+                suite not in EXPECTED_WP05_COMPANION_UPSTREAM_SUITES
+                for suite in companion_suites
+            )
+        ):
+            raise GateFailure(
+                f"WP-05 companion-suite mapping is invalid: {requirement_id}"
+            )
         remaining = requirement.get("remaining")
         if (
             not isinstance(remaining, list)
@@ -2259,9 +2345,9 @@ def load_wp05_semantic_matrix(
             or (status != "implemented" and not remaining)
         ):
             raise GateFailure(f"WP-05 remaining-gap receipt drifted: {requirement_id}")
-        if status == "missing" and (groups or suites):
+        if status == "missing" and (groups or suites or companion_suites):
             raise GateFailure(f"WP-05 missing requirement claims evidence: {requirement_id}")
-        if status != "missing" and not groups and not suites:
+        if status != "missing" and not groups and not suites and not companion_suites:
             raise GateFailure(
                 f"WP-05 non-missing requirement lacks evidence: {requirement_id}"
             )
@@ -2303,6 +2389,32 @@ def load_wp05_semantic_matrix(
         ):
             raise GateFailure(f"WP-05 production host-suite contract drifted: {suite['id']}")
         scenario_ids.update(scenarios)
+
+    companion_suites = matrix.get("companion_upstream_suites")
+    if not isinstance(companion_suites, list) or [
+        item.get("id") if isinstance(item, dict) else None
+        for item in companion_suites
+    ] != list(EXPECTED_WP05_COMPANION_UPSTREAM_SUITES):
+        raise GateFailure("WP-05 companion upstream-suite registry drifted")
+    companion_case_ids: set[str] = set()
+    for suite in companion_suites:
+        contract = EXPECTED_WP05_COMPANION_UPSTREAM_SUITES[suite["id"]]
+        case_ids = suite.get("case_ids")
+        if (
+            suite.get("artifact_type") != contract["artifact_type"]
+            or suite.get("capability") != contract["capability"]
+            or case_ids != contract["case_ids"]
+            or len(case_ids) != len(set(case_ids))
+            or companion_case_ids.intersection(case_ids)
+            or suite.get("identical_wire_hash_case")
+            != contract["identical_wire_hash_case"]
+            or suite.get("identical_wire_hash_case") in case_ids
+            or suite.get("closure_ready") is not False
+        ):
+            raise GateFailure(
+                f"WP-05 companion upstream-suite contract drifted: {suite['id']}"
+            )
+        companion_case_ids.update(case_ids)
 
     source_pins = matrix.get("source_pins")
     if not isinstance(source_pins, dict) or set(source_pins) != EXPECTED_WP05_SOURCE_PATHS:
@@ -2397,9 +2509,17 @@ def summarize_wp05_semantic_matrix(
             len(suite["scenario_ids"])
             for suite in matrix["production_host_suites"]
         ),
+        "companion_upstream_suite_count": len(
+            matrix["companion_upstream_suites"]
+        ),
+        "companion_upstream_case_count": sum(
+            len(suite["case_ids"])
+            for suite in matrix["companion_upstream_suites"]
+        ),
         "requirements": requirements,
         "fuzz_targets": matrix["fuzz_targets"],
         "production_host_suites": matrix["production_host_suites"],
+        "companion_upstream_suites": matrix["companion_upstream_suites"],
         "source_verification": None,
         "result": None,
     }
@@ -2891,6 +3011,22 @@ def production_semantic_suite_specs(
                 ROOT / "main" / "mesh" / "user_text.c",
                 ROOT / "main" / "mesh" / "meshcore_text_plaintext.c",
                 native / "meshcore_text_plaintext_test.c",
+            ],
+        },
+        {
+            "id": "advert_replay_admission",
+            "binary": Path(build_dir) / "meshcore_advert_admission_semantic",
+            "flags": ["-DD1L_CONTACT_STORE_TEST_HOOKS"],
+            "include_dirs": common_includes,
+            "sources": [
+                ROOT / "main" / "mesh" / "node_store.c",
+                ROOT / "main" / "mesh" / "contact_store.c",
+                ROOT / "main" / "mesh" / "meshcore_advert_admission.c",
+                ROOT / "main" / "mesh" / "meshcore_path_state.c",
+                ROOT / "main" / "mesh" / "meshcore_wire.c",
+                ROOT / "main" / "mesh" / "contact_uri.c",
+                native / "esp_nvs_stubs.c",
+                native / "store_behavior_test.c",
             ],
         },
     ]
@@ -3493,6 +3629,144 @@ def _canonical_command_argument(value: str) -> str:
     return normalized
 
 
+def _signed_advert_runtime_binding_from_canonical(
+    canonical: dict[str, Any],
+) -> dict[str, Any]:
+    canonical_bytes = json.dumps(
+        canonical,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    result = canonical["result"]
+    return {
+        "schema_version": 1,
+        "suite_id": "pinned_signed_advert_runtime",
+        "artifact_type": canonical["artifact_type"],
+        "evidence_profile": canonical["evidence_profile"],
+        "capability": canonical["capability"],
+        "repository_commit": canonical["repository"]["repository_commit"],
+        "upstream_commit": canonical["repository"]["upstream_commit"],
+        "canonical_sha256": hashlib.sha256(canonical_bytes).hexdigest(),
+        "timestamp_replay_case_count": result["timestamp_replay_cases"],
+        "timestamp_replay_rejection_count": result[
+            "timestamp_replay_rejections"
+        ],
+        "timestamp_newer_acceptance_count": result[
+            "timestamp_newer_acceptances"
+        ],
+        "replay_outcomes": {
+            key: result[key] for key in SIGNED_ADVERT_REPLAY_OUTCOME_KEYS
+        },
+        "identical_wire_hash_suppression": {
+            "case_id": "identical_wire_hash_suppressed",
+            "suppressed": result["identical_wire_hash_suppressed"],
+            "distinct_from_timestamp_replay_window": True,
+        },
+        "closure_ready": False,
+    }
+
+
+def bind_signed_advert_runtime_receipt(
+    receipt: object,
+    expected_commit: str,
+    *,
+    receipt_is_canonical: bool = False,
+) -> dict[str, Any]:
+    """Validate and bind raw or packaged exact-commit signed-runtime evidence."""
+
+    if receipt_is_canonical:
+        validate_signed_advert_runtime(
+            receipt,
+            expected_commit,
+            require_generated_at=False,
+            require_commands=False,
+        )
+        if (
+            not isinstance(receipt, dict)
+            or set(receipt) != SIGNED_ADVERT_CANONICAL_FIELDS
+            or receipt.get("evidence_profile") != SIGNED_ADVERT_EVIDENCE_PROFILE
+        ):
+            raise ValueError("signed-advert canonical evidence shape drifted")
+        canonical = copy.deepcopy(receipt)
+    else:
+        validate_signed_advert_runtime(receipt, expected_commit)
+        canonical = canonicalize_signed_advert_runtime(receipt, expected_commit)
+    return _signed_advert_runtime_binding_from_canonical(canonical)
+
+
+def signed_advert_runtime_binding_valid(value: Any, expected_commit: str) -> bool:
+    if not isinstance(value, dict):
+        return False
+    outcomes = value.get("replay_outcomes")
+    identical_wire = value.get("identical_wire_hash_suppression")
+    return (
+        set(value)
+        == {
+            "schema_version",
+            "suite_id",
+            "artifact_type",
+            "evidence_profile",
+            "capability",
+            "repository_commit",
+            "upstream_commit",
+            "canonical_sha256",
+            "timestamp_replay_case_count",
+            "timestamp_replay_rejection_count",
+            "timestamp_newer_acceptance_count",
+            "replay_outcomes",
+            "identical_wire_hash_suppression",
+            "closure_ready",
+        }
+        and value.get("schema_version") == 1
+        and value.get("suite_id") == "pinned_signed_advert_runtime"
+        and value.get("artifact_type") == SIGNED_ADVERT_ARTIFACT_TYPE
+        and value.get("evidence_profile") == SIGNED_ADVERT_EVIDENCE_PROFILE
+        and value.get("capability") == "identity_signed_advert_semantic_runtime"
+        and value.get("repository_commit") == expected_commit
+        and value.get("upstream_commit") == EXPECTED_UPSTREAM["commit"]
+        and re.fullmatch(r"[0-9a-f]{64}", str(value.get("canonical_sha256") or ""))
+        is not None
+        and value.get("timestamp_replay_case_count") == 5
+        and value.get("timestamp_replay_rejection_count") == 3
+        and value.get("timestamp_newer_acceptance_count") == 2
+        and isinstance(outcomes, dict)
+        and list(outcomes) == list(SIGNED_ADVERT_REPLAY_OUTCOME_KEYS)
+        and all(outcomes.get(key) is True for key in SIGNED_ADVERT_REPLAY_OUTCOME_KEYS)
+        and identical_wire
+        == {
+            "case_id": "identical_wire_hash_suppressed",
+            "suppressed": True,
+            "distinct_from_timestamp_replay_window": True,
+        }
+        and value.get("closure_ready") is False
+    )
+
+
+def validate_signed_advert_runtime_binding(
+    conformance_report: object,
+    signed_advert_runtime_receipt: object,
+    expected_commit: str,
+    *,
+    receipt_is_canonical: bool = False,
+) -> None:
+    """Recompute and compare the signed-runtime binding, failing closed."""
+
+    if not isinstance(conformance_report, dict):
+        raise ValueError("MeshCore conformance report must be an object")
+    observed = conformance_report.get("signed_advert_runtime")
+    expected = bind_signed_advert_runtime_receipt(
+        signed_advert_runtime_receipt,
+        expected_commit,
+        receipt_is_canonical=receipt_is_canonical,
+    )
+    if observed != expected:
+        raise ValueError(
+            "MeshCore conformance signed-advert runtime binding does not match "
+            "the supplied exact-commit receipt"
+        )
+
+
 def canonicalize_release_report(report: dict[str, Any]) -> dict[str, Any]:
     """Project a live conformance receipt into deterministic package evidence.
 
@@ -3552,6 +3826,9 @@ def validate_completed_report(
     *,
     build_inputs_path: Path = BUILD_INPUTS_PATH,
     require_generated_at: bool = True,
+    signed_advert_runtime_receipt: object | None = None,
+    signed_advert_runtime_receipt_is_canonical: bool = False,
+    require_signed_advert_runtime_receipt: bool = True,
 ) -> None:
     """Reject a top-level green receipt unless every semantic gate completed."""
 
@@ -3572,6 +3849,7 @@ def validate_completed_report(
     advert_corpus = report.get("advert_corpus")
     advert_corpus = advert_corpus if isinstance(advert_corpus, dict) else {}
     wp05_semantic_matrix = report.get("wp05_semantic_matrix")
+    signed_advert_runtime = report.get("signed_advert_runtime")
     compiler = report.get("compiler")
     compiler = compiler if isinstance(compiler, dict) else {}
     scope = report.get("scope")
@@ -3669,6 +3947,19 @@ def validate_completed_report(
         for argument in command
         if isinstance(argument, str) and argument.startswith("-fno-sanitize=")
     ]
+    signed_advert_runtime_receipt_matches = False
+    if signed_advert_runtime_receipt is not None:
+        try:
+            validate_signed_advert_runtime_binding(
+                report,
+                signed_advert_runtime_receipt,
+                expected_commit,
+                receipt_is_canonical=signed_advert_runtime_receipt_is_canonical,
+            )
+        except ValueError:
+            pass
+        else:
+            signed_advert_runtime_receipt_matches = True
     required = {
         "schema_version": report.get("schema_version") == 1,
         "artifact_type": report.get("artifact_type")
@@ -3716,6 +4007,14 @@ def validate_completed_report(
         "wp05_semantic_matrix": wp05_semantic_summary_valid(
             wp05_semantic_matrix,
             expected_cc=cc_command,
+        ),
+        "signed_advert_runtime": signed_advert_runtime_binding_valid(
+            signed_advert_runtime,
+            expected_commit,
+        ),
+        "signed_advert_runtime_receipt_binding": (
+            signed_advert_runtime_receipt_matches
+            or not require_signed_advert_runtime_receipt
         ),
         "vector_passed": vector.get("passed") is True,
         "vector_counts": vector.get("vectors")
@@ -4036,9 +4335,9 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("closure_ready") is False
         and value.get("full_semantic_matrix_covered") is False
         and value.get("requirement_count") == 16
-        and value.get("implemented_requirement_count") == 7
+        and value.get("implemented_requirement_count") == 8
         and value.get("partial_requirement_count") == 8
-        and value.get("missing_requirement_count") == 1
+        and value.get("missing_requirement_count") == 0
         and value.get("fuzz_target_count") == 8
         and value.get("implemented_fuzz_target_count") == 2
         and value.get("partial_fuzz_target_count") == 1
@@ -4052,6 +4351,13 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         == sum(
             contract["scenario_count"]
             for contract in EXPECTED_WP05_PRODUCTION_SUITES.values()
+        )
+        and value.get("companion_upstream_suite_count")
+        == len(EXPECTED_WP05_COMPANION_UPSTREAM_SUITES)
+        and value.get("companion_upstream_case_count")
+        == sum(
+            len(contract["case_ids"])
+            for contract in EXPECTED_WP05_COMPANION_UPSTREAM_SUITES.values()
         )
         and isinstance(requirements, list)
         and all(isinstance(item, dict) for item in requirements)
@@ -4223,6 +4529,9 @@ def base_report(
             "production_host_semantic_suites": list(
                 EXPECTED_WP05_PRODUCTION_SUITES
             ),
+            "companion_upstream_semantic_suites": list(
+                EXPECTED_WP05_COMPANION_UPSTREAM_SUITES
+            ),
         },
         "requested": {
             "commit": args.commit,
@@ -4261,6 +4570,7 @@ def base_report(
         "wp05_semantic_matrix": summarize_wp05_semantic_matrix(
             wp05_semantic_matrix, oracle_manifest
         ),
+        "signed_advert_runtime": None,
         "vector_matrix": manifest["vector_matrix"],
         "payload_version_gate": manifest["payload_version_gate"],
         "corpus": None,
@@ -4324,6 +4634,7 @@ def build_oracle_artifact(report: dict[str, Any]) -> dict[str, Any]:
         "oracle_result": result,
         "capabilities": oracle["capabilities"],
         "wp05_semantic_matrix": report["wp05_semantic_matrix"],
+        "signed_advert_runtime": report.get("signed_advert_runtime"),
         "pending_capabilities": [
             capability["id"]
             for capability in oracle["capabilities"]
@@ -4345,6 +4656,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         wp05_semantic_matrix,
         args,
     )
+    signed_advert_receipt: object | None = None
     try:
         if args.dry_run and os.environ.get("D1L_MESHCORE_CONFORMANCE_CI") == "1":
             raise GateFailure("dry-run is forbidden in GitHub Actions")
@@ -4354,6 +4666,19 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             raise GateFailure(f"release gate requires deterministic seed {DEFAULT_SEED}")
         source_verification = verify_sources(manifest, args.commit)
         report["source_verification"] = source_verification
+        if args.signed_advert_runtime_receipt is not None:
+            try:
+                signed_advert_receipt = json.loads(
+                    args.signed_advert_runtime_receipt.read_text(encoding="utf-8")
+                )
+                report["signed_advert_runtime"] = bind_signed_advert_runtime_receipt(
+                    signed_advert_receipt,
+                    source_verification["repository_commit"],
+                )
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+                raise GateFailure(
+                    f"signed-advert runtime receipt validation failed: {exc}"
+                ) from exc
         report["oracle"]["source_verification"] = verify_oracle_sources(
             oracle_manifest
         )
@@ -4389,6 +4714,10 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             report["status"] = "dry_run"
             report["failure"] = "dry-run does not satisfy the conformance gate"
             return 0, report
+        if args.signed_advert_runtime_receipt is None:
+            raise GateFailure(
+                "real conformance runs require an exact-commit signed-advert runtime receipt"
+            )
         if os.name == "nt":
             raise GateFailure("real sanitizer conformance runs require the Ubuntu CI job")
 
@@ -4695,7 +5024,11 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         report["passed"] = True
         report["status"] = "pass"
         try:
-            validate_completed_report(report, source_verification["repository_commit"])
+            validate_completed_report(
+                report,
+                source_verification["repository_commit"],
+                signed_advert_runtime_receipt=signed_advert_receipt,
+            )
         except ValueError as exc:
             raise GateFailure(str(exc)) from exc
         return 0, report
@@ -4713,6 +5046,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cxx", default="clang++", help="Clang C++ compiler")
     parser.add_argument("--commit", help="exact repository commit expected by the gate")
     parser.add_argument("--toolchain-receipt", type=Path)
+    parser.add_argument("--signed-advert-runtime-receipt", type=Path)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--runs", "--fuzz-runs", dest="runs", type=int, default=DEFAULT_RUNS)
     parser.add_argument("--out", type=Path, required=True)

@@ -629,6 +629,36 @@ def test_signed_advert_semantic_drift_is_rejected_after_rebinding_metadata(
     assert failure.value.code == "invalid_signed_advert_semantics"
 
 
+def test_substituted_signed_runtime_binding_hash_is_rejected_after_rebinding_metadata(
+    tmp_path, monkeypatch
+):
+    root, first, _second, _identity = build_pair(tmp_path, monkeypatch)
+    manifest = json.loads((first / "manifest.json").read_text(encoding="ascii"))
+    evidence = first / f"evidence/meshcore_conformance_{COMMIT}.json"
+    report = json.loads(evidence.read_text(encoding="ascii"))
+    report["signed_advert_runtime"]["canonical_sha256"] = "0" * 64
+    evidence.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="ascii",
+    )
+    metadata = manifest["meshcore_conformance"]
+    metadata["size"] = evidence.stat().st_size
+    metadata["sha256"] = sbom_d1l.sha256_file(evidence)
+
+    with pytest.raises(
+        compare_release_reproducibility_d1l.ComparisonError
+    ) as failure:
+        compare_release_reproducibility_d1l.validate_manifest_shape(
+            root,
+            manifest,
+            first,
+            COMMIT,
+            compare_release_reproducibility_d1l.PROFILE_FULL_RELEASE,
+        )
+
+    assert failure.value.code == "invalid_conformance_semantics"
+
+
 def test_signed_advert_evidence_is_a_required_exact_sha_payload(
     tmp_path, monkeypatch
 ):

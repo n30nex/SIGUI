@@ -212,6 +212,14 @@ def test_signed_advert_runtime_is_an_actions_gate():
     assert "scripts/meshcore_signed_advert_runtime_d1l.py" in workflow
     assert "--sanitize" in workflow
     assert "meshcore_signed_advert_runtime_${GITHUB_SHA}.json" in workflow
+    assert workflow.index(
+        "Run pinned MeshCore signed-advert semantic runtime"
+    ) < workflow.index("Run MeshCore wire-envelope conformance and RX fuzzing")
+    assert (
+        '--signed-advert-runtime-receipt "artifacts/meshcore-conformance/'
+        'meshcore_signed_advert_runtime_${GITHUB_SHA}.json"'
+    ) in workflow
+    assert "signed_advert_runtime_receipt=signed_runtime" in workflow
 
 
 def test_runtime_harness_uses_production_dispatch_not_projection_helpers():

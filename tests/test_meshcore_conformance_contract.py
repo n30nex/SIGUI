@@ -11,7 +11,10 @@ from pathlib import Path
 import pytest
 
 from scripts import meshcore_conformance_d1l as conformance
-from tests.meshcore_conformance_fixture import completed_report
+from tests.meshcore_conformance_fixture import (
+    completed_report,
+    completed_signed_advert_runtime_report,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -157,7 +160,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         summary["implemented_requirement_count"],
         summary["partial_requirement_count"],
         summary["missing_requirement_count"],
-    ) == (7, 8, 1)
+    ) == (8, 8, 0)
     assert (
         summary["implemented_fuzz_target_count"],
         summary["partial_fuzz_target_count"],
@@ -165,8 +168,10 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
     ) == (2, 1, 5)
     assert summary["oracle_semantic_vectors"] == 915
     assert summary["unique_referenced_oracle_semantic_vectors"] == 890
-    assert summary["production_suite_count"] == 6
-    assert summary["production_scenario_count"] == 34
+    assert summary["production_suite_count"] == 7
+    assert summary["production_scenario_count"] == 41
+    assert summary["companion_upstream_suite_count"] == 1
+    assert summary["companion_upstream_case_count"] == 5
     assert [suite["id"] for suite in summary["production_host_suites"]] == [
         "admin_dispatch",
         "runtime_queue_fairness",
@@ -174,6 +179,17 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "legacy_protocol_timestamp_migration",
         "time_service_migration_integration",
         "text_admission",
+        "advert_replay_admission",
+    ]
+    assert summary["companion_upstream_suites"] == [
+        {
+            "id": "pinned_signed_advert_runtime",
+            "artifact_type": "d1l_meshcore_signed_advert_semantic_runtime",
+            "capability": "identity_signed_advert_semantic_runtime",
+            "case_ids": list(conformance.SIGNED_ADVERT_REPLAY_OUTCOME_KEYS),
+            "identical_wire_hash_case": "identical_wire_hash_suppressed",
+            "closure_ready": False,
+        }
     ]
     source_verification = conformance.verify_wp05_semantic_sources(matrix)
     assert source_verification["pins_verified"] is True
@@ -193,7 +209,8 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         dependency_verification,
     )
     assert source_verification["verified"] is True
-    assert dependency_verification["dependency_count"] == 46
+    assert dependency_verification["dependency_count"] == 58
+    assert dependency_verification["translation_unit_count"] == 28
     assert dependency_verification["dependencies"] == sorted(
         conformance.EXPECTED_WP05_SOURCE_PATHS
     )
@@ -211,16 +228,17 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "settings_protocol_migration_semantic",
         "time_service_migration_semantic",
         "meshcore_text_plaintext_semantic",
+        "meshcore_advert_admission_semantic",
     ):
         assert binary in commands
-    assert commands.count("-fsanitize=address,undefined") == 6
+    assert commands.count("-fsanitize=address,undefined") == 7
     assert not re.search(r"\bCOM\d+\b", commands, re.IGNORECASE)
 
     build_plans = conformance.production_semantic_command_plan("clang-18")
     dependency_plans = conformance.production_semantic_dependency_command_plan(
         "clang-18"
     )
-    assert len(build_plans) == 6
+    assert len(build_plans) == 7
     assert len(dependency_plans) == sum(
         len(spec["sources"])
         for spec in conformance.production_semantic_suite_specs()
@@ -261,6 +279,58 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         }
 
 
+def test_signed_advert_runtime_binding_is_exact_commit_and_canonical():
+    commit = "a" * 40
+    receipt = completed_signed_advert_runtime_report(commit)
+    binding = conformance.bind_signed_advert_runtime_receipt(receipt, commit)
+
+    assert conformance.signed_advert_runtime_binding_valid(binding, commit)
+    assert binding["timestamp_replay_case_count"] == 5
+    assert binding["timestamp_replay_rejection_count"] == 3
+    assert binding["timestamp_newer_acceptance_count"] == 2
+    assert binding["replay_outcomes"] == {
+        key: True for key in conformance.SIGNED_ADVERT_REPLAY_OUTCOME_KEYS
+    }
+    assert binding["identical_wire_hash_suppression"] == {
+        "case_id": "identical_wire_hash_suppressed",
+        "suppressed": True,
+        "distinct_from_timestamp_replay_window": True,
+    }
+    conformance_report = {"signed_advert_runtime": binding}
+    conformance.validate_signed_advert_runtime_binding(
+        conformance_report,
+        receipt,
+        commit,
+    )
+    substituted = copy.deepcopy(conformance_report)
+    substituted["signed_advert_runtime"]["canonical_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="does not match"):
+        conformance.validate_signed_advert_runtime_binding(
+            substituted,
+            receipt,
+            commit,
+        )
+
+    other_time = copy.deepcopy(receipt)
+    other_time["generated_at"] = "2099-01-01T00:00:00+00:00"
+    assert (
+        conformance.bind_signed_advert_runtime_receipt(other_time, commit)[
+            "canonical_sha256"
+        ]
+        == binding["canonical_sha256"]
+    )
+
+    stale = copy.deepcopy(receipt)
+    stale["repository"]["repository_commit"] = "b" * 40
+    with pytest.raises(ValueError, match="repository_commit"):
+        conformance.bind_signed_advert_runtime_receipt(stale, commit)
+
+    poisoned = copy.deepcopy(receipt)
+    poisoned["result"]["wrapped_zero_timestamp_rejected"] = False
+    with pytest.raises(ValueError, match="result"):
+        conformance.bind_signed_advert_runtime_receipt(poisoned, commit)
+
+
 def test_wp05_semantic_matrix_rejects_registry_closure_and_source_drift(tmp_path):
     oracle = conformance.load_oracle_manifest()
     matrix = json.loads(WP05_MATRIX.read_text(encoding="utf-8"))
@@ -278,6 +348,7 @@ def test_wp05_semantic_matrix_rejects_registry_closure_and_source_drift(tmp_path
     zero_evidence = copy.deepcopy(matrix)
     zero_evidence["requirements"][0]["oracle_vector_groups"] = []
     zero_evidence["requirements"][0]["production_host_suites"] = []
+    zero_evidence["requirements"][0]["companion_upstream_suites"] = []
     mutations.append((zero_evidence, "non-missing requirement lacks evidence"))
 
     for index, (payload, failure) in enumerate(mutations):
@@ -507,7 +578,8 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["scope"]["packet_semantics_covered"] is False
     assert report["scope"]["bounded_production_semantics_covered"] is True
     assert report["wp05_semantic_matrix"]["closure_ready"] is False
-    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 34
+    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 41
+    assert report["signed_advert_runtime"] is None
     semantic_source = report["wp05_semantic_matrix"]["source_verification"]
     assert semantic_source["pins_verified"] is True
     assert semantic_source["dependency_closure_verified"] is False
@@ -576,12 +648,20 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
 ):
     commit = "a" * 40
     report = completed_report(commit, ROOT / ".github" / "d1l-build-inputs.json")
-    conformance.validate_completed_report(report, commit)
+    signed_receipt = completed_signed_advert_runtime_report(commit)
+    with pytest.raises(ValueError, match="signed_advert_runtime_receipt_binding"):
+        conformance.validate_completed_report(report, commit)
+    conformance.validate_completed_report(
+        report,
+        commit,
+        signed_advert_runtime_receipt=signed_receipt,
+    )
     canonical = conformance.canonicalize_release_report(report)
     conformance.validate_completed_report(
         canonical,
         commit,
         require_generated_at=False,
+        signed_advert_runtime_receipt=signed_receipt,
     )
 
     mutations = []
@@ -630,6 +710,26 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
         command[0] = "attacker-cc"
     mutations.append(
         (substituted_semantic_compiler, "wp05_semantic_matrix")
+    )
+    tampered_signed_runtime = copy.deepcopy(report)
+    tampered_signed_runtime["signed_advert_runtime"]["replay_outcomes"][
+        "distinct_equal_timestamp_rejected"
+    ] = False
+    mutations.append((tampered_signed_runtime, "signed_advert_runtime"))
+    stale_signed_runtime_commit = copy.deepcopy(report)
+    stale_signed_runtime_commit["signed_advert_runtime"]["repository_commit"] = (
+        "b" * 40
+    )
+    mutations.append((stale_signed_runtime_commit, "signed_advert_runtime"))
+    substituted_signed_runtime_digest = copy.deepcopy(report)
+    substituted_signed_runtime_digest["signed_advert_runtime"][
+        "canonical_sha256"
+    ] = "0" * 64
+    mutations.append(
+        (
+            substituted_signed_runtime_digest,
+            "signed_advert_runtime_receipt_binding",
+        )
     )
     stale_source = copy.deepcopy(report)
     stale_source["source_verification"]["source_files"]["src/Packet.cpp"][
@@ -681,13 +781,18 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
 
     for payload, failure in mutations:
         with pytest.raises(ValueError, match=failure):
-            conformance.validate_completed_report(payload, commit)
+            conformance.validate_completed_report(
+                payload,
+                commit,
+                signed_advert_runtime_receipt=signed_receipt,
+            )
         canonical_payload = conformance.canonicalize_release_report(payload)
         with pytest.raises(ValueError, match=failure):
             conformance.validate_completed_report(
                 canonical_payload,
                 commit,
                 require_generated_at=False,
+                signed_advert_runtime_receipt=signed_receipt,
             )
 
     poisoned_matrix = json.loads(WP05_MATRIX.read_text(encoding="utf-8"))
@@ -707,13 +812,18 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
         poisoned_matrix_path,
     )
     with pytest.raises(ValueError, match="wp05_semantic_matrix"):
-        conformance.validate_completed_report(poisoned_receipt, commit)
+        conformance.validate_completed_report(
+            poisoned_receipt,
+            commit,
+            signed_advert_runtime_receipt=signed_receipt,
+        )
     poisoned_canonical = conformance.canonicalize_release_report(poisoned_receipt)
     with pytest.raises(ValueError, match="wp05_semantic_matrix"):
         conformance.validate_completed_report(
             poisoned_canonical,
             commit,
             require_generated_at=False,
+            signed_advert_runtime_receipt=signed_receipt,
         )
 
 

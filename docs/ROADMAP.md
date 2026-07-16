@@ -144,8 +144,15 @@ real signed-advert Identity/Mesh/Dispatcher/BaseChatMesh execution; PR #96
 selected the overlay in production/oracle/runtime/package with zero exceptions;
 PR #98 merged durable ACK dispatch; and PR #99 merged freshness-gated learned
 route selection. The current receipt remains `closure_ready=false`: canonical
-TRACE, admin, persisted-identity/contact, retained-state, real-peer RF, and
-physical proof are still open. See
+TRACE, admin, retained-state, real-peer RF, and physical proof are still open.
+The current advert-replay source slice closes the previously missing WP-05
+timestamp requirement with 7 production host scenarios and binds 5 distinct
+validly signed pinned-upstream replay cases. The declared matrix is now 8
+implemented / 8 partial / 0 missing requirements, 7 production suites / 41
+scenarios / 28 translation units / 58 pins, plus 1 companion suite / 5 cases;
+identical-wire hash suppression remains separate. This does not close generic
+packet replay, retained recovery, RF, hardware, issue #65, or the release gate.
+See
 [MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).
 
 1. Decide and document a narrow adapter around pinned upstream MeshCore packet/routing/chat machinery, or document why the local implementation remains and its conformance boundary.
