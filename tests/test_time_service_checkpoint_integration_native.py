@@ -35,6 +35,7 @@ def test_truthful_time_checkpoint_integration_native(tmp_path):
         str(ROOT / "main/app/settings_envelope.c"),
         str(ROOT / "main/app/settings_time_checkpoint.c"),
         str(ROOT / "main/platform/time_service_core.c"),
+        str(ROOT / "main/platform/time_display.c"),
         str(ROOT / "main/platform/time_service.c"),
         str(ROOT / "tests/native/esp_nvs_stubs.c"),
         str(ROOT / "tests/native/time_service_checkpoint_integration_test.c"),

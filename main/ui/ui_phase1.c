@@ -1672,8 +1672,13 @@ static void more_view_input_from_snapshot(
         .map_tile_cache_ready = snapshot->map_tile_cache_ready,
         .map_tile_render_supported = snapshot->map_tile_render_supported,
         .identity_ready = snapshot->identity_ready,
+        .time_available = snapshot->time_available,
+        .time_approximate = snapshot->time_approximate,
+        .timezone_settings_ready = snapshot->timezone_settings_ready,
         .storage_sd_state = snapshot->storage_sd_state,
         .storage_setup_action = snapshot->storage_setup_action,
+        .time_label = snapshot->time_label,
+        .timezone_label = snapshot->timezone_label,
         .firmware_version = D1L_FIRMWARE_VERSION,
     };
 }
@@ -6054,7 +6059,8 @@ static void device_sheets_action_handler(
 static bool render_display_sheet(void)
 {
     return d1l_ui_device_sheets_render_display(
-        &s_device_sheets_controller, device_sheets_action_handler, NULL);
+        &s_device_sheets_controller, &s_snapshot,
+        device_sheets_action_handler, NULL);
 }
 
 static bool render_diagnostics_sheet(void)

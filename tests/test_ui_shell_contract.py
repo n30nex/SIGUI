@@ -112,7 +112,10 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "static void copy_cstr(char *dest, size_t dest_size, const char *src)" in source
     assert "populate_home_messages(snapshot)" in source
     assert "populate_home_repeaters(snapshot)" in source
-    assert 'snprintf(snapshot->time_label, sizeof(snapshot->time_label), "--:--")' in source
+    assert "snapshot->time_available = time_status.display_time_valid" in source
+    assert "time_status.display_time_approximate" in source
+    assert "time_status.timezone_settings_ready" in source
+    assert "time_status.timezone_label" in source
     assert "d1l_app_model_save_radio_profile" in header
     assert "d1l_app_model_default_radio_profile" in header
     assert "d1l_app_model_current_radio_profile" in header
@@ -1730,7 +1733,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Pair unavailable"' in ble_module
     assert '"Forget unavailable"' in ble_module
     assert "D1L_UI_BLE_ACTION_TOGGLE" in source
-    assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in device_sheets
+    assert '"Fixed UTC offset only; daylight saving is not automatic.' in device_sheets
     assert '"Advanced details stay here so normal screens remain simple."' in device_sheets
     assert '"reset %s  heap %luK/%luK  ui stk %lu"' in device_sheets
 

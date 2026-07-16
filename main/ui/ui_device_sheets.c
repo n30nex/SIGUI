@@ -253,10 +253,15 @@ static bool begin_render(
 
 bool d1l_ui_device_sheets_render_display(
     d1l_ui_device_sheets_controller_t *controller,
+    const d1l_app_snapshot_t *snapshot,
     d1l_ui_device_sheets_action_handler_t action_handler,
     void *action_context)
 {
     lv_obj_t *sheet = controller ? controller->display_sheet : NULL;
+    if (!snapshot) {
+        invalidate_sheet(controller, sheet);
+        return false;
+    }
     if (!begin_render(controller, sheet, action_handler, action_context)) {
         return false;
     }
@@ -273,15 +278,19 @@ bool d1l_ui_device_sheets_render_display(
         BINDING_CLOSE_DISPLAY,
         D1L_UI_DEVICE_SHEETS_ACTION_CLOSE_DISPLAY) != NULL && complete;
 
-    lv_obj_t *state = create_label(sheet, "Screen controls", 0x5EEAD4);
+    lv_obj_t *state = create_label(sheet, "Local display time", 0x5EEAD4);
     if (state) {
         lv_obj_set_pos(state, 8, 54);
     }
     complete = state != NULL && complete;
-    lv_obj_t *summary = create_label(
-        sheet,
-        "Brightness, night mode, contrast, and timeout belong here.",
-        0xE5EDF5);
+    char time_summary[96];
+    snprintf(time_summary, sizeof(time_summary), "%s  %s",
+             snapshot->timezone_settings_ready &&
+                     snapshot->timezone_label[0] != '\0' ?
+                 snapshot->timezone_label : "UTC fallback",
+             snapshot->time_available && snapshot->time_label[0] != '\0' ?
+                 snapshot->time_label : "time not synced");
+    lv_obj_t *summary = create_label(sheet, time_summary, 0xE5EDF5);
     configure_wrapped_label(summary, 8, 88);
     complete = summary != NULL && complete;
 
@@ -308,7 +317,7 @@ bool d1l_ui_device_sheets_render_display(
 
     lv_obj_t *note = create_label(
         sheet,
-        "Touch display controls are staged until backlight/runtime persistence is wired.",
+        "Fixed UTC offset only; daylight saving is not automatic. Other display controls remain staged.",
         0xFBBF24);
     configure_wrapped_label(note, 8, 260);
     complete = note != NULL && complete;

@@ -161,11 +161,23 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
 
     char packet_status[D1L_UI_MORE_STATUS_TEXT_LEN];
     char about_status[D1L_UI_MORE_STATUS_TEXT_LEN];
+    char display_status[D1L_UI_MORE_STATUS_TEXT_LEN];
     snprintf(packet_status, sizeof(packet_status), "%llu saved",
              (unsigned long long)input->packet_count);
     snprintf(about_status, sizeof(about_status), "Version %s",
              input->firmware_version && input->firmware_version[0] != '\0'
                  ? input->firmware_version : "unknown");
+    if (!input->timezone_settings_ready) {
+        snprintf(display_status, sizeof(display_status),
+                 "Time setting unavailable");
+    } else {
+        snprintf(display_status, sizeof(display_status), "%s / %s",
+                 input->timezone_label && input->timezone_label[0] != '\0' ?
+                     input->timezone_label : "UTC",
+                 input->time_available && input->time_label &&
+                         input->time_label[0] != '\0' ?
+                     input->time_label : "syncing");
+    }
 
     const char *wifi_status = !input->wifi_build_enabled ? "Unavailable" :
         (input->wifi_connected ? "Connected" :
@@ -235,7 +247,7 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
     category = set_category(out_view, D1L_UI_MORE_CATEGORY_DEVICE,
                             "Device", "Display and identity", COLOR_BLUE,
                             false, 2U);
-    set_item(&category->items[0], "Display", "Brightness & theme", COLOR_DISPLAY,
+    set_item(&category->items[0], "Display", display_status, COLOR_DISPLAY,
              D1L_UI_SETTINGS_ACTION_DISPLAY, false);
     set_item(&category->items[1], "Identity",
              input->identity_ready ? "Ready" : "Not set", COLOR_TEXT,

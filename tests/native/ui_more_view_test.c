@@ -43,6 +43,8 @@ static void test_default_view_is_owned_bounded_and_truthful(void)
                   "Internal storage") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 1)->status,
                   "Set location") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 0)->status,
+                  "Time setting unavailable") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
                   "Not set") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_SUPPORT, 0)->status,
@@ -68,6 +70,11 @@ static void test_connectivity_and_ready_storage_states(void)
         .map_tile_cache_ready = true,
         .map_tile_render_supported = true,
         .identity_ready = true,
+        .time_available = true,
+        .time_approximate = true,
+        .timezone_settings_ready = true,
+        .time_label = "~08:42",
+        .timezone_label = "UTC-04:00",
         .firmware_version = "9.8.7",
     };
     d1l_ui_more_view_model_t view;
@@ -84,6 +91,8 @@ static void test_connectivity_and_ready_storage_states(void)
                   "Ready") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_STORAGE_MAPS, 1)->status,
                   "Ready") == 0);
+    assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 0)->status,
+                  "UTC-04:00 / ~08:42") == 0);
     assert(strcmp(item(&view, D1L_UI_MORE_CATEGORY_DEVICE, 1)->status,
                   "Ready") == 0);
 

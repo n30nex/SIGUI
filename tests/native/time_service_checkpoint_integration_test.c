@@ -11,6 +11,7 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "app/settings_model.h"
 #include "app/settings_envelope.h"
 #include "app/settings_time_checkpoint.h"
 #include "esp_netif_sntp.h"
@@ -24,6 +25,16 @@
 static esp_err_t s_sntp_init_result = ESP_OK;
 static esp_err_t s_sntp_wait_result = ESP_OK;
 static bool s_sntp_wait_enabled;
+
+esp_err_t d1l_settings_public_snapshot(d1l_settings_t *settings)
+{
+    if (!settings) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(settings, 0, sizeof(*settings));
+    settings->timezone_schema_version = D1L_TIMEZONE_SETTING_SCHEMA_VERSION;
+    return ESP_OK;
+}
 
 time_t d1l_test_time(time_t *out_time)
 {

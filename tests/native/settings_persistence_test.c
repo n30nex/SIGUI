@@ -55,6 +55,36 @@ typedef struct {
     bool map_location_set;
     int32_t map_lat_e7;
     int32_t map_lon_e7;
+    uint8_t map_tile_zoom;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
+} legacy_v7_t;
+
+typedef struct {
+    uint32_t schema_version;
+    char node_name[D1L_NODE_NAME_LEN];
+    uint8_t role;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool high_contrast;
+    bool night_mode;
+    bool onboarding_complete;
+    bool wifi_profile_saved;
+    uint8_t path_hash_bytes;
+    char wifi_ssid[D1L_WIFI_SSID_LEN];
+    char wifi_password[D1L_WIFI_PASSWORD_LEN];
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+    uint8_t tcxo_mode;
+    bool map_location_set;
+    int32_t map_lat_e7;
+    int32_t map_lon_e7;
     bool map_tile_provider_saved;
     char map_tile_url_template[D1L_MAP_TILE_URL_TEMPLATE_MAX + 1U];
     char map_tile_attribution[D1L_MAP_TILE_ATTRIBUTION_MAX + 1U];
@@ -205,13 +235,24 @@ static void assert_migrated_legacy(const char *expected_name)
 
 static void test_all_recognized_raw_legacy_versions_migrate(void)
 {
-    d1l_settings_t v7 = {0};
-    d1l_settings_defaults(&v7);
+    legacy_v7_t v7 = {
+        .schema_version = 7U,
+        .path_hash_bytes = 1U,
+        .map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM,
+    };
     (void)snprintf(v7.node_name, sizeof(v7.node_name), "Legacy v7");
+    set_common_radio(&v7.frequency_hz, &v7.bandwidth_tenths_khz,
+                     &v7.spreading_factor, &v7.coding_rate,
+                     &v7.tx_power_dbm);
     mock_nvs_reset();
     assert(mock_nvs_seed_blob(SETTINGS_NAMESPACE, SETTINGS_KEY,
                               &v7, sizeof(v7)));
     assert_migrated_legacy("Legacy v7");
+    d1l_settings_t migrated_v7 = {0};
+    assert(d1l_settings_public_snapshot(&migrated_v7) == ESP_OK);
+    assert(migrated_v7.timezone_schema_version ==
+           D1L_TIMEZONE_SETTING_SCHEMA_VERSION);
+    assert(migrated_v7.timezone_offset_minutes == 0);
 
     legacy_v6_t v6 = {.schema_version = 6U, .path_hash_bytes = 2U};
     (void)snprintf(v6.node_name, sizeof(v6.node_name), "Legacy v6");
@@ -267,6 +308,78 @@ static void test_all_recognized_raw_legacy_versions_migrate(void)
     assert(current.onboarding_complete);
 }
 
+static void test_v7_envelope_migrates_revision_and_recovers_text(void)
+{
+    legacy_v7_t legacy = {
+        .schema_version = 7U,
+        .path_hash_bytes = 1U,
+        .map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM,
+    };
+    memset(legacy.node_name, 'X', sizeof(legacy.node_name));
+    set_common_radio(&legacy.frequency_hz, &legacy.bandwidth_tenths_khz,
+                     &legacy.spreading_factor, &legacy.coding_rate,
+                     &legacy.tx_power_dbm);
+    uint8_t blob[TEST_BLOB_MAX] = {0};
+    size_t length = 0U;
+    assert(d1l_settings_envelope_build(
+        blob, sizeof(blob), &legacy, sizeof(legacy), 41U, &length));
+    mock_nvs_reset();
+    assert(mock_nvs_seed_blob(SETTINGS_NAMESPACE, SETTINGS_KEY, blob, length));
+    assert(d1l_settings_load() == ESP_OK);
+    assert(d1l_settings_persistence_state() ==
+           D1L_SETTINGS_PERSISTENCE_MIGRATED_LEGACY);
+    assert(d1l_settings_persistence_revision() == 42U);
+    d1l_settings_t current = {0};
+    assert(d1l_settings_public_snapshot(&current) == ESP_OK);
+    assert(current.node_name[D1L_NODE_NAME_LEN - 1U] == '\0');
+    assert(current.timezone_schema_version ==
+           D1L_TIMEZONE_SETTING_SCHEMA_VERSION);
+    assert(current.timezone_offset_minutes == 0);
+
+    uint8_t stored[TEST_BLOB_MAX] = {0};
+    const size_t stored_length = mock_nvs_copy_blob(
+        SETTINGS_NAMESPACE, SETTINGS_KEY, stored, sizeof(stored));
+    d1l_settings_envelope_header_t header = {0};
+    assert(d1l_settings_envelope_validate(
+               stored, stored_length, sizeof(d1l_settings_t),
+               &header, NULL) == D1L_SETTINGS_ENVELOPE_VALID);
+    assert(header.revision == 42U);
+}
+
+static void test_invalid_timezone_recovers_to_utc_without_boot_loop(void)
+{
+    d1l_settings_t settings = {0};
+    d1l_settings_defaults(&settings);
+    settings.timezone_schema_version =
+        D1L_TIMEZONE_SETTING_SCHEMA_VERSION + 1U;
+    settings.timezone_offset_minutes = 841;
+    uint8_t blob[TEST_BLOB_MAX] = {0};
+    size_t length = 0U;
+    assert(d1l_settings_envelope_build(
+        blob, sizeof(blob), &settings, sizeof(settings), 5U, &length));
+    mock_nvs_reset();
+    assert(mock_nvs_seed_blob(SETTINGS_NAMESPACE, SETTINGS_KEY, blob, length));
+    assert(d1l_settings_load() == ESP_OK);
+    assert(d1l_settings_persistence_state() ==
+           D1L_SETTINGS_PERSISTENCE_READY);
+    d1l_settings_t recovered = {0};
+    assert(d1l_settings_public_snapshot(&recovered) == ESP_OK);
+    assert(recovered.timezone_schema_version ==
+           D1L_TIMEZONE_SETTING_SCHEMA_VERSION);
+    assert(recovered.timezone_offset_minutes == 0);
+
+    recovered.timezone_schema_version =
+        D1L_TIMEZONE_SETTING_SCHEMA_VERSION;
+    recovered.timezone_offset_minutes = -240;
+    assert(d1l_settings_update_fields(
+               &recovered, D1L_SETTINGS_UPDATE_TIMEZONE) == ESP_OK);
+    assert(d1l_settings_public_snapshot(&recovered) == ESP_OK);
+    assert(recovered.timezone_offset_minutes == -240);
+    assert(d1l_settings_reset() == ESP_OK);
+    assert(d1l_settings_public_snapshot(&recovered) == ESP_OK);
+    assert(recovered.timezone_offset_minutes == 0);
+}
+
 static void test_failed_legacy_rewrite_leaves_raw_blob_intact(void)
 {
     d1l_settings_t legacy = {0};
@@ -316,6 +429,35 @@ static void test_failed_legacy_rewrite_leaves_raw_blob_intact(void)
            ESP_ERR_INVALID_STATE);
     assert_committed_blob_unchanged((const uint8_t *)&legacy,
                                     sizeof(legacy));
+
+    legacy_v7_t enveloped = {
+        .schema_version = 7U,
+        .path_hash_bytes = 1U,
+        .map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM,
+    };
+    (void)snprintf(enveloped.node_name, sizeof(enveloped.node_name),
+                   "Envelope retry");
+    set_common_radio(&enveloped.frequency_hz,
+                     &enveloped.bandwidth_tenths_khz,
+                     &enveloped.spreading_factor,
+                     &enveloped.coding_rate, &enveloped.tx_power_dbm);
+    uint8_t envelope[TEST_BLOB_MAX] = {0};
+    size_t envelope_length = 0U;
+    assert(d1l_settings_envelope_build(
+        envelope, sizeof(envelope), &enveloped, sizeof(enveloped), 9U,
+        &envelope_length));
+    mock_nvs_reset();
+    assert(mock_nvs_seed_blob(SETTINGS_NAMESPACE, SETTINGS_KEY,
+                              envelope, envelope_length));
+    mock_nvs_fail_next_set(ESP_FAIL);
+    assert(d1l_settings_load() == ESP_FAIL);
+    assert(d1l_settings_persistence_state() ==
+           D1L_SETTINGS_PERSISTENCE_IO_ERROR);
+    assert_committed_blob_unchanged(envelope, envelope_length);
+    assert(d1l_settings_update_fields(
+               &legacy, D1L_SETTINGS_UPDATE_NODE_NAME) ==
+           ESP_ERR_INVALID_STATE);
+    assert_committed_blob_unchanged(envelope, envelope_length);
     memset(seed, 0, sizeof(seed));
     memset(&legacy, 0, sizeof(legacy));
 }
@@ -380,6 +522,20 @@ static void test_unknown_newer_envelope_is_preserved_and_write_blocked(void)
     size_t future_envelope_length = 0U;
     assert(d1l_settings_envelope_build(
         blob, sizeof(blob), &future, sizeof(future), 5U,
+        &future_envelope_length));
+    mock_nvs_reset();
+    assert(mock_nvs_seed_blob(SETTINGS_NAMESPACE, SETTINGS_KEY,
+                              blob, future_envelope_length));
+    assert(d1l_settings_load() == ESP_ERR_NOT_SUPPORTED);
+    assert(d1l_settings_persistence_state() ==
+           D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA);
+    assert_committed_blob_unchanged(blob, future_envelope_length);
+
+    uint8_t extended_payload[sizeof(future) + 8U] = {0};
+    memcpy(extended_payload, &future, sizeof(future));
+    memset(blob, 0, sizeof(blob));
+    assert(d1l_settings_envelope_build(
+        blob, sizeof(blob), extended_payload, sizeof(extended_payload), 6U,
         &future_envelope_length));
     mock_nvs_reset();
     assert(mock_nvs_seed_blob(SETTINGS_NAMESPACE, SETTINGS_KEY,
@@ -620,6 +776,26 @@ static void test_public_snapshot_redacts_typed_secrets(void)
                           sizeof(public_snapshot.identity_private_key)));
     assert(d1l_settings_persisted_identity_state() ==
            D1L_IDENTITY_STATE_CONSISTENT);
+
+    d1l_settings_t timezone_update = {
+        .timezone_schema_version =
+            D1L_TIMEZONE_SETTING_SCHEMA_VERSION,
+        .timezone_offset_minutes = 345,
+    };
+    assert(d1l_settings_update_fields(
+               &timezone_update, D1L_SETTINGS_UPDATE_TIMEZONE) == ESP_OK);
+    d1l_settings_wifi_secret_t timezone_wifi = {0};
+    assert(d1l_settings_wifi_secret_snapshot(&timezone_wifi) == ESP_OK);
+    assert(strcmp(timezone_wifi.wifi_password,
+                  "correct horse battery staple") == 0);
+    d1l_settings_wifi_secret_wipe(&timezone_wifi);
+    d1l_settings_identity_secret_t timezone_identity = {0};
+    assert(d1l_settings_identity_secret_snapshot(&timezone_identity) == ESP_OK);
+    assert(memcmp(timezone_identity.identity_private_key, private_key,
+                  sizeof(private_key)) == 0);
+    d1l_settings_identity_secret_wipe(&timezone_identity);
+    assert(d1l_settings_public_snapshot(&public_snapshot) == ESP_OK);
+    assert(public_snapshot.timezone_offset_minutes == 345);
 
     d1l_settings_wifi_secret_t wifi_secret = {0};
     assert(d1l_settings_wifi_secret_snapshot(&wifi_secret) == ESP_OK);
@@ -961,6 +1137,8 @@ static void test_snapshot_waits_for_coherent_publication(void)
 int main(void)
 {
     test_all_recognized_raw_legacy_versions_migrate();
+    test_v7_envelope_migrates_revision_and_recovers_text();
+    test_invalid_timezone_recovers_to_utc_without_boot_loop();
     test_failed_legacy_rewrite_leaves_raw_blob_intact();
     test_unknown_newer_envelope_is_preserved_and_write_blocked();
     test_corruption_and_malformed_length_are_preserved();

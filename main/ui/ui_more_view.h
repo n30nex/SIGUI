@@ -57,8 +57,13 @@ typedef struct {
     bool map_tile_cache_ready;
     bool map_tile_render_supported;
     bool identity_ready;
+    bool time_available;
+    bool time_approximate;
+    bool timezone_settings_ready;
     const char *storage_sd_state;
     const char *storage_setup_action;
+    const char *time_label;
+    const char *timezone_label;
     const char *firmware_version;
 } d1l_ui_more_view_input_t;
 

@@ -1,6 +1,7 @@
 #include "time_service.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -11,6 +12,7 @@
 #include "nvs.h"
 
 #include "app/settings_model.h"
+#include "platform/time_display.h"
 
 #ifndef D1L_BUILD_EPOCH_SEC
 #error "D1L_BUILD_EPOCH_SEC must be derived from the exact source commit"
@@ -397,6 +399,43 @@ static esp_err_t ensure_sntp_initialized(void)
     return ret;
 }
 
+static void populate_timezone_status(d1l_time_service_status_t *status)
+{
+    (void)snprintf(status->display_time, sizeof(status->display_time),
+                   "--:--");
+    d1l_settings_t settings = {0};
+    const esp_err_t ret = d1l_settings_public_snapshot(&settings);
+    status->timezone_settings_error = ret;
+    status->timezone_settings_ready =
+        ret == ESP_OK && settings.timezone_schema_version ==
+                             D1L_TIMEZONE_SETTING_SCHEMA_VERSION &&
+        d1l_time_display_offset_valid(settings.timezone_offset_minutes);
+    status->timezone_schema_version = status->timezone_settings_ready ?
+        settings.timezone_schema_version :
+        D1L_TIMEZONE_SETTING_SCHEMA_VERSION;
+    status->timezone_offset_minutes = status->timezone_settings_ready ?
+        settings.timezone_offset_minutes : 0;
+    (void)d1l_time_display_timezone_label(
+        status->timezone_offset_minutes, status->timezone_label,
+        sizeof(status->timezone_label));
+}
+
+static void populate_display_time(d1l_time_service_status_t *status)
+{
+    status->display_time_valid = status->clock.wall_valid;
+    status->display_time_approximate =
+        status->clock.wall_validity == D1L_TIME_VALIDITY_APPROXIMATE;
+    if (!status->display_time_valid || !d1l_time_display_format_clock(
+            status->clock.wall_epoch_sec, status->timezone_offset_minutes,
+            status->display_time_approximate, status->display_time,
+            sizeof(status->display_time))) {
+        status->display_time_valid = false;
+        status->display_time_approximate = false;
+        (void)snprintf(status->display_time, sizeof(status->display_time),
+                       "--:--");
+    }
+}
+
 esp_err_t d1l_time_service_init(void)
 {
     if (!s_time_mutex) {
@@ -496,6 +535,7 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
         return;
     }
     *out_status = (d1l_time_service_status_t) {0};
+    populate_timezone_status(out_status);
     out_status->protocol_persistence_state = s_protocol_persistence_state;
     out_status->protocol_persistence_error = s_protocol_persistence_error;
     out_status->wall_checkpoint = s_wall_checkpoint_status;
@@ -572,6 +612,7 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
     out_status->wall_checkpoint_pending = s_wall_checkpoint_dirty;
     out_status->wall_checkpoint_write_blocked =
         s_wall_checkpoint_write_blocked;
+    populate_display_time(out_status);
     time_unlock();
 }
 

@@ -66,6 +66,7 @@ def test_more_view_models_all_bounded_categories_and_truth_states():
         "Reconnecting",
         "Needs Wi-Fi",
         "Loading",
+        "Time setting unavailable",
     ):
         assert f'"{state}"' in view
     assert "D1L_UI_MORE_MAX_ITEMS_PER_CATEGORY" in header
@@ -75,6 +76,9 @@ def test_more_view_models_all_bounded_categories_and_truth_states():
     assert "memchr(text, '\\0', capacity)" in view
     assert "D1L_UI_MORE_VIEW_MODEL_MAX_BYTES" in header
     assert "_Static_assert(sizeof(d1l_ui_more_view_model_t)" in view
+    assert "timezone_settings_ready" in header
+    assert "timezone_label" in header
+    assert "time_label" in header
 
 
 def test_more_renderer_preserves_geometry_and_rejects_stale_events():

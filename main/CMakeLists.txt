@@ -34,6 +34,7 @@ idf_component_register(
         "map/map_view_service.c"
         "platform/time_service.c"
         "platform/time_service_core.c"
+        "platform/time_display.c"
         "platform/secure_random.c"
         "mesh/advert_data.c"
         "mesh/channel_message_coordinator.c"
