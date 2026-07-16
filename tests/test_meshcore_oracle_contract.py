@@ -49,7 +49,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 23
+    assert manifest["corpus_version"] == 24
     assert manifest["abi_version"] == 2
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -1533,7 +1533,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["sanitizer_policy"] == conformance.ED25519_SANITIZER_POLICY
     assert artifact["full_ubsan_clean"] is True
     assert artifact["sanitizer_policy_passed"] is None
-    assert artifact["corpus_version"] == 23
+    assert artifact["corpus_version"] == 24
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
     assert artifact["coverage_policy"]["local_packet_type_count"] == 7
