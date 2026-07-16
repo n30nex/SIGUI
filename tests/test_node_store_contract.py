@@ -97,6 +97,7 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     app_source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     nodes_ui = read("main/ui/ui_nodes.c")
+    node_detail_ui = read("main/ui/ui_node_detail.c")
     console = read("main/comms/usb_console.c")
     assert "recent_nodes" in app_header
     assert "d1l_node_view_t recent_nodes" in app_header
@@ -105,9 +106,9 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     assert "d1l_app_model_query_nodes(&node_query" in app_source
     assert "d1l_node_store_query(query, out_entries, max_entries)" in app_source
     assert "nodes_render_node_row" in nodes_ui
-    assert "render_node_role_badge" in ui
+    assert "render_role_badge" in node_detail_ui
     assert "D1L_UI_NODES_ACTION_OPEN_NODE" in nodes_ui
-    assert '"Node Detail"' in ui
+    assert '"Node Detail"' in node_detail_ui
     assert 'ok_begin("nodes")' in console
     assert 'strcmp(line, "nodes")' in console
     assert 'strcmp(line, "nodes clear")' in console

@@ -41,7 +41,7 @@ def test_storage_probe_surfaces_are_canonical_settings_destinations():
 def test_storage_touch_hierarchy_is_full_height_read_only_and_plain_language():
     source = read("main/ui/ui_phase1.c")
 
-    create = function_slice(source, "static void create_storage_sheet", "static void create_node_detail_sheet")
+    create = function_slice(source, "static void create_storage_sheet", "static void create_route_detail_sheet")
     assert "lv_obj_set_size(s_storage_sheet, 480, 424);" in create
     assert "lv_obj_set_pos(s_storage_sheet, 0, 56);" in create
     assert "lv_obj_clear_flag(s_storage_sheet, LV_OBJ_FLAG_SCROLLABLE);" in create

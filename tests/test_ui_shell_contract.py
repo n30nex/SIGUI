@@ -817,7 +817,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_contact_options": "D1L_UI_CONTACT_ACTION_OPEN_OPTIONS",
         "close_contact_options": "D1L_UI_CONTACT_ACTION_CLOSE_OPTIONS",
         "open_node_detail": "D1L_UI_NODES_ACTION_OPEN_NODE",
-        "close_node_detail": "close_node_detail_event_cb",
+        "close_node_detail": "D1L_UI_NODE_DETAIL_ACTION_CLOSE",
         "open_contact_edit": "D1L_UI_CONTACT_ACTION_RENAME",
         "close_contact_edit": "D1L_UI_CONTACT_ACTION_CANCEL_EDIT",
         "cancel_contact_edit": "D1L_UI_CONTACT_ACTION_CANCEL_EDIT",
@@ -1138,6 +1138,7 @@ def test_nodes_screen_renders_heard_node_rows():
     source = read("main/ui/ui_phase1.c")
     nodes_header = read("main/ui/ui_nodes.h")
     nodes_source = read("main/ui/ui_nodes.c")
+    node_detail_source = read("main/ui/ui_node_detail.c")
     header = read("main/app/app_model.h")
     model = read("main/app/app_model.c")
     assert "nodes_render_node_row" in nodes_source
@@ -1153,11 +1154,11 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "nodes_role_badge_text" in nodes_source
     assert "nodes_role_color" in nodes_source
     assert "node_view_can_dm" in source
-    assert "node_view_management_gated" in source
+    assert "role_is_managed_service" in node_detail_source
     assert 'nodes_create_button(row, "DM", 364, 6, 52, 44' in nodes_source
     assert 'nodes_create_button(row, "DM", 368, 2, 48, 44' in nodes_source
     assert "lv_obj_set_style_pad_all(row, 0, 0);" in nodes_source
-    assert "render_node_role_badge" in source
+    assert "render_role_badge" in node_detail_source
     assert "nodes_dispatch_node_open_event_cb" in nodes_source
     assert "recent_contact_count" in source
     assert "recent_contacts" in source
@@ -1175,25 +1176,27 @@ def test_nodes_screen_renders_heard_node_rows():
 
 def test_node_detail_sheet_opens_from_heard_node_rows():
     source = read("main/ui/ui_phase1.c")
-    assert "static lv_obj_t *s_node_detail_sheet" in source
-    assert "static d1l_node_view_t s_node_detail_node" in source
-    assert "create_node_detail_sheet" in source
-    assert "render_node_detail_sheet" in source
+    detail = read("main/ui/ui_node_detail.c")
+    header = read("main/ui/ui_node_detail.h")
+    assert "d1l_ui_node_detail_controller_t" in header
+    assert "s_node_detail_controller EXT_RAM_BSS_ATTR" in source
+    assert "d1l_ui_node_detail_create" in source
+    assert "d1l_ui_node_detail_render" in source
     assert "D1L_UI_NODES_ACTION_OPEN_NODE" in source
     assert "show_node_detail_view(event->node, false);" in source
-    assert "close_node_detail_event_cb" in source
+    assert "D1L_UI_NODE_DETAIL_ACTION_CLOSE" in source
     assert "hide_node_detail_sheet()" in source
-    assert 'create_label(s_node_detail_sheet, "Node Detail"' in source
-    assert '"Role %s"' in source
-    assert '"Fingerprint %.16s"' in source
-    assert '"Public key %s  %s  %s"' in source
-    assert '"Signal rssi %d  snr %s%d.%d  %s"' in source
-    assert '"Path hops %u  hash %u byte  advert %lums"' in source
-    assert '"Last heard %lums  first %lums  count %lu"' in source
-    assert 'create_button(s_node_detail_sheet, "DM"' in source
-    assert '"Manage locked"' in source
-    assert 'create_button(s_node_detail_sheet, "Close"' in source
-    assert "create_node_detail_sheet(s_screen)" in source
+    assert 'create_label(controller->sheet, "Node Detail"' in detail
+    assert '"Role %s"' in detail
+    assert '"Fingerprint %.16s"' in detail
+    assert '"Public key %s  %s  %s"' in detail
+    assert '"Signal rssi %d  snr %s%d.%d  %s"' in detail
+    assert '"Path hops %u  hash %u byte  advert %lums"' in detail
+    assert '"Last heard %lums  first %lums  count %lu"' in detail
+    assert 'create_button(controller, "DM"' in detail
+    assert '"Manage locked"' in detail
+    assert 'create_button(controller, "Close"' in detail
+    assert "d1l_ui_node_detail_create(&s_node_detail_controller, s_screen)" in source
 
 
 def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():

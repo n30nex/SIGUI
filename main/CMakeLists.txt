@@ -82,6 +82,7 @@ idf_component_register(
         "ui/ui_more_view.c"
         "ui/ui_modal.c"
         "ui/ui_navigation.c"
+        "ui/ui_node_detail.c"
         "ui/ui_nodes.c"
         "ui/ui_nodes_summary.c"
         "ui/ui_packets.c"
