@@ -37,6 +37,11 @@ typedef struct {
     uint32_t location_seq;
 } d1l_node_entry_t;
 
+typedef enum {
+    D1L_NODE_LOCATION_PROVENANCE_UNKNOWN = 0,
+    D1L_NODE_LOCATION_PROVENANCE_SIGNED_ADVERT,
+} d1l_node_location_provenance_t;
+
 typedef struct {
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char name[D1L_HEARD_NODE_NAME_LEN];
@@ -45,6 +50,7 @@ typedef struct {
     int32_t lon_e6;
     uint32_t location_advert_timestamp;
     uint32_t location_seq;
+    d1l_node_location_provenance_t location_provenance;
 } d1l_node_marker_t;
 
 typedef enum {
@@ -113,5 +119,8 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
                             size_t max_entries);
 /* Changes only for marker membership, identity/name/type, or coordinate changes. */
 uint32_t d1l_node_store_marker_generation(void);
-/* Passive, bounded snapshot of located nodes, newest local location receipt first. */
+/* Passive, bounded snapshot of located nodes, newest local location receipt first.
+ * This store is written only by d1l_node_store_upsert_advert(), after the signed
+ * advert gate. The transient marker therefore publishes that provenance
+ * explicitly instead of asking the UI to infer it from coordinates. */
 size_t d1l_node_store_copy_markers(d1l_node_marker_t *out_markers, size_t max_markers);

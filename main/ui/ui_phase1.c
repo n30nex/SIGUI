@@ -307,6 +307,7 @@ typedef struct {
 
 typedef struct {
     bool location_set;
+    d1l_map_center_source_t center_source;
     int32_t lat_e7;
     int32_t lon_e7;
     uint8_t zoom;
@@ -499,6 +500,7 @@ static d1l_ui_map_render_input_t map_render_input_from_snapshot(
 {
     return (d1l_ui_map_render_input_t) {
         .location_set = snapshot->map_location_set,
+        .center_source = snapshot->map_center_source,
         .lat_e7 = snapshot->map_lat_e7,
         .lon_e7 = snapshot->map_lon_e7,
         .zoom = snapshot->map_tile_zoom,
@@ -516,6 +518,7 @@ static bool map_render_input_changed_from_rendered(const d1l_app_snapshot_t *sna
     const d1l_ui_map_render_input_t current = map_render_input_from_snapshot(snapshot);
     return !s_rendered_map_input_valid ||
            current.location_set != s_rendered_map_input.location_set ||
+           current.center_source != s_rendered_map_input.center_source ||
            current.lat_e7 != s_rendered_map_input.lat_e7 ||
            current.lon_e7 != s_rendered_map_input.lon_e7 ||
            current.zoom != s_rendered_map_input.zoom;
@@ -2896,6 +2899,13 @@ static void handle_node_detail_action(
     switch (event->action) {
     case D1L_UI_NODE_DETAIL_ACTION_CLOSE:
         hide_node_detail_sheet();
+        if (event->return_to_map) {
+            /* The detail modal may outlive a settings/time refresh. Rebind the
+             * retained viewport to the current trusted center before any
+             * reacquire; stale saved coordinates must fail closed. */
+            d1l_app_model_snapshot(&s_snapshot);
+            d1l_ui_map_viewport_update_truth_context(&s_snapshot);
+        }
         if (event->return_to_map &&
             d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
             !d1l_ui_modal_has_active() && !s_lock_visible &&
@@ -7253,6 +7263,7 @@ static void map_viewport_timer_cb(lv_timer_t *timer)
         !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
         map_interactive_touch_authorized();
     if (map_uncovered) {
+        d1l_ui_map_viewport_update_truth_context(&s_snapshot);
         (void)d1l_ui_map_viewport_refresh();
     }
 }
@@ -7271,6 +7282,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
         !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
         map_interactive_touch_authorized();
     if (map_uncovered) {
+        d1l_ui_map_viewport_update_truth_context(&s_snapshot);
         (void)d1l_ui_map_viewport_refresh();
     }
     if (map_uncovered && map_render_input_changed_from_rendered(&s_snapshot)) {
