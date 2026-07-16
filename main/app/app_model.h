@@ -8,6 +8,7 @@
 
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
+#include "map/map_marker_truth.h"
 #include "mesh/channel_store.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
@@ -123,6 +124,9 @@ typedef struct {
     bool map_tile_render_supported;
     bool map_tile_sideload_supported;
     bool map_location_set;
+    d1l_map_center_source_t map_center_source;
+    bool map_marker_age_reference_valid;
+    uint32_t map_marker_reference_timestamp;
     int32_t map_lat_e7;
     int32_t map_lon_e7;
     uint8_t map_tile_zoom;

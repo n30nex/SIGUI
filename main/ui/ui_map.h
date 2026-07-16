@@ -96,6 +96,10 @@ void d1l_ui_map_viewport_release(void);
 void d1l_ui_map_viewport_prepare_cover(void);
 void d1l_ui_map_viewport_set_suppressed(bool suppressed);
 void d1l_ui_map_viewport_suppress_next_acquire(void);
+/* UI-task-only context refresh. Pin ages are accepted only against the
+ * snapshot's validated wall clock; center provenance is never inferred. */
+void d1l_ui_map_viewport_update_truth_context(
+    const d1l_app_snapshot_t *snapshot);
 bool d1l_ui_map_viewport_refresh(void);
 /* Reacquire the unchanged visible view after a Map-owned modal closes. The
  * service's exact-view retention/cache policy decides whether any frame copy

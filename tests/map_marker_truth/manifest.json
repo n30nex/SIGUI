@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "scope": "wp16_signed_location_map_pin_truth_software_only",
+  "source_hash_mode": "canonical_lf_text_sha256",
+  "physical_acceptance_claimed": false,
+  "rf_acceptance_claimed": false,
+  "semantic_bindings": [
+    {
+      "id": "signed_advert_signature_gate",
+      "source": "main/mesh/meshcore_service.c",
+      "symbol": "verify_advert_signature"
+    },
+    {
+      "id": "signed_advert_coordinate_parser",
+      "source": "main/mesh/advert_data.c",
+      "symbol": "d1l_advert_data_parse"
+    },
+    {
+      "id": "retained_location_and_explicit_provenance",
+      "source": "main/mesh/node_store.c",
+      "symbol": "d1l_node_store_copy_markers"
+    },
+    {
+      "id": "fail_closed_pin_truth_oracle",
+      "source": "main/map/map_marker_truth.c",
+      "symbol": "d1l_map_marker_truth_evaluate"
+    },
+    {
+      "id": "validated_wall_age_reference",
+      "source": "main/app/app_model.c",
+      "symbol": "d1l_app_model_snapshot"
+    },
+    {
+      "id": "persisted_manual_center_settings",
+      "source": "main/app/settings_model.c",
+      "symbol": "d1l_settings_update_fields"
+    },
+    {
+      "id": "trusted_time_status",
+      "source": "main/platform/time_service.c",
+      "symbol": "d1l_time_service_status"
+    },
+    {
+      "id": "trusted_wall_clock_core",
+      "source": "main/platform/time_service_core.c",
+      "symbol": "d1l_time_core_snapshot"
+    },
+    {
+      "id": "viewport_tile_math",
+      "source": "main/map/map_math.c",
+      "symbol": "d1l_map_math_plan_current_view"
+    },
+    {
+      "id": "signed_pin_coordinate_projection",
+      "source": "main/map/map_point_projection.c",
+      "symbol": "d1l_map_point_project_e6"
+    },
+    {
+      "id": "map_service_transition_owner",
+      "source": "main/map/map_view_service.c",
+      "symbol": "d1l_map_view_service_acquire_visible"
+    },
+    {
+      "id": "stateful_viewport_truth_transition",
+      "source": "main/map/map_viewport_truth_transition.c",
+      "symbol": "d1l_map_viewport_truth_apply"
+    },
+    {
+      "id": "initial_center_gated_acquisition",
+      "source": "main/ui/ui_map.c",
+      "symbol": "d1l_ui_map_render"
+    },
+    {
+      "id": "interactive_center_gated_acquisition",
+      "source": "main/ui/ui_map.c",
+      "symbol": "map_viewport_request_interactive_view"
+    },
+    {
+      "id": "center_gated_reacquire",
+      "source": "main/ui/ui_map.c",
+      "symbol": "d1l_ui_map_viewport_reacquire"
+    },
+    {
+      "id": "bounded_passive_pin_renderer",
+      "source": "main/ui/ui_map.c",
+      "symbol": "map_viewport_refresh_markers"
+    },
+    {
+      "id": "ui_task_truth_context_refresh",
+      "source": "main/ui/ui_phase1.c",
+      "symbol": "refresh_timer_cb"
+    },
+    {
+      "id": "node_detail_return_truth_rebind",
+      "source": "main/ui/ui_phase1.c",
+      "symbol": "handle_node_detail_action"
+    },
+    {
+      "id": "node_detail_immutable_return_projection",
+      "source": "main/ui/ui_node_detail.c",
+      "symbol": "d1l_ui_node_detail_build_view_model"
+    },
+    {
+      "id": "deterministic_visual_truth_oracle",
+      "source": "tools/ui_simulator.py",
+      "symbol": "draw_map_markers"
+    }
+  ],
+  "production_source_pins": {
+    "main/app/app_model.c": "3b29e3a89040116ac1dcedb606b5773f761b1bab8f20717e685bf614b841ae16",
+    "main/app/app_model.h": "b9e4bda685dc9c996c9f55f8a81eb38cd1eee4af9295f34c4dd3f5a08aef4070",
+    "main/app/settings_model.c": "15a5d7baa096daa03c0369068282525baab1303e2ecbcc1010123d25bfeb6fa6",
+    "main/app/settings_model.h": "17e976c5105e35978187c58cd81da756d8a20808cac0cce9cfffba2e97ce5795",
+    "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
+    "main/map/map_marker_truth.h": "0aa1723d730016c870e1f6cb93e892803ab6bda589672e4bb99b3abe518466cc",
+    "main/map/map_math.c": "a7915104c13d8dc9c3e094fb3ed658da45adec14f65ad3e3493444cee4624943",
+    "main/map/map_math.h": "7e06cd6eae33e931ab6bcee3ae048a18c02310befed69d650011212dc8788fd8",
+    "main/map/map_point_projection.c": "77cc6064eefb1ef2b74822468f629c6f98de921475db6e90e11de7127c317431",
+    "main/map/map_point_projection.h": "4865c182004b8d4ba655b1c9d12a8b592f18c28faf523cd367431dc19e169c19",
+    "main/map/map_view_service.c": "9538d808f2c2597be87befd228e073b99e91dfb28b4268d0db73349d08b889cb",
+    "main/map/map_view_service.h": "1788ad31a7798196cf06ee3d469b70a3b2fa352ca7e1fb951bf52d4f6ad15b72",
+    "main/map/map_viewport_truth_transition.c": "99d0b57a4902a4e3a78c4f9a096eb7627e2aaaf102b9a552944aa70fa862ec60",
+    "main/map/map_viewport_truth_transition.h": "4de9fd54634d0f3481a5069895e72357bee55593ead88d44db526c98f37bc66e",
+    "main/mesh/advert_data.c": "b046f34629d8f04fbf680cc8b517958162c5401acb991d5bb3231c75f3ac6818",
+    "main/mesh/meshcore_service.c": "4da21ca94e2c89c623698e63da518098416237d9302061fb72413436aed2a7a7",
+    "main/mesh/node_store.c": "d6bde04c212d39417b93ab3f89e2ffcc7a06bc5812a83285a511680085c4b2b0",
+    "main/mesh/node_store.h": "6f9ebf9b92bcca3d405df25483454192011a372c7eaedee2a5625badd22daa23",
+    "main/platform/time_service.c": "ef1602a22a9cc97580877bd42867ba04524e5a5697c8e14f7e955c268badc7b9",
+    "main/platform/time_service.h": "07d19b51dda5c0c18bd61b87b577fa402ce5c8befc5b6f421a15019d5e01b0b0",
+    "main/platform/time_service_core.c": "005c5b75126104f410584e81396e573ee48553564bc94d4b45628192a26c94e3",
+    "main/platform/time_service_core.h": "f3af332807f433d49344eaf45cee29473940a988c47e3c02c44fd44cd0306d75",
+    "main/ui/ui_map.c": "59eb333a957449392e8cef31e9a018f53268c2e7643e2873349a152dd8919ca7",
+    "main/ui/ui_map.h": "35833cc85e96764c126cb311697f43c238bc742130b42c87d603d51ce8695176",
+    "main/ui/ui_node_detail.c": "ce7c440a40d946d13537dd3474aee281f574355cbce3368a134428dacb1d3243",
+    "main/ui/ui_node_detail.h": "320490b05cf56de0e60fbeefd5c052ba268c4a778f9b82338febf8cd5c75e659",
+    "main/ui/ui_phase1.c": "8999f5fd3721220be06e8ceb18eb423c19c0223acb1fa41020531eb78f8fdd1f",
+    "tools/ui_simulator.py": "8b5bdc00b1e783b9e57befa431e983a3c7842984d7b9e375710d49e8d4e87785"
+  }
+}

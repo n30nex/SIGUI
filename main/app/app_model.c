@@ -372,6 +372,19 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->map_tile_render_supported = D1L_MAP_TILE_RENDER_SUPPORTED;
     snapshot->map_tile_sideload_supported = false;
     snapshot->map_location_set = settings.map_location_set;
+    /* Every current map-location writer is an explicit local UI/USB action.
+     * Authenticated companion ownership remains a separate future setter and
+     * must not be inferred from the coordinate alone. */
+    snapshot->map_center_source = settings.map_location_set ?
+        D1L_MAP_CENTER_SOURCE_MANUAL : D1L_MAP_CENTER_SOURCE_UNKNOWN;
+    snapshot->map_marker_age_reference_valid =
+        time_status.clock.certificate_time_valid &&
+        time_status.clock.wall_epoch_sec >= D1L_TIME_WALL_MIN_EPOCH &&
+        time_status.clock.wall_epoch_sec <= (int64_t)UINT32_MAX;
+    if (snapshot->map_marker_age_reference_valid) {
+        snapshot->map_marker_reference_timestamp =
+            (uint32_t)time_status.clock.wall_epoch_sec;
+    }
     snapshot->map_tile_download_supported = connectivity.wifi_build_enabled &&
                                             connectivity.wifi_connected &&
                                             snapshot->map_tile_cache_ready &&

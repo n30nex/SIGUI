@@ -150,6 +150,8 @@ class Node:
     advert_lon_e6: int | None = None
     public_key_hex: str = ""
     dm_capable: bool = False
+    location_advert_timestamp: int = 0
+    location_provenance: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -214,6 +216,8 @@ class Snapshot:
     map_lat_e7: int
     map_lon_e7: int
     map_center_source: str
+    map_marker_age_reference_valid: bool = False
+    map_marker_reference_timestamp: int = 0
     message_store_loaded: bool = True
     dm_store_loaded: bool = True
     message_store_persistence_degraded: bool = False
@@ -937,13 +941,23 @@ def map_wifi_connecting_snapshot() -> Snapshot:
 def map_ready_snapshot() -> Snapshot:
     base = storage_ready_map_tiles_sd_snapshot()
     located_heard = (
-        replace(base.heard[0], advert_lat_e6=43_675_000, advert_lon_e6=-79_440_000),
-        replace(base.heard[1], advert_lat_e6=43_620_000, advert_lon_e6=-79_300_000),
+        replace(
+            base.heard[0], advert_lat_e6=43_675_000,
+            advert_lon_e6=-79_440_000, location_advert_timestamp=1_940,
+            location_provenance="signed_advert",
+        ),
+        replace(
+            base.heard[1], advert_lat_e6=43_620_000,
+            advert_lon_e6=-79_300_000, location_advert_timestamp=1_880,
+            location_provenance="signed_advert",
+        ),
         replace(
             base.heard[2],
             name="Krabs Lagoon Repeater",
             advert_lat_e6=43_700_000,
             advert_lon_e6=-79_620_000,
+            location_advert_timestamp=1_700,
+            location_provenance="signed_advert",
         ),
     )
     return replace(
@@ -953,6 +967,8 @@ def map_ready_snapshot() -> Snapshot:
         map_lat_e7=436532000,
         map_lon_e7=-793832000,
         map_center_source="manual",
+        map_marker_age_reference_valid=True,
+        map_marker_reference_timestamp=2_000,
         wifi_enabled=True,
         wifi_connected=True,
         map_tile_download_supported=True,
@@ -1411,15 +1427,35 @@ def node_dm_identity_reason(snap: Snapshot, node: Node) -> str:
 def map_marker_color(role: str) -> tuple[int, int, int]:
     """Match ui_map.c's canonical bright marker palette."""
     normalized = role.lower()
-    if "repeat" in normalized:
+    if normalized == "repeater":
         return (250, 204, 21)
-    if "room" in normalized:
+    if normalized == "room":
         return (192, 132, 252)
-    if "sensor" in normalized:
+    if normalized == "sensor":
         return (56, 189, 248)
-    if "companion" in normalized or normalized == "chat":
+    if normalized in ("companion", "chat"):
         return (45, 212, 191)
     return (163, 230, 53)
+
+
+def map_marker_role_label(role: str) -> str:
+    return {
+        "companion": "Companion",
+        "chat": "Companion",
+        "repeater": "Repeater",
+        "room": "Room Server",
+        "sensor": "Sensor",
+    }.get(role.lower(), "Unknown role")
+
+
+def map_marker_age_label(age_sec: int) -> str:
+    if age_sec < 60:
+        return "<1m"
+    if age_sec < 3_600:
+        return f"{age_sec // 60}m"
+    if age_sec < 86_400:
+        return f"{age_sec // 3_600}h"
+    return f"{age_sec // 86_400}d"
 
 
 def map_marker_display_name(name: str) -> str:
@@ -3175,6 +3211,10 @@ def map_wifi_status(snap: Snapshot) -> tuple[str, tuple[int, int, int]]:
     return ("Off", MUTED)
 
 
+def map_center_is_trusted(snap: Snapshot) -> bool:
+    return snap.map_location_set and snap.map_center_source in ("manual", "companion")
+
+
 def map_view_status(snap: Snapshot) -> tuple[str, str, tuple[int, int, int]]:
     """Return the same calm empty-state copy used by the firmware viewport."""
 
@@ -3182,6 +3222,8 @@ def map_view_status(snap: Snapshot) -> tuple[str, str, tuple[int, int, int]]:
         return ("Map unavailable", "Check the SD card, then reopen Map.", AMBER)
     if not snap.map_location_set:
         return ("Set a location", "Open Options to choose the area shown here.", AMBER)
+    if not map_center_is_trusted(snap):
+        return ("Center unavailable", "Map center provenance is unknown; save it again.", AMBER)
     if not snap.map_tile_cache_ready:
         if snap.storage_setup_action == "insert_card":
             return ("SD card required", "Insert a FAT32 card to save and load map tiles.", AMBER)
@@ -3259,14 +3301,15 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
     query_limit = 32
     display_limit = 8
     label_width = 112
-    label_height = 20
+    label_height = 38
     dot_radius = 7
     label_gap = 3
     exclusions = (
         (0, TOP_BAR_H, 112, TOP_BAR_H + 64),
         (108, TOP_BAR_H + 10, 412, TOP_BAR_H + 64),
         (412, TOP_BAR_H, 478, TOP_BAR_H + 152),
-        (0, TOP_BAR_H + 294, 112, TOP_BAR_H + 360),
+        (0, TOP_BAR_H + 270, 112, TOP_BAR_H + 360),
+        (108, TOP_BAR_H + 294, 232, TOP_BAR_H + 360),
         (220, TOP_BAR_H + 326, 478, TOP_BAR_H + 360),
     )
     placed: list[tuple[int, int, int, int]] = []
@@ -3274,14 +3317,27 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
     full_names: list[str] = []
     fingerprints: list[str] = []
     roles: list[str] = []
+    role_labels: list[str] = []
+    ages: list[int] = []
+    age_labels: list[str] = []
     colors: list[str] = []
     located = [
         node for node in snap.heard
         if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
     ][:query_limit]
+    provenance_verified = bool(located) and all(
+        node.location_provenance == "signed_advert" for node in located
+    )
     for node in located:
         if len(placed) >= display_limit:
             break
+        if (
+            node.location_provenance != "signed_advert"
+            or not snap.map_marker_age_reference_valid
+            or node.location_advert_timestamp <= 0
+            or node.location_advert_timestamp > snap.map_marker_reference_timestamp
+        ):
+            continue
         point = map_project_node(snap, node, viewport)
         if point is None:
             continue
@@ -3302,9 +3358,13 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
 
         color = map_marker_color(node.role)
         display_name = map_marker_display_name(node.name)
+        role_label = map_marker_role_label(node.role)
+        age = snap.map_marker_reference_timestamp - node.location_advert_timestamp
+        age_label = map_marker_age_label(age)
         s.draw.ellipse((x - dot_radius, y - dot_radius, x + dot_radius, y + dot_radius), fill=color, outline=TEXT, width=2)
         s.round_rect(label_box, (7, 16, 24), (7, 16, 24), 4)
-        s.text(display_name, label_box, 11, TEXT, True, "center")
+        s.text(display_name, (label_box[0], label_box[1], label_box[2], label_box[1] + 18), 10, TEXT, True, "center")
+        s.text(f"{role_label} {age_label}", (label_box[0], label_box[1] + 18, label_box[2], label_box[3]), 9, TEXT, False, "center")
         s.touch_target(
             f"Map node {node.name}",
             (x - 22, y - 22, x + 22, y + 22),
@@ -3317,6 +3377,9 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
         full_names.append(node.name)
         fingerprints.append(node.fingerprint)
         roles.append(node.role)
+        role_labels.append(role_label)
+        ages.append(age)
+        age_labels.append(age_label)
         colors.append(f"#{color[0]:02X}{color[1]:02X}{color[2]:02X}")
     return {
         "map_marker_query_limit": query_limit,
@@ -3331,6 +3394,9 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
         ),
         "map_marker_fingerprints": fingerprints,
         "map_marker_roles": roles,
+        "map_marker_role_labels": role_labels,
+        "map_marker_age_seconds": ages,
+        "map_marker_age_labels": age_labels,
         "map_marker_colors": colors,
         "map_marker_bounds": [list(box) for box in placed],
         "map_marker_exclusion_boxes": [list(box) for box in exclusions],
@@ -3340,14 +3406,18 @@ def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, 
         "map_marker_refresh_rebuilds_tiles": False,
         "map_marker_hit_diameter_px": 44,
         "map_marker_source": "signed_advert_location",
+        "map_marker_provenance_verified": provenance_verified,
+        "map_marker_age_verified": snap.map_marker_age_reference_valid,
+        "map_marker_precision_claim": "accuracy_unknown",
         "map_saved_center_pin": "omitted",
     }
 
 
 def render_map(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
-    ready_for_live = snap.map_location_set and snap.wifi_connected
-    frame_ready = snap.map_tile_download_state in ("active_view_ready", "cache_reuse") and (
+    center_trusted = map_center_is_trusted(snap)
+    ready_for_live = center_trusted and snap.wifi_connected
+    frame_ready = center_trusted and snap.map_tile_download_state in ("active_view_ready", "cache_reuse") and (
         ready_for_live or snap.map_cached_tile_count > 0
     )
     progress_visible = (
@@ -3371,6 +3441,9 @@ def render_map(s: Surface, snap: Snapshot):
             "map_marker_names": [],
             "map_marker_fingerprints": [],
             "map_marker_roles": [],
+            "map_marker_role_labels": [],
+            "map_marker_age_seconds": [],
+            "map_marker_age_labels": [],
             "map_marker_colors": [],
             "map_marker_bounds": [],
             "map_marker_exclusion_boxes": [],
@@ -3380,6 +3453,9 @@ def render_map(s: Surface, snap: Snapshot):
             "map_marker_refresh_rebuilds_tiles": False,
             "map_marker_hit_diameter_px": 44,
             "map_marker_source": "signed_advert_location",
+            "map_marker_provenance_verified": False,
+            "map_marker_age_verified": snap.map_marker_age_reference_valid,
+            "map_marker_precision_claim": "accuracy_unknown",
             "map_saved_center_pin": "omitted",
         }
         s.rect(viewport, (11, 21, 30))
@@ -3399,7 +3475,16 @@ def render_map(s: Surface, snap: Snapshot):
         destination="map_options",
     )
 
-    if snap.map_location_set:
+    if center_trusted:
+        center_source_label = {
+            "manual": "Manual source",
+            "companion": "Companion source",
+        }.get(snap.map_center_source, "Unknown source")
+        s.text(
+            center_source_label,
+            (8, TOP_BAR_H + 278, 104, TOP_BAR_H + 298),
+            9, GREEN, True, "center",
+        )
         draw_button(s, (8, DOCK_Y - 60, 104, DOCK_Y - 8), "Center", TEXT, action="map_recenter")
         s.round_rect((142, TOP_BAR_H + 14, 314, TOP_BAR_H + 46), (7, 16, 24), (7, 16, 24), 5)
         progress_label = (
@@ -3440,6 +3525,19 @@ def render_map(s: Surface, snap: Snapshot):
         s.text(f"z{snap.map_tile_zoom}", (420, TOP_BAR_H + 66, 472, TOP_BAR_H + 88), 11, TEXT, True, "center")
         draw_button(s, (420, TOP_BAR_H + 92, 472, TOP_BAR_H + 144), "-", TEXT, action="map_zoom_out")
 
+    pin_truth = (
+        "Signed advert E6\nage verified\naccuracy unknown"
+        if snap.map_marker_age_reference_valid
+        else "Signed advert E6\npins hidden\nage unverified"
+    )
+    s.round_rect((112, TOP_BAR_H + 298, 224, TOP_BAR_H + 356), (7, 16, 24), (7, 16, 24), 4)
+    s.wrapped_text(
+        pin_truth,
+        (114, TOP_BAR_H + 300, 222, TOP_BAR_H + 354),
+        8, GREEN if snap.map_marker_age_reference_valid else AMBER,
+        line_height=16, align="center",
+    )
+
     s.round_rect((228, DOCK_Y - 30, 472, DOCK_Y - 6), (7, 16, 24), (7, 16, 24), 4)
     s.text(MAP_ATTRIBUTION, (234, DOCK_Y - 28, 466, DOCK_Y - 8), 10, TEXT, True, "right")
     s.metrics.update(
@@ -3447,8 +3545,8 @@ def render_map(s: Surface, snap: Snapshot):
             "map_hierarchy_level": "actual_view",
             "map_actual_view": True,
             "map_landing_action_count": 1,
-            "map_view_control_count": 3 if snap.map_location_set else 0,
-            "map_pan_gesture": snap.map_location_set,
+            "map_view_control_count": 3 if center_trusted else 0,
+            "map_pan_gesture": center_trusted,
             "map_full_bleed_content": True,
             "map_local_header_height": 0,
             "map_controls_overlay_canvas": True,
@@ -3469,6 +3567,15 @@ def render_map(s: Surface, snap: Snapshot):
             "map_tile_style": "local_dark_osm_standard",
             "map_location_set": snap.map_location_set,
             "map_center_source": snap.map_center_source,
+            "map_center_provenance_explicit": center_trusted,
+            "map_center_trust_required_for_initial_acquire": True,
+            "map_center_trust_required_for_interactive_acquire": True,
+            "map_center_trust_required_for_reacquire": True,
+            "map_trust_loss_invalidates_retained_view": True,
+            "map_backward_time_rechecks_future_pins": True,
+            "map_pin_truth_legend": pin_truth,
+            "map_marker_age_reference_valid": snap.map_marker_age_reference_valid,
+            "map_marker_reference_timestamp": snap.map_marker_reference_timestamp,
             "map_center_lat_e7": snap.map_lat_e7,
             "map_center_lon_e7": snap.map_lon_e7,
             "map_route_count": len(snap.routes),

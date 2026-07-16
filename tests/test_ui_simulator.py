@@ -1992,6 +1992,26 @@ def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_pat
     assert map_view["metrics"]["map_marker_refresh_rebuilds_tiles"] is False
     assert map_view["metrics"]["map_marker_hit_diameter_px"] == 44
     assert map_view["metrics"]["map_marker_source"] == "signed_advert_location"
+    assert map_view["metrics"]["map_marker_provenance_verified"] is True
+    assert map_view["metrics"]["map_marker_age_verified"] is True
+    assert map_view["metrics"]["map_marker_role_labels"] == [
+        "Companion",
+        "Room Server",
+        "Repeater",
+    ]
+    assert map_view["metrics"]["map_marker_age_seconds"] == [60, 120, 300]
+    assert map_view["metrics"]["map_marker_age_labels"] == ["1m", "2m", "5m"]
+    assert map_view["metrics"]["map_marker_precision_claim"] == "accuracy_unknown"
+    assert map_view["metrics"]["map_center_source"] == "manual"
+    assert map_view["metrics"]["map_center_provenance_explicit"] is True
+    assert map_view["metrics"]["map_center_trust_required_for_initial_acquire"] is True
+    assert map_view["metrics"]["map_center_trust_required_for_interactive_acquire"] is True
+    assert map_view["metrics"]["map_center_trust_required_for_reacquire"] is True
+    assert map_view["metrics"]["map_trust_loss_invalidates_retained_view"] is True
+    assert map_view["metrics"]["map_backward_time_rechecks_future_pins"] is True
+    assert map_view["metrics"]["map_pin_truth_legend"] == (
+        "Signed advert E6\nage verified\naccuracy unknown"
+    )
     assert map_view["metrics"]["map_saved_center_pin"] == "omitted"
     assert len(set(map_view["metrics"]["map_marker_colors"])) == 3
     assert "#F87171" not in map_view["metrics"]["map_marker_colors"]
@@ -2027,6 +2047,73 @@ def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_pat
     assert dm_targets[0]["destination"] == "compose_sheet"
     assert detail["metrics"]["node_detail_return_destination"] == "map"
     assert detail["metrics"]["node_detail_return_reuses_map_view"] is True
+
+
+def test_ui_simulator_map_markers_fail_closed_without_verified_age():
+    surface = ui_simulator.Surface("map")
+    snapshot = replace(
+        ui_simulator.map_ready_snapshot(),
+        map_marker_age_reference_valid=False,
+        map_marker_reference_timestamp=0,
+    )
+    ui_simulator.render_map(surface, snapshot)
+
+    assert surface.metrics["map_marker_query_count"] == 3
+    assert surface.metrics["map_marker_displayed_count"] == 0
+    assert surface.metrics["map_marker_age_verified"] is False
+    assert surface.metrics["map_pin_truth_legend"] == (
+        "Signed advert E6\npins hidden\nage unverified"
+    )
+
+
+def test_ui_simulator_map_markers_fail_closed_for_unknown_location_provenance():
+    surface = ui_simulator.Surface("map")
+    ready = ui_simulator.map_ready_snapshot()
+    snapshot = replace(
+        ready,
+        heard=tuple(
+            replace(node, location_provenance="unknown")
+            for node in ready.heard
+        ),
+    )
+    ui_simulator.render_map(surface, snapshot)
+
+    assert surface.metrics["map_marker_query_count"] == 3
+    assert surface.metrics["map_marker_displayed_count"] == 0
+    assert surface.metrics["map_marker_provenance_verified"] is False
+    assert surface.metrics["map_marker_age_verified"] is True
+
+
+def test_ui_simulator_backward_trusted_time_rechecks_and_removes_future_pins():
+    surface = ui_simulator.Surface("map")
+    snapshot = replace(
+        ui_simulator.map_ready_snapshot(),
+        map_marker_reference_timestamp=1_800,
+    )
+    ui_simulator.render_map(surface, snapshot)
+
+    assert surface.metrics["map_marker_query_count"] == 3
+    assert surface.metrics["map_marker_displayed_count"] == 1
+    assert surface.metrics["map_marker_full_names"] == ["Krabs Lagoon Repeater"]
+    assert surface.metrics["map_marker_age_seconds"] == [100]
+    assert surface.metrics["map_marker_age_labels"] == ["1m"]
+
+
+def test_ui_simulator_unknown_center_provenance_invalidates_all_acquire_paths():
+    surface = ui_simulator.Surface("map")
+    snapshot = replace(
+        ui_simulator.map_ready_snapshot(),
+        map_center_source="unknown",
+    )
+    ui_simulator.render_map(surface, snapshot)
+
+    assert "Center unavailable" in surface.labels
+    assert surface.metrics["map_frame_ready"] is False
+    assert surface.metrics["map_view_control_count"] == 0
+    assert surface.metrics["map_pan_gesture"] is False
+    assert surface.metrics["map_interactive_request_eligible"] is False
+    assert surface.metrics["map_center_provenance_explicit"] is False
+    assert surface.metrics["map_marker_displayed_count"] == 0
 
 
 def test_ui_simulator_map_downloading_shows_determinate_progress(tmp_path):

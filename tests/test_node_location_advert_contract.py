@@ -256,6 +256,8 @@ def test_marker_query_is_bounded_passive_and_location_only():
     assert "d1l_node_marker_t" in header
     assert "d1l_node_store_marker_generation" in header
     assert "d1l_node_store_copy_markers" in header
+    assert "D1L_NODE_LOCATION_PROVENANCE_SIGNED_ADVERT" in header
+    assert "D1L_NODE_LOCATION_PROVENANCE_SIGNED_ADVERT" in query
     assert "copied < max_markers" in query
     assert "!s_entries[i].location_valid" in query
     assert "location_seq" in query

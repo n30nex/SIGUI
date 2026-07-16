@@ -941,6 +941,8 @@ size_t d1l_node_store_copy_markers(d1l_node_marker_t *out_markers, size_t max_ma
         marker->lon_e6 = s_entries[best].lon_e6;
         marker->location_advert_timestamp = s_entries[best].location_advert_timestamp;
         marker->location_seq = s_entries[best].location_seq;
+        marker->location_provenance =
+            D1L_NODE_LOCATION_PROVENANCE_SIGNED_ADVERT;
     }
     d1l_store_lock_give(&s_store_lock);
     return copied;
