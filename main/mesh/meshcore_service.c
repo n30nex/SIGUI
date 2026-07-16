@@ -23,6 +23,7 @@
 #include "mesh/ed25519_canonical.h"
 #include "mesh/meshcore_ack_dispatch.h"
 #include "mesh/meshcore_admin_runtime.h"
+#include "mesh/meshcore_command_guard.h"
 #include "mesh/meshcore_dm_retry.h"
 #include "mesh/meshcore_identity_exchange.h"
 #include "mesh/meshcore_path_dispatch.h"
@@ -91,6 +92,9 @@ _Static_assert(D1L_ADVERT_DATA_NAME_LEN == D1L_HEARD_NODE_NAME_LEN,
 _Static_assert(D1L_MESHCORE_PUB_KEY_SIZE ==
                    D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES,
                "admin and MeshCore identity sizes must match");
+_Static_assert(D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY ==
+                   D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U,
+               "admin command credential capacity must match protocol");
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
@@ -201,6 +205,9 @@ typedef enum {
     D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
     D1L_MESHCORE_SERVICE_CMD_SEND_DM,
     D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT,
+    D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN,
+    D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS,
+    D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGOUT,
     D1L_MESHCORE_SERVICE_EVENT_TX_DONE,
     D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT,
     D1L_MESHCORE_SERVICE_EVENT_RX_DONE,
@@ -223,6 +230,7 @@ typedef struct {
     char dm_text[D1L_MESSAGE_TEXT_LEN];
     bool dm_path_probe;
     char trace_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char admin_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     int16_t rssi;
     int8_t snr;
     uint64_t monotonic_us;
@@ -233,7 +241,7 @@ typedef struct {
 } d1l_meshcore_service_cmd_t;
 
 typedef struct {
-    d1l_mesh_request_guard_t guard;
+    d1l_mesh_command_request_t request;
     StaticSemaphore_t completion_storage;
     SemaphoreHandle_t completion;
     esp_err_t result;
@@ -269,6 +277,17 @@ static esp_err_t meshcore_service_queue_raw_response(
 static void finalize_pending_dm_radio_result(bool sent, esp_err_t error);
 static esp_err_t retry_pending_dm_as_flood(uint64_t now_us);
 static void fail_pending_dm_ack_timeout(esp_err_t error);
+static void secure_zero_bytes(void *data, size_t size);
+static esp_err_t prepare_admin_route(
+    const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
+    d1l_contact_entry_t *out_contact,
+    d1l_meshcore_route_selection_t *out_selection);
+
+static void meshcore_service_command_wipe(
+    d1l_meshcore_service_cmd_t *cmd)
+{
+    secure_zero_bytes(cmd, cmd ? sizeof(*cmd) : 0U);
+}
 
 static bool meshcore_request_slots_init(void)
 {
@@ -324,7 +343,8 @@ static d1l_meshcore_request_slot_t *meshcore_request_slot_for(
     }
     d1l_meshcore_request_slot_t *slot =
         &s_request_slots[cmd->request_slot];
-    return d1l_mesh_request_guard_matches(&slot->guard, cmd->request_id) ?
+    return d1l_mesh_command_request_matches(
+               &slot->request, cmd->request_id) ?
         slot : NULL;
 }
 
@@ -340,15 +360,16 @@ static esp_err_t meshcore_request_claim(
     }
     for (size_t i = 0U; i < D1L_MESHCORE_REQUEST_SLOT_COUNT; ++i) {
         d1l_meshcore_request_slot_t *slot = &s_request_slots[i];
-        if (!d1l_mesh_request_guard_claim(&slot->guard, request_id)) {
+        if (!d1l_mesh_command_request_claim(&slot->request, request_id)) {
             continue;
         }
         while (xSemaphoreTake(slot->completion, 0) == pdTRUE) {
         }
         slot->result = ESP_ERR_TIMEOUT;
-        if (!d1l_mesh_request_guard_publish(&slot->guard, request_id)) {
-            (void)d1l_mesh_request_guard_release(
-                &slot->guard, request_id, D1L_MESH_REQUEST_CLAIMED);
+        if (!d1l_mesh_command_request_publish(
+                &slot->request, request_id)) {
+            (void)d1l_mesh_command_request_release(
+                &slot->request, request_id, D1L_MESH_REQUEST_CLAIMED);
             return ESP_ERR_INVALID_STATE;
         }
         cmd->request_id = request_id;
@@ -361,19 +382,48 @@ static esp_err_t meshcore_request_claim(
     return ESP_ERR_TIMEOUT;
 }
 
+static esp_err_t meshcore_request_store_admin_password(
+    const d1l_meshcore_service_cmd_t *cmd, const char *password,
+    size_t password_len)
+{
+    if (!cmd || cmd->type != D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN ||
+        !password || password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
+    return slot && d1l_mesh_command_request_store_admin_password(
+                       &slot->request, cmd->request_id, password,
+                       password_len) ?
+        ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+static bool meshcore_request_take_admin_password(
+    const d1l_meshcore_service_cmd_t *cmd, char *out_password,
+    size_t out_size, size_t *out_len)
+{
+    if (!cmd || cmd->type != D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN ||
+        !out_password || !out_len) {
+        return false;
+    }
+    d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
+    return slot && d1l_mesh_command_request_take_admin_password(
+                       &slot->request, cmd->request_id, out_password,
+                       out_size, out_len);
+}
+
 static esp_err_t meshcore_request_consume(
     const d1l_meshcore_service_cmd_t *cmd,
     d1l_mesh_request_state_t expected_state)
 {
     d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
     if (!slot ||
-        d1l_mesh_request_guard_state(&slot->guard) != expected_state) {
+        d1l_mesh_command_request_state(&slot->request) != expected_state) {
         return ESP_ERR_INVALID_STATE;
     }
     const esp_err_t result = slot->result;
     (void)xSemaphoreTake(slot->completion, 0);
-    if (!d1l_mesh_request_guard_release(
-            &slot->guard, cmd->request_id, expected_state)) {
+    if (!d1l_mesh_command_request_release(
+            &slot->request, cmd->request_id, expected_state)) {
         return ESP_ERR_INVALID_STATE;
     }
     return result;
@@ -388,21 +438,23 @@ static esp_err_t meshcore_request_wait(
     }
     if (xSemaphoreTake(slot->completion, timeout_ticks) == pdTRUE) {
         const d1l_mesh_request_state_t state =
-            d1l_mesh_request_guard_state(&slot->guard);
+            d1l_mesh_command_request_state(&slot->request);
         if (state == D1L_MESH_REQUEST_COMPLETED ||
             state == D1L_MESH_REQUEST_OWNER_EXPIRED) {
             return meshcore_request_consume(cmd, state);
         }
     }
 
-    if (d1l_mesh_request_guard_transition(
-            &slot->guard, cmd->request_id, D1L_MESH_REQUEST_PENDING,
-            D1L_MESH_REQUEST_CALLER_CANCELLED)) {
+    if (d1l_mesh_command_request_cancel_and_release(
+            &slot->request, cmd->request_id)) {
+        /* Cancellation owns the exact generation after this CAS. Clear and
+         * release it here so a later queued copy can only observe a stale ID;
+         * the owner must never release a caller-cancelled slot concurrently. */
         return ESP_ERR_TIMEOUT;
     }
 
     d1l_mesh_request_state_t state =
-        d1l_mesh_request_guard_state(&slot->guard);
+        d1l_mesh_command_request_state(&slot->request);
     if (state == D1L_MESH_REQUEST_ADMITTED ||
         state == D1L_MESH_REQUEST_COMPLETED ||
         state == D1L_MESH_REQUEST_OWNER_EXPIRED) {
@@ -411,7 +463,7 @@ static esp_err_t meshcore_request_wait(
          * semaphore give could leak into the next request that claims it. */
         while (xSemaphoreTake(slot->completion, portMAX_DELAY) != pdTRUE) {
         }
-        state = d1l_mesh_request_guard_state(&slot->guard);
+        state = d1l_mesh_command_request_state(&slot->request);
     }
     if (state == D1L_MESH_REQUEST_COMPLETED ||
         state == D1L_MESH_REQUEST_OWNER_EXPIRED) {
@@ -428,13 +480,8 @@ static void meshcore_request_abort_unqueued(
     if (!slot) {
         return;
     }
-    if (d1l_mesh_request_guard_transition(
-            &slot->guard, cmd->request_id, D1L_MESH_REQUEST_PENDING,
-            D1L_MESH_REQUEST_CALLER_CANCELLED)) {
-        (void)d1l_mesh_request_guard_release(
-            &slot->guard, cmd->request_id,
-            D1L_MESH_REQUEST_CALLER_CANCELLED);
-    }
+    (void)d1l_mesh_command_request_cancel_and_release(
+        &slot->request, cmd->request_id);
 }
 
 static bool meshcore_request_admit(
@@ -448,26 +495,21 @@ static bool meshcore_request_admit(
         return false;
     }
     if ((uint64_t)esp_timer_get_time() >= cmd->request_deadline_us) {
-        slot->result = ESP_ERR_TIMEOUT;
-        if (d1l_mesh_request_guard_transition(
-                &slot->guard, cmd->request_id,
-                D1L_MESH_REQUEST_PENDING,
-                D1L_MESH_REQUEST_OWNER_EXPIRED)) {
+        if (d1l_mesh_command_request_expire(
+                &slot->request, cmd->request_id)) {
+            /* This exact owner now has exclusive terminal ownership until it
+             * signals the caller, which prevents wipe/reuse ABA races. */
+            slot->result = ESP_ERR_TIMEOUT;
             (void)xSemaphoreGive(slot->completion);
             return false;
         }
     }
-    if (d1l_mesh_request_guard_transition(
-            &slot->guard, cmd->request_id, D1L_MESH_REQUEST_PENDING,
-            D1L_MESH_REQUEST_ADMITTED)) {
+    if (d1l_mesh_command_request_admit(
+            &slot->request, cmd->request_id)) {
         return true;
     }
-    if (d1l_mesh_request_guard_state(&slot->guard) ==
-        D1L_MESH_REQUEST_CALLER_CANCELLED) {
-        (void)d1l_mesh_request_guard_release(
-            &slot->guard, cmd->request_id,
-            D1L_MESH_REQUEST_CALLER_CANCELLED);
-    }
+    /* A caller-cancelled generation is wiped and released by the caller that
+     * won that CAS. Touching its slot here could race a subsequent claimant. */
     return false;
 }
 
@@ -482,9 +524,8 @@ static void meshcore_request_complete(
         return;
     }
     slot->result = result;
-    if (d1l_mesh_request_guard_transition(
-            &slot->guard, cmd->request_id, D1L_MESH_REQUEST_ADMITTED,
-            D1L_MESH_REQUEST_COMPLETED)) {
+    if (d1l_mesh_command_request_complete(
+            &slot->request, cmd->request_id)) {
         (void)xSemaphoreGive(slot->completion);
     }
 }
@@ -4586,6 +4627,192 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
     return ESP_OK;
 }
 
+static esp_err_t meshcore_service_handle_admin_login(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    char password[D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U] = {0};
+    size_t password_len = 0U;
+    d1l_settings_t settings_snapshot = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_meshcore_route_selection_t selection = {0};
+    d1l_meshcore_admin_binding_t binding = {0};
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
+    uint8_t raw_len = 0U;
+    d1l_meshcore_service_cmd_t raw_cmd = {0};
+    esp_err_t ret = ESP_ERR_INVALID_STATE;
+
+    /* The credential never enters the FreeRTOS queue. The sole owner takes
+     * it from the exact admitted request slot and clears that slot before any
+     * identity, timestamp, session, packet, or radio side effect begins. */
+    if (!meshcore_request_take_admin_password(
+            cmd, password, sizeof(password), &password_len)) {
+        goto admin_login_cleanup;
+    }
+    if (!cmd || cmd->admin_fingerprint[0] == '\0' ||
+        password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES) {
+        ret = ESP_ERR_INVALID_ARG;
+        goto admin_login_cleanup;
+    }
+    if (!s_service_initialized) {
+        goto admin_login_cleanup;
+    }
+
+    ret = d1l_meshcore_service_ensure_identity();
+    if (ret != ESP_OK) {
+        goto admin_login_cleanup;
+    }
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
+    ret = prepare_admin_route(cmd->admin_fingerprint, &settings_snapshot,
+                              now_ms, &contact, &selection);
+    if (ret != ESP_OK) {
+        goto admin_login_cleanup;
+    }
+
+    uint32_t timestamp = 0U;
+    ret = d1l_settings_next_mesh_timestamp(&timestamp);
+    if (ret != ESP_OK) {
+        goto admin_login_cleanup;
+    }
+    ret = d1l_meshcore_admin_build_login_packet(
+        &settings_snapshot, &contact, &selection, password, timestamp,
+        derive_local_identity_shared_secret, meshcore_encrypt_then_mac,
+        &binding, raw, sizeof(raw), &raw_len);
+    secure_zero_bytes(password, sizeof(password));
+    if (ret != ESP_OK) {
+        goto admin_login_cleanup;
+    }
+
+    uint32_t generation = 0U;
+    if (!d1l_meshcore_admin_runtime_begin_login(
+            &binding, now_us, &generation)) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto admin_login_cleanup;
+    }
+    d1l_meshcore_admin_binding_wipe(&binding);
+
+    raw_cmd.type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW;
+    raw_cmd.requested_tx_kind = D1L_MESH_TX_OPERATION_GENERIC;
+    raw_cmd.raw_len = raw_len;
+    memcpy(raw_cmd.raw, raw, raw_len);
+    ret = meshcore_service_handle_send_raw(&raw_cmd);
+    d1l_meshcore_admin_runtime_note_login_tx(generation, ret);
+    if (ret != ESP_OK) {
+        goto admin_login_cleanup;
+    }
+
+    (void)d1l_route_store_upsert_observation(
+        contact.fingerprint, contact.alias, "admin_login",
+        route_name(selection.route), "tx", 0, 0,
+        selection.path_hash_bytes, selection.path_hops, raw_len);
+
+admin_login_cleanup:
+    d1l_meshcore_admin_binding_wipe(&binding);
+    secure_zero_bytes(&raw_cmd, sizeof(raw_cmd));
+    secure_zero_bytes(raw, sizeof(raw));
+    secure_zero_bytes(password, sizeof(password));
+    return ret;
+}
+
+static esp_err_t meshcore_service_handle_admin_request_status(void)
+{
+    d1l_meshcore_admin_context_t context = {0};
+    d1l_meshcore_admin_binding_t current = {0};
+    d1l_settings_t settings_snapshot = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_meshcore_route_selection_t selection = {0};
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
+    uint8_t raw_len = 0U;
+    d1l_meshcore_service_cmd_t raw_cmd = {0};
+    esp_err_t ret = ESP_ERR_INVALID_STATE;
+
+    if (!s_service_initialized ||
+        !d1l_meshcore_admin_runtime_capture_authenticated(&context)) {
+        goto admin_status_cleanup;
+    }
+
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
+    ret = prepare_admin_route(
+        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
+        &selection);
+    snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
+             context.binding.fingerprint);
+    if (ret == ESP_OK) {
+        current.role = d1l_meshcore_admin_role_for_contact(&contact);
+        memcpy(current.local_public_key,
+               settings_snapshot.identity_public_key,
+               sizeof(current.local_public_key));
+        const esp_err_t derive_ret = hex_to_bytes(
+                current.peer_public_key, sizeof(current.peer_public_key),
+                contact.public_key_hex) ?
+            derive_local_identity_shared_secret(
+                current.peer_public_key, current.local_public_key,
+                current.session_secret) : ESP_ERR_INVALID_STATE;
+        if (derive_ret != ESP_OK ||
+            !d1l_meshcore_admin_runtime_validate_binding(
+                &current, context.generation)) {
+            ret = ESP_ERR_INVALID_STATE;
+        }
+    }
+    if (ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_invalidate(ret);
+        goto admin_status_cleanup;
+    }
+
+    uint32_t tag = 0U;
+    ret = d1l_settings_next_mesh_timestamp(&tag);
+    if (ret == ESP_OK) {
+        ret = d1l_meshcore_admin_build_status_packet(
+            &settings_snapshot, &current, &selection, tag, esp_random(),
+            meshcore_encrypt_then_mac, raw, sizeof(raw), &raw_len);
+    }
+    if (ret != ESP_OK) {
+        goto admin_status_cleanup;
+    }
+
+    uint32_t request_generation = 0U;
+    if (!d1l_meshcore_admin_runtime_begin_status(
+            &current, context.generation, tag, now_us,
+            &request_generation)) {
+        ret = ESP_ERR_INVALID_STATE;
+        goto admin_status_cleanup;
+    }
+    d1l_meshcore_admin_binding_wipe(&current);
+    d1l_meshcore_admin_context_wipe(&context);
+
+    raw_cmd.type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW;
+    raw_cmd.requested_tx_kind = D1L_MESH_TX_OPERATION_GENERIC;
+    raw_cmd.raw_len = raw_len;
+    memcpy(raw_cmd.raw, raw, raw_len);
+    ret = meshcore_service_handle_send_raw(&raw_cmd);
+    d1l_meshcore_admin_runtime_note_status_tx(
+        request_generation, tag, ret);
+    if (ret != ESP_OK) {
+        goto admin_status_cleanup;
+    }
+
+    (void)d1l_route_store_upsert_observation(
+        contact.fingerprint, contact.alias, "admin_status",
+        route_name(selection.route), "tx", 0, 0,
+        selection.path_hash_bytes, selection.path_hops, raw_len);
+
+admin_status_cleanup:
+    d1l_meshcore_admin_binding_wipe(&current);
+    d1l_meshcore_admin_context_wipe(&context);
+    secure_zero_bytes(&raw_cmd, sizeof(raw_cmd));
+    secure_zero_bytes(raw, sizeof(raw));
+    return ret;
+}
+
+static esp_err_t meshcore_service_handle_admin_logout(void)
+{
+    d1l_meshcore_admin_runtime_logout();
+    return ESP_OK;
+}
+
 static void meshcore_service_reply(const d1l_meshcore_service_cmd_t *cmd, esp_err_t ret)
 {
     meshcore_request_complete(cmd, ret);
@@ -4594,6 +4821,9 @@ static void meshcore_service_reply(const d1l_meshcore_service_cmd_t *cmd, esp_er
 static void meshcore_service_task(void *arg)
 {
     (void)arg;
+    /* Admin runtime initialization is itself a session mutation, so perform
+     * it on the same task that owns every later Admin transition. */
+    d1l_meshcore_admin_runtime_init();
     d1l_meshcore_service_cmd_t cmd = {0};
     uint8_t radio_event_burst = 0U;
     for (;;) {
@@ -4664,6 +4894,7 @@ static void meshcore_service_task(void *arg)
          * owner wins admission for its exact request ID before its deadline.
          * Cancelled, expired, and stale slot generations are dropped here. */
         if (!meshcore_request_admit(&cmd)) {
+            meshcore_service_command_wipe(&cmd);
             continue;
         }
 
@@ -4689,6 +4920,24 @@ static void meshcore_service_task(void *arg)
             break;
         case D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT:
             ret = meshcore_service_handle_send_trace_contact(&cmd);
+            if (ret != ESP_OK) {
+                s_status.rejected_commands++;
+            }
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN:
+            ret = meshcore_service_handle_admin_login(&cmd);
+            if (ret != ESP_OK) {
+                s_status.rejected_commands++;
+            }
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS:
+            ret = meshcore_service_handle_admin_request_status();
+            if (ret != ESP_OK) {
+                s_status.rejected_commands++;
+            }
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGOUT:
+            ret = meshcore_service_handle_admin_logout();
             if (ret != ESP_OK) {
                 s_status.rejected_commands++;
             }
@@ -4733,6 +4982,7 @@ static void meshcore_service_task(void *arg)
             meshcore_service_finalize_send_advert(&cmd);
         }
         meshcore_service_run_owner_maintenance();
+        meshcore_service_command_wipe(&cmd);
     }
 }
 
@@ -4777,31 +5027,110 @@ static esp_err_t meshcore_service_start_task(void)
     return ESP_OK;
 }
 
+static bool meshcore_service_called_from_owner(void)
+{
+    return !d1l_mesh_command_sync_wait_allowed(
+        (const void *)s_service_task,
+        (const void *)xTaskGetCurrentTaskHandle());
+}
+
+typedef struct {
+    QueueHandle_t queue;
+    TickType_t timeout_ticks;
+} d1l_meshcore_service_enqueue_context_t;
+
+static bool meshcore_service_enqueue_claimed(void *context,
+                                             const void *command)
+{
+    const d1l_meshcore_service_enqueue_context_t *enqueue_context =
+        (const d1l_meshcore_service_enqueue_context_t *)context;
+    return enqueue_context && enqueue_context->queue && command &&
+           xQueueSend(enqueue_context->queue, command,
+                      enqueue_context->timeout_ticks) == pdTRUE;
+}
+
+static esp_err_t meshcore_service_send_claimed_command(
+    d1l_meshcore_service_cmd_t *cmd, uint32_t timeout_ms)
+{
+    const TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
+    d1l_meshcore_request_slot_t *slot = meshcore_request_slot_for(cmd);
+    d1l_meshcore_service_enqueue_context_t enqueue_context = {
+        .queue = s_service_queue,
+        .timeout_ticks = timeout_ticks,
+    };
+    const d1l_mesh_command_enqueue_result_t enqueue_result = slot ?
+        d1l_mesh_command_request_enqueue(
+            &slot->request, cmd->request_id,
+            meshcore_service_enqueue_claimed, &enqueue_context,
+            cmd) : D1L_MESH_COMMAND_ENQUEUE_INVALID;
+    if (enqueue_result != D1L_MESH_COMMAND_ENQUEUE_QUEUED) {
+        if (enqueue_result == D1L_MESH_COMMAND_ENQUEUE_INVALID) {
+            meshcore_request_abort_unqueued(cmd);
+        }
+        runtime_note_queue_drop(false);
+        return enqueue_result == D1L_MESH_COMMAND_ENQUEUE_SATURATED ?
+            ESP_ERR_TIMEOUT : ESP_ERR_INVALID_STATE;
+    }
+    runtime_note_queue_depth(s_service_queue,
+                             &s_runtime_command_queue_high_water);
+    meshcore_service_wake();
+    return meshcore_request_wait(cmd, timeout_ticks);
+}
+
 static esp_err_t meshcore_service_send_command(d1l_meshcore_service_cmd_t *cmd,
                                                uint32_t timeout_ms)
 {
-    if (!cmd) {
+    if (!cmd || timeout_ms == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t ret = meshcore_service_start_task();
     if (ret != ESP_OK) {
         return ret;
     }
+    if (meshcore_service_called_from_owner()) {
+        return ESP_ERR_INVALID_STATE;
+    }
 
     ret = meshcore_request_claim(cmd, timeout_ms);
     if (ret != ESP_OK) {
         return ret;
     }
-    const TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
-    if (xQueueSend(s_service_queue, cmd, timeout_ticks) != pdTRUE) {
-        meshcore_request_abort_unqueued(cmd);
-        runtime_note_queue_drop(false);
-        return ESP_ERR_TIMEOUT;
+    return meshcore_service_send_claimed_command(cmd, timeout_ms);
+}
+
+static esp_err_t meshcore_service_send_admin_login_command(
+    d1l_meshcore_service_cmd_t *cmd, const char *password,
+    size_t password_len, uint32_t timeout_ms)
+{
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    if (!cmd || cmd->type != D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN ||
+        !password || password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES ||
+        timeout_ms == 0U) {
+        meshcore_service_command_wipe(cmd);
+        return ret;
     }
-    runtime_note_queue_depth(s_service_queue,
-                             &s_runtime_command_queue_high_water);
-    meshcore_service_wake();
-    return meshcore_request_wait(cmd, timeout_ticks);
+    ret = meshcore_service_start_task();
+    if (ret != ESP_OK || meshcore_service_called_from_owner()) {
+        if (ret == ESP_OK) {
+            ret = ESP_ERR_INVALID_STATE;
+        }
+        meshcore_service_command_wipe(cmd);
+        return ret;
+    }
+
+    ret = meshcore_request_claim(cmd, timeout_ms);
+    if (ret == ESP_OK) {
+        ret = meshcore_request_store_admin_password(
+            cmd, password, password_len);
+    }
+    if (ret == ESP_OK) {
+        ret = meshcore_service_send_claimed_command(cmd, timeout_ms);
+    } else if (cmd->request_id != 0U) {
+        meshcore_request_abort_unqueued(cmd);
+    }
+
+    meshcore_service_command_wipe(cmd);
+    return ret;
 }
 
 esp_err_t d1l_meshcore_service_start_rx_async(void)
@@ -4933,7 +5262,6 @@ void d1l_meshcore_service_init(void)
     const d1l_settings_t *settings = &settings_snapshot;
     const esp_err_t task_ret = meshcore_service_start_task();
     if (!s_service_initialized) {
-        d1l_meshcore_admin_runtime_init();
         d1l_store_lock_take(&s_trace_lock);
         memset(&s_trace_tracker, 0, sizeof(s_trace_tracker));
         s_trace_last_rssi_dbm = 0;
@@ -5188,8 +5516,16 @@ static esp_err_t prepare_admin_route(
 esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
                                            const char *password)
 {
-    if (!fingerprint || fingerprint[0] == '\0' || !password ||
-        !s_service_initialized) {
+    if (!fingerprint || fingerprint[0] == '\0' || !password) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_service_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const size_t fingerprint_len = strnlen(
+        fingerprint, D1L_NODE_FINGERPRINT_LEN);
+    if (fingerprint_len == 0U ||
+        fingerprint_len >= D1L_NODE_FINGERPRINT_LEN) {
         return ESP_ERR_INVALID_ARG;
     }
     const size_t password_len = strnlen(
@@ -5197,63 +5533,14 @@ esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
     if (password_len > D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = d1l_meshcore_service_ensure_identity();
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    d1l_settings_t settings_snapshot = {0};
-    (void)d1l_settings_public_snapshot(&settings_snapshot);
-    const uint64_t now_us = (uint64_t)esp_timer_get_time();
-    const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    d1l_contact_entry_t contact = {0};
-    d1l_meshcore_route_selection_t selection = {0};
-    ret = prepare_admin_route(fingerprint, &settings_snapshot, now_ms,
-                              &contact, &selection);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    uint32_t timestamp = 0U;
-    ret = d1l_settings_next_mesh_timestamp(&timestamp);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    d1l_meshcore_admin_binding_t binding = {0};
-    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
-    uint8_t raw_len = 0U;
-    ret = d1l_meshcore_admin_build_login_packet(
-        &settings_snapshot, &contact, &selection, password, timestamp,
-        derive_local_identity_shared_secret, meshcore_encrypt_then_mac,
-        &binding, raw, sizeof(raw), &raw_len);
-    if (ret != ESP_OK) {
-        d1l_meshcore_admin_binding_wipe(&binding);
-        secure_zero_bytes(raw, sizeof(raw));
-        return ret;
-    }
-
-    uint32_t generation = 0U;
-    const bool began = d1l_meshcore_admin_runtime_begin_login(
-        &binding, now_us, &generation);
-    d1l_meshcore_admin_binding_wipe(&binding);
-    if (!began) {
-        secure_zero_bytes(raw, sizeof(raw));
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    ret = meshcore_service_send_raw(
-        raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
-    secure_zero_bytes(raw, sizeof(raw));
-    d1l_meshcore_admin_runtime_note_login_tx(generation, ret);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    (void)d1l_route_store_upsert_observation(
-        contact.fingerprint, contact.alias, "admin_login",
-        route_name(selection.route), "tx", 0, 0,
-        selection.path_hash_bytes, selection.path_hops, raw_len);
-    return ESP_OK;
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN,
+    };
+    memcpy(cmd.admin_fingerprint, fingerprint, fingerprint_len);
+    cmd.admin_fingerprint[fingerprint_len] = '\0';
+    return meshcore_service_send_admin_login_command(
+        &cmd, password, password_len,
+        D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
 }
 
 esp_err_t d1l_meshcore_service_admin_request_status(void)
@@ -5261,89 +5548,24 @@ esp_err_t d1l_meshcore_service_admin_request_status(void)
     if (!s_service_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
-    d1l_meshcore_admin_context_t context = {0};
-    if (!d1l_meshcore_admin_runtime_capture_authenticated(&context)) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    d1l_settings_t settings_snapshot = {0};
-    (void)d1l_settings_public_snapshot(&settings_snapshot);
-    const uint64_t now_us = (uint64_t)esp_timer_get_time();
-    const uint32_t now_ms = (uint32_t)(now_us / 1000ULL);
-    d1l_contact_entry_t contact = {0};
-    d1l_meshcore_route_selection_t selection = {0};
-    esp_err_t ret = prepare_admin_route(
-        context.binding.fingerprint, &settings_snapshot, now_ms, &contact,
-        &selection);
-    d1l_meshcore_admin_binding_t current = {0};
-    snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
-             context.binding.fingerprint);
-    if (ret == ESP_OK) {
-        current.role = d1l_meshcore_admin_role_for_contact(&contact);
-        memcpy(current.local_public_key, settings_snapshot.identity_public_key,
-               sizeof(current.local_public_key));
-        if (!hex_to_bytes(current.peer_public_key,
-                          sizeof(current.peer_public_key),
-                          contact.public_key_hex) ||
-            derive_local_identity_shared_secret(
-                current.peer_public_key, current.local_public_key,
-                current.session_secret) != ESP_OK ||
-            !d1l_meshcore_admin_runtime_validate_binding(
-                &current, context.generation)) {
-            ret = ESP_ERR_INVALID_STATE;
-        }
-    }
-    if (ret != ESP_OK) {
-        d1l_meshcore_admin_runtime_invalidate(ret);
-        d1l_meshcore_admin_binding_wipe(&current);
-        d1l_meshcore_admin_context_wipe(&context);
-        return ret;
-    }
-
-    uint32_t tag = 0U;
-    ret = d1l_settings_next_mesh_timestamp(&tag);
-    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET] = {0};
-    uint8_t raw_len = 0U;
-    if (ret == ESP_OK) {
-        ret = d1l_meshcore_admin_build_status_packet(
-            &settings_snapshot, &current, &selection, tag, esp_random(),
-            meshcore_encrypt_then_mac, raw, sizeof(raw), &raw_len);
-    }
-    if (ret != ESP_OK) {
-        d1l_meshcore_admin_binding_wipe(&current);
-        d1l_meshcore_admin_context_wipe(&context);
-        secure_zero_bytes(raw, sizeof(raw));
-        return ret;
-    }
-
-    uint32_t request_generation = 0U;
-    const bool began = d1l_meshcore_admin_runtime_begin_status(
-        &current, context.generation, tag, now_us, &request_generation);
-    d1l_meshcore_admin_binding_wipe(&current);
-    d1l_meshcore_admin_context_wipe(&context);
-    if (!began) {
-        secure_zero_bytes(raw, sizeof(raw));
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    ret = meshcore_service_send_raw(
-        raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
-    secure_zero_bytes(raw, sizeof(raw));
-    d1l_meshcore_admin_runtime_note_status_tx(request_generation, tag, ret);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    (void)d1l_route_store_upsert_observation(
-        contact.fingerprint, contact.alias, "admin_status",
-        route_name(selection.route), "tx", 0, 0,
-        selection.path_hash_bytes, selection.path_hops, raw_len);
-    return ESP_OK;
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS,
+    };
+    const esp_err_t ret = meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    meshcore_service_command_wipe(&cmd);
+    return ret;
 }
 
-void d1l_meshcore_service_admin_logout(void)
+esp_err_t d1l_meshcore_service_admin_logout(void)
 {
-    d1l_meshcore_admin_runtime_logout();
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGOUT,
+    };
+    const esp_err_t ret = meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    meshcore_service_command_wipe(&cmd);
+    return ret;
 }
 
 esp_err_t d1l_meshcore_service_request_advert(bool flood)

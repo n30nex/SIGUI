@@ -106,10 +106,14 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
 void d1l_meshcore_service_trace_snapshot(d1l_meshcore_trace_snapshot_t *out_snapshot);
 void d1l_meshcore_service_admin_snapshot(
     d1l_meshcore_admin_snapshot_t *out_snapshot);
+/* Synchronous, bounded owner-task commands. ESP_ERR_TIMEOUT reports request
+ * slot or command-queue saturation; no Admin/session side effect is admitted
+ * after the caller deadline. The login credential is copied only into the
+ * exact guarded request slot and is never retained in the command queue. */
 esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
                                            const char *password);
 esp_err_t d1l_meshcore_service_admin_request_status(void);
-void d1l_meshcore_service_admin_logout(void);
+esp_err_t d1l_meshcore_service_admin_logout(void);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
                                             const char *text);

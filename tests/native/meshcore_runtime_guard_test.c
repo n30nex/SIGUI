@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "mesh/meshcore_runtime_guard.h"
+#include "mesh/meshcore_command_guard.h"
 
 static void test_caller_timeout_cancels_only_pending(void)
 {
@@ -120,6 +120,179 @@ static void test_atomic_identity_state_tuple_blocks_slot_reuse_aba(void)
         D1L_MESH_REQUEST_CALLER_CANCELLED));
     assert(d1l_mesh_request_guard_release(
         &guard, 32U, D1L_MESH_REQUEST_CALLER_CANCELLED));
+}
+
+typedef struct {
+    bool accept;
+    unsigned calls;
+    const void *last_command;
+} admin_test_queue_t;
+
+static bool bytes_zero(const void *value, size_t size)
+{
+    const unsigned char *bytes = value;
+    if (!bytes) {
+        return false;
+    }
+    while (size > 0U) {
+        if (*bytes++ != 0U) {
+            return false;
+        }
+        size--;
+    }
+    return true;
+}
+
+static bool request_password_clear(
+    const d1l_mesh_command_request_t *request)
+{
+    return request && !request->admin_password_present &&
+           request->admin_password_len == 0U &&
+           bytes_zero(request->admin_password,
+                      sizeof(request->admin_password));
+}
+
+static bool admin_test_enqueue(void *context, const void *command)
+{
+    admin_test_queue_t *queue = context;
+    assert(queue && command);
+    queue->calls++;
+    queue->last_command = command;
+    return queue->accept;
+}
+
+static void publish_admin_login(d1l_mesh_command_request_t *request,
+                                uint32_t request_id,
+                                const char *password)
+{
+    assert(request && password);
+    assert(d1l_mesh_command_request_claim(request, request_id));
+    assert(request_password_clear(request));
+    assert(d1l_mesh_command_request_publish(request, request_id));
+    assert(d1l_mesh_command_request_store_admin_password(
+        request, request_id, password, strlen(password)));
+}
+
+static void finish_admitted_admin_login(
+    d1l_mesh_command_request_t *request, uint32_t request_id,
+    const char *expected_password)
+{
+    char owner_password[D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY] = {0};
+    size_t owner_password_len = 0U;
+    assert(d1l_mesh_command_request_admit(request, request_id));
+    assert(d1l_mesh_command_request_take_admin_password(
+        request, request_id, owner_password, sizeof(owner_password),
+        &owner_password_len));
+    assert(owner_password_len == strlen(expected_password));
+    assert(strcmp(owner_password, expected_password) == 0);
+    assert(request_password_clear(request));
+    d1l_mesh_command_secure_zero(owner_password, sizeof(owner_password));
+    assert(bytes_zero(owner_password, sizeof(owner_password)));
+    assert(d1l_mesh_command_request_complete(request, request_id));
+    assert(d1l_mesh_command_request_release(
+        request, request_id, D1L_MESH_REQUEST_COMPLETED));
+}
+
+static void test_admin_cancel_and_expiry_have_no_side_effects(void)
+{
+    d1l_mesh_command_request_t cancelled = {0};
+    unsigned cancelled_mutations = 0U;
+    publish_admin_login(&cancelled, 101U, "secret");
+    assert(d1l_mesh_command_request_cancel_and_release(&cancelled, 101U));
+    if (d1l_mesh_command_request_admit(&cancelled, 101U)) {
+        cancelled_mutations++;
+    }
+    assert(cancelled_mutations == 0U);
+    assert(request_password_clear(&cancelled));
+    assert(d1l_mesh_command_request_state(&cancelled) ==
+           D1L_MESH_REQUEST_FREE);
+
+    d1l_mesh_command_request_t expired = {0};
+    unsigned expired_mutations = 0U;
+    publish_admin_login(&expired, 102U, "secret");
+    assert(d1l_mesh_command_request_expire(&expired, 102U));
+    if (d1l_mesh_command_request_admit(&expired, 102U)) {
+        expired_mutations++;
+    }
+    assert(expired_mutations == 0U);
+    assert(request_password_clear(&expired));
+    assert(d1l_mesh_command_request_state(&expired) ==
+           D1L_MESH_REQUEST_OWNER_EXPIRED);
+    assert(d1l_mesh_command_request_release(
+        &expired, 102U, D1L_MESH_REQUEST_OWNER_EXPIRED));
+}
+
+static void test_admin_queue_saturation_and_admission_execute_production_guard(void)
+{
+    const uint32_t dummy_command = 0xA5A5U;
+    d1l_mesh_command_request_t saturated = {0};
+    admin_test_queue_t full_queue = {.accept = false};
+    publish_admin_login(&saturated, 111U, "queue-full");
+    assert(d1l_mesh_command_request_enqueue(
+        &saturated, 111U, admin_test_enqueue, &full_queue,
+        &dummy_command) == D1L_MESH_COMMAND_ENQUEUE_SATURATED);
+    assert(full_queue.calls == 1U &&
+           full_queue.last_command == &dummy_command);
+    assert(request_password_clear(&saturated));
+    assert(d1l_mesh_command_request_state(&saturated) ==
+           D1L_MESH_REQUEST_FREE);
+    assert(!d1l_mesh_command_request_admit(&saturated, 111U));
+
+    d1l_mesh_command_request_t queued = {0};
+    admin_test_queue_t accepting_queue = {.accept = true};
+    publish_admin_login(&queued, 112U, "accepted");
+    assert(d1l_mesh_command_request_enqueue(
+        &queued, 112U, admin_test_enqueue, &accepting_queue,
+        &dummy_command) == D1L_MESH_COMMAND_ENQUEUE_QUEUED);
+    assert(d1l_mesh_command_request_state(&queued) ==
+           D1L_MESH_REQUEST_PENDING);
+    finish_admitted_admin_login(&queued, 112U, "accepted");
+}
+
+static void test_admin_slot_reuse_rejects_stale_generation_without_wipe(void)
+{
+    d1l_mesh_command_request_t request = {0};
+    publish_admin_login(&request, 121U, "old");
+    assert(d1l_mesh_command_request_cancel_and_release(&request, 121U));
+    publish_admin_login(&request, 122U, "new-secret");
+
+    char stale_output[D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY] = {0};
+    size_t stale_len = 0U;
+    assert(!d1l_mesh_command_request_admit(&request, 121U));
+    assert(!d1l_mesh_command_request_take_admin_password(
+        &request, 121U, stale_output, sizeof(stale_output), &stale_len));
+    assert(!d1l_mesh_command_request_complete(&request, 121U));
+    assert(!d1l_mesh_command_request_release(
+        &request, 121U, D1L_MESH_REQUEST_PENDING));
+    assert(request.admin_password_present);
+    assert(strcmp(request.admin_password, "new-secret") == 0);
+    finish_admitted_admin_login(&request, 122U, "new-secret");
+}
+
+static void test_admin_logout_and_owner_recursion_use_production_guard(void)
+{
+    int owner_token = 0;
+    int other_token = 0;
+    assert(d1l_mesh_command_sync_wait_allowed(NULL, &owner_token));
+    assert(d1l_mesh_command_sync_wait_allowed(&owner_token, &other_token));
+    assert(!d1l_mesh_command_sync_wait_allowed(&owner_token, &owner_token));
+
+    const uint32_t logout_command = 3U;
+    d1l_mesh_command_request_t logout = {0};
+    admin_test_queue_t queue = {.accept = true};
+    assert(d1l_mesh_command_request_claim(&logout, 131U));
+    assert(d1l_mesh_command_request_publish(&logout, 131U));
+    assert(d1l_mesh_command_request_enqueue(
+        &logout, 131U, admin_test_enqueue, &queue, &logout_command) ==
+           D1L_MESH_COMMAND_ENQUEUE_QUEUED);
+    assert(d1l_mesh_command_request_admit(&logout, 131U));
+    unsigned logout_mutations = 0U;
+    logout_mutations++;
+    assert(d1l_mesh_command_request_complete(&logout, 131U));
+    assert(d1l_mesh_command_request_release(
+        &logout, 131U, D1L_MESH_REQUEST_COMPLETED));
+    assert(logout_mutations == 1U);
+    assert(request_password_clear(&logout));
 }
 
 static bool consume_terminal_if_current(
@@ -396,6 +569,10 @@ int main(void)
     test_admission_wins_timeout_and_requires_exact_completion();
     test_expiry_and_stale_reply_cannot_cross_slot_generations();
     test_atomic_identity_state_tuple_blocks_slot_reuse_aba();
+    test_admin_cancel_and_expiry_have_no_side_effects();
+    test_admin_queue_saturation_and_admission_execute_production_guard();
+    test_admin_slot_reuse_rejects_stale_generation_without_wipe();
+    test_admin_logout_and_owner_recursion_use_production_guard();
     test_late_a_terminal_cannot_mutate_active_b();
     test_watchdog_recovers_when_full_irq_queue_drops_terminal();
     test_vendor_terminal_claim_defers_competing_watchdog_recovery();

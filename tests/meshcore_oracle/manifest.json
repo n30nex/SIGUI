@@ -80,6 +80,7 @@
     "main/mesh/meshcore_admin_dispatch.h": "10e1e73af1046bbcf610457d6ae3adbb5e52e25962c4c249d2afc0d36567d43f",
     "main/mesh/meshcore_admin_runtime.c": "e772701c6ced952cd002c61bff0b5190150fa2d558a5015e4298af09f30c2087",
     "main/mesh/meshcore_admin_runtime.h": "96372ce353520383f7471a70134c548c51ae5a7628d0c6104ef8230641cdb11e",
+    "main/mesh/meshcore_command_guard.h": "c266e8f1a28bce5469a7f072b12ae06410e8be04af0c31ce9375283746082f53",
     "main/mesh/meshcore_identity_exchange.c": "fc380fe5a02a0fc6941f5c2da9a257a226e8a72ebb8e4935409a8c82edeb5c97",
     "main/mesh/meshcore_identity_exchange.h": "cb7e51ee1469834f92f8ab65221db8a2d4779f74da5d6e1cd0fe631e33a82ca5",
     "main/mesh/meshcore_dm_retry.h": "cc7fe98b0c1ede5ba2bab15d3362c730b5755876eec7c28d124c9e10eb0b9238",
@@ -87,8 +88,9 @@
     "main/mesh/meshcore_path_state.c": "f3e4071574a0a65cab1caa4ad285f64943a0770c82ac2df803328212d9db9d77",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
-    "main/mesh/meshcore_service.c": "589d1ad45ba74d1758ed9cb1da0c83048eff2793c55d3e5f5f02593868555d45",
-    "main/mesh/meshcore_service.h": "2c774d5d254e67900cf7b8bac0d862bde1777e02e1dea2fdad321dd93ab12337",
+    "main/mesh/meshcore_runtime_guard.h": "5cbd2cf819909fba2dc84870f4c64ffa1875d0aba63214b2248d9cf5a074db8f",
+    "main/mesh/meshcore_service.c": "82ccbd1fda9298bb5609d03beaf1eb56c836fa86fd5218bc57891cdbc03b1d1d",
+    "main/mesh/meshcore_service.h": "031d1799516ebc4e61e6abde4da457f4255adcf2bd42f1149c5d186b02335eb7",
     "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
     "main/mesh/meshcore_trace.h": "dcfd9d18f65555baa018412f1b7c9e6079a04b1b6ad89fda1452ec3943a6dc78",
@@ -768,6 +770,8 @@
         "sources": [
           "main/mesh/meshcore_service.c",
           "main/mesh/meshcore_service.h",
+          "main/mesh/meshcore_command_guard.h",
+          "main/mesh/meshcore_runtime_guard.h",
           "main/mesh/meshcore_trace.h",
           "main/comms/usb_console.c"
         ],
@@ -791,23 +795,26 @@
         "authenticated_text_replay_response_session_fixtures",
         "login_response_creation_dispatch_orchestration_fixtures",
         "host_authenticated_admin_session_fixture",
-        "production_admin_login_status_dispatch"
+        "production_admin_login_status_dispatch",
+        "production_admin_single_owner_login_status_logout_dispatch"
       ],
       "host_only_receipt": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
       "production_receipt": {
-        "id": "RCPT-WP04-PRODUCTION-ADMIN-DISPATCH-20260715",
+        "id": "RCPT-WP06-ADMIN-COMMAND-OWNER-20260716",
         "status": "implemented_pending_actions_and_physical_evidence",
         "sources": [
           "main/mesh/meshcore_admin_dispatch.c",
           "main/mesh/meshcore_admin_dispatch.h",
           "main/mesh/meshcore_admin_runtime.c",
           "main/mesh/meshcore_admin_runtime.h",
+          "main/mesh/meshcore_command_guard.h",
           "main/mesh/meshcore_identity_exchange.c",
           "main/mesh/meshcore_identity_exchange.h",
+          "main/mesh/meshcore_runtime_guard.h",
           "main/mesh/meshcore_service.c",
           "main/mesh/meshcore_service.h"
         ],
-        "scope": "repeater_admin_login_and_get_status_only_direct_or_flood_outbound_and_direct_or_path_response_inbound_room_rejected_no_ui_credential_storage_or_mutating_admin_commands"
+        "scope": "repeater_admin_login_and_get_status_only_direct_or_flood_outbound_and_direct_or_path_response_inbound_room_rejected_single_owner_bounded_login_status_logout_commands_request_deadline_queue_saturation_and_zeroization_guards_no_ui_credential_storage_or_remote_mutating_admin_commands"
       }
     },
     {
