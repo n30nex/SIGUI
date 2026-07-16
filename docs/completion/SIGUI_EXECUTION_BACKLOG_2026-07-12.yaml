@@ -3,16 +3,26 @@ generated_at: '2026-07-16'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
-  integrated_candidate: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
-  live_main_actions_run: 29460262807
+  merged_baseline: aeb538088bada27fa8f84882b05a641fb944bc90
+  integrated_candidate: aeb538088bada27fa8f84882b05a641fb944bc90
+  live_main_actions_run: 29463374435
   live_main_actions_status: success
   exact_main_gate_pending: false
   exact_main_evidence_bank_pending: false
-  last_strict_verified_main: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
-  observed_successor_main: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
-  observed_successor_pull_request: 160
+  last_strict_verified_main: aeb538088bada27fa8f84882b05a641fb944bc90
+  observed_successor_main: aeb538088bada27fa8f84882b05a641fb944bc90
+  observed_successor_pull_request: 162
   successor_evidence_in_this_slice: true
+  completion_reporting_integrity:
+    pull_request: 161
+    head: 4a7b8f9cd8a157ae606bfab9ff060a4cc1ceefe2
+    merge_commit: 6d090909545ad5838f1176b69474872f230af01f
+    shared_tree: c9d38c15e653abedb171fe0215d0e9f485cd4b4e
+    pr_actions_run: 29461993341
+    exact_main_actions_run: 29462582281
+    pr_receipt_sha256: 0690d7b1f6592d08c3ea5f571ddc16345ed3262bef8f024bdf0844969360e4d0
+    exact_main_receipt_sha256: 56390171de9daaeaf0af37c79ab4a5fbb882647cec18c51470afc8217fa909d3
+    physical_closure_claimed: false
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
   proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
@@ -1039,12 +1049,12 @@ project:
     checksum_entries_verified: 78
   release_audit:
     ready_for_public_release: false
-    exact_main_run: 29460262807
-    scope_commit: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
-    receipt_sha256: b128439541a559b6e3ddd05cfbb95827fc5b7415753d4bc9741633b10e5462bd
+    exact_main_run: 29463374435
+    scope_commit: aeb538088bada27fa8f84882b05a641fb944bc90
+    receipt_sha256: 857a52c200d19363d2f996303473215976e2696ba4627ded54c009e0a0ce85af
     status: fail_closed
-    last_strict_verified_main_run: 29460262807
-    last_strict_verified_receipt_sha256: dad1a84d81b45a7c5c94e51e2ffb1e8cd28febd4f4f98a4d6a862566aeb38a91
+    last_strict_verified_main_run: 29463374435
+    last_strict_verified_receipt_sha256: 7da9d5fa09a3e0a7b7e73db23aa483e0c1214bfa06b0e7a592e1dd5814ab9af9
     remaining_p0_failures: 33
     failures_overall_including_p1: 35
   active_pull_requests: []
@@ -2350,8 +2360,8 @@ work_packages:
   tracks:
   - 69
   status: blocked
-  implementation_commit: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
-  evidence_commit: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
+  implementation_commit: aeb538088bada27fa8f84882b05a641fb944bc90
+  evidence_commit: aeb538088bada27fa8f84882b05a641fb944bc90
   implementation_merged: false
   partial_implementation_merged: true
   software_implementation_status: partial_merged_in_progress
@@ -2443,6 +2453,44 @@ work_packages:
     physical_time_power_interruption_complete: false
     wp12_software_implementation_complete: false
     wp12_closure: false
+    valid_at_current_scope: false
+    historical_valid: true
+  - pull_request: 162
+    base_commit: 6d090909545ad5838f1176b69474872f230af01f
+    head: b7944f325882225fbe622798c7b6765d0b6e6a8a
+    synthetic_merge: f8f89f73275e7986e1314467ce7c45d25e4169f2
+    merge_commit: aeb538088bada27fa8f84882b05a641fb944bc90
+    shared_tree: 1bee63e301e0f6d2e03ce675b166bdeb41fa0c40
+    actions_pr_run: 29462663743
+    pr_status: success
+    excluded_duplicate_push_run: 29462654454
+    exact_main_actions_run: 29463374435
+    exact_main_actions_status: success
+    exact_main_host_tests_passed: 1178
+    exact_main_checksum_contract_tests_passed: 32
+    exact_main_focused_timezone_settings_ui_tests_passed: 74
+    exact_main_wire_fuzz_runs_completed: 100000
+    exact_main_advert_fuzz_runs_completed: 100000
+    exact_main_fuzz_findings: 0
+    pull_request_gate_receipt_sha256: fa491b7435fd2eb71dbe4d968aa4a15e06845d1abd47fdf7b55634f9f3fc4718
+    pull_request_gate_manifest_sha256: a2b8302e5a25797fbb9203f5cf1ac87a41ff6f27a56adc5ab381f2c865cb0f0a
+    exact_main_gate_receipt_sha256: 7da9d5fa09a3e0a7b7e73db23aa483e0c1214bfa06b0e7a592e1dd5814ab9af9
+    exact_main_gate_manifest_sha256: ab94aaf8ad1f03a32d67f923d2c6a23ab5789fee1b2d6939b300298b220d8e66
+    portable_aggregate_path: docs/completion/evidence/wp12/timezone_display_aeb538088bada27fa8f84882b05a641fb944bc90.json
+    portable_aggregate_sha256: c774398c115abd6c390c2fdfd2dec45e1bf259650012005013e04d127c776f06
+    fixed_offset_minimum_minutes: -720
+    fixed_offset_maximum_minutes: 840
+    minute_offsets_supported: true
+    settings_schema_v8_migration_complete: true
+    timezone_display_conversion_complete: true
+    iana_timezone_database_supported: false
+    automatic_dst_supported: false
+    protocol_and_certificate_clocks_remain_utc: true
+    legacy_mesh_ts_migration_complete: false
+    authenticated_companion_transport_accepted: false
+    physical_time_power_interruption_complete: false
+    wp12_software_implementation_complete: false
+    wp12_closure: false
     valid_at_current_scope: true
   evidence:
   - filename: truthful_time_foundation_5e83b17efebad8d2e5e689292b57d87070893f02.json
@@ -2462,36 +2510,44 @@ work_packages:
   - filename: retained_wall_checkpoint_5ee89e3d3956e39cd8eff4c87374d22b3f40613b.json
     commit: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
     workflow_run: 29460262807
-    valid: true
+    valid: false
+    historical_valid: true
     closure_required: false
     scope: versioned_domain_bound_crc_retained_wall_checkpoint_approximate_recovery_worker_owned_coalesced_writes_and_truthful_telemetry
     sha256: 15ff143e6e226201017fc3d34fd5e4c12c52ac2e4de8bd1271b2ca473222bc2b
     portable_aggregate_path: docs/completion/evidence/wp12/retained_wall_checkpoint_5ee89e3d3956e39cd8eff4c87374d22b3f40613b.json
+  - filename: timezone_display_aeb538088bada27fa8f84882b05a641fb944bc90.json
+    commit: aeb538088bada27fa8f84882b05a641fb944bc90
+    workflow_run: 29463374435
+    valid: true
+    closure_required: false
+    scope: fixed_offset_timezone_display_schema_v8_migration_utc_protocol_certificate_separation_and_truthful_usb_ui_state
+    sha256: c774398c115abd6c390c2fdfd2dec45e1bf259650012005013e04d127c776f06
+    portable_aggregate_path: docs/completion/evidence/wp12/timezone_display_aeb538088bada27fa8f84882b05a641fb944bc90.json
   latest_valid_receipt:
-    filename: retained_wall_checkpoint_5ee89e3d3956e39cd8eff4c87374d22b3f40613b.json
-    commit: 5ee89e3d3956e39cd8eff4c87374d22b3f40613b
-    scope: versioned_domain_bound_crc_retained_wall_checkpoint_approximate_recovery_worker_owned_coalesced_writes_and_truthful_telemetry
+    filename: timezone_display_aeb538088bada27fa8f84882b05a641fb944bc90.json
+    commit: aeb538088bada27fa8f84882b05a641fb944bc90
+    scope: fixed_offset_timezone_display_schema_v8_migration_utc_protocol_certificate_separation_and_truthful_usb_ui_state
     closure_eligible: false
   verification:
-    pull_request: 160
-    head_commit: b10ceb773d90592bfb764328516eee79bac68187
-    synthetic_merge_commit: c6003f193d887031962bced9b3079c7284daeedd
-    shared_tree: 8254d1137b3983314131571dc8202bf39bff4018
-    actions_pull_request_run: 29459701337
-    excluded_duplicate_push_run: 29459698835
-    exact_main_actions_run: 29460262807
-    exact_main_host_tests_passed: 1166
+    pull_request: 162
+    head_commit: b7944f325882225fbe622798c7b6765d0b6e6a8a
+    synthetic_merge_commit: f8f89f73275e7986e1314467ce7c45d25e4169f2
+    shared_tree: 1bee63e301e0f6d2e03ce675b166bdeb41fa0c40
+    actions_pull_request_run: 29462663743
+    excluded_duplicate_push_run: 29462654454
+    exact_main_actions_run: 29463374435
+    exact_main_host_tests_passed: 1178
     exact_main_checksum_contract_tests_passed: 32
-    exact_main_focused_retained_time_tests_passed: 32
-    pull_request_gate_receipt_sha256: 227955d2dda0f22db1e15968685e2c14f794f2c2197bdb94b58c57d3df265e4d
-    exact_main_gate_receipt_sha256: dad1a84d81b45a7c5c94e51e2ffb1e8cd28febd4f4f98a4d6a862566aeb38a91
-    exact_main_gate_manifest_sha256: 214deb9d1f74952cec7784de15154e2c36b5cecf5b9de1b9208763c423569284
-    portable_aggregate_sha256: 15ff143e6e226201017fc3d34fd5e4c12c52ac2e4de8bd1271b2ca473222bc2b
+    exact_main_focused_timezone_settings_ui_tests_passed: 74
+    pull_request_gate_receipt_sha256: fa491b7435fd2eb71dbe4d968aa4a15e06845d1abd47fdf7b55634f9f3fc4718
+    exact_main_gate_receipt_sha256: 7da9d5fa09a3e0a7b7e73db23aa483e0c1214bfa06b0e7a592e1dd5814ab9af9
+    exact_main_gate_manifest_sha256: ab94aaf8ad1f03a32d67f923d2c6a23ab5789fee1b2d6939b300298b220d8e66
+    portable_aggregate_sha256: c774398c115abd6c390c2fdfd2dec45e1bf259650012005013e04d127c776f06
     wp12_closure: false
     physical_time_evidence: false
   residual_capabilities:
   - legacy_mesh_ts_explicit_migration_receipt
-  - timezone_setting_and_display_conversion
   - authenticated_companion_transport_acceptance
   - exact_candidate_cold_boot_sntp_backward_forward_jump_and_tls_acceptance
   - exact_candidate_reboot_power_interruption_and_protocol_uniqueness_acceptance

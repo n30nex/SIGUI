@@ -1,5 +1,7 @@
 # D1L Test Plan
 
+Current exact-main software/artifact checkpoint: `aeb538088bada27fa8f84882b05a641fb944bc90` / Actions `29463374435` passes 1,178 host, 32 checksum-contract, and 74 focused timezone/settings/UI tests plus conformance/fuzz, five downloaded artifacts / 46 nested checksum entries, exact-source provenance, and SPDX. Strict receipt SHA-256 is `7da9d5fa09a3e0a7b7e73db23aa483e0c1214bfa06b0e7a592e1dd5814ab9af9`; portable timezone/display aggregate SHA-256 is `c774398c115abd6c390c2fdfd2dec45e1bf259650012005013e04d127c776f06`. This does not close physical time/power/UI/RF acceptance, legacy `mesh_ts` migration, authenticated companion transport, WP-12, or release gates.
+
 ## Host Tests
 
 Run:
