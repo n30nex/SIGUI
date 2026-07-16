@@ -87,15 +87,28 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   create/sign/send/filter/verify/dispatch/contact-promotion behavior. It now
   proves five distinct validly signed timestamp cases: equal and older reject
   without mutation, strictly newer and `UINT32_MAX` accept, and zero after
-  `UINT32_MAX` rejects without wrap. Identical-wire hash suppression remains a
-  distinct result. The WP-05 conformance receipt validates the sanitized
-  exact-commit runtime receipt and binds its canonical SHA-256 and all five
-  outcomes. Actions and downstream package/audit consumers recompute and compare
+  `UINT32_MAX` rejects without wrap. The runtime now uses the pinned upstream
+  `SimpleMeshTables` implementation and proves ten table lookups with three
+  exact/path/transport duplicate suppressions. Five additional cases prove that
+  the production D1L eight-byte SHA-256 packet hash matches upstream: packet type
+  and payload form the normal domain, TRACE also includes its `uint16_t`
+  little-endian path length plus the upstream separator byte, and route,
+  transport, and path bytes are excluded. Production exposes a boot-local
+  160-entry cyclic hash cache and applies it to verified signed adverts. A hash
+  is remembered only after a terminal admission outcome; transient node/contact
+  storage failures remain uncached so exact-wire contact promotion can retry.
+  The WP-05 conformance receipt validates the sanitized exact-commit runtime
+  receipt and binds its canonical SHA-256, all five timestamp outcomes, all five
+  packet-hash outcomes, and the exact table receipt. The declared matrix is 9
+  implemented / 7 partial / 0 missing requirements, 8 production suites / 53
+  scenarios / 33 translation units / 63 source pins, plus 1 companion suite /
+  10 cases. Actions and downstream package/audit consumers recompute and compare
   the binding from the supplied receipt rather than accepting any shaped digest;
-  the matrix remains `closure_ready=false`. It does
-  not prove firmware binding, persisted keypair consistency, retained-contact
-  recovery, peer/RF interoperability, routing, ACK delivery, trace, admin
-  sessions, or hardware. The pinned `BaseChatMesh` callback reports
+  the matrix remains `closure_ready=false`. This does not provide a persisted
+  duplicate cache or generic Public/DM/ACK/PATH/TRACE dispatch integration, and
+  it does not prove persisted keypair consistency, retained-contact recovery,
+  peer/RF interoperability, ACK delivery, trace, admin sessions, or hardware.
+  The pinned `BaseChatMesh` callback reports
   `is_new=false` for the tested newly auto-added contact; integration must not
   rely on that flag as a truthful new-contact indicator until upstream behavior
   is reconciled.
