@@ -342,7 +342,7 @@ def sample_snapshot() -> Snapshot:
         node_name="D1L Desk",
         fingerprint="60B6ABA17831F883",
         radio_profile="US/CAN 910.525 / BW62.5 / SF7 / CR5",
-        mesh_state="ready, listening",
+        mesh_state="ready",
         rx_total=128,
         tx_total=34,
         unread_public=2,
@@ -486,6 +486,59 @@ def more_long_labels_snapshot() -> Snapshot:
             "1.0.0-rc1+exact-commit-provenance-with-a-deliberately-long-label"
         ),
     )
+
+
+def home_status_ready_snapshot() -> Snapshot:
+    return replace(
+        more_connectivity_ready_snapshot(),
+        storage_sd_present=True,
+        storage_sd_mounted=True,
+        storage_sd_data_root_ready=True,
+        storage_data_enabled=True,
+        storage_sd_state="ready",
+        storage_sd_filesystem="fat32",
+        storage_setup_action="ready",
+    )
+
+
+def home_status_connecting_snapshot() -> Snapshot:
+    return replace(
+        more_connectivity_applying_snapshot(),
+        mesh_state="starting",
+        storage_setup_required=True,
+        storage_sd_state="mount_pending",
+        storage_setup_action="wait_for_storage_mount",
+    )
+
+
+def home_status_no_card_snapshot() -> Snapshot:
+    return replace(
+        storage_no_card_snapshot(),
+        mesh_state="ready",
+        radio_ready=True,
+        radio_applied=True,
+    )
+
+
+def home_status_error_snapshot() -> Snapshot:
+    return replace(
+        storage_mount_error_snapshot(),
+        mesh_state="radio_error",
+        radio_ready=False,
+        radio_applied=False,
+        radio_apply_pending=False,
+    )
+
+
+def home_status_reconnecting_snapshot() -> Snapshot:
+    return replace(
+        home_status_ready_snapshot(),
+        storage_setup_action="wait_for_storage_reconnect",
+    )
+
+
+def home_status_busy_snapshot() -> Snapshot:
+    return replace(home_status_ready_snapshot(), mesh_state="tx_busy")
 
 
 def large_mesh_snapshot() -> Snapshot:
@@ -914,6 +967,12 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "more-connectivity-ready": more_connectivity_ready_snapshot,
     "more-connectivity-applying": more_connectivity_applying_snapshot,
     "more-long-labels": more_long_labels_snapshot,
+    "home-status-ready": home_status_ready_snapshot,
+    "home-status-connecting": home_status_connecting_snapshot,
+    "home-status-no-card": home_status_no_card_snapshot,
+    "home-status-error": home_status_error_snapshot,
+    "home-status-reconnecting": home_status_reconnecting_snapshot,
+    "home-status-busy": home_status_busy_snapshot,
 }
 
 
@@ -1978,6 +2037,88 @@ def settings_map_status(snap: Snapshot) -> str:
     return "Ready" if snap.map_tile_render_supported else "Loading"
 
 
+def home_mesh_status(snap: Snapshot) -> tuple[str, tuple[int, int, int], bool]:
+    state = snap.mesh_state
+    if state == "radio_error":
+        return "Error", RED, True
+    if snap.radio_apply_pending:
+        return "Applying", AMBER, False
+    if snap.radio_ready and snap.radio_applied and state == "tx_busy":
+        return "Busy", GREEN, False
+    if snap.radio_ready and snap.radio_applied and state == "ready":
+        return "Ready", GREEN, False
+    if state in ("waiting_for_radio", "offline", "unavailable"):
+        return "Offline", MUTED, False
+    return "Starting", AMBER, False
+
+
+def home_wifi_status(snap: Snapshot) -> tuple[str, tuple[int, int, int]]:
+    if snap.wifi_connected:
+        return "Connected", GREEN
+    if snap.wifi_connecting:
+        return "Connecting", AMBER
+    if snap.wifi_enabled:
+        return "On", (167, 243, 208)
+    return "Off", MUTED
+
+
+def home_ble_status(snap: Snapshot) -> tuple[str, tuple[int, int, int]]:
+    if not snap.ble_build_enabled or not snap.ble_transport_supported:
+        return "Unavailable", MUTED
+    return ("On", (167, 243, 208)) if snap.ble_companion_enabled else ("Off", MUTED)
+
+
+def home_compact_storage_status(snap: Snapshot) -> tuple[str, tuple[int, int, int]]:
+    if storage_sd_needs_attention(snap):
+        return "Check", RED
+    if snap.storage_retained_backup_degraded:
+        return "Degraded", AMBER
+    if snap.storage_setup_action == "wait_for_storage_reconnect":
+        return "Reconnect", AMBER
+    if snap.storage_data_enabled or snap.storage_sd_data_root_ready:
+        return "Ready", GREEN
+    if snap.storage_setup_action == "insert_card" or snap.storage_sd_state == "no_card":
+        return "No card", AMBER
+    if snap.storage_sd_needs_fat32 or snap.storage_setup_action in (
+        "prepare_fat32_on_computer",
+        "backup_reformat_fat32_on_computer",
+    ):
+        return "FAT32", AMBER
+    if snap.storage_setup_required:
+        return "Setup", AMBER
+    if snap.storage_setup_action in ("bridge_unavailable", "bridge_protocol_pending"):
+        return "Offline", MUTED
+    return "Internal", MUTED
+
+
+def draw_home_status_icon(
+    s: Surface,
+    kind: str,
+    center: tuple[int, int],
+    color: tuple[int, int, int],
+):
+    x, y = center
+    if kind == "mesh":
+        s.draw.arc((x - 7, y - 7, x + 7, y + 7), 35, 190, fill=color, width=2)
+        s.draw.arc((x - 7, y - 7, x + 7, y + 7), 215, 350, fill=color, width=2)
+        s.draw.ellipse((x - 2, y - 2, x + 2, y + 2), fill=color)
+    elif kind == "wifi":
+        for radius in (3, 7):
+            s.draw.arc((x - radius, y - radius, x + radius, y + radius), 205, 335, fill=color, width=2)
+        s.draw.ellipse((x - 1, y + 4, x + 1, y + 6), fill=color)
+    elif kind == "ble":
+        s.draw.line(((x, y - 8), (x, y + 8), (x + 6, y + 3), (x - 5, y - 2),
+                     (x + 6, y - 7), (x, y - 12)), fill=color, width=2)
+    elif kind == "sd":
+        s.draw.polygon(((x - 7, y - 8), (x + 3, y - 8), (x + 7, y - 4),
+                        (x + 7, y + 8), (x - 7, y + 8)), outline=color)
+        s.draw.line(((x - 3, y - 7), (x - 3, y - 3)), fill=color, width=2)
+    else:
+        s.draw.polygon(((x, y - 9), (x + 9, y + 8), (x - 9, y + 8)), outline=color)
+        s.draw.line(((x, y - 3), (x, y + 3)), fill=color, width=2)
+        s.draw.ellipse((x - 1, y + 5, x + 1, y + 7), fill=color)
+
+
 def draw_home_body(s: Surface, snap: Snapshot):
     if not snap.map_location_set:
         map_status, map_color = "Set a location", ACCENT
@@ -2053,38 +2194,65 @@ def draw_home_body(s: Surface, snap: Snapshot):
             destination=destination,
         )
 
-    device_box = (12, 312, 468, 428)
-    storage_status = home_storage_status(snap)
-    storage_color = GREEN if storage_status == "Ready" else (
-        RED if storage_sd_needs_attention(snap) else AMBER
+    mesh_status, mesh_color, mesh_attention = home_mesh_status(snap)
+    wifi_status, wifi_color = home_wifi_status(snap)
+    ble_status, ble_color = home_ble_status(snap)
+    storage_status, storage_color = home_compact_storage_status(snap)
+    attention_required = mesh_attention or storage_sd_needs_attention(snap)
+    attention_notice = (
+        snap.storage_retained_backup_degraded
+        or snap.radio_apply_pending
+        or snap.wifi_connecting
+        or snap.storage_setup_required
+        or snap.storage_setup_action in (
+            "insert_card",
+            "prepare_fat32_on_computer",
+            "backup_reformat_fat32_on_computer",
+            "wait_for_storage_reconnect",
+            "run_storage_mount",
+            "wait_for_storage_mount",
+        )
     )
-    s.round_rect(device_box, (13, 23, 18), (31, 55, 46), 8)
-    s.text("Device status", (26, 320, 230, 346), 16, TEXT, True)
-    s.text("Settings and support", (26, 342, 260, 362), 10, MUTED)
-    s.text(">", (438, 320, 454, 346), 16, MUTED, True, "center")
-    device_columns = (
-        ("Time", "Syncing", MUTED),
-        ("Wi-Fi", "Off", MUTED),
-        ("BLE", "Off", MUTED),
-        ("SD", storage_status, storage_color),
+    attention_status = "Check" if attention_required else ("Notice" if attention_notice else "OK")
+    attention_color = RED if attention_required else (AMBER if attention_notice else GREEN)
+    status_box = (12, 312, 468, 400)
+    s.round_rect(status_box, (13, 23, 18), (31, 55, 46), 8)
+    status_items = (
+        ("Mesh", mesh_status, mesh_color, "mesh", "LV_SYMBOL_LOOP", "open_radio_settings", "radio_settings_sheet"),
+        ("Wi-Fi", wifi_status, wifi_color, "wifi", "LV_SYMBOL_WIFI", "open_wifi_settings", "wifi_setup_sheet"),
+        ("BLE", ble_status, ble_color, "ble", "LV_SYMBOL_BLUETOOTH", "open_ble_settings", "ble_setup_sheet"),
+        ("SD", storage_status, storage_color, "sd", "LV_SYMBOL_SD_CARD", "open_storage_setup", "storage_setup_sheet"),
+        ("Attention", attention_status, attention_color, "attention", "LV_SYMBOL_WARNING", "open_diagnostics", "diagnostics_sheet"),
     )
-    for index, (label, value, color) in enumerate(device_columns):
-        x0 = 26 + index * 110
-        s.text(label, (x0, 374, x0 + 100, 392), 10, MUTED, True)
-        s.text(value, (x0, 396, x0 + 100, 418), 11, color, True)
-    s.touch_target(
-        "Device status",
-        device_box,
-        kind="device_status_card",
-        action="open_device_status",
-        destination="settings",
-    )
+    semantic_labels: list[str] = []
+    for index, (label, value, color, kind, icon, action, destination) in enumerate(status_items):
+        x0 = 14 + index * 91
+        item_box = (x0, 314, x0 + 88, 398)
+        s.round_rect(item_box, (17, 29, 23), (17, 29, 23), 7)
+        draw_home_status_icon(s, kind, (x0 + 44, 327), color)
+        s.text(label, (x0 + 4, 342, x0 + 84, 360), 10, MUTED, True, "center")
+        s.text(value, (x0 + 4, 365, x0 + 84, 388), 10, color, True, "center")
+        semantic_label = f"{label}: {value}"
+        semantic_labels.append(semantic_label)
+        s.touch_target(
+            semantic_label,
+            item_box,
+            kind="home_status_item",
+            action=action,
+            destination=destination,
+            semantic_label=semantic_label,
+            icon=icon,
+        )
     s.metrics.update(
         {
             "home_audible_unread": audible_unread,
             "home_muted_unread": snap.muted_unread_dm,
             "home_muted_unread_separate": True,
             "home_messages_status": messages_status,
+            "home_status_strip_height": status_box[3] - status_box[1],
+            "home_status_item_count": len(status_items),
+            "home_status_semantic_labels": semantic_labels,
+            "home_status_attention_required": attention_required,
         }
     )
 
@@ -4433,8 +4601,15 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (214, 312, 274, 348), "TX+", ACCENT, action="radio_tx_power_up")
     draw_button(s, (282, 312, 416, 348), "RX Boost On", GREEN, action="radio_toggle_rx_boost")
     draw_button(s, (44, 356, 136, 386), "US/CAN", BLUE, action="radio_defaults")
-    draw_button(s, (146, 356, 238, 386), "Save", GREEN, action="save_radio_profile", destination="settings")
-    draw_button(s, (248, 356, 340, 386), "Close", MUTED, action="close_radio_settings", destination="settings")
+    draw_button(
+        s, (146, 356, 238, 386), "Save", GREEN,
+        action="save_radio_profile", destination="radio_settings_sheet",
+    )
+    draw_button(
+        s, (248, 356, 340, 386), "Close", MUTED,
+        action="close_radio_settings", destination="active_tab",
+    )
+    s.metrics["modal_return_policy"] = "active_tab"
 
 
 def draw_storage_page_header(
@@ -4572,7 +4747,7 @@ def render_storage_setup_sheet(s: Surface, snap: Snapshot):
         "Storage",
         "Card and saved-data overview",
         back_action="close_storage_setup",
-        back_destination="settings",
+        back_destination="active_tab",
     )
 
     hero_box = (16, 120, 464, 212)
@@ -4613,6 +4788,7 @@ def render_storage_setup_sheet(s: Surface, snap: Snapshot):
             "storage_root_action_count": 2,
             "storage_root_location_summary": location_summary,
             "storage_setup_action_hidden": True,
+            "modal_return_policy": "active_tab",
         }
     )
 
@@ -4742,7 +4918,7 @@ def render_display_settings_sheet(s: Surface, snap: Snapshot):
 
 def render_diagnostics_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Diagnostics", "Advanced health")
-    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_diagnostics", destination="settings")
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_diagnostics", destination="active_tab")
     s.text("Health", (44, 154, 160, 174), 13, GREEN, True)
     s.text("reset poweron  uptime 122s", (44, 178, 436, 200), 13, TEXT)
     s.text("heap 184K free  min 169K  largest 80K", (44, 206, 436, 228), 12, MUTED)
@@ -4753,6 +4929,7 @@ def render_diagnostics_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (44, 358, 156, 390), "Crashlog", AMBER, action="diagnostics_crashlog")
     draw_button(s, (168, 358, 264, 390), "Export", BLUE, action="diagnostics_export")
     draw_button(s, (276, 358, 362, 390), "Soak", GREEN, action="diagnostics_soak")
+    s.metrics["modal_return_policy"] = "active_tab"
 
 
 def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
@@ -4760,7 +4937,7 @@ def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
     s.text("Wi-Fi Setup", (28, 70, 230, 100), 22, TEXT, True)
     s.text("Profile and state", (28, 96, 230, 116), 12, MUTED)
-    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_wifi_setup", destination="settings")
+    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_wifi_setup", destination="active_tab")
     s.text("State off  build enabled", (28, 112, 452, 134), 14, AMBER, True)
     s.text("Last none", (28, 134, 452, 156), 13, MUTED)
     s.text("Profile not saved  password open/empty", (28, 156, 452, 178), 13, TEXT)
@@ -4781,11 +4958,12 @@ def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
     s.round_rect((16, 386, 464, 468), (10, 16, 24), BORDER, 8)
     s.text("Keyboard", (28, 394, 452, 416), 13, MUTED, True)
     s.text("q w e r t y u i o p", (32, 426, 448, 456), 16, TEXT, False, "center")
+    s.metrics["modal_return_policy"] = "active_tab"
 
 
 def render_ble_setup_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "BLE Setup", "Companion state")
-    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="settings")
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="active_tab")
     s.text("State off  build disabled", (44, 154, 436, 178), 15, AMBER, True)
     if snap.ble_transport_supported:
         s.text("Companion BLE is available for measured local setup.", (44, 194, 436, 236), 13, TEXT)
@@ -4800,6 +4978,7 @@ def render_ble_setup_sheet(s: Surface, snap: Snapshot):
         s.text("Pair unavailable", (44, 346, 210, 366), 12, MUTED)
         s.text("Forget unavailable", (224, 346, 436, 366), 12, MUTED)
     s.text("USB remains the reliable companion path for production validation.", (44, 386, 436, 416), 12, MUTED)
+    s.metrics["modal_return_policy"] = "active_tab"
 
 
 def render_advert_sheet(s: Surface, snap: Snapshot):
@@ -5672,12 +5851,11 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Nodes",
         "Map",
         "Tools",
-        "Device status",
-        "Settings and support",
-        "Time",
+        "Mesh",
         "Wi-Fi",
         "BLE",
         "SD",
+        "Attention",
     ),
     "messages": (
         "Messages",
@@ -6134,7 +6312,26 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "home", "action": "open_nodes", "destination": "nodes"},
             {"view": "home", "action": "open_map", "destination": "map"},
             {"view": "home", "action": "open_settings", "destination": "settings"},
-            {"view": "home", "action": "open_device_status", "destination": "settings"},
+            {"view": "home", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
+            {"view": "home", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
+            {"view": "home", "action": "open_ble_settings", "destination": "ble_setup_sheet"},
+            {"view": "home", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
+            {"view": "home", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+        ),
+    },
+    {
+        "name": "home_status_modals_return_to_active_tab",
+        "steps": (
+            {"view": "home", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
+            {"view": "radio_settings_sheet", "action": "close_radio_settings", "destination": "active_tab"},
+            {"view": "home", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
+            {"view": "wifi_setup_sheet", "action": "close_wifi_setup", "destination": "active_tab"},
+            {"view": "home", "action": "open_ble_settings", "destination": "ble_setup_sheet"},
+            {"view": "ble_setup_sheet", "action": "close_ble_setup", "destination": "active_tab"},
+            {"view": "home", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
+            {"view": "storage_setup_sheet", "action": "close_storage_setup", "destination": "active_tab"},
+            {"view": "home", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+            {"view": "diagnostics_sheet", "action": "close_diagnostics", "destination": "active_tab"},
         ),
     },
     {
@@ -6164,7 +6361,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "settings_connections_expanded", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
             {"view": "wifi_setup_sheet", "action": "wifi_scan"},
             {"view": "wifi_setup_sheet", "action": "wifi_connect"},
-            {"view": "wifi_setup_sheet", "action": "close_wifi_setup", "destination": "settings"},
+            {"view": "wifi_setup_sheet", "action": "close_wifi_setup", "destination": "active_tab"},
             {"view": "settings_connections_expanded", "action": "open_ble_settings", "destination": "ble_setup_sheet"},
             {"view": "settings_connections_expanded", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
             {"view": "settings_connections_expanded", "action": "toggle_more_connections"},
@@ -6492,8 +6689,8 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "radio_settings_sheet", "action": "radio_cycle_bandwidth"},
             {"view": "radio_settings_sheet", "action": "radio_sf_down"},
             {"view": "radio_settings_sheet", "action": "radio_sf_up"},
-            {"view": "radio_settings_sheet", "action": "save_radio_profile", "destination": "settings"},
-            {"view": "storage_setup_sheet", "action": "close_storage_setup", "destination": "settings"},
+            {"view": "radio_settings_sheet", "action": "save_radio_profile", "destination": "radio_settings_sheet"},
+            {"view": "storage_setup_sheet", "action": "close_storage_setup", "destination": "active_tab"},
             {"view": "advert_sheet", "action": "send_advert_zero", "rf_tx": True},
             {"view": "advert_sheet", "action": "send_advert_flood", "rf_tx": True},
             {"view": "advert_sheet", "action": "close_advert_sheet", "destination": "settings"},
@@ -6506,14 +6703,14 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "storage_card_page", "action": "close_storage_card", "destination": "storage_setup_sheet"},
             {"view": "storage_setup_sheet", "action": "open_storage_data", "destination": "storage_data_page"},
             {"view": "storage_data_page", "action": "close_storage_data", "destination": "storage_setup_sheet"},
-            {"view": "storage_setup_sheet", "action": "close_storage_setup", "destination": "settings"},
+            {"view": "storage_setup_sheet", "action": "close_storage_setup", "destination": "active_tab"},
         ),
     },
     {
         "name": "settings_display_and_diagnostics",
         "steps": (
             {"view": "display_settings_sheet", "action": "close_display_settings", "destination": "settings"},
-            {"view": "diagnostics_sheet", "action": "close_diagnostics", "destination": "settings"},
+            {"view": "diagnostics_sheet", "action": "close_diagnostics", "destination": "active_tab"},
         ),
     },
 )

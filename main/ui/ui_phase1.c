@@ -1624,8 +1624,15 @@ static void home_view_input_from_snapshot(
         .packet_count = snapshot->packet_count,
         .map_location_set = snapshot->map_location_set,
         .map_tile_cache_ready = snapshot->map_tile_cache_ready,
+        .mesh_state = snapshot->mesh_state,
+        .radio_ready = snapshot->radio_ready,
+        .radio_applied = snapshot->radio_applied,
+        .radio_apply_pending = snapshot->radio_apply_pending,
         .wifi_connected = snapshot->wifi_connected,
         .wifi_enabled = snapshot->wifi_enabled,
+        .wifi_connecting = snapshot->wifi_connecting,
+        .ble_build_enabled = snapshot->ble_build_enabled,
+        .ble_transport_supported = snapshot->ble_transport_supported,
         .ble_companion_enabled = snapshot->ble_companion_enabled,
         .time_available = snapshot->time_available,
         .time_label = snapshot->time_label,
@@ -2034,6 +2041,21 @@ static void handle_home_action(d1l_ui_home_action_t action, void *context)
         break;
     case D1L_UI_HOME_ACTION_MORE:
         request_tab_switch(D1L_UI_TAB_SETTINGS);
+        break;
+    case D1L_UI_HOME_ACTION_RADIO:
+        open_radio_settings_event_cb(NULL);
+        break;
+    case D1L_UI_HOME_ACTION_WIFI:
+        open_wifi_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_HOME_ACTION_BLE:
+        open_ble_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_HOME_ACTION_STORAGE:
+        open_storage_sheet_event_cb(NULL);
+        break;
+    case D1L_UI_HOME_ACTION_ATTENTION:
+        open_diagnostics_sheet_event_cb(NULL);
         break;
     case D1L_UI_HOME_ACTION_NONE:
     default:

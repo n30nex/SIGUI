@@ -8,6 +8,11 @@ static bool text_equals(const char *value, const char *expected)
     return value && expected && strcmp(value, expected) == 0;
 }
 
+static bool mesh_needs_attention(const d1l_ui_home_view_input_t *input)
+{
+    return input && text_equals(input->mesh_state, "radio_error");
+}
+
 static bool storage_needs_attention(const d1l_ui_home_view_input_t *input)
 {
     if (!input) {
@@ -177,23 +182,105 @@ void d1l_ui_home_view(const d1l_ui_home_view_input_t *input,
              input->packet_count == 1U ? "" : "s");
     out_view->more_status_color = input->packet_count ? 0xC4B5FDU : 0x8EA0AEU;
 
+    out_view->mesh_needs_attention = mesh_needs_attention(input);
+    const char *mesh_value = "Starting";
+    out_view->mesh_value_color = 0xFBBF24U;
+    if (out_view->mesh_needs_attention) {
+        mesh_value = "Error";
+        out_view->mesh_value_color = 0xF87171U;
+    } else if (input->radio_apply_pending) {
+        mesh_value = "Applying";
+    } else if (input->radio_ready && input->radio_applied &&
+               text_equals(input->mesh_state, "tx_busy")) {
+        mesh_value = "Busy";
+        out_view->mesh_value_color = 0x5EEAD4U;
+    } else if (input->radio_ready && input->radio_applied &&
+               text_equals(input->mesh_state, "ready")) {
+        mesh_value = "Ready";
+        out_view->mesh_value_color = 0x5EEAD4U;
+    } else if (text_equals(input->mesh_state, "waiting_for_radio") ||
+               text_equals(input->mesh_state, "offline") ||
+               text_equals(input->mesh_state, "unavailable")) {
+        mesh_value = "Offline";
+        out_view->mesh_value_color = 0x8EA0AEU;
+    }
+    snprintf(out_view->mesh_value, sizeof(out_view->mesh_value), "%s",
+             mesh_value);
+
     snprintf(out_view->time_value, sizeof(out_view->time_value), "%s",
              input->time_available && input->time_label && input->time_label[0] ?
                  input->time_label : "Syncing");
     snprintf(out_view->wifi_value, sizeof(out_view->wifi_value), "%s",
              input->wifi_connected ? "Connected" :
-             (input->wifi_enabled ? "On" : "Off"));
+             (input->wifi_connecting ? "Connecting" :
+              (input->wifi_enabled ? "On" : "Off")));
     snprintf(out_view->ble_value, sizeof(out_view->ble_value), "%s",
-             input->ble_companion_enabled ? "On" : "Off");
+             !input->ble_build_enabled || !input->ble_transport_supported ?
+                 "Unavailable" :
+             (input->ble_companion_enabled ? "On" : "Off"));
     snprintf(out_view->sd_value, sizeof(out_view->sd_value), "%s",
              d1l_ui_home_sd_state(input));
 
     out_view->storage_needs_attention = storage_needs_attention(input);
     out_view->time_value_color = input->time_available ? 0x5EEAD4U : 0x8EA0AEU;
-    out_view->wifi_value_color = input->wifi_enabled ? 0x5EEAD4U : 0x8EA0AEU;
-    out_view->ble_value_color = input->ble_companion_enabled ? 0xA7F3D0U : 0x8EA0AEU;
+    out_view->wifi_value_color = input->wifi_connected ? 0x5EEAD4U :
+        (input->wifi_connecting ? 0xFBBF24U :
+         (input->wifi_enabled ? 0xA7F3D0U : 0x8EA0AEU));
+    const bool ble_available = input->ble_build_enabled &&
+        input->ble_transport_supported;
+    out_view->ble_value_color = ble_available && input->ble_companion_enabled ?
+        0xA7F3D0U : 0x8EA0AEU;
+    const bool sd_notice = input->storage_setup_required ||
+        text_equals(out_view->sd_value, "no card") ||
+        text_equals(out_view->sd_value, "needs FAT32") ||
+        text_equals(out_view->sd_value, "mounting") ||
+        text_equals(out_view->sd_value, "reconnecting");
     out_view->sd_value_color = out_view->storage_needs_attention ? 0xF87171U :
         (input->storage_retained_backup_degraded ? 0xFBBF24U :
-         (input->storage_data_enabled ? 0x5EEAD4U :
-          (input->storage_setup_required ? 0xFBBF24U : 0x8EA0AEU)));
+         (sd_notice ? 0xFBBF24U :
+          ((input->storage_data_enabled || input->storage_sd_data_root_ready) ?
+               0x5EEAD4U : 0x8EA0AEU)));
+
+    const char *sd_compact = out_view->sd_value;
+    if (out_view->storage_needs_attention) {
+        sd_compact = "Check";
+    } else if (text_equals(out_view->sd_value, "needs FAT32")) {
+        sd_compact = "FAT32";
+    } else if (text_equals(out_view->sd_value, "storage issue") ||
+               text_equals(out_view->sd_value, "backup issue")) {
+        sd_compact = "Degraded";
+    } else if (text_equals(out_view->sd_value, "ready") ||
+               text_equals(out_view->sd_value, "FAT32 ready")) {
+        sd_compact = "Ready";
+    } else if (text_equals(out_view->sd_value, "no card")) {
+        sd_compact = "No card";
+    } else if (text_equals(out_view->sd_value, "reconnecting")) {
+        sd_compact = "Reconnect";
+    } else if (text_equals(out_view->sd_value, "mount") ||
+               text_equals(out_view->sd_value, "mounting") ||
+               text_equals(out_view->sd_value, "preparing")) {
+        sd_compact = "Starting";
+    } else if (text_equals(out_view->sd_value, "setup")) {
+        sd_compact = "Setup";
+    } else if (text_equals(out_view->sd_value, "fallback") ||
+               text_equals(out_view->sd_value, "internal")) {
+        sd_compact = "Internal";
+    } else if (text_equals(out_view->sd_value, "offline")) {
+        sd_compact = "Offline";
+    } else if (text_equals(out_view->sd_value, "repair")) {
+        sd_compact = "Repair";
+    }
+    snprintf(out_view->sd_compact_value,
+             sizeof(out_view->sd_compact_value), "%s", sd_compact);
+
+    out_view->attention_required = out_view->mesh_needs_attention ||
+        out_view->storage_needs_attention;
+    const bool attention_notice = input->storage_retained_backup_degraded ||
+        input->radio_apply_pending || input->wifi_connecting ||
+        sd_notice;
+    snprintf(out_view->attention_value, sizeof(out_view->attention_value), "%s",
+             out_view->attention_required ? "Check" :
+             (attention_notice ? "Notice" : "OK"));
+    out_view->attention_value_color = out_view->attention_required ? 0xF87171U :
+        (attention_notice ? 0xFBBF24U : 0x5EEAD4U);
 }

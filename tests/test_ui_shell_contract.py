@@ -202,13 +202,15 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "return input->storage_sd_state;" not in home_view
     assert "d1l_ui_home_destination_box" in home_header
     assert "d1l_ui_home_device_box" in home_header
+    assert "d1l_ui_home_status_box" in home_header
     assert "static const d1l_ui_home_box_t k_destination_boxes" in home_module
     assert "static const d1l_ui_home_box_t k_device_box" in home_module
+    assert "static const d1l_ui_home_box_t k_status_boxes" in home_module
     assert "[D1L_UI_HOME_DESTINATION_MESSAGES] = {12, 0, 222, 140}" in home_module
     assert "[D1L_UI_HOME_DESTINATION_NETWORK] = {246, 0, 222, 140}" in home_module
     assert "[D1L_UI_HOME_DESTINATION_MAP] = {12, 148, 222, 140}" in home_module
     assert "[D1L_UI_HOME_DESTINATION_MORE] = {246, 148, 222, 140}" in home_module
-    assert "static const d1l_ui_home_box_t k_device_box = {12, 296, 456, 116}" in home_module
+    assert "static const d1l_ui_home_box_t k_device_box = {12, 296, 456, 88}" in home_module
     assert "render_destination_card" in home_module
     assert "render_device_status" in home_module
     assert "lv_obj_set_style_border_width(panel, 1, 0)" in home_module
@@ -222,8 +224,13 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "D1L_UI_HOME_ACTION_NETWORK" in home_header
     assert "D1L_UI_HOME_ACTION_MAP" in home_header
     assert "D1L_UI_HOME_ACTION_MORE" in home_header
+    assert "D1L_UI_HOME_ACTION_RADIO" in home_header
+    assert "D1L_UI_HOME_ACTION_WIFI" in home_header
+    assert "D1L_UI_HOME_ACTION_BLE" in home_header
+    assert "D1L_UI_HOME_ACTION_STORAGE" in home_header
+    assert "D1L_UI_HOME_ACTION_ATTENTION" in home_header
     assert "D1L_UI_HOME_LAUNCHER_" not in home_header
-    assert "D1L_UI_HOME_STATUS_" not in home_header
+    assert "D1L_UI_HOME_STATUS_COUNT" in home_header
     assert "render_home_launcher_tile" not in source
     assert "render_home_status_icon" not in source
     assert "render_home_message_preview" not in source
@@ -236,11 +243,11 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert '"Nodes"' in home_module
     assert '"Map"' in home_module
     assert '"Tools"' in home_module
-    assert '"Device status"' in home_module
-    assert '"Time"' in home_module
+    assert '"Mesh"' in home_module
     assert '"Wi-Fi"' in home_module
     assert '"BLE"' in home_module
     assert '"SD"' in home_module
+    assert '"Attention"' in home_module
     assert "input->public_unread_count" in home_view
     assert "input->dm_unread_count" in home_view
     assert "input->contact_count" in home_view
@@ -256,10 +263,19 @@ def test_home_screen_is_user_first_companion_dashboard():
     ):
         route_body = source.split(f"case {action}:", 1)[1].split("break;", 1)[0]
         assert f"request_tab_switch({tab});" in route_body
+    for action, callback in (
+        ("D1L_UI_HOME_ACTION_RADIO", "open_radio_settings_event_cb(NULL);"),
+        ("D1L_UI_HOME_ACTION_WIFI", "open_wifi_sheet_event_cb(NULL);"),
+        ("D1L_UI_HOME_ACTION_BLE", "open_ble_sheet_event_cb(NULL);"),
+        ("D1L_UI_HOME_ACTION_STORAGE", "open_storage_sheet_event_cb(NULL);"),
+        ("D1L_UI_HOME_ACTION_ATTENTION", "open_diagnostics_sheet_event_cb(NULL);"),
+    ):
+        route_body = source.split(f"case {action}:", 1)[1].split("break;", 1)[0]
+        assert callback in route_body
     home_body = home_module.split("void d1l_ui_home_render", 1)[1]
     assert home_body.count("render_destination_card(parent") == 4
     assert "render_device_status(parent, &controller->rendered" in home_body
-    assert "render_status_icon" not in home_body
+    assert "render_status_item" in home_module
     assert "Mesh %s  RX %lu  TX %lu" not in home_body
     assert "Last Messages" not in home_body
     assert "Local Repeaters" not in home_body

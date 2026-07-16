@@ -23,11 +23,25 @@ typedef enum {
 } d1l_ui_home_destination_slot_t;
 
 typedef enum {
+    D1L_UI_HOME_STATUS_MESH = 0,
+    D1L_UI_HOME_STATUS_WIFI,
+    D1L_UI_HOME_STATUS_BLE,
+    D1L_UI_HOME_STATUS_SD,
+    D1L_UI_HOME_STATUS_ATTENTION,
+    D1L_UI_HOME_STATUS_COUNT,
+} d1l_ui_home_status_slot_t;
+
+typedef enum {
     D1L_UI_HOME_ACTION_NONE = 0,
     D1L_UI_HOME_ACTION_MESSAGES,
     D1L_UI_HOME_ACTION_NETWORK,
     D1L_UI_HOME_ACTION_MAP,
     D1L_UI_HOME_ACTION_MORE,
+    D1L_UI_HOME_ACTION_RADIO,
+    D1L_UI_HOME_ACTION_WIFI,
+    D1L_UI_HOME_ACTION_BLE,
+    D1L_UI_HOME_ACTION_STORAGE,
+    D1L_UI_HOME_ACTION_ATTENTION,
 } d1l_ui_home_action_t;
 
 typedef void (*d1l_ui_home_action_handler_t)(d1l_ui_home_action_t action,
@@ -40,7 +54,8 @@ typedef struct {
     d1l_ui_home_action_t action;
 } d1l_ui_home_action_binding_t;
 
-#define D1L_UI_HOME_ACTION_BINDING_COUNT (D1L_UI_HOME_DESTINATION_COUNT + 1U)
+#define D1L_UI_HOME_ACTION_BINDING_COUNT \
+    (D1L_UI_HOME_DESTINATION_COUNT + D1L_UI_HOME_STATUS_COUNT)
 
 typedef struct d1l_ui_home_controller {
     d1l_ui_home_view_model_t rendered;
@@ -51,6 +66,7 @@ typedef struct d1l_ui_home_controller {
 
 d1l_ui_home_box_t d1l_ui_home_destination_box(d1l_ui_home_destination_slot_t slot);
 d1l_ui_home_box_t d1l_ui_home_device_box(void);
+d1l_ui_home_box_t d1l_ui_home_status_box(d1l_ui_home_status_slot_t slot);
 void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
                         lv_obj_t *parent,
                         const d1l_ui_home_view_model_t *view_model,

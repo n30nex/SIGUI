@@ -30,7 +30,7 @@ def test_home_and_top_bar_prioritize_retained_sd_degradation_over_ready_state():
     color_table = source.split("out_view->sd_value_color =", 1)[1].split(";", 1)[0]
     assert "out_view->storage_needs_attention ? 0xF87171U" in color_table
     assert color_table.index("storage_needs_attention") < color_table.index(
-        "input->storage_data_enabled ? 0x5EEAD4U"
+        "input->storage_data_enabled || input->storage_sd_data_root_ready"
     )
 
     top_bar = function_body(shell, "static void update_chrome", "static lv_obj_t *render_metric_card")
