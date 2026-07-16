@@ -15,6 +15,7 @@ def test_nodes_root_has_owned_bounded_view_model_and_action_lifetime():
     source = read("main/ui/ui_nodes.c")
 
     assert '"ui/ui_nodes.c"' in cmake
+    assert '"ui/ui_nodes_summary.c"' in cmake
     assert '#include "ui_nodes.h"' in phase1
     assert "d1l_ui_nodes_view_model_t" in header
     assert "d1l_ui_nodes_action_event_t" in header
@@ -25,6 +26,7 @@ def test_nodes_root_has_owned_bounded_view_model_and_action_lifetime():
     assert "d1l_node_view_t node_rows[D1L_NODE_STORE_CAPACITY]" in header
     assert "bool contact_can_dm[D1L_APP_SNAPSHOT_CONTACT_PREVIEW]" in header
     assert "bool node_can_dm[D1L_NODE_STORE_CAPACITY]" in header
+    assert "d1l_ui_node_role_counts_t role_counts" in header
 
     assert "view_model != &controller->rendered" in source
     assert "controller->rendered = *view_model;" in source
@@ -44,6 +46,8 @@ def test_nodes_root_has_owned_bounded_view_model_and_action_lifetime():
     assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW" in phase1
     assert "d1l_app_model_query_nodes(" in phase1
     assert "D1L_NODE_STORE_CAPACITY" in phase1
+    assert "d1l_ui_nodes_summarize_roles(" in phase1
+    assert "view_model->node_count" not in phase1
     assert "contact_can_dm(&view_model->contact_rows[i])" in phase1
     assert "node_view_can_dm(&view_model->node_rows[i])" in phase1
     assert "handle_nodes_action" in phase1
@@ -70,10 +74,17 @@ def test_nodes_root_module_preserves_rows_roles_empty_state_and_boundaries():
         '"RPT"',
         '"SNS"',
         '"CMP"',
+        '"Chat"',
+        '"Repeater"',
+        '"Room"',
+        '"Sensor"',
+        '"Unknown"',
     ):
         assert label in source
     assert "nodes_render_contact_row" in source
     assert "nodes_render_node_row" in source
+    assert "nodes_render_summary" in source
+    assert "nodes_render_role_count" in source
     assert "static const char *nodes_role_badge_text" in source
     assert "static uint32_t nodes_role_color" in source
     assert 'entry->public_key_hex[0] ? "key" : "no key"' in source
@@ -88,3 +99,17 @@ def test_nodes_root_module_preserves_rows_roles_empty_state_and_boundaries():
     assert "d1l_meshcore_service_" not in source
     assert "d1l_storage_" not in source
     assert "freertos/" not in source
+
+
+def test_nodes_summary_counts_only_exact_canonical_role_labels():
+    summary = read("main/ui/ui_nodes_summary.c")
+
+    for role in ("companion", "chat", "repeater", "room", "sensor"):
+        assert f'role_equals(role, "{role}")' in summary
+    assert "roles[i]" in summary
+    assert "node_roles[i] = view_model->node_rows[i].role;" in read("main/ui/ui_phase1.c")
+    assert "path_hops" not in summary
+    assert "rssi" not in summary
+    assert "snr" not in summary
+    assert "++out_counts->unknown;" in summary
+    assert "++out_counts->total;" in summary

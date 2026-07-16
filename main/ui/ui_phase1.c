@@ -5167,13 +5167,7 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
         return;
     }
     memset(view_model, 0, sizeof(*view_model));
-    view_model->node_count = snapshot->node_count;
-    view_model->node_total_written = snapshot->node_total_written;
-    view_model->room_server_count = snapshot->signal_summary.room_server_count;
-    view_model->repeater_candidate_count =
-        snapshot->signal_summary.repeater_candidate_count;
     view_model->contact_count = snapshot->contact_count;
-    view_model->contact_total_written = snapshot->contact_total_written;
 
     view_model->contact_row_count = snapshot->recent_contact_count;
     if (view_model->contact_row_count > D1L_APP_SNAPSHOT_CONTACT_PREVIEW) {
@@ -5197,6 +5191,13 @@ static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
     if (view_model->node_row_count > D1L_NODE_STORE_CAPACITY) {
         view_model->node_row_count = D1L_NODE_STORE_CAPACITY;
     }
+    const char *node_roles[D1L_NODE_STORE_CAPACITY] = {0};
+    for (size_t i = 0; i < view_model->node_row_count; ++i) {
+        node_roles[i] = view_model->node_rows[i].role;
+    }
+    d1l_ui_nodes_summarize_roles(
+        node_roles, view_model->node_row_count, D1L_NODE_STORE_CAPACITY,
+        &view_model->role_counts);
     for (size_t i = 0; i < view_model->node_row_count; ++i) {
         view_model->node_can_dm[i] = node_view_can_dm(&view_model->node_rows[i]);
     }

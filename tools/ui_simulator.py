@@ -20,6 +20,7 @@ HOME_TOP_BAR_H = 16
 DOCK_Y = 428
 DOCK_H = 52
 MIN_TOUCH_TARGET = 44
+D1L_NODE_STORE_CAPACITY = 64
 DOCK_TABS = (
     ("Home", "Home", "home", "LV_SYMBOL_HOME"),
     ("Messages", "Messages", "messages", "LV_SYMBOL_ENVELOPE"),
@@ -327,17 +328,17 @@ def sample_snapshot() -> Snapshot:
     """Return a stable fake mesh snapshot used by CI screenshot checks."""
 
     room = Node(
-        "YKF Room", "937D290883817CBD", "Room Server",
+        "YKF Room", "937D290883817CBD", "room",
         "-44 dBm / 29 dB", "last 12s, signed advert",
         public_key_hex="937D290883817CBD11223344556677880BF0A701D5AE2DB660B6ABA17831F883",
     )
     bot = Node(
-        "YKF Corebot", "0BF0A701D5AE2DB6", "Companion",
+        "YKF Corebot", "0BF0A701D5AE2DB6", "companion",
         "-41 dBm / 30 dB", "direct route, public key",
         public_key_hex=SAMPLE_PUBLIC_KEY,
         dm_capable=True,
     )
-    repeater = Node("Krabs Lagoon", "60B6ABA17831F883", "Repeater", "-52 dBm / 22 dB", "1 hop via flood path")
+    repeater = Node("Krabs Lagoon", "60B6ABA17831F883", "repeater", "-52 dBm / 22 dB", "1 hop via flood path")
     return Snapshot(
         node_name="D1L Desk",
         fingerprint="60B6ABA17831F883",
@@ -541,6 +542,49 @@ def home_status_busy_snapshot() -> Snapshot:
     return replace(home_status_ready_snapshot(), mesh_state="tx_busy")
 
 
+def nodes_empty_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        rooms=(),
+        repeaters=(),
+        contacts=(),
+        heard=(),
+    )
+
+
+def nodes_mixed_roles_snapshot() -> Snapshot:
+    nodes = (
+        Node(
+            "Chat Companion", "1111111111111111", "companion",
+            "-41 dBm / 30 dB", "direct, signed advert",
+            public_key_hex="11" * 32, dm_capable=True,
+        ),
+        Node(
+            "Hill Repeater", "2222222222222222", "repeater",
+            "-52 dBm / 22 dB", "one hop, signed advert",
+        ),
+        Node(
+            "Ops Room", "3333333333333333", "room",
+            "-48 dBm / 24 dB", "signed advert",
+        ),
+        Node(
+            "Weather Sensor", "4444444444444444", "sensor",
+            "-57 dBm / 18 dB", "signed advert",
+        ),
+        Node(
+            "Future Role", "5555555555555555", "gateway",
+            "-60 dBm / 16 dB", "unknown exact role",
+        ),
+    )
+    return replace(
+        sample_snapshot(),
+        rooms=(nodes[2],),
+        repeaters=(nodes[1],),
+        contacts=(nodes[0],),
+        heard=nodes,
+    )
+
+
 def large_mesh_snapshot() -> Snapshot:
     """Return an intentionally large fake mesh snapshot for bounded-list stress checks."""
 
@@ -548,7 +592,7 @@ def large_mesh_snapshot() -> Snapshot:
         Node(
             f"Corebot Contact {i:02d}",
             f"0BF0A701D5AE{i:04X}",
-            "Companion",
+            "companion",
             f"-{38 + (i % 12)} dBm / {24 + (i % 8)} dB",
             "retained key, direct candidate",
             public_key_hex=(
@@ -562,7 +606,7 @@ def large_mesh_snapshot() -> Snapshot:
         Node(
             f"Large Mesh Heard Node With Long Name {i:03d}",
             f"937D290883{i:06X}",
-            "Room" if i % 5 == 0 else ("Repeater" if i % 5 == 1 else "Chat"),
+            "room" if i % 5 == 0 else ("repeater" if i % 5 == 1 else "chat"),
             f"-{42 + (i % 20)} dBm / {18 + (i % 12)} dB",
             f"{i % 4} hop, signed advert, seen {i + 1}",
         )
@@ -973,6 +1017,8 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "home-status-error": home_status_error_snapshot,
     "home-status-reconnecting": home_status_reconnecting_snapshot,
     "home-status-busy": home_status_busy_snapshot,
+    "nodes-empty": nodes_empty_snapshot,
+    "nodes-mixed-roles": nodes_mixed_roles_snapshot,
 }
 
 
@@ -1294,6 +1340,31 @@ def role_badge_color(role: str) -> tuple[int, int, int]:
     if "companion" in normalized:
         return ACCENT
     return BLUE
+
+
+def node_role_counts(nodes: tuple[Node, ...]) -> dict[str, int]:
+    """Project the firmware's bounded, exact role query without normalization."""
+
+    counts = {
+        "chat_companion": 0,
+        "repeater": 0,
+        "room_server": 0,
+        "sensor": 0,
+        "unknown": 0,
+    }
+    for node in nodes[:D1L_NODE_STORE_CAPACITY]:
+        role = node.role
+        if role in ("chat", "companion"):
+            counts["chat_companion"] += 1
+        elif role == "repeater":
+            counts["repeater"] += 1
+        elif role == "room":
+            counts["room_server"] += 1
+        elif role == "sensor":
+            counts["sensor"] += 1
+        else:
+            counts["unknown"] += 1
+    return counts
 
 
 DM_IDENTITY_REASON_TEXT = {
@@ -2973,16 +3044,42 @@ def render_messages_dm_failure(s: Surface, snap: Snapshot):
 def render_nodes(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Nodes", (16, 64, 150, 92), 22, TEXT, True)
-    s.round_rect((16, 104, 464, 228))
-    s.text("Contacts", (28, 112, 180, 134), 14, MUTED, True)
-    y = 140
+    counts = node_role_counts(snap.heard)
+    heard_query_count = min(len(snap.heard), D1L_NODE_STORE_CAPACITY)
+    s.round_rect((16, 104, 464, 200))
+    s.text("Heard Nodes", (28, 110, 180, 132), 14, MUTED, True)
+    s.text(str(heard_query_count), (28, 132, 112, 158), 22, ACCENT, True)
+    contact_word = "contact" if len(snap.contacts) == 1 else "contacts"
+    s.text(
+        f"{len(snap.contacts)} {contact_word}",
+        (250, 114, 452, 138),
+        12,
+        GREEN,
+        True,
+        "right",
+    )
+    chip_specs = (
+        ("Chat", "chat_companion", ACCENT),
+        ("Repeater", "repeater", AMBER),
+        ("Room", "room_server", GREEN),
+        ("Sensor", "sensor", VIOLET),
+        ("Unknown", "unknown", BLUE),
+    )
+    for index, (label, key, color) in enumerate(chip_specs):
+        x = 28 + index * 83
+        s.round_rect((x, 160, x + 76, 194), fill=(16, 32, 42), outline=color, radius=6)
+        s.text(label, (x + 2, 162, x + 74, 176), 9, MUTED, True, "center")
+        s.text(str(counts[key]), (x + 2, 176, x + 74, 192), 11, color, True, "center")
+
+    s.round_rect((16, 208, 464, 282))
+    s.text("Contacts", (28, 212, 180, 232), 13, MUTED, True)
+    y = 234
     contacts_rendered = 0
     for node in snap.contacts:
-        if y + 48 > 220:
+        if y + 44 > 280:
             break
         draw_row(
-            s,
-            (28, y, 374, y + 48),
+            s, (28, y, 374, y + 44),
             node.name,
             f"{node.fingerprint}  {node.signal}",
             role_badge_text(node.role),
@@ -2991,19 +3088,22 @@ def render_nodes(s: Surface, snap: Snapshot):
             action="open_contact_detail",
             destination="contact_detail_sheet",
         )
-        draw_button(
-            s, (384, y + 2, 452, y + 46), "DM", GREEN,
-            action="open_dm_compose", destination="compose_sheet",
-        )
-        y += 54
+        if node_dm_identity_reason(snap, node) == "ready":
+            draw_button(
+                s, (384, y, 452, y + 44), "DM", GREEN,
+                action="open_dm_compose", destination="compose_sheet",
+            )
+        y += 48
         contacts_rendered += 1
-    s.round_rect((16, 240, 464, 416))
-    s.text("Heard Nodes", (28, 248, 180, 270), 14, MUTED, True)
-    s.text("All Heard", (306, 248, 452, 270), 12, MUTED, True, "right")
-    y = 276
+    if contacts_rendered == 0:
+        s.text("No contacts retained", (28, 238, 452, 268), 12, MUTED)
+
+    s.round_rect((16, 290, 464, 416))
+    s.text("All Heard", (28, 294, 180, 314), 13, MUTED, True)
+    y = 316
     heard_rendered = 0
     for node in snap.heard:
-        if y + 44 > 416:
+        if y + 44 > 414:
             break
         dm_ready = node_dm_identity_reason(snap, node) == "ready"
         draw_row(
@@ -3024,13 +3124,23 @@ def render_nodes(s: Surface, snap: Snapshot):
             )
         y += 48
         heard_rendered += 1
+    if heard_rendered == 0:
+        s.text("No heard nodes yet", (28, 326, 452, 356), 12, MUTED)
     s.metrics.update(
         {
             "contacts_source_count": len(snap.contacts),
             "contacts_rendered_count": contacts_rendered,
             "heard_source_count": len(snap.heard),
-            "heard_query_count": len(snap.heard),
+            "heard_query_count": heard_query_count,
+            "node_role_query_capacity": D1L_NODE_STORE_CAPACITY,
             "heard_rendered_count": heard_rendered,
+            "node_role_counts": counts,
+            "node_role_count_sum": sum(counts.values()),
+            "node_role_counts_match_query": sum(counts.values()) == heard_query_count,
+            "node_role_source": "exact_render_query_role",
+            "nodes_navigation_rf_silent": True,
+            "nodes_formats_sd": False,
+            "nodes_destructive_actions": 0,
             "contact_dm_shortcut_min_height": 44,
             "node_dm_shortcut_min_height": 44,
         }
@@ -5901,7 +6011,17 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Direct messages",
         "A final delivery failure is retained; open for details.",
     ),
-    "nodes": ("Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"),
+    "nodes": (
+        "Nodes",
+        "Contacts",
+        "Heard Nodes",
+        "All Heard",
+        "Chat",
+        "Repeater",
+        "Room",
+        "Sensor",
+        "Unknown",
+    ),
     "map": (
         "Options",
         "(c) OpenStreetMap contributors",

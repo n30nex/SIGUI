@@ -5,16 +5,13 @@
 #include <stdint.h>
 
 #include "app/app_model.h"
+#include "ui_nodes_summary.h"
 
 typedef struct _lv_obj_t lv_obj_t;
 
 typedef struct {
-    size_t node_count;
-    uint32_t node_total_written;
-    uint32_t room_server_count;
-    uint32_t repeater_candidate_count;
+    d1l_ui_node_role_counts_t role_counts;
     size_t contact_count;
-    uint32_t contact_total_written;
     d1l_contact_entry_t contact_rows[D1L_APP_SNAPSHOT_CONTACT_PREVIEW];
     bool contact_can_dm[D1L_APP_SNAPSHOT_CONTACT_PREVIEW];
     size_t contact_row_count;
