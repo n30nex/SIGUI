@@ -144,33 +144,84 @@ static lv_obj_t *nodes_render_role_badge(lv_obj_t *parent,
     return badge;
 }
 
-static lv_obj_t *nodes_render_metric_card(lv_obj_t *parent,
-                                          int x,
-                                          int y,
-                                          const char *title,
-                                          const char *value,
-                                          const char *detail,
-                                          uint32_t accent)
+static void nodes_render_role_count(lv_obj_t *parent,
+                                    int x,
+                                    const char *label,
+                                    size_t count,
+                                    uint32_t accent)
 {
-    lv_obj_t *card = nodes_create_panel(parent, x, y, 204, 104);
-    if (!card) {
-        return NULL;
+    if (!parent || !label) {
+        return;
     }
-    lv_obj_t *title_label = nodes_create_label(card, title, 0x8EA0AE);
-    if (title_label) {
-        lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *chip = nodes_create_panel(parent, x, 58, 76, 38);
+    if (!chip) {
+        return;
     }
-    lv_obj_t *value_label = nodes_create_label(card, value, accent);
-    if (value_label) {
-        lv_obj_set_style_text_font(value_label, &lv_font_montserrat_24, 0);
-        lv_obj_align(value_label, LV_ALIGN_TOP_LEFT, 0, 26);
+    lv_obj_set_style_radius(chip, 6, 0);
+    lv_obj_set_style_bg_color(chip, lv_color_hex(0x10202A), 0);
+    lv_obj_set_style_border_color(chip, lv_color_hex(accent), 0);
+    lv_obj_set_style_pad_all(chip, 0, 0);
+
+    lv_obj_t *name = nodes_create_label(chip, label, 0xA7B4BE);
+    if (name) {
+        nodes_set_dot_width(name, 70);
+        lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(name, 3, 1);
     }
-    lv_obj_t *detail_label = nodes_create_label(card, detail, 0xD7E1EA);
-    nodes_set_dot_width(detail_label, 176);
-    if (detail_label) {
-        lv_obj_align(detail_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    char value[24];
+    snprintf(value, sizeof(value), "%u", (unsigned)count);
+    lv_obj_t *number = nodes_create_label(chip, value, accent);
+    if (number) {
+        nodes_set_dot_width(number, 70);
+        lv_obj_set_style_text_align(number, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(number, 3, 18);
     }
-    return card;
+}
+
+static void nodes_render_summary(lv_obj_t *parent,
+                                 const d1l_ui_nodes_view_model_t *view_model)
+{
+    if (!parent || !view_model) {
+        return;
+    }
+    lv_obj_t *summary = nodes_create_panel(parent, 18, 16, 424, 104);
+    if (!summary) {
+        return;
+    }
+    lv_obj_set_style_pad_all(summary, 0, 0);
+
+    lv_obj_t *title = nodes_create_label(summary, "Heard Nodes", 0x8EA0AE);
+    if (title) {
+        lv_obj_set_pos(title, 12, 6);
+    }
+    char total[32];
+    snprintf(total, sizeof(total), "%u", (unsigned)view_model->role_counts.total);
+    lv_obj_t *total_label = nodes_create_label(summary, total, 0x5EEAD4);
+    if (total_label) {
+        lv_obj_set_style_text_font(total_label, &lv_font_montserrat_24, 0);
+        lv_obj_set_pos(total_label, 12, 27);
+    }
+    char contacts[48];
+    snprintf(contacts, sizeof(contacts), "%u contact%s",
+             (unsigned)view_model->contact_count,
+             view_model->contact_count == 1U ? "" : "s");
+    lv_obj_t *contact_label = nodes_create_label(summary, contacts, 0xA7F3D0);
+    if (contact_label) {
+        nodes_set_dot_width(contact_label, 180);
+        lv_obj_set_style_text_align(contact_label, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_pos(contact_label, 232, 14);
+    }
+
+    nodes_render_role_count(summary, 12, "Chat", view_model->role_counts.chat_companion,
+                            0x5EEAD4);
+    nodes_render_role_count(summary, 92, "Repeater", view_model->role_counts.repeater,
+                            0xFBBF24);
+    nodes_render_role_count(summary, 172, "Room", view_model->role_counts.room_server,
+                            0xA7F3D0);
+    nodes_render_role_count(summary, 252, "Sensor", view_model->role_counts.sensor,
+                            0xC4B5FD);
+    nodes_render_role_count(summary, 332, "Unknown", view_model->role_counts.unknown,
+                            0x93C5FD);
 }
 
 static void nodes_dispatch_contact_event(d1l_ui_nodes_action_binding_t *binding,
@@ -374,21 +425,15 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
     controller->action_handler = action_handler;
     controller->action_context = action_context;
 
-    char value[32];
-    char detail[64];
-    snprintf(value, sizeof(value), "%u", (unsigned)controller->rendered.node_count);
-    snprintf(detail, sizeof(detail), "rooms %lu  rpt %lu  writes %lu",
-             (unsigned long)controller->rendered.room_server_count,
-             (unsigned long)controller->rendered.repeater_candidate_count,
-             (unsigned long)controller->rendered.node_total_written);
-    nodes_render_metric_card(parent, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
-    snprintf(value, sizeof(value), "%u", (unsigned)controller->rendered.contact_count);
-    snprintf(detail, sizeof(detail), "contacts  writes %lu",
-             (unsigned long)controller->rendered.contact_total_written);
-    nodes_render_metric_card(parent, 238, 16, "Contacts", value, detail, 0xA7F3D0);
+    nodes_render_summary(parent, &controller->rendered);
 
     int y = 136;
     if (controller->rendered.contact_row_count > 0U) {
+        lv_obj_t *contacts = nodes_create_label(parent, "Contacts", 0x8EA0AE);
+        if (contacts) {
+            lv_obj_set_pos(contacts, 26, y);
+        }
+        y += 24;
         for (size_t i = 0; i < controller->rendered.contact_row_count && y <= 190; ++i) {
             nodes_render_contact_row(controller, parent, y, i);
             y += 54;
@@ -416,7 +461,7 @@ void d1l_ui_nodes_render(d1l_ui_nodes_controller_t *controller,
         static const char *const notes[] = {
             "Listening for signed adverts from nearby MeshCore nodes.",
             "Contacts appear separately when a retained public key exists.",
-            "Signal, route, and repeater summaries update from RX packets.",
+            "Role counts use exact roles from the rendered node query.",
             "Scroll proof keeps this empty-state layout validated too.",
         };
         int note_y = 206;

@@ -130,7 +130,8 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert nodes["contacts_source_count"] == 18
     assert nodes["contacts_rendered_count"] <= 2
     assert nodes["heard_source_count"] == 96
-    assert nodes["heard_query_count"] == 96
+    assert nodes["heard_query_count"] == 64
+    assert nodes["node_role_query_capacity"] == 64
     assert nodes["heard_rendered_count"] <= 4
 
     packets = views["packets"]["metrics"]
@@ -200,6 +201,74 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert public_history["public_history_load_older_available"] is True
     assert "Load Older" in set(views["public_history_sheet"]["labels"])
     assert "Sent over RF" in public_history["public_history_rendered_states"]
+
+
+def test_nodes_role_summary_uses_exact_render_query_roles(tmp_path):
+    expected_by_scenario = {
+        "default": {
+            "chat_companion": 1,
+            "repeater": 1,
+            "room_server": 1,
+            "sensor": 0,
+            "unknown": 0,
+        },
+        "nodes-empty": {
+            "chat_companion": 0,
+            "repeater": 0,
+            "room_server": 0,
+            "sensor": 0,
+            "unknown": 0,
+        },
+        "nodes-mixed-roles": {
+            "chat_companion": 1,
+            "repeater": 1,
+            "room_server": 1,
+            "sensor": 1,
+            "unknown": 1,
+        },
+        "large-mesh": {
+            "chat_companion": 38,
+            "repeater": 13,
+            "room_server": 13,
+            "sensor": 0,
+            "unknown": 0,
+        },
+    }
+
+    for scenario, expected in expected_by_scenario.items():
+        report = ui_simulator.generate(
+            tmp_path / scenario,
+            views=("nodes",),
+            scenario=scenario,
+        )
+        assert report["ok"] is True, scenario
+        nodes = report["views"][0]
+        metrics = nodes["metrics"]
+        assert metrics["node_role_counts"] == expected, scenario
+        assert metrics["node_role_count_sum"] == metrics["heard_query_count"], scenario
+        assert metrics["node_role_counts_match_query"] is True, scenario
+        assert metrics["node_role_source"] == "exact_render_query_role", scenario
+        assert metrics["nodes_navigation_rf_silent"] is True, scenario
+        assert metrics["nodes_formats_sd"] is False, scenario
+        assert metrics["nodes_destructive_actions"] == 0, scenario
+        assert nodes["touch_target_issues"] == [], scenario
+        assert all(target["rf_tx"] is False for target in nodes["touch_targets"]), scenario
+        assert all(target["formats_sd"] is False for target in nodes["touch_targets"]), scenario
+        assert all(target["destructive"] is False for target in nodes["touch_targets"]), scenario
+
+
+def test_node_role_counts_reject_noncanonical_case_spacing_and_aliases() -> None:
+    nodes = tuple(
+        ui_simulator.Node(f"Node {index}", f"{index:016X}", role, "", "")
+        for index, role in enumerate(("Repeater", " repeater", "room server", "ROOM", ""))
+    )
+    assert ui_simulator.node_role_counts(nodes) == {
+        "chat_companion": 0,
+        "repeater": 0,
+        "room_server": 0,
+        "sensor": 0,
+        "unknown": 5,
+    }
 
 
 def test_dm_simulator_projects_one_latest_row_per_conversation() -> None:
@@ -389,7 +458,20 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert public_metrics["public_rendered_states"] == ["New", "Sent over RF"]
     assert public_metrics["public_time_validity_truthful"] is True
     assert public_metrics["public_sticky_compose"] is True
-    assert {"Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
+    assert {
+        "Nodes",
+        "Contacts",
+        "Heard Nodes",
+        "All Heard",
+        "Chat",
+        "Repeater",
+        "Room",
+        "Sensor",
+        "Unknown",
+        "DM",
+        "CMP",
+        "ROOM",
+    } <= labels_by_view["nodes"]
     assert {"Map", "Options", "(c) OpenStreetMap contributors"} <= labels_by_view["map"]
     assert {
         "Map options",
