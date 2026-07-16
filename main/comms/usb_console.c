@@ -481,6 +481,17 @@ static const char *time_protocol_recovery(
     if (status->protocol_tx_ready) {
         return "none";
     }
+    if (status->protocol_migration.state ==
+        D1L_TIME_PROTOCOL_MIGRATION_REQUIRED) {
+        return "exact_device_protocol_upper_bound_confirmation_required";
+    }
+    if (status->protocol_migration.state ==
+        D1L_TIME_PROTOCOL_MIGRATION_PENDING) {
+        return "resume_exact_device_protocol_migration";
+    }
+    if (status->protocol_migration.write_blocked) {
+        return "preserve_and_repair_protocol_migration_receipt";
+    }
     if (!status->protocol_persistence_ready) {
         return "protocol_persistence_migration_or_repair";
     }
@@ -507,6 +518,17 @@ static const char *time_protocol_tx_block(
     if (status->protocol_tx_ready) {
         return "none";
     }
+    if (status->protocol_migration.state ==
+        D1L_TIME_PROTOCOL_MIGRATION_REQUIRED) {
+        return "legacy_protocol_lower_bound_unconfirmed";
+    }
+    if (status->protocol_migration.state ==
+        D1L_TIME_PROTOCOL_MIGRATION_PENDING) {
+        return "legacy_protocol_migration_incomplete";
+    }
+    if (status->protocol_migration.write_blocked) {
+        return "legacy_protocol_migration_quarantined";
+    }
     if (!status->protocol_persistence_ready) {
         return "persistence_unavailable";
     }
@@ -522,6 +544,85 @@ static const char *time_protocol_tx_block(
         return "recoverable_wall_unrepresentable";
     }
     return "service_unavailable";
+}
+
+static const char *time_protocol_migration_stage(
+    const d1l_time_protocol_migration_status_t *status)
+{
+    if (!status) {
+        return "status_unavailable";
+    }
+    if (status->state == D1L_TIME_PROTOCOL_MIGRATION_REQUIRED) {
+        return "awaiting_operator_confirmation";
+    }
+    if (status->state == D1L_TIME_PROTOCOL_MIGRATION_PENDING) {
+        if (!status->high_water_present) {
+            return "intent_committed_high_water_pending";
+        }
+        if (status->legacy_present) {
+            return "high_water_committed_legacy_erase_pending";
+        }
+        return "legacy_erased_completion_receipt_pending";
+    }
+    if (status->state == D1L_TIME_PROTOCOL_MIGRATION_COMPLETE) {
+        return "completion_receipt_committed";
+    }
+    if (status->state == D1L_TIME_PROTOCOL_MIGRATION_ABSENT) {
+        return "legacy_not_present";
+    }
+    if (status->state == D1L_TIME_PROTOCOL_MIGRATION_STORAGE_ERROR) {
+        return "storage_repair_required";
+    }
+    return "quarantined_preserve_nvs";
+}
+
+static void cmd_time_migration_status(void)
+{
+    d1l_time_service_status_t time_status;
+    d1l_time_service_status(&time_status);
+    const d1l_time_protocol_migration_status_t *status =
+        &time_status.protocol_migration;
+    ok_begin("time migration status");
+    printf(
+        ",\"automatic\":false,\"wall_time_inferred\":false,"
+        "\"state\":\"%s\",\"state_code\":%u,\"stage\":\"%s\","
+        "\"error\":\"%s\",\"error_code\":%ld,"
+        "\"receipt\":{\"present\":%s,\"schema_version\":%lu,"
+        "\"phase\":%lu,\"revision\":%lu,\"intent_committed\":%s,"
+        "\"completion_committed\":%s},"
+        "\"legacy\":{\"present\":%s,\"observed_mesh_ts\":%lu,"
+        "\"attested_mesh_ts\":%lu},"
+        "\"high_water\":{\"present\":%s,\"observed\":%lu,"
+        "\"confirmed_upper_bound\":%lu,\"target\":%lu},"
+        "\"confirmation_required\":%s,\"resume_required\":%s,"
+        "\"write_blocked\":%s,\"protocol_tx_ready\":%s,"
+        "\"protocol_tx_block\":\"%s\",\"retry_idempotent\":true,"
+        "\"supplied_confirmation_logged\":false,"
+        "\"settings_reset_scope\":\"settings_model_only\","
+        "\"settings_reset_preserves_protocol_migration\":true,"
+        "\"factory_reset_supported\":false}\n",
+        d1l_time_protocol_migration_state_name(status->state),
+        (unsigned)status->state,
+        time_protocol_migration_stage(status),
+        esp_err_to_name(status->error), (long)status->error,
+        bool_json(status->receipt_found),
+        (unsigned long)status->receipt_schema_version,
+        (unsigned long)status->receipt_phase,
+        (unsigned long)status->revision,
+        bool_json(status->intent_committed),
+        bool_json(status->completion_committed),
+        bool_json(status->legacy_present),
+        (unsigned long)status->observed_legacy_value,
+        (unsigned long)status->legacy_value,
+        bool_json(status->high_water_present),
+        (unsigned long)status->observed_high_water,
+        (unsigned long)status->confirmed_upper_bound,
+        (unsigned long)status->target_high_water,
+        bool_json(status->confirmation_required),
+        bool_json(status->resume_required),
+        bool_json(status->write_blocked),
+        bool_json(time_status.protocol_tx_ready),
+        time_protocol_tx_block(&time_status));
 }
 
 static void cmd_version(void)
@@ -549,9 +650,20 @@ static void cmd_version(void)
            "\"protocol_tx_ready\":%s,\"protocol_tx_error\":\"%s\","
            "\"protocol_tx_block\":\"%s\","
            "\"protocol_trust_anchor\":%lu,\"sntp_ceiling\":%lu,"
-           "\"protocol_ahead_of_wall_sec\":%" PRId64 ","
-           "\"recovery\":\"%s\","
-           "\"checkpoint\":{\"state\":\"%s\",\"state_code\":%u,"
+            "\"protocol_ahead_of_wall_sec\":%" PRId64 ","
+            "\"recovery\":\"%s\","
+            "\"migration\":{\"automatic\":false,\"state\":\"%s\","
+            "\"state_code\":%u,\"error\":\"%s\",\"error_code\":%ld,"
+            "\"receipt_schema_version\":%lu,\"receipt_phase\":%lu,"
+            "\"receipt_revision\":%lu,\"receipt_present\":%s,"
+            "\"legacy_present\":%s,\"legacy_value\":%lu,"
+            "\"observed_legacy_value\":%lu,"
+            "\"confirmed_upper_bound\":%lu,\"target_high_water\":%lu,"
+            "\"high_water_present\":%s,\"observed_high_water\":%lu,"
+            "\"confirmation_required\":%s,\"resume_required\":%s,"
+            "\"write_blocked\":%s,\"intent_committed\":%s,"
+            "\"completion_committed\":%s,\"wall_time_inferred\":false},"
+            "\"checkpoint\":{\"state\":\"%s\",\"state_code\":%u,"
            "\"error\":\"%s\",\"error_code\":%ld,"
            "\"revision\":%lu,\"epoch_sec\":%" PRId64 ","
            "\"protocol_reserved_through\":%lu,\"source\":\"%s\","
@@ -588,9 +700,34 @@ static void cmd_version(void)
            tx_block,
            (unsigned long)time_status.clock.protocol_trust_anchor,
            (unsigned long)time_status.clock.protocol_sntp_ceiling,
-           time_status.clock.protocol_ahead_of_wall_sec,
-           recovery,
-           d1l_settings_time_checkpoint_state_name(
+            time_status.clock.protocol_ahead_of_wall_sec,
+            recovery,
+            d1l_time_protocol_migration_state_name(
+                time_status.protocol_migration.state),
+            (unsigned)time_status.protocol_migration.state,
+             esp_err_to_name(time_status.protocol_migration.error),
+             (long)time_status.protocol_migration.error,
+             (unsigned long)
+                 time_status.protocol_migration.receipt_schema_version,
+             (unsigned long)time_status.protocol_migration.receipt_phase,
+             (unsigned long)time_status.protocol_migration.revision,
+            bool_json(time_status.protocol_migration.receipt_found),
+            bool_json(time_status.protocol_migration.legacy_present),
+            (unsigned long)time_status.protocol_migration.legacy_value,
+            (unsigned long)
+                time_status.protocol_migration.observed_legacy_value,
+            (unsigned long)
+                time_status.protocol_migration.confirmed_upper_bound,
+            (unsigned long)time_status.protocol_migration.target_high_water,
+            bool_json(time_status.protocol_migration.high_water_present),
+            (unsigned long)
+                time_status.protocol_migration.observed_high_water,
+            bool_json(time_status.protocol_migration.confirmation_required),
+             bool_json(time_status.protocol_migration.resume_required),
+             bool_json(time_status.protocol_migration.write_blocked),
+             bool_json(time_status.protocol_migration.intent_committed),
+             bool_json(time_status.protocol_migration.completion_committed),
+            d1l_settings_time_checkpoint_state_name(
                time_status.wall_checkpoint.state),
            (unsigned)time_status.wall_checkpoint.state,
            esp_err_to_name(time_status.wall_checkpoint.error),
@@ -611,6 +748,63 @@ static void cmd_version(void)
            (unsigned long)time_status.wall_checkpoint_skip_count,
            (unsigned long)time_status.wall_checkpoint_failure_count,
            time_status.wall_checkpoint_retry_not_before_us);
+}
+
+static void cmd_time_migrate_legacy(const char *line)
+{
+    const char *cursor = line + strlen("time migrate-legacy ");
+    uint32_t expected_legacy_value = 0U;
+    uint32_t confirmed_upper_bound = 0U;
+    if (!parse_next_u32_arg(&cursor, &expected_legacy_value) ||
+        !parse_next_u32_arg(&cursor, &confirmed_upper_bound) ||
+        strcmp(cursor, D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION) != 0) {
+        err_result(
+            "time migrate-legacy", "CONFIRMATION_REQUIRED",
+            "usage: time migrate-legacy <expected-mesh-ts> <confirmed-upper-bound> "
+            D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION);
+        return;
+    }
+    bool written = false;
+    d1l_time_protocol_migration_status_t status = {
+        .state = D1L_TIME_PROTOCOL_MIGRATION_UNINITIALIZED,
+        .error = ESP_ERR_INVALID_STATE,
+    };
+    const esp_err_t ret =
+        d1l_time_service_migrate_legacy_protocol_timestamp(
+            expected_legacy_value, confirmed_upper_bound, cursor,
+            &written, &status);
+    if (ret != ESP_OK) {
+        printf("{\"schema\":%d,\"cmd\":\"time migrate-legacy\","
+               "\"ok\":false,\"error\":\"%s\",\"error_code\":%ld,"
+               "\"state\":\"%s\",\"stage\":\"%s\",\"written\":%s,"
+               "\"retry_idempotent\":true,"
+               "\"supplied_confirmation_logged\":false}\n",
+               D1L_CONSOLE_SCHEMA, esp_err_to_name(ret), (long)ret,
+               d1l_time_protocol_migration_state_name(status.state),
+               time_protocol_migration_stage(&status), bool_json(written));
+        return;
+    }
+    d1l_time_service_status_t time_status;
+    d1l_time_service_status(&time_status);
+    const char *tx_block = time_protocol_tx_block(&time_status);
+    ok_begin("time migrate-legacy");
+    printf(",\"written\":%s,\"automatic\":false,\"state\":\"%s\","
+           "\"receipt_revision\":%lu,\"legacy_value\":%lu,"
+           "\"confirmed_upper_bound\":%lu,\"target_high_water\":%lu,"
+           "\"protocol_tx_unblocked\":%s,\"protocol_tx_ready\":%s,"
+           "\"protocol_tx_block\":\"%s\",\"wall_time_inferred\":false,"
+           "\"retry_idempotent\":true,"
+           "\"supplied_confirmation_logged\":false,"
+           "\"settings_reset_preserves_protocol_migration\":true,"
+           "\"factory_reset_supported\":false}\n",
+           bool_json(written),
+           d1l_time_protocol_migration_state_name(status.state),
+           (unsigned long)status.revision,
+           (unsigned long)status.legacy_value,
+           (unsigned long)status.confirmed_upper_bound,
+           (unsigned long)status.target_high_water,
+           bool_json(time_status.protocol_tx_ready),
+           bool_json(time_status.protocol_tx_ready), tx_block);
 }
 
 static void cmd_board(void)
@@ -676,7 +870,11 @@ static void cmd_settings_reset(void)
     ok_begin("settings reset");
     d1l_settings_t settings = {0};
     (void)d1l_settings_public_snapshot(&settings);
-    printf(",\"persisted\":true,\"node_name\":\"%s\"}\n", settings.node_name);
+    printf(",\"persisted\":true,\"node_name\":\"%s\","
+           "\"reset_scope\":\"settings_model_only\","
+           "\"protocol_migration_preserved\":true,"
+           "\"protocol_high_water_preserved\":true,"
+           "\"factory_reset\":false}\n", settings.node_name);
 }
 
 static void cmd_settings_onboarding_status(void)
@@ -5686,6 +5884,9 @@ static void cmd_help(void)
     printf(",\"map_probe_surfaces\":[\"map\",\"map_options\",\"map_location\",\"map_cache\"]");
     printf(",\"map_probes_read_only\":true");
     printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\","
+            "\"time migration status\","
+            "\"time migrate-legacy <expected-mesh-ts> <confirmed-upper-bound> "
+            D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION "\","
            "\"settings set name <name>\",\"settings set pathhash <1|2|3>\","
            "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
            "\"settings set location <lat> <lon>\",\"settings clear location\","
@@ -5738,6 +5939,11 @@ static void handle_line(const char *line)
         cmd_help();
     } else if (strcmp(line, "version") == 0) {
         cmd_version();
+    } else if (strcmp(line, "time migration status") == 0) {
+        cmd_time_migration_status();
+    } else if (strncmp(line, "time migrate-legacy ",
+                       strlen("time migrate-legacy ")) == 0) {
+        cmd_time_migrate_legacy(line);
     } else if (strcmp(line, "board") == 0) {
         cmd_board();
     } else if (strcmp(line, "settings get") == 0) {
@@ -6056,7 +6262,8 @@ static void handle_line(const char *line)
         for (;;) {
         }
     } else if (strcmp(line, "factory-reset-confirm") == 0) {
-        err_result("factory-reset-confirm", "SAFETY_NONCE_REQUIRED", "factory reset will require a generated nonce in a later phase");
+        err_result("factory-reset-confirm", "NOT_SUPPORTED",
+                   "factory reset is not implemented; settings reset preserves protocol migration and high-water state");
     } else {
         err_result("unknown", "UNKNOWN_COMMAND", "send help for supported commands");
     }

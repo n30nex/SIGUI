@@ -33,6 +33,7 @@ def test_truthful_time_checkpoint_integration_native(tmp_path):
         "-I",
         str(ROOT / "main"),
         str(ROOT / "main/app/settings_envelope.c"),
+        str(ROOT / "main/app/settings_protocol_migration.c"),
         str(ROOT / "main/app/settings_time_checkpoint.c"),
         str(ROOT / "main/platform/time_service_core.c"),
         str(ROOT / "main/platform/time_display.c"),
@@ -43,7 +44,14 @@ def test_truthful_time_checkpoint_integration_native(tmp_path):
         str(executable),
     ]
     subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
-    for scenario in ("happy", "corrupt", "guard"):
+    for scenario in (
+        "happy",
+        "corrupt",
+        "guard",
+        "legacy-migration",
+        "legacy-quarantine",
+        "legacy-preinit-failure",
+    ):
         completed = subprocess.run(
             [str(executable), scenario],
             cwd=ROOT,

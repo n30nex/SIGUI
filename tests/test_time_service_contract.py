@@ -52,11 +52,12 @@ def test_clock_domains_and_truth_states_are_explicit():
 
 def test_protocol_allocator_reserves_before_use_and_has_no_volatile_fallback():
     service = read("main/platform/time_service.c")
+    migration = read("main/app/settings_protocol_migration.h")
     core = read("main/platform/time_service_core.c")
     settings = read("main/app/settings_model.c")
-    assert '#define D1L_TIME_NVS_NAMESPACE "d1l_settings"' in service
-    assert '#define D1L_TIME_PROTOCOL_LEGACY_KEY "mesh_ts"' in service
-    assert '#define D1L_TIME_PROTOCOL_HIGH_WATER_KEY "mesh_hi_v2"' in service
+    assert '#define D1L_TIME_PROTOCOL_NVS_NAMESPACE "d1l_settings"' in migration
+    assert '#define D1L_TIME_PROTOCOL_LEGACY_KEY "mesh_ts"' in migration
+    assert '#define D1L_TIME_PROTOCOL_HIGH_WATER_KEY "mesh_hi_v2"' in migration
     assert "D1L_TIME_PROTOCOL_RESERVATION_SIZE 64U" in read(
         "main/platform/time_service_core.h"
     )
@@ -76,6 +77,7 @@ def test_protocol_allocator_reserves_before_use_and_has_no_volatile_fallback():
 
 def test_legacy_protocol_seed_requires_explicit_migration_and_is_preserved():
     service = read("main/platform/time_service.c")
+    migration = read("main/app/settings_protocol_migration.c")
     header = read("main/platform/time_service_core.h")
     load = body(
         service,
@@ -88,10 +90,11 @@ def test_legacy_protocol_seed_requires_explicit_migration_and_is_preserved():
         "static bool continue_allowed",
     )
     assert "D1L_TIME_PROTOCOL_PERSISTENCE_MIGRATION_REQUIRED" in header
-    assert "D1L_TIME_PROTOCOL_LEGACY_KEY" in load
+    assert "d1l_time_protocol_migration_inspect" in load
+    assert "D1L_TIME_PROTOCOL_LEGACY_KEY" in migration
     assert "d1l_time_core_classify_protocol_seed(" in load
     assert "ret = ESP_ERR_INVALID_STATE" in load
-    assert "lower bound, not proof" in load
+    assert "predecessor lower bound" in load
     assert "D1L_TIME_PROTOCOL_HIGH_WATER_KEY" in reserve
     assert "D1L_TIME_PROTOCOL_LEGACY_KEY" not in reserve
     assert "protocol_persistence_state" in read("main/platform/time_service.h")

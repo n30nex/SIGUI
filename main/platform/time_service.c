@@ -12,6 +12,7 @@
 #include "nvs.h"
 
 #include "app/settings_model.h"
+#include "app/settings_protocol_migration.h"
 #include "platform/time_display.h"
 
 #ifndef D1L_BUILD_EPOCH_SEC
@@ -24,9 +25,6 @@ _Static_assert((int64_t)D1L_BUILD_EPOCH_SEC <=
                    D1L_TIME_SNTP_MAX_PROTOCOL_EPOCH,
                "build epoch leaves insufficient uint32 protocol headroom");
 
-#define D1L_TIME_NVS_NAMESPACE "d1l_settings"
-#define D1L_TIME_PROTOCOL_LEGACY_KEY "mesh_ts"
-#define D1L_TIME_PROTOCOL_HIGH_WATER_KEY "mesh_hi_v2"
 #define D1L_TIME_CHECKPOINT_RETRY_BACKOFF_US UINT64_C(30000000)
 
 static StaticSemaphore_t s_time_mutex_storage;
@@ -38,6 +36,10 @@ static bool s_sntp_initialized;
 static d1l_time_protocol_persistence_state_t s_protocol_persistence_state =
     D1L_TIME_PROTOCOL_PERSISTENCE_UNINITIALIZED;
 static esp_err_t s_protocol_persistence_error = ESP_ERR_INVALID_STATE;
+static d1l_time_protocol_migration_status_t s_protocol_migration_status = {
+    .state = D1L_TIME_PROTOCOL_MIGRATION_UNINITIALIZED,
+    .error = ESP_ERR_INVALID_STATE,
+};
 static esp_err_t s_sntp_init_error = ESP_ERR_INVALID_STATE;
 static d1l_settings_time_checkpoint_status_t s_wall_checkpoint_status = {
     .state = D1L_SETTINGS_TIME_CHECKPOINT_UNINITIALIZED,
@@ -72,47 +74,34 @@ static void time_unlock(void)
     (void)xSemaphoreGive(s_time_mutex);
 }
 
-static esp_err_t get_optional_u32(nvs_handle_t handle,
-                                  const char *key,
-                                  bool *found,
-                                  uint32_t *value)
-{
-    if (!found || !value) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    *found = false;
-    const esp_err_t ret = nvs_get_u32(handle, key, value);
-    if (ret == ESP_OK) {
-        *found = true;
-        return ESP_OK;
-    }
-    return ret == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : ret;
-}
-
 static esp_err_t load_protocol_seed_locked(void)
 {
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_TIME_NVS_NAMESPACE, NVS_READONLY, &handle);
-    bool legacy_present = false;
-    bool high_water_present = false;
-    uint32_t legacy_value = 0U;
-    uint32_t reserved_through = D1L_TIME_PROTOCOL_TIMESTAMP_BASE;
+    /* mesh_ts is only a predecessor lower bound. Inspection must never infer
+     * wall time from it or auto-promote it into mesh_hi_v2. Only an absent
+     * legacy key or a completed exact-device receipt may seed protocol TX. */
+    esp_err_t ret = d1l_time_protocol_migration_inspect(
+        &s_protocol_migration_status);
     if (ret == ESP_OK) {
-        ret = get_optional_u32(handle, D1L_TIME_PROTOCOL_LEGACY_KEY,
-                               &legacy_present, &legacy_value);
-        if (ret == ESP_OK) {
-            ret = get_optional_u32(handle, D1L_TIME_PROTOCOL_HIGH_WATER_KEY,
-                                   &high_water_present, &reserved_through);
+        const bool migration_allows_seed =
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_ABSENT ||
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_COMPLETE;
+        if (!migration_allows_seed) {
+            s_protocol_persistence_state =
+                D1L_TIME_PROTOCOL_PERSISTENCE_MIGRATION_REQUIRED;
+            ret = ESP_ERR_INVALID_STATE;
         }
-        nvs_close(handle);
-        (void)legacy_value;
-    } else if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        ret = ESP_OK;
     }
     if (ret == ESP_OK) {
+        const bool high_water_present =
+            s_protocol_migration_status.high_water_present;
+        const uint32_t reserved_through = high_water_present ?
+            s_protocol_migration_status.observed_high_water :
+            D1L_TIME_PROTOCOL_TIMESTAMP_BASE;
         s_protocol_persistence_state =
             d1l_time_core_classify_protocol_seed(
-                legacy_present, high_water_present, reserved_through);
+                false, high_water_present, reserved_through);
         if (s_protocol_persistence_state ==
             D1L_TIME_PROTOCOL_PERSISTENCE_FRESH) {
             ret = d1l_time_core_seed_protocol(
@@ -122,15 +111,30 @@ static esp_err_t load_protocol_seed_locked(void)
             ret = d1l_time_core_seed_protocol(&s_time_core, true,
                                               reserved_through);
         } else {
-            /* The predecessor key could lag RAM-only timestamps after an NVS
-             * exhaustion fallback.  It is a lower bound, not proof that the
-             * next value was never transmitted, so preserve it and fail
-             * closed for an explicit migration procedure. */
             ret = ESP_ERR_INVALID_STATE;
         }
     } else {
-        s_protocol_persistence_state =
-            D1L_TIME_PROTOCOL_PERSISTENCE_STORAGE_ERROR;
+        const bool migration_block =
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_REQUIRED ||
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_PENDING;
+        const bool migration_quarantine =
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_QUARANTINED_NEWER_SCHEMA ||
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_QUARANTINED_MALFORMED ||
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_QUARANTINED_CHECKSUM ||
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_QUARANTINED_DOWNGRADE ||
+            s_protocol_migration_status.state ==
+                D1L_TIME_PROTOCOL_MIGRATION_REVISION_SATURATED;
+        s_protocol_persistence_state = migration_block ?
+            D1L_TIME_PROTOCOL_PERSISTENCE_MIGRATION_REQUIRED :
+            (migration_quarantine ?
+                D1L_TIME_PROTOCOL_PERSISTENCE_CORRUPT :
+                D1L_TIME_PROTOCOL_PERSISTENCE_STORAGE_ERROR);
     }
     if (ret != ESP_OK &&
         s_protocol_persistence_state !=
@@ -289,7 +293,8 @@ static esp_err_t reserve_protocol_range(void *context,
 {
     (void)context;
     nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_TIME_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    esp_err_t ret = nvs_open(D1L_TIME_PROTOCOL_NVS_NAMESPACE,
+                             NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
         s_protocol_persistence_state =
             D1L_TIME_PROTOCOL_PERSISTENCE_STORAGE_ERROR;
@@ -306,6 +311,10 @@ static esp_err_t reserve_protocol_range(void *context,
         D1L_TIME_PROTOCOL_PERSISTENCE_READY :
         D1L_TIME_PROTOCOL_PERSISTENCE_STORAGE_ERROR;
     s_protocol_persistence_error = ret;
+    if (ret == ESP_OK) {
+        s_protocol_migration_status.high_water_present = true;
+        s_protocol_migration_status.observed_high_water = reserved_through;
+    }
     return ret;
 }
 
@@ -529,6 +538,59 @@ esp_err_t d1l_time_service_next_protocol_timestamp(uint32_t *out_timestamp)
     return ret;
 }
 
+esp_err_t d1l_time_service_migrate_legacy_protocol_timestamp(
+    uint32_t expected_legacy_value,
+    uint32_t confirmed_upper_bound,
+    const char *confirmation,
+    bool *out_written,
+    d1l_time_protocol_migration_status_t *out_status)
+{
+    if (out_written) {
+        *out_written = false;
+    }
+    if (out_status) {
+        *out_status = (d1l_time_protocol_migration_status_t) {
+            .state = D1L_TIME_PROTOCOL_MIGRATION_UNINITIALIZED,
+            .error = ESP_ERR_INVALID_STATE,
+        };
+    }
+    if (!out_written || !out_status) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    /* Initialization is allowed to fail specifically because the legacy
+     * lower bound has blocked protocol TX. The core still exists, but no
+     * timestamp can have been issued through this service. */
+    const esp_err_t init_ret = d1l_time_service_init();
+    if (init_ret != ESP_OK && !s_initialized) {
+        out_status->error = init_ret;
+        return init_ret;
+    }
+    if (!time_lock()) {
+        out_status->error = ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_time_core.protocol_started &&
+        s_protocol_migration_status.state !=
+            D1L_TIME_PROTOCOL_MIGRATION_COMPLETE) {
+        *out_status = s_protocol_migration_status;
+        time_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = d1l_time_protocol_migration_run(
+        expected_legacy_value, confirmed_upper_bound, confirmation,
+        out_written, out_status);
+    s_protocol_migration_status = *out_status;
+    if (ret == ESP_OK && !s_protocol_seed_ready) {
+        ret = load_protocol_seed_locked();
+        if (ret == ESP_OK) {
+            (void)load_wall_checkpoint_locked();
+        }
+        *out_status = s_protocol_migration_status;
+    }
+    time_unlock();
+    return ret;
+}
+
 void d1l_time_service_status(d1l_time_service_status_t *out_status)
 {
     if (!out_status) {
@@ -537,6 +599,7 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
     *out_status = (d1l_time_service_status_t) {0};
     populate_timezone_status(out_status);
     out_status->protocol_persistence_state = s_protocol_persistence_state;
+    out_status->protocol_migration = s_protocol_migration_status;
     out_status->protocol_persistence_error = s_protocol_persistence_error;
     out_status->wall_checkpoint = s_wall_checkpoint_status;
     out_status->wall_checkpoint_recovery_error =
@@ -544,6 +607,7 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
     if (!s_initialized && d1l_time_service_init() != ESP_OK && !s_initialized) {
         out_status->protocol_persistence_state =
             s_protocol_persistence_state;
+        out_status->protocol_migration = s_protocol_migration_status;
         out_status->protocol_persistence_error = s_protocol_persistence_error;
         out_status->protocol_tx_error = ESP_ERR_INVALID_STATE;
         out_status->sntp_init_error = s_sntp_init_error;
@@ -585,6 +649,7 @@ void d1l_time_service_status(d1l_time_service_status_t *out_status)
                            &out_status->clock);
     out_status->initialized = s_initialized;
     out_status->protocol_persistence_state = s_protocol_persistence_state;
+    out_status->protocol_migration = s_protocol_migration_status;
     out_status->protocol_persistence_ready =
         s_protocol_seed_ready && s_protocol_persistence_error == ESP_OK;
     out_status->protocol_persistence_error = s_protocol_persistence_error;

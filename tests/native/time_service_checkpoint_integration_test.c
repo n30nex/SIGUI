@@ -13,6 +13,7 @@
 
 #include "app/settings_model.h"
 #include "app/settings_envelope.h"
+#include "app/settings_protocol_migration.h"
 #include "app/settings_time_checkpoint.h"
 #include "esp_netif_sntp.h"
 #include "mock_esp_nvs.h"
@@ -234,6 +235,121 @@ static void run_guard_rollback(void)
     assert(!status.clock.wall_valid);
 }
 
+static void run_legacy_migration(void)
+{
+    mock_nvs_reset();
+    mock_timer_set_us(0);
+    const uint32_t legacy = (uint32_t)TEST_BUILD_EPOCH - 100U;
+    const uint32_t confirmed_upper = (uint32_t)TEST_BUILD_EPOCH + 200U;
+    assert(mock_nvs_seed_blob(
+        D1L_TIME_PROTOCOL_NVS_NAMESPACE, D1L_TIME_PROTOCOL_LEGACY_KEY,
+        &legacy, sizeof(legacy)));
+
+    assert(d1l_time_service_init() == ESP_ERR_INVALID_STATE);
+    d1l_time_service_status_t status;
+    d1l_time_service_status(&status);
+    assert(status.protocol_migration.state ==
+           D1L_TIME_PROTOCOL_MIGRATION_REQUIRED);
+    assert(status.protocol_migration.observed_legacy_value == legacy);
+    assert(!status.protocol_persistence_ready);
+    assert(!status.protocol_tx_ready);
+    assert(!status.clock.wall_valid);
+    uint32_t timestamp = 0xA5A5A5A5U;
+    assert(d1l_time_service_next_protocol_timestamp(&timestamp) ==
+           ESP_ERR_INVALID_STATE);
+    assert(timestamp == 0xA5A5A5A5U);
+
+    bool written = true;
+    d1l_time_protocol_migration_status_t migration = {0};
+    assert(d1l_time_service_migrate_legacy_protocol_timestamp(
+               legacy + 1U, confirmed_upper,
+               D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION,
+               &written, &migration) == ESP_ERR_INVALID_ARG);
+    assert(!written);
+    assert(migration.state == D1L_TIME_PROTOCOL_MIGRATION_REQUIRED);
+    assert(d1l_time_service_migrate_legacy_protocol_timestamp(
+               legacy, confirmed_upper,
+               D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION,
+               &written, &migration) == ESP_OK);
+    assert(written);
+    assert(migration.state == D1L_TIME_PROTOCOL_MIGRATION_COMPLETE);
+
+    d1l_time_service_status(&status);
+    assert(status.protocol_persistence_ready);
+    assert(status.protocol_tx_ready);
+    assert(status.protocol_migration.state ==
+           D1L_TIME_PROTOCOL_MIGRATION_COMPLETE);
+    assert(!status.clock.wall_valid);
+    assert(d1l_time_service_next_protocol_timestamp(&timestamp) == ESP_OK);
+    assert(timestamp == confirmed_upper + 1U);
+    written = true;
+    assert(d1l_time_service_migrate_legacy_protocol_timestamp(
+               legacy, confirmed_upper,
+               D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION,
+               &written, &migration) == ESP_OK);
+    assert(!written);
+    assert(migration.state == D1L_TIME_PROTOCOL_MIGRATION_COMPLETE);
+    written = true;
+    assert(d1l_time_service_migrate_legacy_protocol_timestamp(
+               legacy, confirmed_upper + 1U,
+               D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION,
+               &written, &migration) == ESP_ERR_INVALID_ARG);
+    assert(!written);
+    assert(migration.state == D1L_TIME_PROTOCOL_MIGRATION_COMPLETE);
+    d1l_time_service_status(&status);
+    assert(status.protocol_migration.observed_high_water >= timestamp);
+    assert(!status.clock.wall_valid);
+}
+
+static void run_legacy_quarantine(void)
+{
+    mock_nvs_reset();
+    const uint8_t malformed_receipt[] = {0x01U, 0x02U, 0x03U};
+    assert(mock_nvs_seed_blob(
+        D1L_TIME_PROTOCOL_MIGRATION_NVS_NAMESPACE,
+        D1L_TIME_PROTOCOL_MIGRATION_NVS_KEY,
+        malformed_receipt, sizeof(malformed_receipt)));
+    assert(d1l_time_service_init() == ESP_ERR_INVALID_SIZE);
+    d1l_time_service_status_t status;
+    d1l_time_service_status(&status);
+    assert(status.protocol_migration.state ==
+           D1L_TIME_PROTOCOL_MIGRATION_QUARANTINED_MALFORMED);
+    assert(status.protocol_migration.write_blocked);
+    assert(status.protocol_persistence_state ==
+           D1L_TIME_PROTOCOL_PERSISTENCE_CORRUPT);
+    assert(!status.protocol_persistence_ready);
+    assert(!status.protocol_tx_ready);
+    uint32_t timestamp = 0x5A5A5A5AU;
+    assert(d1l_time_service_next_protocol_timestamp(&timestamp) ==
+           ESP_ERR_INVALID_SIZE);
+    assert(timestamp == 0x5A5A5A5AU);
+    assert(mock_nvs_set_call_count() == 0U);
+    assert(mock_nvs_commit_call_count() == 0U);
+}
+
+static void run_legacy_preinit_failure(void)
+{
+    mock_nvs_reset();
+    mock_semaphore_fail_next_create();
+    bool written = true;
+    d1l_time_protocol_migration_status_t status;
+    memset(&status, 0xA5, sizeof(status));
+    assert(d1l_time_service_migrate_legacy_protocol_timestamp(
+               D1L_TIME_PROTOCOL_TIMESTAMP_BASE + 1U,
+               D1L_TIME_PROTOCOL_TIMESTAMP_BASE + 65U,
+               D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION,
+               &written, &status) == ESP_ERR_NO_MEM);
+    assert(!written);
+    assert(status.state == D1L_TIME_PROTOCOL_MIGRATION_UNINITIALIZED);
+    assert(status.error == ESP_ERR_NO_MEM);
+    assert(!status.receipt_found);
+    assert(!status.legacy_present);
+    assert(!status.high_water_present);
+    assert(!status.write_blocked);
+    assert(mock_nvs_set_call_count() == 0U);
+    assert(mock_nvs_commit_call_count() == 0U);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -243,6 +359,12 @@ int main(int argc, char **argv)
         run_corrupt_isolation();
     } else if (strcmp(argv[1], "guard") == 0) {
         run_guard_rollback();
+    } else if (strcmp(argv[1], "legacy-migration") == 0) {
+        run_legacy_migration();
+    } else if (strcmp(argv[1], "legacy-quarantine") == 0) {
+        run_legacy_quarantine();
+    } else if (strcmp(argv[1], "legacy-preinit-failure") == 0) {
+        run_legacy_preinit_failure();
     } else {
         assert(!"unknown scenario");
     }
