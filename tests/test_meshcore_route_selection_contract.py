@@ -75,7 +75,7 @@ def test_path_probe_is_a_real_correlated_flood_request():
     service = read("main/mesh/meshcore_service.c")
     trace = service.split(
         "esp_err_t d1l_meshcore_service_request_path_discovery_probe", 1
-    )[1].split("esp_err_t d1l_meshcore_service_send_trace_loop", 1)[0]
+    )[1].split("esp_err_t d1l_meshcore_service_send_trace_contact", 1)[0]
 
     assert "d1l_contact_store_prepare_path_route(" in trace
     assert "d1l_contact_store_can_dm(&contact)" in trace

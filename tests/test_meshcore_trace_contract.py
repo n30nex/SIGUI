@@ -38,6 +38,14 @@ def test_trace_helper_is_flags_zero_direct_and_terminal_only() -> None:
     assert "D1L_MESHCORE_ROUTE_TRANSPORT" not in trace
     assert "*out_source = source" in trace
     assert "*out_terminal = terminal" in trace
+    assert "d1l_meshcore_trace_plan_contact" in trace
+    assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH" in trace
+    assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY" in trace
+    assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG" in trace
+    assert "(size_t)path_hops * 2U + 1U" in trace
+    assert "(size_t)path_hops * 2U - 1U" in trace
+    assert "plan.path_hashes[write_index++] = contact_hash" in trace
+    assert "out_path[i - 1U]" in trace
 
 
 def test_trace_tracker_correlates_immutable_tag_auth_path_and_bounds_age() -> None:
@@ -100,28 +108,58 @@ def test_service_retains_only_a_matched_trace_result() -> None:
     assert '"Explicit TRACE"' in receive
 
 
-def test_service_sends_only_an_explicit_nonempty_loop_without_contact_lookup() -> None:
+def test_runtime_owner_derives_contact_trace_from_one_current_proven_path() -> None:
     service = read("main/mesh/meshcore_service.c")
+    header = read("main/mesh/meshcore_service.h")
+    resolve = service.split(
+        "static esp_err_t meshcore_service_resolve_trace_contact", 1
+    )[1].split(
+        "static esp_err_t meshcore_service_handle_send_trace_contact", 1
+    )[0]
     send = service.split(
-        "esp_err_t d1l_meshcore_service_send_trace_loop", 1
+        "static esp_err_t meshcore_service_handle_send_trace_contact", 1
+    )[1].split("static void meshcore_service_reply", 1)[0]
+    wrapper = service.split(
+        "esp_err_t d1l_meshcore_service_send_trace_contact", 1
     )[1].split("const char *d1l_meshcore_service_state_name", 1)[0]
 
-    assert "!path_hashes || path_hops == 0U" in send
+    assert "d1l_contact_store_copy_recent" in resolve
+    assert "meshcore_service_fingerprint_equal(" in resolve
+    assert "matches != 1U" in resolve
+    assert "d1l_contact_store_is_canonical(&unique)" in resolve
+    assert "d1l_contact_store_prepare_path_route" in resolve
+    assert "unique.fingerprint, now_ms" in resolve
+    assert "prepared.public_key_hex, unique.public_key_hex" in resolve
+    assert "lookup_boot_route(contact.fingerprint, contact.out_path" in send
+    assert "contact.out_path_state.generation" in send
+    assert "d1l_meshcore_route_select_canonical" in send
+    assert "selection.route != D1L_MESHCORE_ROUTE_DIRECT" in send
+    assert "selection.reason != D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN" in send
+    assert 'strcmp(contact.type, "repeater") == 0' in send
+    assert 'strcmp(contact.type, "room") == 0' in send
+    assert "d1l_meshcore_trace_plan_contact" in send
+    assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH" in send
     assert "d1l_meshcore_trace_build_source" in send
     assert "d1l_meshcore_trace_tracker_expire_pending" in send
     assert "d1l_meshcore_trace_tracker_begin" in send
     assert "d1l_meshcore_trace_tracker_cancel" in send
-    assert "meshcore_service_send_raw" in send
+    assert "meshcore_service_handle_send_raw(&raw_cmd)" in send
     assert "d1l_route_store_upsert_observation_volatile" in send
     assert '"trace_request"' in send
-    assert "d1l_contact_store_find_by_fingerprint" not in send
     assert "D1L_MESHCORE_ROUTE_FLOOD" not in send
     assert send.index("d1l_meshcore_trace_tracker_begin") < send.index(
-        "meshcore_service_send_raw"
+        "meshcore_service_handle_send_raw(&raw_cmd)"
     )
-    assert send.index("meshcore_service_send_raw") < send.index(
+    assert send.index("meshcore_service_handle_send_raw(&raw_cmd)") < send.index(
         "s_status.trace_tx_queued++"
     )
+    assert "D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT" in wrapper
+    assert "trace_fingerprint" in wrapper
+    assert "meshcore_service_lower_hex(fingerprint[i])" in wrapper
+    assert "ESP_ERR_INVALID_ARG" in wrapper
+    assert "path_hash" not in wrapper
+    assert "d1l_meshcore_service_send_trace_loop" not in service
+    assert "d1l_meshcore_service_send_trace_loop" not in header
 
 
 def test_trace_snapshot_is_passive_and_does_not_expose_auth_code() -> None:
@@ -147,13 +185,18 @@ def test_console_discloses_trace_boundary_and_keeps_dm_path_probe_truthful() -> 
     console = read("main/comms/usb_console.c")
     app = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
+    test_plan = read("docs/TEST_PLAN_D1L.md")
 
-    assert 'ok_begin("routes trace send")' in console
+    assert 'ok_begin("routes trace contact")' in console
     assert 'ok_begin("routes trace status")' in console
-    assert "routes trace send <loop-path-hex>" in console
+    assert "routes trace contact <fingerprint>" in console
     assert "routes trace status" in console
-    assert "requires_explicit_loop" in console
+    assert "requires_current_boot_proven_contact_path" in console
     assert "contact_trace_supported" in console
+    assert "operator_path_accepted" in console
+    assert "operator_trace_path_accepted" in console
+    assert "current_boot_proven_contact_path" in console
+    assert "one_byte_hash_only" in console
     assert "hardware_verified" in console
     assert "per_hop_complete" in console
     assert "route_summary_durable_verified" in console
@@ -164,9 +207,11 @@ def test_console_discloses_trace_boundary_and_keeps_dm_path_probe_truthful() -> 
     assert "trace_pending_expired" in console
     assert 'retained_summary\\\":true' not in console
     assert "boot_local" in console
-    assert "tag_auth_immutable_explicit_loop" in console
+    assert "tag_auth_immutable_contact_loop" in console
     assert "pending_auth" not in console
-    assert console.index('strncmp(line, "routes trace send ", 18)') < console.index(
+    assert "routes trace send <loop-path-hex>" not in console
+    assert "parse_trace_loop_path" not in console
+    assert console.index('strncmp(line, "routes trace contact ", 21)') < console.index(
         'strncmp(line, "routes trace ", 13)'
     )
     assert console.index('strcmp(line, "routes trace status")') < console.index(
@@ -177,6 +222,12 @@ def test_console_discloses_trace_boundary_and_keeps_dm_path_probe_truthful() -> 
     assert "DM/PATH discovery probe queued" in console
     assert "d1l_meshcore_service_request_path_discovery_probe" in app
     assert "DM/PATH discovery; not TRACE; no Public RF" in ui
+    assert "routes trace send <loop-path-hex>" not in test_plan
+    assert "contact_trace_supported=false" not in test_plan
+    assert "real_trace_contact_supported=false" not in test_plan
+    assert "routes trace contact <fingerprint>" in test_plan
+    assert "operator_path_accepted=false" in test_plan
+    assert "one_byte_hash_only=true" in test_plan
 
 
 def test_trace_helper_and_service_are_exact_production_binding_sources() -> None:
@@ -187,8 +238,10 @@ def test_trace_helper_and_service_are_exact_production_binding_sources() -> None
     )[1].split("}", 1)[0]
 
     for relative in (
+        "main/comms/usb_console.c",
         "main/mesh/meshcore_trace.h",
         "main/mesh/meshcore_service.c",
+        "main/mesh/meshcore_service.h",
     ):
         assert relative in manifest["production_binding_sources"]
         assert manifest["production_binding_sources"][relative] == canonical_sha256(

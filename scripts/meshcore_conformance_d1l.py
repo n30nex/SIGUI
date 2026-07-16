@@ -469,10 +469,29 @@ EXPECTED_ORACLE_CAPABILITIES = [
     {
         "id": "trace_forwarding_and_path_discovery",
         "status": "pending",
-        "owner": "unassigned",
+        "owner": "d1l_production_contact_trace",
         "blocked_by": (
             "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
         ),
+        "implemented_prerequisites": [
+            "trace_source_frames",
+            "fingerprint_only_current_boot_proven_contact_loop_dispatch",
+        ],
+        "production_receipt": {
+            "id": "RCPT-WP04-CONTACT-TRACE-20260716",
+            "status": "implemented_pending_actions_and_rf_evidence",
+            "sources": [
+                "main/mesh/meshcore_service.c",
+                "main/mesh/meshcore_service.h",
+                "main/mesh/meshcore_trace.h",
+                "main/comms/usb_console.c",
+            ],
+            "scope": (
+                "fingerprint_only_exact_canonical_contact_current_boot_proven_"
+                "one_byte_route_loop_runtime_dispatch_no_operator_path_multi_"
+                "byte_ui_rf_evidence_hardware_evidence_or_closure"
+            ),
+        },
     },
     {
         "id": "login_request_response_admin",
@@ -1046,6 +1065,7 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
 }
 EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/CMakeLists.txt",
+    "main/comms/usb_console.c",
     "main/mesh/advert_data.h",
     "main/mesh/contact_store.c",
     "main/mesh/contact_store.h",

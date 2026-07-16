@@ -200,6 +200,7 @@ typedef enum {
     D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
     D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT,
     D1L_MESHCORE_SERVICE_CMD_SEND_DM,
+    D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT,
     D1L_MESHCORE_SERVICE_EVENT_TX_DONE,
     D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT,
     D1L_MESHCORE_SERVICE_EVENT_RX_DONE,
@@ -221,6 +222,7 @@ typedef struct {
     char dm_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char dm_text[D1L_MESSAGE_TEXT_LEN];
     bool dm_path_probe;
+    char trace_fingerprint[D1L_NODE_FINGERPRINT_LEN];
     int16_t rssi;
     int8_t snr;
     uint64_t monotonic_us;
@@ -2470,10 +2472,16 @@ static bool parse_rx_admin_response_packet(const uint8_t *payload,
     current.role = d1l_meshcore_admin_role_for_contact(&contact);
     memcpy(current.local_public_key, settings_snapshot.identity_public_key,
            sizeof(current.local_public_key));
-    if (derive_local_identity_shared_secret(
-            current.peer_public_key, current.local_public_key,
-            current.session_secret) != ESP_OK ||
-        !d1l_meshcore_admin_runtime_validate_binding(
+    const esp_err_t derive_ret = derive_local_identity_shared_secret(
+        current.peer_public_key, current.local_public_key,
+        current.session_secret);
+    if (derive_ret != ESP_OK) {
+        d1l_meshcore_admin_runtime_invalidate(ESP_ERR_INVALID_STATE);
+        d1l_meshcore_admin_binding_wipe(&current);
+        d1l_meshcore_admin_context_wipe(&context);
+        return true;
+    }
+    if (!d1l_meshcore_admin_runtime_validate_binding(
             &current, context.generation)) {
         d1l_meshcore_admin_binding_wipe(&current);
         d1l_meshcore_admin_context_wipe(&context);
@@ -4386,6 +4394,198 @@ static esp_err_t meshcore_service_handle_send_dm(
     return ESP_OK;
 }
 
+static char meshcore_service_lower_hex(char value)
+{
+    return value >= 'A' && value <= 'F' ?
+        (char)(value + ('a' - 'A')) : value;
+}
+
+static bool meshcore_service_fingerprint_equal(const char *left,
+                                               const char *right)
+{
+    if (!left || !right) {
+        return false;
+    }
+    for (size_t i = 0U; i < D1L_NODE_FINGERPRINT_LEN - 1U; ++i) {
+        const char left_char = meshcore_service_lower_hex(left[i]);
+        const char right_char = meshcore_service_lower_hex(right[i]);
+        const bool left_valid =
+            (left_char >= '0' && left_char <= '9') ||
+            (left_char >= 'a' && left_char <= 'f');
+        const bool right_valid =
+            (right_char >= '0' && right_char <= '9') ||
+            (right_char >= 'a' && right_char <= 'f');
+        if (!left_valid || !right_valid || left_char != right_char) {
+            return false;
+        }
+    }
+    return left[D1L_NODE_FINGERPRINT_LEN - 1U] == '\0' &&
+           right[D1L_NODE_FINGERPRINT_LEN - 1U] == '\0';
+}
+
+static esp_err_t meshcore_service_resolve_trace_contact(
+    const char *fingerprint,
+    uint32_t now_ms,
+    d1l_contact_entry_t *out_contact)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !out_contact) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t copied = d1l_contact_store_copy_recent(
+        s_contact_scan, D1L_CONTACT_STORE_CAPACITY);
+    size_t matches = 0U;
+    d1l_contact_entry_t unique = {0};
+    for (size_t i = 0U; i < copied; ++i) {
+        if (meshcore_service_fingerprint_equal(
+                s_contact_scan[i].fingerprint, fingerprint)) {
+            unique = s_contact_scan[i];
+            matches++;
+        }
+    }
+    if (matches == 0U) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (matches != 1U || !d1l_contact_store_is_canonical(&unique)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool path_expired = false;
+    d1l_contact_entry_t prepared = {0};
+    const esp_err_t ret = d1l_contact_store_prepare_path_route(
+        unique.fingerprint, now_ms, &prepared, &path_expired);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (!d1l_contact_store_is_canonical(&prepared) ||
+        strcmp(prepared.fingerprint, unique.fingerprint) != 0 ||
+        strcmp(prepared.public_key_hex, unique.public_key_hex) != 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    *out_contact = prepared;
+    return ESP_OK;
+}
+
+static esp_err_t meshcore_service_handle_send_trace_contact(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd || cmd->trace_fingerprint[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    d1l_contact_entry_t contact = {0};
+    esp_err_t ret = meshcore_service_resolve_trace_contact(
+        cmd->trace_fingerprint, now_ms, &contact);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    d1l_settings_t settings_snapshot = {0};
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const bool learned_this_boot = contact.out_path_valid &&
+        lookup_boot_route(contact.fingerprint, contact.out_path,
+                          contact.out_path_len,
+                          contact.out_path_state.generation);
+    d1l_meshcore_route_selection_t selection = {0};
+    if (!d1l_meshcore_route_select_canonical(
+            contact.out_path_valid, learned_this_boot,
+            contact.out_path, contact.out_path_len,
+            &contact.out_path_state, now_ms,
+            settings_snapshot.path_hash_bytes, &selection) ||
+        selection.route != D1L_MESHCORE_ROUTE_DIRECT ||
+        selection.reason != D1L_MESHCORE_ROUTE_SELECTION_DIRECT_PROVEN) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const bool contact_forwards_trace =
+        strcmp(contact.type, "repeater") == 0 ||
+        strcmp(contact.type, "room") == 0;
+    uint8_t contact_public_key[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+    if (!hex_to_bytes(contact_public_key, sizeof(contact_public_key),
+                      contact.public_key_hex)) {
+        secure_zero_bytes(contact_public_key, sizeof(contact_public_key));
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_meshcore_contact_trace_plan_t plan = {0};
+    const d1l_meshcore_contact_trace_plan_result_t plan_result =
+        d1l_meshcore_trace_plan_contact(
+            selection.path, selection.path_len, contact_forwards_trace,
+            contact_public_key[0], &plan);
+    secure_zero_bytes(contact_public_key, sizeof(contact_public_key));
+    if (plan_result == D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH ||
+        plan_result == D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (plan_result == D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (plan_result != D1L_MESHCORE_CONTACT_TRACE_PLAN_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const uint32_t tag = esp_random();
+    const uint32_t auth_code = esp_random();
+    d1l_meshcore_trace_source_t source = {0};
+    if (!d1l_meshcore_trace_build_source(
+            tag, auth_code, plan.path_hashes, plan.path_hops, &source)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    d1l_store_lock_take(&s_trace_lock);
+    const bool expired = d1l_meshcore_trace_tracker_expire_pending(
+        &s_trace_tracker, now_ms);
+    const bool began = d1l_meshcore_trace_tracker_begin(
+        &s_trace_tracker, tag, auth_code, plan.path_hashes,
+        plan.path_hops, now_ms);
+    d1l_store_lock_give(&s_trace_lock);
+    if (expired) {
+        status_lock();
+        s_status.trace_pending_expired++;
+        status_unlock();
+    }
+    if (!began) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_meshcore_service_cmd_t raw_cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+        .requested_tx_kind = D1L_MESH_TX_OPERATION_GENERIC,
+        .raw_len = source.raw_len,
+    };
+    memcpy(raw_cmd.raw, source.raw, source.raw_len);
+    ret = meshcore_service_handle_send_raw(&raw_cmd);
+    if (ret != ESP_OK) {
+        d1l_store_lock_take(&s_trace_lock);
+        (void)d1l_meshcore_trace_tracker_cancel(
+            &s_trace_tracker, tag, auth_code);
+        d1l_store_lock_give(&s_trace_lock);
+        return ret;
+    }
+
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(note, sizeof(note), "%.12s loop_hops=%u contact=%u",
+             contact.fingerprint, (unsigned)plan.path_hops,
+             plan.includes_contact ? 1U : 0U);
+    const esp_err_t route_ret =
+        d1l_route_store_upsert_observation_volatile(
+            contact.fingerprint,
+            contact.alias[0] ? contact.alias : contact.fingerprint,
+            "trace_request", "direct", "tx", 0, 0, 1U,
+            plan.path_hops, source.raw_len);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "volatile contact TRACE request route failed: %s",
+                 esp_err_to_name(route_ret));
+    }
+    append_packet_log("tx", "trace_request", 0, 0, 1U,
+                      plan.path_hops, source.raw_len, source.raw,
+                      source.raw_len, note);
+    status_lock();
+    s_status.trace_tx_queued++;
+    status_unlock();
+    return ESP_OK;
+}
+
 static void meshcore_service_reply(const d1l_meshcore_service_cmd_t *cmd, esp_err_t ret)
 {
     meshcore_request_complete(cmd, ret);
@@ -4483,6 +4683,12 @@ static void meshcore_service_task(void *arg)
             break;
         case D1L_MESHCORE_SERVICE_CMD_SEND_DM:
             ret = meshcore_service_handle_send_dm(&cmd);
+            if (ret != ESP_OK) {
+                s_status.rejected_commands++;
+            }
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT:
+            ret = meshcore_service_handle_send_trace_contact(&cmd);
             if (ret != ESP_OK) {
                 s_status.rejected_commands++;
             }
@@ -5427,82 +5633,26 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     return ESP_OK;
 }
 
-esp_err_t d1l_meshcore_service_send_trace_loop(const uint8_t *path_hashes,
-                                               size_t path_hops,
-                                               uint32_t *out_tag)
+esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint)
 {
-    if (!path_hashes || path_hops == 0U ||
-        path_hops > D1L_MESHCORE_TRACE_MAX_HOPS) {
-        status_lock();
-        s_status.rejected_commands++;
-        status_unlock();
+    if (!fingerprint ||
+        strlen(fingerprint) != D1L_NODE_FINGERPRINT_LEN - 1U) {
         return ESP_ERR_INVALID_ARG;
     }
-    const uint32_t tag = esp_random();
-    const uint32_t auth_code = esp_random();
-    d1l_meshcore_trace_source_t source = {0};
-    if (!d1l_meshcore_trace_build_source(tag, auth_code, path_hashes,
-                                         path_hops, &source)) {
-        status_lock();
-        s_status.rejected_commands++;
-        status_unlock();
-        return ESP_ERR_INVALID_SIZE;
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT,
+    };
+    for (size_t i = 0U; i < D1L_NODE_FINGERPRINT_LEN - 1U; ++i) {
+        const char value = meshcore_service_lower_hex(fingerprint[i]);
+        if (!((value >= '0' && value <= '9') ||
+              (value >= 'a' && value <= 'f'))) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        cmd.trace_fingerprint[i] = value;
     }
-
-    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    d1l_store_lock_take(&s_trace_lock);
-    const bool expired = d1l_meshcore_trace_tracker_expire_pending(
-        &s_trace_tracker, now_ms);
-    const bool began = d1l_meshcore_trace_tracker_begin(
-        &s_trace_tracker, tag, auth_code, path_hashes, path_hops, now_ms);
-    d1l_store_lock_give(&s_trace_lock);
-    if (expired) {
-        status_lock();
-        s_status.trace_pending_expired++;
-        status_unlock();
-    }
-    if (!began) {
-        status_lock();
-        s_status.rejected_commands++;
-        status_unlock();
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    const esp_err_t ret = meshcore_service_send_raw(
-        source.raw, source.raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        d1l_store_lock_take(&s_trace_lock);
-        (void)d1l_meshcore_trace_tracker_cancel(&s_trace_tracker, tag,
-                                                auth_code);
-        d1l_store_lock_give(&s_trace_lock);
-        status_lock();
-        s_status.rejected_commands++;
-        status_unlock();
-        return ret;
-    }
-
-    char target[D1L_ROUTE_TARGET_LEN] = {0};
-    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    snprintf(target, sizeof(target), "trace_%08lX", (unsigned long)tag);
-    snprintf(note, sizeof(note), "tag=%08lX loop_hops=%u",
-             (unsigned long)tag, (unsigned)path_hops);
-    const esp_err_t route_ret = d1l_route_store_upsert_observation_volatile(
-        target, "Explicit TRACE", "trace_request", "direct", "tx", 0, 0,
-        1U, (uint8_t)path_hops, source.raw_len);
-    if (route_ret != ESP_OK) {
-        ESP_LOGW(TAG, "volatile TRACE request route failed: %s",
-                 esp_err_to_name(route_ret));
-    }
-    append_packet_log("tx", "trace_request", 0, 0, 1U,
-                      (uint8_t)path_hops, source.raw_len, source.raw,
-                      source.raw_len, note);
-    status_lock();
-    s_status.trace_tx_queued++;
-    status_unlock();
-    if (out_tag) {
-        *out_tag = tag;
-    }
-    return ESP_OK;
+    cmd.trace_fingerprint[D1L_NODE_FINGERPRINT_LEN - 1U] = '\0';
+    return meshcore_service_send_command(
+        &cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
 }
 
 const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state)

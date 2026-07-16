@@ -70,6 +70,16 @@ def test_service_revalidates_every_live_admin_binding_and_zeroizes_copies() -> N
         "secure_zero_bytes(plaintext, sizeof(plaintext))",
     ):
         assert required in direct
+    derive_failure = body(
+        direct,
+        "const esp_err_t derive_ret = derive_local_identity_shared_secret(",
+        "if (!d1l_meshcore_admin_runtime_validate_binding(",
+    )
+    assert "if (derive_ret != ESP_OK)" in derive_failure
+    assert "d1l_meshcore_admin_runtime_invalidate(ESP_ERR_INVALID_STATE)" in \
+        derive_failure
+    assert derive_failure.index("d1l_meshcore_admin_runtime_invalidate") < \
+        derive_failure.index("d1l_meshcore_admin_binding_wipe")
 
     path_rx = body(service, "static void parse_rx_path_packet",
                    "static void parse_rx_trace_packet")

@@ -62,10 +62,14 @@ As of the 2026-07-16 strict-banked PR #162 exact-main checkpoint:
   path with duplicate, bad-signature, and self-advert suppression plus balanced
   packet allocation/release. It does not claim ACK, route, TRACE, or admin
   closure. PR #96 now makes the production/oracle/runtime arithmetic boundary
-  exception-free. PR #101 adds one bounded explicit-loop TRACE request and
-  correlated terminal-status path; it deliberately reports
-  `contact_trace_supported=false` and `hardware_verified=false`, so the broader
-  protocol closure remains unchanged. PR #103 adds fail-closed persisted identity
+  exception-free. PR #101 banked the predecessor bounded explicit-loop TRACE
+  request and correlated terminal-status path. The current runtime removes the
+  operator-supplied loop command and accepts only an exact canonical contact
+  fingerprint; the sole Mesh owner re-resolves a current-boot proven path and
+  derives the immutable flags-zero loop. This is limited to one-byte path hashes,
+  does not make chat/sensor contacts forward TRACE, and still reports
+  `hardware_verified=false`; multi-byte forwarding, official-peer RF, physical
+  proof, and broader protocol closure remain open. PR #103 adds fail-closed persisted identity
   classification and exact-full-key verified-contact storage primitives. PR #104
   binds fail-closed identity startup into the production service, and corrected
   PR #105 binds verified signed-advert RX to exact-full-key retained-contact
@@ -106,12 +110,15 @@ As of the 2026-07-16 strict-banked PR #162 exact-main checkpoint:
   flood. ACK planning uses the same selector, and telemetry reports the immutable
   route actually sent instead of rereading mutable contact state. Exact-candidate
   RF must still prove direct and fallback delivery, correlation, and retry behavior.
-  PR #101 now merges the bounded explicit-loop TRACE software slice, but it
-  deliberately does not derive a route from a contact. PR #104 and corrected PR
-  #105 bind production identity startup and verified signed-advert exact-key
-  contact promotion respectively; PR #102 remains a host-only admin transcript.
-  Complete contact lifecycle/recovery, generic contact and multi-hop TRACE,
-  production admin dispatch, RF, and physical closure are not claimed.
+  PR #101 merged the predecessor bounded explicit-loop TRACE software slice.
+  Current source adds a fingerprint-only contact TRACE command whose runtime
+  owner rejects missing, expired, preboot, noncanonical, ambiguous, oversized,
+  or non-one-byte routes and derives the outbound/pivot/return loop from the
+  same current-boot direct-route proof. It is software-only and does not prove
+  multi-byte behavior, compatible-peer forwarding, hop identity, RF, or physical
+  acceptance. PR #104 and corrected PR #105 bind production identity startup
+  and verified signed-advert exact-key contact promotion respectively; complete
+  contact lifecycle/recovery and release closure are not claimed.
 - Settings are implemented as an NVS-backed firmware model and have passed reboot persistence smoke on real D1L flash. The persisted radio profile is exposed through `settings get`, serial radio setters, and a touch Radio Settings sheet; the user-facing More page groups tools, connections, storage/maps, device, support, and advanced functions behind disclosure rows instead of a flat settings grid. PR #56 proves the collapsed hierarchy and all-tab navigation on COM12; expanded category touch behavior and the remaining system-page redesigns still need physical touch review.
 - First-boot onboarding now persists a setup-complete flag, collects the node name, confirms Canada/USA defaults, keeps Wi-Fi/BLE/observer disabled, and generates/retains the local MeshCore identity. Optional-radio choices in onboarding remain limited until live Wi-Fi/BLE runtime support is enabled.
 - `identity status` now generates and reports an NVS-retained Ed25519 local identity fingerprint. This is a minimal firmware identity model, not the final full MeshCore C++ store integration.

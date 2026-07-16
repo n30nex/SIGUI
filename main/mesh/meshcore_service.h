@@ -120,7 +120,5 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     const char *fingerprint,
     char *out_token,
     size_t out_token_size);
-esp_err_t d1l_meshcore_service_send_trace_loop(const uint8_t *path_hashes,
-                                               size_t path_hops,
-                                               uint32_t *out_tag);
+esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint);
 const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state);
