@@ -219,6 +219,7 @@ def test_terminal_events_must_match_the_exact_active_operation_and_dm_revision()
 def test_request_timeout_and_completion_are_correlated_to_one_slot_generation():
     source = read("main/mesh/meshcore_service.c")
     guard = read("main/mesh/meshcore_runtime_guard.h")
+    command_guard = read("main/mesh/meshcore_command_guard.h")
     task = body(
         source,
         "static void meshcore_service_task(void *arg)",
@@ -228,6 +229,16 @@ def test_request_timeout_and_completion_are_correlated_to_one_slot_generation():
         source,
         "static esp_err_t meshcore_service_send_command",
         "esp_err_t d1l_meshcore_service_start_rx_async",
+    )
+    send_claimed = body(
+        source,
+        "static esp_err_t meshcore_service_send_claimed_command",
+        "static esp_err_t meshcore_service_send_command",
+    )
+    enqueue = body(
+        source,
+        "static bool meshcore_service_enqueue_claimed",
+        "static esp_err_t meshcore_service_send_claimed_command",
     )
     wait = body(
         source,
@@ -264,27 +275,30 @@ def test_request_timeout_and_completion_are_correlated_to_one_slot_generation():
         assert forbidden not in source
 
     assert send.index("meshcore_request_claim(cmd, timeout_ms)") < send.index(
-        "xQueueSend(s_service_queue, cmd, timeout_ticks)"
+        "meshcore_service_send_claimed_command(cmd, timeout_ms)"
     )
-    assert "meshcore_request_abort_unqueued(cmd)" in send
-    assert "meshcore_request_wait(cmd, timeout_ticks)" in send
+    assert "d1l_mesh_command_request_enqueue" in send_claimed
+    assert "xQueueSend(enqueue_context->queue, command" in enqueue
+    assert "meshcore_request_abort_unqueued(cmd)" in send_claimed
+    assert "meshcore_request_wait(cmd, timeout_ticks)" in send_claimed
     assert task.index("meshcore_request_admit(&cmd)") < task.index(
         "switch (cmd.type)"
     )
 
-    assert "D1L_MESH_REQUEST_PENDING" in wait
+    assert "d1l_mesh_command_request_cancel_and_release" in wait
+    assert "D1L_MESH_REQUEST_PENDING" in command_guard
     assert "D1L_MESH_REQUEST_CALLER_CANCELLED" in wait
     assert "D1L_MESH_REQUEST_ADMITTED" in wait
     assert "xSemaphoreTake(slot->completion, portMAX_DELAY)" in wait
     assert admit.index("request_deadline_us") < admit.index(
-        "D1L_MESH_REQUEST_ADMITTED"
+        "d1l_mesh_command_request_admit"
     )
-    assert "D1L_MESH_REQUEST_OWNER_EXPIRED" in admit
-    assert "D1L_MESH_REQUEST_CALLER_CANCELLED" in admit
-    assert "d1l_mesh_request_guard_transition(" in complete
+    assert "d1l_mesh_command_request_expire" in admit
+    assert "d1l_mesh_request_guard_release(" not in admit
+    assert "d1l_mesh_command_request_complete" in complete
     assert "cmd->request_id" in complete
-    assert "D1L_MESH_REQUEST_ADMITTED" in complete
-    assert "D1L_MESH_REQUEST_COMPLETED" in complete
+    assert "D1L_MESH_REQUEST_ADMITTED" in command_guard
+    assert "D1L_MESH_REQUEST_COMPLETED" in command_guard
 
 
 def test_callback_terminal_snapshot_is_immutable_and_monotonically_identified():

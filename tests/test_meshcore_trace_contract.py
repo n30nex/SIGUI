@@ -239,6 +239,8 @@ def test_trace_helper_and_service_are_exact_production_binding_sources() -> None
 
     for relative in (
         "main/comms/usb_console.c",
+        "main/mesh/meshcore_command_guard.h",
+        "main/mesh/meshcore_runtime_guard.h",
         "main/mesh/meshcore_trace.h",
         "main/mesh/meshcore_service.c",
         "main/mesh/meshcore_service.h",
