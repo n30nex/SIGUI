@@ -36,6 +36,9 @@
       "oracle_vector_groups": [
         "dm_encrypt_decrypt"
       ],
+      "production_host_suites": [
+        "text_admission"
+      ],
       "remaining": []
     },
     {
@@ -171,11 +174,12 @@
     },
     {
       "id": "malformed_utf8_and_embedded_nul",
-      "status": "missing",
+      "status": "implemented",
       "oracle_vector_groups": [],
-      "remaining": [
-        "integrate strict production text-admission vectors into this gate"
-      ]
+      "production_host_suites": [
+        "text_admission"
+      ],
+      "remaining": []
     },
     {
       "id": "self_message_unknown_peer_and_channel",
@@ -335,6 +339,24 @@
         ]
       ],
       "expected_stdout": "native truthful-time checkpoint integration: ok"
+    },
+    {
+      "id": "text_admission",
+      "binary": "meshcore_text_plaintext_semantic",
+      "scenario_ids": [
+        "canonical_public_padding",
+        "canonical_extended_attempt",
+        "attempt_matrix_0_through_255",
+        "embedded_nul_rejection",
+        "malformed_utf8_rejection",
+        "malformed_padding_rejection",
+        "attempt_mismatch_rejection",
+        "oversize_rejection"
+      ],
+      "invocations": [
+        []
+      ],
+      "expected_stdout": "native MeshCore text plaintext: ok"
     }
   ],
   "source_pins": {
@@ -352,10 +374,14 @@
     "main/mesh/meshcore_command_guard.h": "c266e8f1a28bce5469a7f072b12ae06410e8be04af0c31ce9375283746082f53",
     "main/mesh/meshcore_radio_profile.h": "79fc333c543d2215dab414067515763113a70bdd62eb43a63038819322854e9a",
     "main/mesh/meshcore_runtime_guard.h": "5b3630e4a27b15d65a10f7b7524ee646123680b89efb9586f7b02ba33c899708",
+    "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
+    "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
     "main/mesh/meshcore_trace.h": "dcfd9d18f65555baa018412f1b7c9e6079a04b1b6ad89fda1452ec3943a6dc78",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
     "main/mesh/store_lock.h": "1fae71b73b643c37452a8da8d7c0a3c4bd0e839014e3a490af25206b41d2d7fe",
+    "main/mesh/user_text.c": "483bdcce4b6303acd7a0a82ab7607ed7655454f8e9096d46615aaebbb255bc6f",
+    "main/mesh/user_text.h": "e75c7b84efe66bd961ae0cf94e28150fedf639d1aa2d9ef57caad817924e7517",
     "main/platform/time_display.c": "824031a6e0d180651551cd61f424c0f76512b2c914ba574fa0d4c9883131c7a9",
     "main/platform/time_display.h": "f65f6a98dd93a3a9243b55354923206831da45ed4d256f9c3c100c65ea2724d0",
     "main/platform/time_service.c": "ef1602a22a9cc97580877bd42867ba04524e5a5697c8e14f7e955c268badc7b9",
@@ -368,6 +394,7 @@
     "tests/native/esp_nvs_stubs.c": "2ad701fb96d76e19518e193bcfafb7fada5d0e1a517a38406998fc386ad6b8ca",
     "tests/native/meshcore_admin_dispatch_test.c": "830b262f3f15f95c27d374e93ad60eab2e52647e478346df70d604125312bfda",
     "tests/native/meshcore_runtime_guard_test.c": "f5a2c1b33ed1fd1545d934eceb05041fc348f9cfc8f6ef04399fcba444bc91e4",
+    "tests/native/meshcore_text_plaintext_test.c": "b7f4edbe648c00b5725878b631c705c251c3a81ffe4652cd706d8b996d1e6e7b",
     "tests/native/meshcore_trace_test.c": "c046cdc354a40d5feae8e79eb8e8f66fa1426ecae97a083ef6f6ca7c56092eff",
     "tests/native/mock_esp_nvs.h": "186a12a057672734ddeddeeba5667298aadf69fb2b074d42c4dbd588f9d552fd",
     "tests/native/settings_protocol_migration_test.c": "6e0093fed3ac42bc02fe8f5d4e18185eb52f6f86febca805e489c2d794de0b93",

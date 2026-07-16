@@ -245,7 +245,7 @@ EXPECTED_WP05_REQUIREMENT_STATUSES = {
     "replayed_advert_timestamp": "missing",
     "duplicate_packet_and_hash": "partial",
     "truncated_oversize_and_empty_payload": "implemented",
-    "malformed_utf8_and_embedded_nul": "missing",
+    "malformed_utf8_and_embedded_nul": "implemented",
     "self_message_unknown_peer_and_channel": "partial",
     "lifetime_and_expiry_boundaries": "partial",
 }
@@ -290,6 +290,12 @@ EXPECTED_WP05_PRODUCTION_SUITES = {
         "invocation_count": 6,
         "expected_stdout": "native truthful-time checkpoint integration: ok",
     },
+    "text_admission": {
+        "binary": "meshcore_text_plaintext_semantic",
+        "scenario_count": 8,
+        "invocation_count": 1,
+        "expected_stdout": "native MeshCore text plaintext: ok",
+    },
 }
 EXPECTED_WP05_SOURCE_PATHS = {
     "main/app/identity_state.h",
@@ -307,9 +313,13 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/mesh/meshcore_radio_profile.h",
     "main/mesh/meshcore_runtime_guard.h",
     "main/mesh/meshcore_trace.h",
+    "main/mesh/meshcore_text_plaintext.c",
+    "main/mesh/meshcore_text_plaintext.h",
     "main/mesh/meshcore_wire.c",
     "main/mesh/meshcore_wire.h",
     "main/mesh/store_lock.h",
+    "main/mesh/user_text.c",
+    "main/mesh/user_text.h",
     "main/platform/time_display.c",
     "main/platform/time_display.h",
     "main/platform/time_service.c",
@@ -323,6 +333,7 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "tests/native/meshcore_admin_dispatch_test.c",
     "tests/native/meshcore_runtime_guard_test.c",
     "tests/native/meshcore_trace_test.c",
+    "tests/native/meshcore_text_plaintext_test.c",
     "tests/native/mock_esp_nvs.h",
     "tests/native/settings_protocol_migration_test.c",
     "tests/native/stubs/esp_err.h",
@@ -2871,6 +2882,17 @@ def production_semantic_suite_specs(
                 native / "time_service_checkpoint_integration_test.c",
             ],
         },
+        {
+            "id": "text_admission",
+            "binary": Path(build_dir) / "meshcore_text_plaintext_semantic",
+            "flags": [],
+            "include_dirs": [ROOT / "main"],
+            "sources": [
+                ROOT / "main" / "mesh" / "user_text.c",
+                ROOT / "main" / "mesh" / "meshcore_text_plaintext.c",
+                native / "meshcore_text_plaintext_test.c",
+            ],
+        },
     ]
 
 
@@ -4014,9 +4036,9 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("closure_ready") is False
         and value.get("full_semantic_matrix_covered") is False
         and value.get("requirement_count") == 16
-        and value.get("implemented_requirement_count") == 6
+        and value.get("implemented_requirement_count") == 7
         and value.get("partial_requirement_count") == 8
-        and value.get("missing_requirement_count") == 2
+        and value.get("missing_requirement_count") == 1
         and value.get("fuzz_target_count") == 8
         and value.get("implemented_fuzz_target_count") == 2
         and value.get("partial_fuzz_target_count") == 1

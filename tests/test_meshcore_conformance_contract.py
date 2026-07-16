@@ -157,7 +157,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         summary["implemented_requirement_count"],
         summary["partial_requirement_count"],
         summary["missing_requirement_count"],
-    ) == (6, 8, 2)
+    ) == (7, 8, 1)
     assert (
         summary["implemented_fuzz_target_count"],
         summary["partial_fuzz_target_count"],
@@ -165,14 +165,15 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
     ) == (2, 1, 5)
     assert summary["oracle_semantic_vectors"] == 915
     assert summary["unique_referenced_oracle_semantic_vectors"] == 890
-    assert summary["production_suite_count"] == 5
-    assert summary["production_scenario_count"] == 26
+    assert summary["production_suite_count"] == 6
+    assert summary["production_scenario_count"] == 34
     assert [suite["id"] for suite in summary["production_host_suites"]] == [
         "admin_dispatch",
         "runtime_queue_fairness",
         "contact_trace",
         "legacy_protocol_timestamp_migration",
         "time_service_migration_integration",
+        "text_admission",
     ]
     source_verification = conformance.verify_wp05_semantic_sources(matrix)
     assert source_verification["pins_verified"] is True
@@ -192,7 +193,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         dependency_verification,
     )
     assert source_verification["verified"] is True
-    assert dependency_verification["dependency_count"] == 41
+    assert dependency_verification["dependency_count"] == 46
     assert dependency_verification["dependencies"] == sorted(
         conformance.EXPECTED_WP05_SOURCE_PATHS
     )
@@ -209,16 +210,17 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "meshcore_trace_semantic",
         "settings_protocol_migration_semantic",
         "time_service_migration_semantic",
+        "meshcore_text_plaintext_semantic",
     ):
         assert binary in commands
-    assert commands.count("-fsanitize=address,undefined") == 5
+    assert commands.count("-fsanitize=address,undefined") == 6
     assert not re.search(r"\bCOM\d+\b", commands, re.IGNORECASE)
 
     build_plans = conformance.production_semantic_command_plan("clang-18")
     dependency_plans = conformance.production_semantic_dependency_command_plan(
         "clang-18"
     )
-    assert len(build_plans) == 5
+    assert len(build_plans) == 6
     assert len(dependency_plans) == sum(
         len(spec["sources"])
         for spec in conformance.production_semantic_suite_specs()
@@ -505,7 +507,7 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["scope"]["packet_semantics_covered"] is False
     assert report["scope"]["bounded_production_semantics_covered"] is True
     assert report["wp05_semantic_matrix"]["closure_ready"] is False
-    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 26
+    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 34
     semantic_source = report["wp05_semantic_matrix"]["source_verification"]
     assert semantic_source["pins_verified"] is True
     assert semantic_source["dependency_closure_verified"] is False
@@ -598,7 +600,7 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     incomplete_semantic_matrix = copy.deepcopy(report)
     incomplete_semantic_matrix["wp05_semantic_matrix"]["result"][
         "scenario_count"
-    ] = 20
+    ] = 33
     mutations.append((incomplete_semantic_matrix, "wp05_semantic_matrix"))
     fabricated_semantic_scenarios = copy.deepcopy(report)
     fabricated_semantic_scenarios["wp05_semantic_matrix"]["result"]["suites"][
@@ -617,7 +619,7 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     incomplete_semantic_dependencies = copy.deepcopy(report)
     incomplete_semantic_dependencies["wp05_semantic_matrix"][
         "source_verification"
-    ]["dependency_verification"]["dependency_count"] = 37
+    ]["dependency_verification"]["dependency_count"] = 45
     mutations.append(
         (incomplete_semantic_dependencies, "wp05_semantic_matrix")
     )

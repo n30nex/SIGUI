@@ -41,11 +41,25 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "tests/native/stubs/freertos/semphr.h",
         "tests/native/stubs/nvs.h",
     }
+    text_admission = {
+        "main/mesh/meshcore_text_plaintext.c",
+        "main/mesh/meshcore_text_plaintext.h",
+        "main/mesh/user_text.c",
+        "main/mesh/user_text.h",
+        "tests/native/meshcore_text_plaintext_test.c",
+    }
     all_dependencies = set(matrix["source_pins"])
-    time_service = all_dependencies - admin - runtime - trace - {
+    time_service = all_dependencies - admin - runtime - trace - text_admission - {
         "tests/native/settings_protocol_migration_test.c"
     }
-    suite_sets = [admin, runtime, trace, migration, time_service]
+    suite_sets = [
+        admin,
+        runtime,
+        trace,
+        migration,
+        time_service,
+        text_admission,
+    ]
     suite_specs = conformance.production_semantic_suite_specs()
     commands = [
         [conformance._canonical_command_argument(argument) for argument in command]
