@@ -1,4 +1,7 @@
 #include <helpers/BaseChatMesh.h>
+#include <helpers/SimpleMeshTables.h>
+
+#include "mesh/meshcore_packet_hash.h"
 
 #include <algorithm>
 #include <array>
@@ -7,7 +10,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -277,29 +279,161 @@ class FixedPacketManager final : public mesh::PacketManager {
     int releases_ = 0;
 };
 
-class SeenTable final : public mesh::MeshTables {
+class SeenTable final : public SimpleMeshTables {
   public:
     bool hasSeen(const mesh::Packet *packet) override
     {
         ++lookups_;
-        std::array<uint8_t, MAX_HASH_SIZE> packet_hash{};
-        packet->calculatePacketHash(packet_hash.data());
-        return !seen_.insert(packet_hash).second;
+        return SimpleMeshTables::hasSeen(packet);
     }
 
     void clear(const mesh::Packet *packet) override
     {
-        std::array<uint8_t, MAX_HASH_SIZE> packet_hash{};
-        packet->calculatePacketHash(packet_hash.data());
-        seen_.erase(packet_hash);
+        SimpleMeshTables::clear(packet);
     }
 
     int lookups() const { return lookups_; }
+    uint32_t flood_duplicates() const { return getNumFloodDups(); }
 
   private:
-    std::set<std::array<uint8_t, MAX_HASH_SIZE>> seen_;
     int lookups_ = 0;
 };
+
+static_assert(MAX_HASH_SIZE == D1L_MESHCORE_PACKET_HASH_BYTES,
+              "pinned upstream and D1L packet hashes must have equal width");
+
+std::array<uint8_t, D1L_MESHCORE_PACKET_HASH_BYTES>
+upstream_packet_hash(const mesh::Packet &packet)
+{
+    std::array<uint8_t, D1L_MESHCORE_PACKET_HASH_BYTES> hash{};
+    packet.calculatePacketHash(hash.data());
+    return hash;
+}
+
+std::array<uint8_t, D1L_MESHCORE_PACKET_HASH_BYTES>
+d1l_packet_hash(const mesh::Packet &packet)
+{
+    d1l_meshcore_wire_packet_t view{};
+    view.header = packet.header;
+    view.route = packet.getRouteType();
+    view.type = packet.getPayloadType();
+    view.version = packet.getPayloadVer();
+    view.transport_codes[0] = packet.transport_codes[0];
+    view.transport_codes[1] = packet.transport_codes[1];
+    view.path_len = static_cast<uint8_t>(packet.path_len);
+    view.path_hash_bytes = packet.getPathHashSize();
+    view.path_hops = packet.getPathHashCount();
+    view.path = packet.getPathByteLen() > 0U ? packet.path : nullptr;
+    view.path_byte_len = packet.getPathByteLen();
+    view.payload = packet.payload;
+    view.payload_len = packet.payload_len;
+    std::array<uint8_t, D1L_MESHCORE_PACKET_HASH_BYTES> hash{};
+    require(d1l_meshcore_packet_hash_calculate(&view, hash.data()) == ESP_OK,
+            "D1L packet hash rejected a pinned upstream packet");
+    return hash;
+}
+
+void require_hash_parity(const mesh::Packet &packet, const char *message)
+{
+    require(upstream_packet_hash(packet) == d1l_packet_hash(packet), message);
+}
+
+int verify_packet_hash_semantics(const std::vector<uint8_t> &advert_wire)
+{
+    require(!advert_wire.empty() && advert_wire.size() <= UINT8_MAX,
+            "signed advert wire cannot be decoded for hash parity");
+    mesh::Packet advert;
+    require(advert.readFrom(advert_wire.data(),
+                            static_cast<uint8_t>(advert_wire.size())),
+            "signed advert wire did not decode for hash parity");
+    require_hash_parity(advert, "upstream/D1L signed-advert hash changed");
+    const auto advert_hash = upstream_packet_hash(advert);
+
+    mesh::Packet route_variant = advert;
+    route_variant.header = static_cast<uint8_t>(
+        (route_variant.header & ~PH_ROUTE_MASK) | ROUTE_TYPE_TRANSPORT_DIRECT);
+    route_variant.transport_codes[0] = 0x1234U;
+    route_variant.transport_codes[1] = 0xabcdU;
+    route_variant.setPathHashSizeAndCount(1U, 2U);
+    route_variant.path[0] = 0x51U;
+    route_variant.path[1] = 0x62U;
+    require_hash_parity(route_variant,
+                        "upstream/D1L routed advert hash changed");
+    require(upstream_packet_hash(route_variant) == advert_hash,
+            "non-TRACE route/path/transport changed packet hash");
+
+    mesh::Packet changed_type = advert;
+    changed_type.header = static_cast<uint8_t>(
+        (changed_type.header & ~(PH_TYPE_MASK << PH_TYPE_SHIFT)) |
+        (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT));
+    mesh::Packet changed_payload = advert;
+    require(changed_payload.payload_len > 0U,
+            "advert payload is empty for hash mutation");
+    changed_payload.payload[changed_payload.payload_len - 1U] ^= 0x01U;
+    require_hash_parity(changed_type,
+                        "upstream/D1L type-domain hash changed");
+    require_hash_parity(changed_payload,
+                        "upstream/D1L payload-domain hash changed");
+    require(upstream_packet_hash(changed_type) != advert_hash &&
+                upstream_packet_hash(changed_payload) != advert_hash,
+            "packet type or payload mutation did not change hash");
+
+    mesh::Packet trace;
+    trace.header = static_cast<uint8_t>(
+        (PAYLOAD_TYPE_TRACE << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD);
+    trace.setPathHashSizeAndCount(2U, 2U);
+    trace.path[0] = 0x10U;
+    trace.path[1] = 0x20U;
+    trace.path[2] = 0x30U;
+    trace.path[3] = 0x40U;
+    trace.payload_len = 4U;
+    trace.payload[0] = 0x90U;
+    trace.payload[1] = 0x91U;
+    trace.payload[2] = 0x92U;
+    trace.payload[3] = 0x93U;
+    require_hash_parity(trace,
+                        "TRACE uint16 little-endian path length hash changed");
+    const auto trace_hash = upstream_packet_hash(trace);
+
+    mesh::Packet trace_path_variant = trace;
+    trace_path_variant.path[0] ^= 0xffU;
+    trace_path_variant.path[3] ^= 0xffU;
+    require_hash_parity(trace_path_variant,
+                        "TRACE path-byte exclusion parity changed");
+    require(upstream_packet_hash(trace_path_variant) == trace_hash,
+            "TRACE path bytes unexpectedly changed packet hash");
+
+    mesh::Packet trace_length_variant = trace;
+    trace_length_variant.setPathHashSizeAndCount(2U, 1U);
+    require_hash_parity(trace_length_variant,
+                        "TRACE changed-length parity changed");
+    require(upstream_packet_hash(trace_length_variant) != trace_hash,
+            "TRACE encoded path length did not change packet hash");
+    return 5;
+}
+
+std::vector<uint8_t> routed_advert_variant(const std::vector<uint8_t> &wire,
+                                           bool transport)
+{
+    require(!wire.empty() && wire.size() <= UINT8_MAX,
+            "signed advert route variant input is invalid");
+    mesh::Packet packet;
+    require(packet.readFrom(wire.data(), static_cast<uint8_t>(wire.size())),
+            "signed advert route variant did not decode");
+    packet.header = static_cast<uint8_t>(
+        (packet.header & ~PH_ROUTE_MASK) |
+        (transport ? ROUTE_TYPE_TRANSPORT_FLOOD : ROUTE_TYPE_FLOOD));
+    packet.transport_codes[0] = 0x1357U;
+    packet.transport_codes[1] = 0x2468U;
+    packet.setPathHashSizeAndCount(1U, transport ? 3U : 2U);
+    packet.path[0] = transport ? 0xa1U : 0xb1U;
+    packet.path[1] = transport ? 0xa2U : 0xb2U;
+    packet.path[2] = 0xa3U;
+    std::array<uint8_t, 255U> encoded{};
+    const uint8_t length = packet.writeTo(encoded.data());
+    require(length > 0U, "signed advert route variant encoded empty");
+    return std::vector<uint8_t>(encoded.begin(), encoded.begin() + length);
+}
 
 struct ContactSnapshot {
     std::array<uint8_t, PUB_KEY_SIZE> public_key{};
@@ -406,6 +540,8 @@ struct ScenarioResult {
     std::array<uint8_t, PUB_KEY_SIZE> sender_key{};
     int receiver_filter_count = 0;
     int receiver_table_lookups = 0;
+    int receiver_table_flood_duplicates = 0;
+    int packet_hash_parity_cases = 0;
     int signed_adverts_sent = 0;
     int contact_callbacks = 0;
     int stored_advert_writes = 0;
@@ -421,6 +557,9 @@ struct ScenarioResult {
                stored_advert == other.stored_advert && sender_key == other.sender_key &&
                receiver_filter_count == other.receiver_filter_count &&
                receiver_table_lookups == other.receiver_table_lookups &&
+               receiver_table_flood_duplicates ==
+                   other.receiver_table_flood_duplicates &&
+               packet_hash_parity_cases == other.packet_hash_parity_cases &&
                signed_adverts_sent == other.signed_adverts_sent &&
                contact_callbacks == other.contact_callbacks &&
                stored_advert_writes == other.stored_advert_writes &&
@@ -490,6 +629,7 @@ ScenarioResult run_scenario()
     const std::vector<uint8_t> wire = transmit_signed_advert(
         sender, sender_rtc, sender_ms, sender_radio, sender_manager,
         baseline_timestamp, "semantic-node");
+    const int packet_hash_parity_cases = verify_packet_hash_semantics(wire);
     receiver_radio.inject(wire);
     pump_receive(receiver);
     require(receiver.callback_count() == 1, "valid advert did not invoke contact callback");
@@ -512,6 +652,24 @@ ScenarioResult run_scenario()
     require(receiver.callback_count() == 1, "duplicate advert reached callback");
     require(receiver.blob_write_count() == 1, "duplicate advert rewrote storage");
     require(receiver_manager.live_count() == 0, "receiver retained duplicate packet");
+
+    const std::vector<uint8_t> path_variant =
+        routed_advert_variant(wire, false);
+    const std::vector<uint8_t> transport_variant =
+        routed_advert_variant(wire, true);
+    require(path_variant != wire && transport_variant != wire &&
+                path_variant != transport_variant,
+            "advert route variants were not distinct wires");
+    receiver_radio.inject(path_variant);
+    pump_receive(receiver);
+    receiver_radio.inject(transport_variant);
+    pump_receive(receiver);
+    require(receiver.callback_count() == 1,
+            "routed duplicate advert reached callback");
+    require(receiver.blob_write_count() == 1,
+            "routed duplicate advert rewrote storage");
+    require(receiver_seen.flood_duplicates() == 3U,
+            "real SimpleMeshTables did not count all advert duplicates");
 
     std::vector<std::vector<uint8_t>> signed_wires = {wire};
     const auto transmit_distinct = [&](uint32_t timestamp, const char *name) {
@@ -621,6 +779,9 @@ ScenarioResult run_scenario()
               result.sender_key.begin());
     result.receiver_filter_count = receiver.filter_count();
     result.receiver_table_lookups = receiver_seen.lookups();
+    result.receiver_table_flood_duplicates =
+        static_cast<int>(receiver_seen.flood_duplicates());
+    result.packet_hash_parity_cases = packet_hash_parity_cases;
     result.signed_adverts_sent = static_cast<int>(sender_radio.captured().size());
     result.contact_callbacks = receiver.callback_count();
     result.stored_advert_writes = receiver.blob_write_count();
@@ -639,10 +800,14 @@ int main()
     const ScenarioResult first = run_scenario();
     const ScenarioResult second = run_scenario();
     require(first == second, "deterministic replay changed runtime results");
-    require(first.receiver_filter_count == 8,
+    require(first.receiver_filter_count == 10,
             "flood pre-dispatch filter was not exercised for each receive");
-    require(first.receiver_table_lookups == 8,
+    require(first.receiver_table_lookups == 10,
             "seen-table lookup count did not cover distinct replay wires");
+    require(first.receiver_table_flood_duplicates == 3,
+            "real SimpleMeshTables duplicate count drifted");
+    require(first.packet_hash_parity_cases == 5,
+            "packet-hash parity case count drifted");
     require(first.signed_adverts_sent == 6,
             "signed timestamp scenario count drifted");
     require(first.contact_callbacks == 3 && first.stored_advert_writes == 3,
@@ -660,6 +825,7 @@ int main()
         "\"advert_timestamp\":%u,\"latitude_e6\":%d,\"longitude_e6\":%d,"
         "\"upstream_callback_is_new\":%s,"
         "\"filter_calls\":%d,\"table_lookups\":%d,"
+        "\"table_flood_duplicates\":%d,\"packet_hash_parity_cases\":%d,"
         "\"signed_adverts_sent\":%d,\"contact_callbacks\":%d,"
         "\"stored_advert_writes\":%d,\"timestamp_replay_cases\":%d,"
         "\"timestamp_replay_rejections\":%d,"
@@ -667,6 +833,11 @@ int main()
         "\"allocations\":%d,\"releases\":%d,"
         "\"duplicate_suppressed\":true,"
         "\"identical_wire_hash_suppressed\":true,"
+        "\"real_simple_mesh_tables\":true,"
+        "\"upstream_d1l_packet_hash_match\":true,"
+        "\"route_path_transport_variants_suppressed\":true,"
+        "\"trace_path_length_little_endian_match\":true,"
+        "\"trace_path_bytes_excluded\":true,"
         "\"distinct_equal_timestamp_rejected\":true,"
         "\"distinct_older_timestamp_rejected\":true,"
         "\"strictly_newer_timestamp_accepted\":true,"
@@ -682,7 +853,8 @@ int main()
         first.contact.longitude,
         first.contact.upstream_is_new ? "true" : "false",
         first.receiver_filter_count,
-        first.receiver_table_lookups, first.signed_adverts_sent,
+        first.receiver_table_lookups, first.receiver_table_flood_duplicates,
+        first.packet_hash_parity_cases, first.signed_adverts_sent,
         first.contact_callbacks, first.stored_advert_writes,
         first.timestamp_replay_cases, first.timestamp_replay_rejections,
         first.timestamp_newer_acceptances, first.allocations, first.releases);

@@ -31,6 +31,13 @@ HARNESS_PATH = (
 RNG_STUB_PATH = (
     ROOT / "tests" / "meshcore_signed_advert_runtime" / "crypto_rng_stub.cpp"
 )
+MBEDTLS_SHA256_BRIDGE_PATH = (
+    ROOT
+    / "tests"
+    / "meshcore_signed_advert_runtime"
+    / "mbedtls_md_sha256_bridge.cpp"
+)
+D1L_PACKET_HASH_SOURCE = ROOT / "main" / "mesh" / "meshcore_packet_hash.c"
 
 MESH_CPP_SOURCES = (
     ROOT / "third_party" / "MeshCore" / "src" / "Identity.cpp",
@@ -342,6 +349,10 @@ def command_plan(
         "-I",
         str(ROOT / "tests" / "meshcore_oracle" / "stubs"),
         "-I",
+        str(ROOT / "tests" / "native" / "stubs"),
+        "-I",
+        str(ROOT / "main"),
+        "-I",
         str(external),
         "-I",
         str(ROOT / "third_party" / "MeshCore" / "src"),
@@ -382,7 +393,8 @@ def command_plan(
     ]
     commands: list[list[str]] = []
     objects: list[str] = []
-    for index, source in enumerate((*ED25519_C_SOURCES, AES_SOURCE)):
+    c_sources = (*ED25519_C_SOURCES, AES_SOURCE, D1L_PACKET_HASH_SOURCE)
+    for index, source in enumerate(c_sources):
         output = str(build / f"c_{index}.o")
         flags = list(c_flags)
         if source == AES_SOURCE:
@@ -395,11 +407,16 @@ def command_plan(
         *MESH_CPP_SOURCES,
         *(external / name for name in EXTERNAL_CPP_SOURCES),
         RNG_STUB_PATH,
+        MBEDTLS_SHA256_BRIDGE_PATH,
         HARNESS_PATH,
     ]
     for index, source in enumerate(cpp_sources):
         output = str(build / f"cpp_{index}.o")
-        flags = harness_flags if source in (RNG_STUB_PATH, HARNESS_PATH) else imported_cxx_flags
+        flags = (
+            harness_flags
+            if source in (RNG_STUB_PATH, MBEDTLS_SHA256_BRIDGE_PATH, HARNESS_PATH)
+            else imported_cxx_flags
+        )
         commands.append(
             [cxx, *flags, *include_flags, "-c", str(source), "-o", output]
         )
@@ -438,18 +455,12 @@ def canonical_command_plan(commands: object) -> list[list[str]] | None:
     ):
         return None
 
-    c_source_count = len(ED25519_C_SOURCES) + 1  # plus the pinned AES source
+    c_source_count = len(ED25519_C_SOURCES) + 2  # pinned AES plus D1L packet hash
     try:
         first_c = commands[0]
         first_cpp = commands[c_source_count]
         source_index = first_c.index("-c") + 1
         output_index = first_c.index("-o") + 1
-        include_indexes = [
-            index for index, argument in enumerate(first_c) if argument == "-I"
-        ]
-        if len(include_indexes) < 3:
-            return None
-
         first_relative = str(ED25519_C_SOURCES[0].relative_to(ROOT)).replace(
             "\\", "/"
         )
@@ -458,9 +469,13 @@ def canonical_command_plan(commands: object) -> list[list[str]] | None:
         if not first_source.endswith(suffix):
             return None
         repository_root = first_source[: -len(suffix)]
-        external_root = first_c[include_indexes[2] + 1].replace("\\", "/").rstrip(
-            "/"
-        )
+        first_external = commands[c_source_count + len(MESH_CPP_SOURCES)]
+        external_source_index = first_external.index("-c") + 1
+        external_source = first_external[external_source_index].replace("\\", "/")
+        external_suffix = f"/{EXTERNAL_CPP_SOURCES[0]}"
+        if not external_source.endswith(external_suffix):
+            return None
+        external_root = external_source[: -len(external_suffix)].rstrip("/")
         first_output = first_c[output_index].replace("\\", "/")
         if "/" not in first_output:
             return None

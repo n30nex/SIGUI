@@ -7,6 +7,7 @@
 
 #include "mesh/contact_store.h"
 #include "mesh/meshcore_advert_admission.h"
+#include "mesh/meshcore_packet_hash.h"
 #include "mesh/node_store.h"
 #include "mock_esp_nvs.h"
 
@@ -1425,6 +1426,156 @@ static d1l_node_entry_t make_verified_node(const char *public_key_hex,
     return node;
 }
 
+static void calculate_advert_hash(
+    uint8_t variant, uint8_t hash[D1L_MESHCORE_PACKET_HASH_BYTES])
+{
+    const uint8_t payload[] = {0x41U, variant, 0x99U};
+    const d1l_meshcore_wire_packet_t packet = {
+        .header = (uint8_t)((D1L_MESHCORE_PAYLOAD_ADVERT << 2U) |
+                           D1L_MESHCORE_ROUTE_FLOOD),
+        .route = D1L_MESHCORE_ROUTE_FLOOD,
+        .type = D1L_MESHCORE_PAYLOAD_ADVERT,
+        .version = D1L_MESHCORE_PAYLOAD_VER_1,
+        .path_len = 0U,
+        .path_hash_bytes = 1U,
+        .payload = payload,
+        .payload_len = sizeof(payload),
+    };
+    assert(d1l_meshcore_packet_hash_calculate(&packet, hash) == ESP_OK);
+}
+
+/* d1l_advert_accepted_terminal_hash_remembered */
+static void test_d1l_advert_accepted_terminal_hash_remembered(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x41U);
+    fingerprint_from_key(fingerprint, key);
+    const d1l_meshcore_advert_admission_receipt_t receipt =
+        admit_verified_advert(fingerprint, key, "Terminal", 500U, false, 0, 0);
+    assert(receipt.outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+    assert(d1l_meshcore_advert_admission_receipt_cacheable(&receipt));
+
+    d1l_meshcore_packet_hash_cache_t cache = {0};
+    uint8_t hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    calculate_advert_hash(1U, hash);
+    assert(d1l_meshcore_packet_hash_cache_remember(&cache, hash));
+    assert(d1l_meshcore_packet_hash_cache_contains(&cache, hash));
+}
+
+/* d1l_distinct_equal_timestamp_hash_miss_reaches_replay */
+static void test_d1l_distinct_equal_timestamp_hash_miss_reaches_replay(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x42U);
+    fingerprint_from_key(fingerprint, key);
+    const d1l_meshcore_advert_admission_receipt_t accepted =
+        admit_verified_advert(fingerprint, key, "Baseline", 600U, false, 0, 0);
+    assert(d1l_meshcore_advert_admission_receipt_cacheable(&accepted));
+
+    d1l_meshcore_packet_hash_cache_t cache = {0};
+    uint8_t first_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    uint8_t distinct_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    calculate_advert_hash(2U, first_hash);
+    calculate_advert_hash(3U, distinct_hash);
+    assert(d1l_meshcore_packet_hash_cache_remember(&cache, first_hash));
+    assert(!d1l_meshcore_packet_hash_cache_contains(&cache, distinct_hash));
+
+    const d1l_meshcore_advert_admission_receipt_t replay =
+        admit_verified_advert(fingerprint, key, "Distinct", 600U, false, 0, 0);
+    assert(replay.outcome == D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED);
+    assert(d1l_meshcore_advert_admission_receipt_cacheable(&replay));
+    assert(d1l_meshcore_packet_hash_cache_remember(&cache, distinct_hash));
+}
+
+/* d1l_contact_retry_failure_hash_not_remembered */
+static void test_d1l_contact_retry_failure_hash_not_remembered(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x43U);
+    fingerprint_from_key(fingerprint, key);
+    bool stale = true;
+    assert(d1l_node_store_upsert_advert(
+               fingerprint, key, "Retry", 'C', -55, 80, 1U, 2U, 700U,
+               false, 0, 0, &stale) == ESP_OK);
+    assert(!stale);
+
+    mock_nvs_fail_next_set(ESP_FAIL);
+    const d1l_meshcore_advert_admission_receipt_t failed =
+        admit_verified_advert(fingerprint, key, "Retry", 700U, false, 0, 0);
+    assert(failed.outcome ==
+           D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED);
+    assert(!d1l_meshcore_advert_admission_receipt_cacheable(&failed));
+    d1l_meshcore_packet_hash_cache_t cache = {0};
+    uint8_t hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    calculate_advert_hash(4U, hash);
+    assert(!d1l_meshcore_packet_hash_cache_contains(&cache, hash));
+}
+
+/* d1l_accepted_contact_failure_hash_not_remembered */
+static void test_d1l_accepted_contact_failure_hash_not_remembered(void)
+{
+    initialize_admission_stores();
+    for (uint32_t id = 100U;
+         id < 100U + D1L_CONTACT_STORE_CAPACITY; ++id) {
+        char existing_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+        char existing_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+        make_public_key(existing_key, id);
+        fingerprint_from_key(existing_fingerprint, existing_key);
+        d1l_node_entry_t node =
+            make_verified_node(existing_key, "Full", "chat");
+        d1l_contact_verified_advert_result_t result =
+            D1L_CONTACT_VERIFIED_ADVERT_NONE;
+        assert(d1l_contact_store_upsert_verified_advert(
+                   existing_fingerprint, &node, &result, NULL) == ESP_OK);
+    }
+
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x90U);
+    fingerprint_from_key(fingerprint, key);
+    const d1l_meshcore_advert_admission_receipt_t failed =
+        admit_verified_advert(fingerprint, key, "No Space", 800U, false, 0, 0);
+    assert(failed.outcome == D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED);
+    assert(failed.contact_store_error == ESP_ERR_NO_MEM);
+    assert(!d1l_meshcore_advert_admission_receipt_cacheable(&failed));
+    d1l_meshcore_packet_hash_cache_t cache = {0};
+    uint8_t hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    calculate_advert_hash(5U, hash);
+    assert(!d1l_meshcore_packet_hash_cache_contains(&cache, hash));
+}
+
+/* d1l_contact_retry_success_hash_remembered */
+static void test_d1l_contact_retry_success_hash_remembered(void)
+{
+    initialize_admission_stores();
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 0x44U);
+    fingerprint_from_key(fingerprint, key);
+    bool stale = true;
+    assert(d1l_node_store_upsert_advert(
+               fingerprint, key, "Retry", 'C', -55, 80, 1U, 2U, 900U,
+               false, 0, 0, &stale) == ESP_OK);
+    assert(!stale);
+
+    const d1l_meshcore_advert_admission_receipt_t succeeded =
+        admit_verified_advert(fingerprint, key, "Retry", 900U, false, 0, 0);
+    assert(succeeded.outcome ==
+           D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED);
+    assert(d1l_meshcore_advert_admission_receipt_cacheable(&succeeded));
+    d1l_meshcore_packet_hash_cache_t cache = {0};
+    uint8_t hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    calculate_advert_hash(6U, hash);
+    assert(d1l_meshcore_packet_hash_cache_remember(&cache, hash));
+    assert(d1l_meshcore_packet_hash_cache_contains(&cache, hash));
+}
+
 static void test_verified_contact_create_reload_update_preserves_preferences(void)
 {
     mock_nvs_reset();
@@ -1995,6 +2146,11 @@ int main(void)
     test_d1l_uint32_max_then_zero_no_wrap();
     test_d1l_equal_exact_key_contact_retry();
     test_d1l_full_key_prefix_collision_precedes_replay();
+    test_d1l_advert_accepted_terminal_hash_remembered();
+    test_d1l_distinct_equal_timestamp_hash_miss_reaches_replay();
+    test_d1l_contact_retry_failure_hash_not_remembered();
+    test_d1l_accepted_contact_failure_hash_not_remembered();
+    test_d1l_contact_retry_success_hash_remembered();
     test_contact_nvs_failure_rolls_back_and_retry_succeeds();
     test_prepare_after_concurrent_delete_fails_closed();
     test_verified_contact_create_reload_update_preserves_preferences();

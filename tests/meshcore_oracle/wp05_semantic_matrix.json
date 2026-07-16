@@ -144,21 +144,21 @@
     },
     {
       "id": "duplicate_packet_and_hash",
-      "status": "partial",
+      "status": "implemented",
       "oracle_vector_groups": [
         "authenticated_request_replay_transition_fixtures",
         "authenticated_text_replay_response_session_fixtures"
       ],
       "production_host_suites": [
         "admin_dispatch",
-        "contact_trace"
+        "contact_trace",
+        "advert_replay_admission",
+        "packet_hash_and_advert_dedupe"
       ],
       "companion_upstream_suites": [
         "pinned_signed_advert_runtime"
       ],
-      "remaining": [
-        "execute generic production packet-hash suppression outside the separately proven signed-advert identical-wire case"
-      ]
+      "remaining": []
     },
     {
       "id": "truncated_oversize_and_empty_payload",
@@ -377,12 +377,34 @@
         "d1l_strictly_newer_timestamp_accepted",
         "d1l_uint32_max_then_zero_no_wrap",
         "d1l_equal_exact_key_contact_retry",
-        "d1l_full_key_prefix_collision_precedes_replay"
+        "d1l_full_key_prefix_collision_precedes_replay",
+        "d1l_advert_accepted_terminal_hash_remembered",
+        "d1l_distinct_equal_timestamp_hash_miss_reaches_replay",
+        "d1l_contact_retry_failure_hash_not_remembered",
+        "d1l_accepted_contact_failure_hash_not_remembered",
+        "d1l_contact_retry_success_hash_remembered"
       ],
       "invocations": [
         []
       ],
       "expected_stdout": "native node/contact store behavior: ok"
+    },
+    {
+      "id": "packet_hash_and_advert_dedupe",
+      "binary": "meshcore_packet_hash_semantic",
+      "scenario_ids": [
+        "advert_type_payload_framing",
+        "non_trace_route_path_transport_invariance",
+        "payload_type_and_content_domain_separation",
+        "trace_path_length_little_endian_uint16",
+        "trace_path_bytes_excluded",
+        "cache_miss_remember_hit_forget",
+        "cache_160_entry_fifo_eviction"
+      ],
+      "invocations": [
+        []
+      ],
+      "expected_stdout": "native MeshCore packet hash: ok"
     }
   ],
   "companion_upstream_suites": [
@@ -395,7 +417,12 @@
         "distinct_older_timestamp_rejected",
         "strictly_newer_timestamp_accepted",
         "uint32_max_timestamp_accepted",
-        "wrapped_zero_timestamp_rejected"
+        "wrapped_zero_timestamp_rejected",
+        "real_simple_mesh_tables",
+        "upstream_d1l_packet_hash_match",
+        "route_path_transport_variants_suppressed",
+        "trace_path_length_little_endian_match",
+        "trace_path_bytes_excluded"
       ],
       "identical_wire_hash_case": "identical_wire_hash_suppressed",
       "closure_ready": false
@@ -417,8 +444,10 @@
     "main/mesh/contact_store.h": "2252ef58b703c6721a1fd77f2a1306d6ea4d9f419af5c996666a212a29752750",
     "main/mesh/contact_uri.c": "a65175e4a07023adc2777a0504a2c83f5d409fdc4bd497cbddd4a4868f51fc8b",
     "main/mesh/contact_uri.h": "1a06f9d47c284f1c9990f71357434e3b5446a516331e37447ef1e3d7676662ef",
-    "main/mesh/meshcore_advert_admission.c": "3e0a6d4638db5fd82d9e09242b5f1110ae0001c5ddabcb3f4c6266b4e015f8be",
-    "main/mesh/meshcore_advert_admission.h": "a0592654c5e442e449416af7705a0d2495a70405f7d749773acba37f82edfdba",
+    "main/mesh/meshcore_advert_admission.c": "dc026a50d6283b0442fe7a046a3f606062385ec98c73d664e367629c065c1174",
+    "main/mesh/meshcore_advert_admission.h": "9b56f20bdbe8adc011d3fc844e7a85e27d9849f1e071374aca6dccc57ace603c",
+    "main/mesh/meshcore_packet_hash.c": "4a873a750e21011d8b6beb302da04d0d828d240b947fa67276507cc221ab3aed",
+    "main/mesh/meshcore_packet_hash.h": "930d15539c590ce53ecdd99ef588ab0c40a98f4c9e450d2373e5e020b635da1a",
     "main/mesh/meshcore_path_state.c": "f3e4071574a0a65cab1caa4ad285f64943a0770c82ac2df803328212d9db9d77",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_command_guard.h": "c266e8f1a28bce5469a7f072b12ae06410e8be04af0c31ce9375283746082f53",
@@ -444,8 +473,10 @@
     "main/storage/retained_blob_store.h": "2de19037857be8769da3ee005b175cf54ad3944b94fb8b5f870c629060391e4d",
     "main/storage/storage_status.h": "9da4c29e51e6345de70770649f7e92b583edeb668cbb4017152130c20001700d",
     "tests/native/esp_nvs_stubs.c": "2ad701fb96d76e19518e193bcfafb7fada5d0e1a517a38406998fc386ad6b8ca",
+    "tests/native/mbedtls_md_stub.c": "db5f82347ce2e70303a71a7b8dc0cae4c7de237e3a353605845763f6e61bda52",
     "tests/native/meshcore_admin_dispatch_test.c": "830b262f3f15f95c27d374e93ad60eab2e52647e478346df70d604125312bfda",
     "tests/native/meshcore_runtime_guard_test.c": "f5a2c1b33ed1fd1545d934eceb05041fc348f9cfc8f6ef04399fcba444bc91e4",
+    "tests/native/meshcore_packet_hash_test.c": "d5e479d8383560b0cc216f33cb35da03393c6359fd21f718f36c1e3675a0df5f",
     "tests/native/meshcore_text_plaintext_test.c": "b7f4edbe648c00b5725878b631c705c251c3a81ffe4652cd706d8b996d1e6e7b",
     "tests/native/meshcore_trace_test.c": "c046cdc354a40d5feae8e79eb8e8f66fa1426ecae97a083ef6f6ca7c56092eff",
     "tests/native/mock_esp_nvs.h": "186a12a057672734ddeddeeba5667298aadf69fb2b074d42c4dbd588f9d552fd",
@@ -454,11 +485,12 @@
     "tests/native/stubs/esp_attr.h": "6b500829de5501f799fcc57238c7bc5c9b94d640202813f43734828ceb496499",
     "tests/native/stubs/esp_netif_sntp.h": "a545617a1203a4eea89e222848767e9a43b21ffded7cb3ea9514d5e19d944fd1",
     "tests/native/stubs/esp_timer.h": "3fecee76f39abd79ad6cda09f4c27f37941bdd6924f49ff57688baf66a628786",
+    "tests/native/stubs/mbedtls/md.h": "d2c4843df11b6b8c9b26ffb8a773ae8f48d1b691a93ee534dbd4e507e6a4071f",
     "tests/native/stubs/freertos/FreeRTOS.h": "dcd270de0dcd76852f2e7ff8e20f8575ae2ba536a5ad6992874df7ec04476a99",
     "tests/native/stubs/freertos/semphr.h": "c9d32e56030d2fe51983e0aee854c9f7e7d39e89d9189d6bbc123ae1984a4aa9",
     "tests/native/stubs/nvs.h": "a0895d23196ac486164d00e42ed6a7af09e40e5f60f4e1bc8918f00aaa747683",
     "tests/native/stubs/sys/time.h": "251d586ea591ff51aa9d51e6843deadd6c578b5591658df50eb5121c9e6b39c7",
     "tests/native/time_service_checkpoint_integration_test.c": "2de100718160702b5ab54f5d8ca0f3d802e8b89f3d16756185be1b0f82f0ad41",
-    "tests/native/store_behavior_test.c": "b8787449a0635780757648d619f2b0edc3041e41d16b0a6717d328877797a086"
+    "tests/native/store_behavior_test.c": "d76f11b94a5209d78138c7ac2590033563df70522eaab68c7ea6be010ab3b487"
   }
 }

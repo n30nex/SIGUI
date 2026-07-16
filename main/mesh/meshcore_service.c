@@ -24,6 +24,7 @@
 #include "mesh/meshcore_ack_dispatch.h"
 #include "mesh/meshcore_admin_runtime.h"
 #include "mesh/meshcore_advert_admission.h"
+#include "mesh/meshcore_packet_hash.h"
 #include "mesh/meshcore_command_guard.h"
 #include "mesh/meshcore_dm_retry.h"
 #include "mesh/meshcore_identity_exchange.h"
@@ -218,6 +219,7 @@ static d1l_meshcore_path_response_expectation_t s_path_response_expectation;
 static char s_path_response_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static d1l_store_lock_t s_path_response_lock = D1L_STORE_LOCK_INITIALIZER;
 static d1l_meshcore_path_replay_cache_t s_path_replay_cache;
+static d1l_meshcore_packet_hash_cache_t s_advert_packet_hash_cache;
 extern SX126x_t SX126x;
 
 typedef enum {
@@ -3539,6 +3541,19 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
         return;
     }
 
+    uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    const bool packet_hash_ready =
+        d1l_meshcore_packet_hash_calculate(&packet, packet_hash) == ESP_OK;
+    if (packet_hash_ready && d1l_meshcore_packet_hash_cache_contains(
+                                 &s_advert_packet_hash_cache, packet_hash)) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "duplicate %.8s", pub_prefix);
+        append_packet_log("rx", "advert_duplicate", rssi, snr,
+                          packet.path_hash_bytes, packet.path_hops, size,
+                          payload, size, note);
+        return;
+    }
+
     const uint32_t advert_timestamp = read_le32(timestamp);
     d1l_meshcore_advert_admission_receipt_t admission = {0};
     const esp_err_t admission_ret = d1l_meshcore_advert_admit_verified(
@@ -3552,6 +3567,11 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
                           packet.path_hash_bytes, packet.path_hops, size,
                           payload, size, esp_err_to_name(admission_ret));
         return;
+    }
+    if (packet_hash_ready &&
+        d1l_meshcore_advert_admission_receipt_cacheable(&admission)) {
+        (void)d1l_meshcore_packet_hash_cache_remember(
+            &s_advert_packet_hash_cache, packet_hash);
     }
 
     switch (admission.outcome) {
@@ -5537,6 +5557,7 @@ void d1l_meshcore_service_init(void)
     clear_pending_ack_tx();
     clear_boot_routes();
     memset(&s_path_replay_cache, 0, sizeof(s_path_replay_cache));
+    d1l_meshcore_packet_hash_cache_reset(&s_advert_packet_hash_cache);
     d1l_store_lock_take(&s_path_response_lock);
     memset(&s_path_response_expectation, 0,
            sizeof(s_path_response_expectation));

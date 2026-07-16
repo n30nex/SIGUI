@@ -255,7 +255,7 @@ EXPECTED_WP05_REQUIREMENT_STATUSES = {
     "request_response_login_keepalive_status": "partial",
     "trace_and_path_discovery": "partial",
     "replayed_advert_timestamp": "implemented",
-    "duplicate_packet_and_hash": "partial",
+    "duplicate_packet_and_hash": "implemented",
     "truncated_oversize_and_empty_payload": "implemented",
     "malformed_utf8_and_embedded_nul": "implemented",
     "self_message_unknown_peer_and_channel": "partial",
@@ -310,9 +310,15 @@ EXPECTED_WP05_PRODUCTION_SUITES = {
     },
     "advert_replay_admission": {
         "binary": "meshcore_advert_admission_semantic",
-        "scenario_count": 7,
+        "scenario_count": 12,
         "invocation_count": 1,
         "expected_stdout": "native node/contact store behavior: ok",
+    },
+    "packet_hash_and_advert_dedupe": {
+        "binary": "meshcore_packet_hash_semantic",
+        "scenario_count": 7,
+        "invocation_count": 1,
+        "expected_stdout": "native MeshCore packet hash: ok",
     },
 }
 EXPECTED_WP05_COMPANION_UPSTREAM_SUITES = {
@@ -325,6 +331,11 @@ EXPECTED_WP05_COMPANION_UPSTREAM_SUITES = {
             "strictly_newer_timestamp_accepted",
             "uint32_max_timestamp_accepted",
             "wrapped_zero_timestamp_rejected",
+            "real_simple_mesh_tables",
+            "upstream_d1l_packet_hash_match",
+            "route_path_transport_variants_suppressed",
+            "trace_path_length_little_endian_match",
+            "trace_path_bytes_excluded",
         ],
         "identical_wire_hash_case": "identical_wire_hash_suppressed",
         "closure_ready": False,
@@ -349,6 +360,8 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/mesh/meshcore_command_guard.h",
     "main/mesh/meshcore_advert_admission.c",
     "main/mesh/meshcore_advert_admission.h",
+    "main/mesh/meshcore_packet_hash.c",
+    "main/mesh/meshcore_packet_hash.h",
     "main/mesh/meshcore_path_state.c",
     "main/mesh/meshcore_path_state.h",
     "main/mesh/meshcore_radio_profile.h",
@@ -373,8 +386,10 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/storage/retained_blob_store.h",
     "main/storage/storage_status.h",
     "tests/native/esp_nvs_stubs.c",
+    "tests/native/mbedtls_md_stub.c",
     "tests/native/meshcore_admin_dispatch_test.c",
     "tests/native/meshcore_runtime_guard_test.c",
+    "tests/native/meshcore_packet_hash_test.c",
     "tests/native/meshcore_trace_test.c",
     "tests/native/meshcore_text_plaintext_test.c",
     "tests/native/mock_esp_nvs.h",
@@ -383,6 +398,7 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "tests/native/stubs/esp_attr.h",
     "tests/native/stubs/esp_netif_sntp.h",
     "tests/native/stubs/esp_timer.h",
+    "tests/native/stubs/mbedtls/md.h",
     "tests/native/stubs/freertos/FreeRTOS.h",
     "tests/native/stubs/freertos/semphr.h",
     "tests/native/stubs/nvs.h",
@@ -419,6 +435,13 @@ SIGNED_ADVERT_CANONICAL_FIELDS = {
     "assertions",
     "residual_gaps",
 }
+SIGNED_ADVERT_PACKET_HASH_OUTCOME_KEYS = (
+    "real_simple_mesh_tables",
+    "upstream_d1l_packet_hash_match",
+    "route_path_transport_variants_suppressed",
+    "trace_path_length_little_endian_match",
+    "trace_path_bytes_excluded",
+)
 EXPECTED_ORACLE_CAPABILITIES = [
     {
         "id": "packet_envelope",
@@ -3022,11 +3045,24 @@ def production_semantic_suite_specs(
                 ROOT / "main" / "mesh" / "node_store.c",
                 ROOT / "main" / "mesh" / "contact_store.c",
                 ROOT / "main" / "mesh" / "meshcore_advert_admission.c",
+                ROOT / "main" / "mesh" / "meshcore_packet_hash.c",
                 ROOT / "main" / "mesh" / "meshcore_path_state.c",
                 ROOT / "main" / "mesh" / "meshcore_wire.c",
                 ROOT / "main" / "mesh" / "contact_uri.c",
                 native / "esp_nvs_stubs.c",
+                native / "mbedtls_md_stub.c",
                 native / "store_behavior_test.c",
+            ],
+        },
+        {
+            "id": "packet_hash_and_advert_dedupe",
+            "binary": Path(build_dir) / "meshcore_packet_hash_semantic",
+            "flags": [],
+            "include_dirs": common_includes,
+            "sources": [
+                ROOT / "main" / "mesh" / "meshcore_packet_hash.c",
+                ROOT / "main" / "mesh" / "meshcore_wire.c",
+                native / "meshcore_packet_hash_test.c",
             ],
         },
     ]
@@ -3663,6 +3699,14 @@ def _signed_advert_runtime_binding_from_canonical(
             "suppressed": result["identical_wire_hash_suppressed"],
             "distinct_from_timestamp_replay_window": True,
         },
+        "packet_hash_case_count": result["packet_hash_parity_cases"],
+        "packet_hash_outcomes": {
+            key: result[key] for key in SIGNED_ADVERT_PACKET_HASH_OUTCOME_KEYS
+        },
+        "simple_mesh_table_receipt": {
+            "lookups": result["table_lookups"],
+            "flood_duplicates": result["table_flood_duplicates"],
+        },
         "closure_ready": False,
     }
 
@@ -3700,6 +3744,8 @@ def signed_advert_runtime_binding_valid(value: Any, expected_commit: str) -> boo
         return False
     outcomes = value.get("replay_outcomes")
     identical_wire = value.get("identical_wire_hash_suppression")
+    packet_hash_outcomes = value.get("packet_hash_outcomes")
+    simple_table = value.get("simple_mesh_table_receipt")
     return (
         set(value)
         == {
@@ -3716,6 +3762,9 @@ def signed_advert_runtime_binding_valid(value: Any, expected_commit: str) -> boo
             "timestamp_newer_acceptance_count",
             "replay_outcomes",
             "identical_wire_hash_suppression",
+            "packet_hash_case_count",
+            "packet_hash_outcomes",
+            "simple_mesh_table_receipt",
             "closure_ready",
         }
         and value.get("schema_version") == 1
@@ -3739,6 +3788,14 @@ def signed_advert_runtime_binding_valid(value: Any, expected_commit: str) -> boo
             "suppressed": True,
             "distinct_from_timestamp_replay_window": True,
         }
+        and value.get("packet_hash_case_count") == 5
+        and isinstance(packet_hash_outcomes, dict)
+        and set(packet_hash_outcomes) == set(SIGNED_ADVERT_PACKET_HASH_OUTCOME_KEYS)
+        and all(
+            packet_hash_outcomes.get(key) is True
+            for key in SIGNED_ADVERT_PACKET_HASH_OUTCOME_KEYS
+        )
+        and simple_table == {"lookups": 10, "flood_duplicates": 3}
         and value.get("closure_ready") is False
     )
 
@@ -4335,8 +4392,8 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("closure_ready") is False
         and value.get("full_semantic_matrix_covered") is False
         and value.get("requirement_count") == 16
-        and value.get("implemented_requirement_count") == 8
-        and value.get("partial_requirement_count") == 8
+        and value.get("implemented_requirement_count") == 9
+        and value.get("partial_requirement_count") == 7
         and value.get("missing_requirement_count") == 0
         and value.get("fuzz_target_count") == 8
         and value.get("implemented_fuzz_target_count") == 2
