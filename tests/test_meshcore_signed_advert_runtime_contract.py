@@ -66,10 +66,18 @@ def test_signed_advert_runtime_manifest_is_bounded_and_pinned():
     assert manifest["expected_result"]["timestamp_replay_cases"] == 5
     assert manifest["expected_result"]["timestamp_replay_rejections"] == 3
     assert manifest["expected_result"]["timestamp_newer_acceptances"] == 2
-    assert manifest["expected_result"]["filter_calls"] == 8
-    assert manifest["expected_result"]["table_lookups"] == 8
-    assert manifest["expected_result"]["allocations"] == 15
-    assert manifest["expected_result"]["releases"] == 15
+    assert manifest["expected_result"]["filter_calls"] == 10
+    assert manifest["expected_result"]["table_lookups"] == 10
+    assert manifest["expected_result"]["table_flood_duplicates"] == 3
+    assert manifest["expected_result"]["packet_hash_parity_cases"] == 5
+    assert manifest["expected_result"]["real_simple_mesh_tables"] is True
+    assert manifest["expected_result"]["upstream_d1l_packet_hash_match"] is True
+    assert (
+        manifest["expected_result"]["route_path_transport_variants_suppressed"]
+        is True
+    )
+    assert manifest["expected_result"]["allocations"] == 17
+    assert manifest["expected_result"]["releases"] == 17
 
 
 def test_signed_advert_runtime_repository_sources_match_exact_pins():
@@ -81,7 +89,7 @@ def test_signed_advert_runtime_repository_sources_match_exact_pins():
     assert receipt["upstream_commit"] == manifest["upstream"]["commit"]
     assert receipt["gitlink_commit"] == manifest["upstream"]["commit"]
     assert receipt["source_hash_mode"] == "canonical_lf_text_sha256"
-    assert len(receipt["files"]) == 38
+    assert len(receipt["files"]) == 44
     assert all(item["matched"] for item in receipt["files"].values())
 
 
@@ -144,6 +152,8 @@ def test_signed_advert_runtime_command_plan_compiles_real_sources():
         "third_party/MeshCore/src/Utils.cpp",
         "third_party/MeshCore/src/helpers/AdvertDataHelpers.cpp",
         "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+        "main/mesh/meshcore_packet_hash.c",
+        "tests/meshcore_signed_advert_runtime/mbedtls_md_sha256_bridge.cpp",
     ):
         assert sum(source in command for command in flattened) == 1
     for source in (
@@ -235,6 +245,9 @@ def test_runtime_harness_uses_production_dispatch_not_projection_helpers():
     assert "sender.loop()" in harness
     assert "receiver.loop()" in harness
     assert "duplicate advert reached callback" in harness
+    assert "SimpleMeshTables::hasSeen(packet)" in harness
+    assert "d1l_meshcore_packet_hash_calculate" in harness
+    assert "routed duplicate advert reached callback" in harness
     assert "distinct equal-timestamp advert reached callback" in harness
     assert "distinct older-timestamp advert reached callback" in harness
     assert "strictly newer timestamp did not reach callback" in harness

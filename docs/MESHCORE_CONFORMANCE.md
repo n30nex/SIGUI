@@ -382,13 +382,23 @@ The external verifier is the exact `rweather/Crypto` 0.4.0 PlatformIO registry
 archive (version ID 43204, 162696 bytes, SHA-256
 `1867740aad0d61bdcbac25f6dbc8eefe6eed9e7b37f48d9d0b9d80500ad431e0`),
 with every compiled transitive source independently hash-checked before
-extraction. Deterministic radio, clock, RNG, packet-manager, and seen-table
-doubles drive the real create/sign, flood queue, wire serialization, receive
-filter, external signature verification, dispatch, `BaseChatMesh` contact
-promotion, callback, and raw-advert storage paths. The executable asserts a
-valid contact, duplicate suppression, forged-signature rejection, self
-suppression, balanced packet ownership, contact lifetime after packet release,
-and byte-identical two-run replay. It does not call an oracle projection helper.
+extraction. Deterministic radio, clock, RNG, and packet-manager doubles drive
+the real create/sign, flood queue, wire serialization, receive filter, external
+signature verification, dispatch, `BaseChatMesh` contact promotion, callback,
+and raw-advert storage paths; duplicate admission delegates to the exact pinned
+upstream `SimpleMeshTables` implementation. The executable asserts a valid
+contact, exact/path/transport duplicate suppression, forged-signature rejection,
+self suppression, balanced packet ownership, contact lifetime after packet
+release, and byte-identical two-run replay. It also compares the production D1L
+eight-byte packet hash with upstream for five normal/TRACE framing cases,
+including TRACE `uint16_t` little-endian path length and path-byte exclusion. It
+does not call an oracle projection helper. The production D1L service applies
+the matching 160-entry boot-local cyclic cache only after each RX family's
+stronger authority: retained channel/DM admission, exact ACK owner revision,
+authenticated PATH replay identity, correlated TRACE result, or verified advert
+admission. Cached DM packets still enter bounded durable re-ACK handling;
+pending ACK persistence and PATH ACK-only retry remain semantic exceptions to a
+generic hash hit.
 The receipt also preserves a pinned-upstream quirk instead of hiding it:
 `BaseChatMesh::onAdvertRecv` reports `is_new=false` to the discovery callback
 for a newly auto-added contact even though the contact count advances from zero
@@ -548,10 +558,13 @@ This bounded gate makes no claim about:
   flags-zero TRACE payload framing are covered, but delivery, PATH dispatch,
   stored route choice/reciprocal decisions, TRACE forwarding/SNR/path discovery,
   correlation, and remaining Dispatcher behavior are not;
-- ACK timing, retry/delivery state, general duplicate or replay control,
-  route selection/fallback, or non-advert self-message behavior. The separate
-  signed-advert runtime gate covers duplicate suppression, self suppression,
-  packet lifetime, and contact lifetime only for its exact advert scenario;
+- complete official-peer duplicate/replay qualification, persistent generic
+  duplicate state, or non-advert self-message behavior. Production now binds
+  Public/channel, DM, simple/multipart ACK, authenticated PATH, correlated TRACE,
+  and advert RX to the boot-local cache without replacing their stronger
+  retained/correlation authorities. The separate signed-advert runtime gate covers the
+  exact upstream/D1L packet hash, real-table exact/path/transport duplicate
+  suppression, self suppression, packet lifetime, and contact lifetime;
 - persisted/retained state, schema migration, reboot recovery, or write
   durability;
 - radio behavior, interoperability with an official client or second radio,
@@ -559,10 +572,10 @@ This bounded gate makes no claim about:
 - the complete declared MeshCore 1.0 surface or release readiness.
 
 Accordingly, a passing artifact must still say `closure_ready=false`. Full
-issue #65 closure requires later semantic, production-cryptography,
-duplicate/replay/lifetime, retained-state, and real-peer coverage against the
-entire declared surface. Those later stages must not reinterpret this artifact
-as evidence they ran.
+issue #65 closure requires later semantic, production-cryptography, all-type
+dispatch/lifetime, persistent/retained-state, and real-peer coverage against
+the entire declared surface. Those later stages must not reinterpret this
+artifact as evidence they ran.
 
 ## CI Reproduction Contract
 

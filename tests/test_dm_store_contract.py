@@ -215,9 +215,9 @@ def test_meshcore_service_builds_private_text_packets_from_contacts():
     assert "d1l_dm_store_transition_delivery" in source
     assert "contact.out_path_valid" in source
     assert '"tx", "dm_text", 0, 0' in source
-    assert 'append_packet_log("rx", "dm_text"' in source
-    assert 'append_packet_log("rx", "dm_ack"' in source
-    assert 'append_packet_log("rx", "path_return"' in source
+    assert 'append_packet_log_deferred(\n            "rx", "dm_text"' in source
+    assert 'append_packet_log_deferred(\n            "rx", "dm_ack"' in source
+    assert 'append_packet_log_deferred(\n                    "rx", "path_return"' in source
     assert "../third_party/MeshCore/lib/ed25519/key_exchange.c" in cmake
 
 
@@ -251,7 +251,7 @@ def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
         "static esp_err_t calc_dm_ack_hash", 1
     )[0]
     dm_parse_body = source.split("static bool parse_rx_dm_packet", 1)[1].split(
-        "static void record_dm_ack", 1
+        "static d1l_rx_ack_result_t record_dm_ack", 1
     )[0]
 
     assert '#include "mesh/meshcore_ack_dispatch.h"' in source
@@ -284,11 +284,12 @@ def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
     assert "d1l_meshcore_ack_dedupe_contains" in source
     assert "d1l_meshcore_ack_dedupe_remember" in source
     assert "dispatch_bounded_dm_ack" in source
-    assert 'append_packet_log("rx", "dm_text_duplicate"' in source
+    assert '"dm_text_duplicate"' not in source
     assert dm_parse_body.count("record_dm_ack_failure(ack_hash, store_ret);") == 1
     assert "d1l_dm_store_append_rx_identity(" in dm_parse_body
     assert "store_outcome.inserted" in dm_parse_body
-    assert "remember_ack_identity_state(&retained_identity, false)" in dm_parse_body
+    assert "remember_ack_identity_state(&retained_identity," in dm_parse_body
+    assert "store_outcome.durable" in dm_parse_body
     assert "d1l_dm_store_find_rx_identity(identity_digest" in dm_parse_body
     assert "uint32_t ack_tx_queued;" in header
     assert "uint32_t ack_tx_done;" in header

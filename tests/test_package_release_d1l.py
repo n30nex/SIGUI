@@ -694,11 +694,18 @@ def test_release_package_accepts_signed_advert_commands_from_other_checkout_root
     report = json.loads(signed_advert.read_text(encoding="utf-8"))
     local_root = str(signed_runtime.ROOT).replace("\\", "/").rstrip("/")
     producer_root = "/home/runner/work/SIGUI/SIGUI"
+    external_suffix = f"/{signed_runtime.EXTERNAL_CPP_SOURCES[0]}"
+    external_command = next(
+        [argument.replace("\\", "/") for argument in command]
+        for command in report["commands"]
+        if any(
+            argument.replace("\\", "/").endswith(external_suffix)
+            for argument in command
+        )
+    )
+    external_source = external_command[external_command.index("-c") + 1]
+    local_external = external_source[: -len(external_suffix)].rstrip("/")
     first_command = [argument.replace("\\", "/") for argument in report["commands"][0]]
-    include_indexes = [
-        index for index, argument in enumerate(first_command) if argument == "-I"
-    ]
-    local_external = first_command[include_indexes[2] + 1].rstrip("/")
     local_build = first_command[first_command.index("-o") + 1].rsplit("/", 1)[0]
     relocated_roots = (
         (local_root, producer_root),

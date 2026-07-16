@@ -68,7 +68,7 @@
     }
   },
   "production_binding_sources": {
-    "main/CMakeLists.txt": "f0c1642874be1fdced0be603b6cad0ae28f4b9bc2fd9e0b7a1777f4e04e84d85",
+    "main/CMakeLists.txt": "4c9795e82f9c7f788d1d8f5edd531b89ea4050efee457a4d633a4461ceaffaa0",
     "main/comms/usb_console.c": "c2db5626933b078675d703af1889adb7c2e193520c8f82ca1130a73a9af7df84",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "3f895213e9cb8fdf5da67a01fac26df35aa542c6f2ffcf179d1e0d276a1d9e14",
@@ -89,7 +89,7 @@
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
     "main/mesh/meshcore_runtime_guard.h": "5b3630e4a27b15d65a10f7b7524ee646123680b89efb9586f7b02ba33c899708",
-    "main/mesh/meshcore_service.c": "4ded3d17c6996f3330fce449d8ef73cc9d004641d5895f759029555c44ce1470",
+    "main/mesh/meshcore_service.c": "716228512be21e6c494e436c7b45e32db55c6b653e4c1439e6c9305f00e06ca5",
     "main/mesh/meshcore_service.h": "0d2d94e1bce716d87213cf875834c99ed4bb503dc0c1f5099ad6c017fdcdb809",
     "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
@@ -113,7 +113,7 @@
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "34cc67c76197762c6ed843fd499a6b5a63019c41043576f01ec948fff96dc77e",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "105484217bab8e16c7e63b6db8ecac2380a689c15e52643ad0e9cb4625cfb07b",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",

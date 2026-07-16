@@ -24,6 +24,7 @@
 #include "mesh/meshcore_ack_dispatch.h"
 #include "mesh/meshcore_admin_runtime.h"
 #include "mesh/meshcore_advert_admission.h"
+#include "mesh/meshcore_packet_hash.h"
 #include "mesh/meshcore_command_guard.h"
 #include "mesh/meshcore_dm_retry.h"
 #include "mesh/meshcore_identity_exchange.h"
@@ -178,6 +179,8 @@ typedef struct {
     bool path_probe;
     bool ack_persistence_pending;
     bool flood_retry_consumed;
+    uint8_t ack_packet_hashes[3U][D1L_MESHCORE_PACKET_HASH_BYTES];
+    uint8_t ack_packet_hash_count;
     d1l_meshcore_dm_ack_deadline_t ack_deadline;
 } d1l_pending_dm_tx_t;
 
@@ -218,6 +221,10 @@ static d1l_meshcore_path_response_expectation_t s_path_response_expectation;
 static char s_path_response_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static d1l_store_lock_t s_path_response_lock = D1L_STORE_LOCK_INITIALIZER;
 static d1l_meshcore_path_replay_cache_t s_path_replay_cache;
+/* One upstream-compatible packet-hash domain covers every authenticated or
+ * correlated RX family. Entries are inserted only after that family's
+ * durable/terminal side effects complete. */
+static d1l_meshcore_packet_hash_cache_t s_rx_packet_hash_cache;
 extern SX126x_t SX126x;
 
 typedef enum {
@@ -1029,6 +1036,19 @@ static bool append_packet_log(const char *direction, const char *kind, int rssi,
         payload_len, raw, raw_len, note, false);
 }
 
+static bool append_packet_log_deferred(
+    const char *direction, const char *kind, int rssi, int snr_quarters,
+    uint8_t path_hash_bytes, uint8_t path_hops, uint16_t payload_len,
+    const uint8_t *raw, size_t raw_len, const char *note)
+{
+    /* RX admission is serialized by the service owner. Insert the history row
+     * once and leave backend reconciliation to the retained-store worker;
+     * synchronous flush failures are not proof that no row was inserted. */
+    return append_packet_log_internal(
+        direction, kind, rssi, snr_quarters, path_hash_bytes, path_hops,
+        payload_len, raw, raw_len, note, true);
+}
+
 static void secure_zero_bytes(void *data, size_t size)
 {
     volatile uint8_t *bytes = (volatile uint8_t *)data;
@@ -1172,7 +1192,12 @@ static bool channel_message_generation_ready(void)
     return true;
 }
 
-static void append_channel_message_store_rx(
+typedef struct {
+    esp_err_t error;
+    bool admitted;
+} d1l_channel_rx_store_result_t;
+
+static d1l_channel_rx_store_result_t append_channel_message_store_rx(
     uint64_t channel_id, const char *channel_name, const char *message,
     int rssi, int snr_quarters, uint8_t path_hash_bytes, uint8_t path_hops)
 {
@@ -1197,7 +1222,9 @@ static void append_channel_message_store_rx(
     if (d1l_user_text_copy(body, sizeof(body), body_src) !=
         D1L_USER_TEXT_OK) {
         ESP_LOGW(TAG, "message store rejected invalid channel text");
-        return;
+        return (d1l_channel_rx_store_result_t) {
+            .error = ESP_ERR_INVALID_ARG,
+        };
     }
     uint32_t message_seq = 0U;
     esp_err_t ret = d1l_message_store_append_channel(
@@ -1208,6 +1235,13 @@ static void append_channel_message_store_rx(
         ESP_LOGW(TAG, "channel message append rx failed: %s",
                  esp_err_to_name(ret));
     }
+    return (d1l_channel_rx_store_result_t) {
+        .error = ret,
+        /* The store assigns the sequence only after inserting the row. A
+         * subsequent mirror/flush failure leaves reconciliation pending but
+         * must not make a retransmission append a second visible message. */
+        .admitted = message_seq != 0U,
+    };
 }
 
 static void append_channel_message_store_tx(uint64_t channel_id,
@@ -1224,6 +1258,38 @@ static void append_channel_message_store_tx(uint64_t channel_id,
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "channel message append tx failed: %s",
                  esp_err_to_name(ret));
+    }
+}
+
+static void bank_pending_dm_ack_packet_hash(
+    const uint8_t hash[D1L_MESHCORE_PACKET_HASH_BYTES])
+{
+    if (!hash) {
+        return;
+    }
+    for (uint8_t index = 0U;
+         index < s_pending_dm_tx.ack_packet_hash_count; ++index) {
+        if (memcmp(s_pending_dm_tx.ack_packet_hashes[index], hash,
+                   D1L_MESHCORE_PACKET_HASH_BYTES) == 0) {
+            return;
+        }
+    }
+    if (s_pending_dm_tx.ack_packet_hash_count >= 3U) {
+        return;
+    }
+    memcpy(s_pending_dm_tx.ack_packet_hashes[
+               s_pending_dm_tx.ack_packet_hash_count],
+           hash, D1L_MESHCORE_PACKET_HASH_BYTES);
+    s_pending_dm_tx.ack_packet_hash_count++;
+}
+
+static void remember_pending_dm_ack_packet_hashes(void)
+{
+    for (uint8_t index = 0U;
+         index < s_pending_dm_tx.ack_packet_hash_count; ++index) {
+        (void)d1l_meshcore_packet_hash_cache_remember(
+            &s_rx_packet_hash_cache,
+            s_pending_dm_tx.ack_packet_hashes[index]);
     }
 }
 
@@ -1399,6 +1465,7 @@ static void reconcile_pending_dm_ack_persistence(void)
                               owner->state, ESP_OK);
     ESP_LOGI(TAG, "DM ACK persistence reconciled at revision %lu",
              (unsigned long)owner->revision);
+    remember_pending_dm_ack_packet_hashes();
     clear_pending_dm_tx();
 }
 
@@ -2719,11 +2786,29 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     if (!channel_metadata(channel_id, &channel)) {
         return;
     }
+    uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    const bool packet_hash_ready =
+        d1l_meshcore_packet_hash_calculate(&packet, packet_hash) == ESP_OK;
+    if (packet_hash_ready && d1l_meshcore_packet_hash_cache_contains(
+                                 &s_rx_packet_hash_cache, packet_hash)) {
+        return;
+    }
     char route_target[17] = {0};
     channel_route_target(channel_id, route_target);
     const char *packet_kind = channel_packet_kind(channel_id);
+    const d1l_channel_rx_store_result_t message_result =
+        append_channel_message_store_rx(
+            channel_id, channel.name, message, rssi, snr,
+            packet.path_hash_bytes, packet.path_hops);
+    if (!message_result.admitted) {
+        return;
+    }
+    if (packet_hash_ready) {
+        (void)d1l_meshcore_packet_hash_cache_remember(
+            &s_rx_packet_hash_cache, packet_hash);
+    }
     s_status.rx_packets++;
-    esp_err_t route_ret = d1l_route_store_upsert_observation(
+    const esp_err_t route_ret = d1l_route_store_upsert_observation(
         route_target, channel.name, packet_kind, route_name(packet.route),
         "rx", rssi, (snr * 10) / 4, packet.path_hash_bytes,
         packet.path_hops, size);
@@ -2731,11 +2816,12 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
         ESP_LOGW(TAG, "route store channel rx failed: %s",
                  esp_err_to_name(route_ret));
     }
-    append_packet_log("rx", packet_kind, rssi, snr, packet.path_hash_bytes,
-                      packet.path_hops, size, payload, size, message);
-    append_channel_message_store_rx(
-        channel_id, channel.name, message, rssi, snr, packet.path_hash_bytes,
-        packet.path_hops);
+    const bool packet_retained = append_packet_log_deferred(
+        "rx", packet_kind, rssi, snr, packet.path_hash_bytes,
+        packet.path_hops, size, payload, size, message);
+    if (!packet_retained || message_result.error != ESP_OK) {
+        ESP_LOGW(TAG, "channel RX admitted with retained reconciliation pending");
+    }
 }
 
 static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
@@ -2864,18 +2950,33 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         }
         secure_zero_bytes(secret, sizeof(secret));
 
-        s_status.rx_packets++;
+        uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+        const bool packet_hash_ready =
+            d1l_meshcore_packet_hash_calculate(&packet, packet_hash) == ESP_OK;
+        if (packet_hash_ready && duplicate &&
+            d1l_meshcore_packet_hash_cache_contains(
+                &s_rx_packet_hash_cache, packet_hash)) {
+            /* A durable duplicate DM may still consume its bounded re-ACK
+             * allowance. It must never recreate a row, route observation, or
+             * packet-log entry. */
+            if (ack_build_ret == ESP_OK) {
+                return dispatch_bounded_dm_ack(
+                    contact, ack_hash, &ack_plan, ack_raw, ack_raw_len,
+                    identity_digest);
+            }
+            return false;
+        }
+
         if (duplicate) {
             s_status.ack_tx_duplicate_rows_suppressed++;
             s_status.ack_tx_last_hash = ack_hash;
             s_status.ack_tx_last_error = ack_build_ret;
-            char duplicate_note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-            snprintf(duplicate_note, sizeof(duplicate_note), "%.12s: %.24s",
-                     contact->alias, message);
-            append_packet_log("rx", "dm_text_duplicate", rssi, snr,
-                              packet.path_hash_bytes, packet.path_hops,
-                              size, payload, size, duplicate_note);
             if (ack_build_ret == ESP_OK) {
+                s_status.rx_packets++;
+                if (packet_hash_ready) {
+                    (void)d1l_meshcore_packet_hash_cache_remember(
+                        &s_rx_packet_hash_cache, packet_hash);
+                }
                 return dispatch_bounded_dm_ack(
                     contact, ack_hash, &ack_plan, ack_raw, ack_raw_len,
                     identity_digest);
@@ -2896,35 +2997,37 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         if (store_ret != ESP_OK) {
             ESP_LOGW(TAG, "DM rx store append failed: %s", esp_err_to_name(store_ret));
         }
-        esp_err_t route_ret =
-            d1l_route_store_upsert_observation(contact->fingerprint, contact->alias, "dm_text",
-                                               route_name(packet.route), "rx", rssi,
-                                               (snr * 10) / 4, packet.path_hash_bytes,
-                                               packet.path_hops, size);
-        if (route_ret != ESP_OK) {
-            ESP_LOGW(TAG, "route store DM rx failed: %s", esp_err_to_name(route_ret));
-        }
-        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-        snprintf(note, sizeof(note), "%.12s: %.24s", contact->alias, message);
-        append_packet_log("rx", "dm_text", rssi, snr, packet.path_hash_bytes,
-                          packet.path_hops, size, payload, size, note);
-        if (store_ret != ESP_OK) {
-            if (store_outcome.inserted &&
-                d1l_dm_store_find_rx_identity(identity_digest,
-                                              &retained_identity)) {
-                (void)remember_ack_identity_state(&retained_identity, false);
-            }
+        if (!store_outcome.inserted) {
             record_dm_ack_failure(ack_hash, store_ret);
             return false;
         }
+        if (!d1l_dm_store_find_rx_identity(identity_digest,
+                                           &retained_identity) ||
+            !remember_ack_identity_state(&retained_identity,
+                                         store_outcome.durable)) {
+            record_dm_ack_failure(ack_hash, ESP_ERR_INVALID_STATE);
+            ESP_LOGE(TAG, "DM ACK dedupe remember failed");
+            return false;
+        }
+        if (packet_hash_ready) {
+            (void)d1l_meshcore_packet_hash_cache_remember(
+                &s_rx_packet_hash_cache, packet_hash);
+        }
+        s_status.rx_packets++;
+        const esp_err_t route_ret = d1l_route_store_upsert_observation(
+            contact->fingerprint, contact->alias, "dm_text",
+            route_name(packet.route), "rx", rssi, (snr * 10) / 4,
+            packet.path_hash_bytes, packet.path_hops, size);
+        if (route_ret != ESP_OK) {
+            ESP_LOGW(TAG, "route store DM rx failed: %s",
+                     esp_err_to_name(route_ret));
+        }
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "%.12s: %.24s", contact->alias, message);
+        (void)append_packet_log_deferred(
+            "rx", "dm_text", rssi, snr, packet.path_hash_bytes,
+            packet.path_hops, size, payload, size, note);
         if (digest_ret == ESP_OK) {
-            if (!d1l_dm_store_find_rx_identity(identity_digest,
-                                               &retained_identity) ||
-                !remember_ack_identity_state(&retained_identity, true)) {
-                record_dm_ack_failure(ack_hash, ESP_ERR_INVALID_STATE);
-                ESP_LOGE(TAG, "DM ACK dedupe remember failed");
-                return false;
-            }
             if (ack_build_ret == ESP_OK) {
                 return dispatch_bounded_dm_ack(
                     contact, ack_hash, &ack_plan, ack_raw, ack_raw_len,
@@ -2940,63 +3043,93 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
     return false;
 }
 
-static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *packet,
-                          int16_t rssi, int8_t snr, uint16_t size, const uint8_t *raw,
-                          size_t raw_len, const char *source)
+typedef enum {
+    D1L_RX_ACK_UNMATCHED = 0,
+    D1L_RX_ACK_RETRYABLE,
+    D1L_RX_ACK_ACCEPTED,
+    D1L_RX_ACK_ACCEPTED_PENDING,
+    D1L_RX_ACK_ALREADY_ACCEPTED,
+} d1l_rx_ack_result_t;
+
+static d1l_rx_ack_result_t record_dm_ack(
+    uint32_t ack_hash, const d1l_meshcore_wire_packet_t *packet,
+    int16_t rssi, int8_t snr, uint16_t size, const uint8_t *raw,
+    size_t raw_len, const char *source,
+    const uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES])
 {
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    if (s_pending_dm_tx.ack_persistence_pending &&
+        d1l_dm_delivery_owner_ack_matches(
+            &s_pending_dm_tx.delivery, ack_hash)) {
+        /* The retained transition already admitted this exact owner revision.
+         * The storage worker is the only retry owner from here. */
+        bank_pending_dm_ack_packet_hash(packet_hash);
+        return D1L_RX_ACK_ALREADY_ACCEPTED;
+    }
     if (d1l_dm_delivery_owner_ack_matches(
             &s_pending_dm_tx.delivery, ack_hash)) {
-        /* Authentication and exact owner correlation are already complete.
-         * Stop the RF deadline and credit the direct generation even if the
-         * retained ACK transition needs a later persistence retry. */
-        d1l_meshcore_dm_ack_deadline_clear(
-            &s_pending_dm_tx.ack_deadline);
-        record_pending_direct_path_result(true);
-        const esp_err_t ret = transition_pending_dm_tx(
+        snprintf(note, sizeof(note), "ack %lu %.12s", (unsigned long)ack_hash,
+                 s_pending_dm_tx.alias);
+        const esp_err_t transition_ret = transition_pending_dm_tx(
             D1L_DM_DELIVERY_ACKNOWLEDGED,
             D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK);
-        if (ret != ESP_OK) {
+        const bool persistence_pending =
+            s_pending_dm_tx.ack_persistence_pending;
+        const bool durable = s_pending_dm_tx.delivery.active &&
+            s_pending_dm_tx.delivery.state == D1L_DM_DELIVERY_ACKNOWLEDGED;
+        if (!durable && !persistence_pending) {
             snprintf(note, sizeof(note), "%s persistence %lu",
                      source ? source : "ack", (unsigned long)ack_hash);
-            append_packet_log(
+            (void)append_packet_log_deferred(
+                "rx", "dm_ack_persistence_pending", rssi, snr,
+                packet->path_hash_bytes, packet->path_hops, size, raw,
+                raw_len, note);
+            ESP_LOGW(TAG, "DM ACK state transition failed: %s",
+                     esp_err_to_name(transition_ret));
+            return D1L_RX_ACK_RETRYABLE;
+        }
+        bank_pending_dm_ack_packet_hash(packet_hash);
+
+        /* The exact-owner CAS is the canonical semantic effect. Backend
+         * reconciliation owns an admitted-but-nondurable transition; replaying
+         * the RF ACK would only duplicate route credit and history. */
+        d1l_meshcore_dm_ack_deadline_clear(&s_pending_dm_tx.ack_deadline);
+        (void)record_pending_direct_path_result(true);
+        const esp_err_t route_ret = d1l_route_store_upsert_observation(
+            s_pending_dm_tx.fingerprint, s_pending_dm_tx.alias,
+            "dm_ack", route_name(packet->route), "rx", rssi,
+            (snr * 10) / 4, packet->path_hash_bytes,
+            packet->path_hops, size);
+        if (route_ret != ESP_OK) {
+            ESP_LOGW(TAG, "route store DM ACK rx failed: %s",
+                     esp_err_to_name(route_ret));
+        }
+        if (persistence_pending) {
+            snprintf(note, sizeof(note), "%s persistence %lu",
+                     source ? source : "ack", (unsigned long)ack_hash);
+            (void)append_packet_log_deferred(
                 "rx", "dm_ack_persistence_pending", rssi, snr,
                 packet->path_hash_bytes, packet->path_hops, size, raw,
                 raw_len, note);
             ESP_LOGW(TAG, "DM ACK state persistence pending: %s",
-                     esp_err_to_name(ret));
-            return;
+                     esp_err_to_name(transition_ret));
+            return D1L_RX_ACK_ACCEPTED_PENDING;
         }
-        if (!s_pending_dm_tx.delivery.active ||
-            s_pending_dm_tx.delivery.state !=
-                D1L_DM_DELIVERY_ACKNOWLEDGED) {
-            snprintf(note, sizeof(note), "%s stale %lu",
-                     source ? source : "ack", (unsigned long)ack_hash);
-            append_packet_log("rx", "dm_ack_unmatched", rssi, snr,
-                              packet->path_hash_bytes, packet->path_hops,
-                              size, raw, raw_len, note);
-            return;
-        }
-        snprintf(note, sizeof(note), "ack %lu %.12s", (unsigned long)ack_hash,
-                 s_pending_dm_tx.alias);
-        esp_err_t route_ret =
-            d1l_route_store_upsert_observation(
-                s_pending_dm_tx.fingerprint, s_pending_dm_tx.alias,
-                "dm_ack", route_name(packet->route), "rx", rssi,
-                (snr * 10) / 4, packet->path_hash_bytes,
-                packet->path_hops, size);
-        if (route_ret != ESP_OK) {
-            ESP_LOGW(TAG, "route store DM ACK rx failed: %s", esp_err_to_name(route_ret));
-        }
-        append_packet_log("rx", "dm_ack", rssi, snr, packet->path_hash_bytes,
-                          packet->path_hops, size, raw, raw_len, note);
+        (void)append_packet_log_deferred(
+            "rx", "dm_ack", rssi, snr, packet->path_hash_bytes,
+            packet->path_hops, size, raw, raw_len, note);
+        remember_pending_dm_ack_packet_hashes();
         clear_pending_dm_tx();
+        return D1L_RX_ACK_ACCEPTED;
     } else {
         snprintf(note, sizeof(note), "%s unmatched %lu", source ? source : "ack",
                  (unsigned long)ack_hash);
-        append_packet_log("rx", "dm_ack_unmatched", rssi, snr, packet->path_hash_bytes,
-                          packet->path_hops, size, raw, raw_len, note);
+        (void)append_packet_log_deferred(
+            "rx", "dm_ack_unmatched", rssi, snr,
+            packet->path_hash_bytes, packet->path_hops, size, raw,
+            raw_len, note);
     }
+    return D1L_RX_ACK_UNMATCHED;
 }
 
 static void parse_rx_ack_packet(const uint8_t *payload, uint16_t size,
@@ -3020,8 +3153,30 @@ static void parse_rx_ack_packet(const uint8_t *payload, uint16_t size,
         return;
     }
 
+    d1l_meshcore_wire_packet_t hash_packet = packet;
+    if (packet.type == D1L_MESHCORE_PAYLOAD_MULTIPART) {
+        /* Upstream strips the multipart descriptor before hashing the ACK
+         * body while retaining the MULTIPART payload-type domain. */
+        hash_packet.payload = &packet.payload[1];
+        hash_packet.payload_len = packet.payload_len - 1U;
+    }
+    uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    const bool packet_hash_ready =
+        d1l_meshcore_packet_hash_calculate(&hash_packet, packet_hash) == ESP_OK;
+    const bool owner_matches = d1l_dm_delivery_owner_ack_matches(
+        &s_pending_dm_tx.delivery, ack_hash);
+    const bool owner_needs_packet_retry =
+        owner_matches && !s_pending_dm_tx.ack_persistence_pending;
+    if (packet_hash_ready && !owner_needs_packet_retry &&
+        d1l_meshcore_packet_hash_cache_contains(
+            &s_rx_packet_hash_cache, packet_hash)) {
+        return;
+    }
+
     s_status.rx_packets++;
-    record_dm_ack(ack_hash, &packet, rssi, snr, size, payload, size, source);
+    (void)record_dm_ack(
+        ack_hash, &packet, rssi, snr, size, payload, size, source,
+        packet_hash_ready ? packet_hash : NULL);
 }
 
 static d1l_meshcore_path_response_result_t dispatch_path_response(
@@ -3129,17 +3284,52 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
             goto path_candidate_cleanup;
         }
 
+        uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+        const bool packet_hash_ready =
+            d1l_meshcore_packet_hash_calculate(&packet, packet_hash) == ESP_OK;
+        if (packet_hash_ready && d1l_meshcore_packet_hash_cache_contains(
+                                     &s_rx_packet_hash_cache, packet_hash)) {
+            if (decoded.kind == D1L_MESHCORE_PATH_EXTRA_ACK &&
+                d1l_dm_delivery_owner_ack_matches(
+                    &s_pending_dm_tx.delivery, read_le32(decoded.extra))) {
+                (void)record_dm_ack(
+                    read_le32(decoded.extra), &packet, rssi, snr,
+                    size, payload, size, "path_ack_retry",
+                    packet_hash_ready ? packet_hash : NULL);
+            }
+            goto path_candidate_cleanup;
+        }
+
         uint8_t replay_identity[
             D1L_MESHCORE_PATH_REPLAY_IDENTITY_BYTES] = {0};
         esp_err_t ret = calc_path_replay_identity(
             replay_identity, sender_pub, packet.payload, packet.payload_len);
-        if (ret != ESP_OK ||
-            !d1l_meshcore_path_replay_take(
-                &s_path_replay_cache, replay_identity)) {
+        if (ret != ESP_OK) {
             memset(replay_identity, 0, sizeof(replay_identity));
             goto path_candidate_cleanup;
         }
-
+        if (!d1l_meshcore_path_replay_take(
+                &s_path_replay_cache, replay_identity)) {
+            /* Whole-PATH effects are already terminal, but an ACK owner CAS
+             * that failed before admission may still be retried without
+             * relearning the path, relogging, or queuing a reciprocal PATH. */
+            if (decoded.kind == D1L_MESHCORE_PATH_EXTRA_ACK &&
+                d1l_dm_delivery_owner_ack_matches(
+                    &s_pending_dm_tx.delivery, read_le32(decoded.extra))) {
+                const d1l_rx_ack_result_t ack_result = record_dm_ack(
+                    read_le32(decoded.extra), &packet, rssi, snr,
+                    size, payload, size, "path_ack_retry",
+                    packet_hash_ready ? packet_hash : NULL);
+                if ((ack_result == D1L_RX_ACK_ACCEPTED ||
+                     ack_result == D1L_RX_ACK_ALREADY_ACCEPTED) &&
+                    packet_hash_ready) {
+                    (void)d1l_meshcore_packet_hash_cache_remember(
+                        &s_rx_packet_hash_cache, packet_hash);
+                }
+            }
+            memset(replay_identity, 0, sizeof(replay_identity));
+            goto path_candidate_cleanup;
+        }
         d1l_contact_entry_t learned_contact = {0};
         ret = d1l_contact_store_update_path_from_source(
             contact->fingerprint, decoded.path, decoded.path_len,
@@ -3157,8 +3347,6 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
                 learned_contact.fingerprint, decoded.path, decoded.path_len,
                 learned_contact.out_path_state.generation);
         }
-        memset(replay_identity, 0, sizeof(replay_identity));
-
         const uint8_t out_hash_bytes =
             d1l_meshcore_wire_path_hash_size(decoded.path_len);
         const uint8_t out_hops =
@@ -3188,14 +3376,21 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
         /* An authenticated admin PATH can carry encrypted credential/session
          * material. Keep its route metadata, but never retain the raw packet. */
         if (!admin_response_considered) {
-            append_packet_log("rx", "path_return", rssi, snr,
-                              out_hash_bytes, out_hops, size,
-                              payload, size, note);
+            if (!append_packet_log_deferred(
+                    "rx", "path_return", rssi, snr, out_hash_bytes,
+                    out_hops, size, payload, size, note)) {
+                ESP_LOGW(TAG, "packet log PATH return admission failed");
+            }
         }
 
         if (decoded.kind == D1L_MESHCORE_PATH_EXTRA_ACK) {
-            record_dm_ack(read_le32(decoded.extra), &packet, rssi, snr,
-                           size, payload, size, "path_ack");
+            const d1l_rx_ack_result_t ack_result = record_dm_ack(
+                read_le32(decoded.extra), &packet, rssi, snr,
+                size, payload, size, "path_ack",
+                packet_hash_ready ? packet_hash : NULL);
+            if (ack_result == D1L_RX_ACK_RETRYABLE) {
+                ESP_LOGW(TAG, "PATH ACK owner transition remains retryable");
+            }
         } else if (decoded.kind == D1L_MESHCORE_PATH_EXTRA_RESPONSE &&
                    !admin_response_considered) {
             const d1l_meshcore_path_response_result_t response =
@@ -3204,11 +3399,13 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
                     decoded.extra_len, (uint64_t)esp_timer_get_time());
             snprintf(note, sizeof(note), "path_response %.12s result=%u",
                      learned_contact.alias, (unsigned)response);
-            append_packet_log(
-                "rx", response == D1L_MESHCORE_PATH_RESPONSE_MATCHED ?
-                          "path_response" : "path_response_unmatched",
-                rssi, snr, out_hash_bytes, out_hops, size,
-                payload, size, note);
+            if (!append_packet_log_deferred(
+                    "rx", response == D1L_MESHCORE_PATH_RESPONSE_MATCHED ?
+                              "path_response" : "path_response_unmatched",
+                    rssi, snr, out_hash_bytes, out_hops, size,
+                    payload, size, note)) {
+                ESP_LOGW(TAG, "packet log PATH response admission failed");
+            }
         } else if (admin_response_considered &&
                    admin_response != D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
             ESP_LOGW(TAG, "admin PATH response rejected: %u",
@@ -3235,6 +3432,11 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
                          esp_err_to_name(ret));
             }
         }
+        if (packet_hash_ready) {
+            (void)d1l_meshcore_packet_hash_cache_remember(
+                &s_rx_packet_hash_cache, packet_hash);
+        }
+        memset(replay_identity, 0, sizeof(replay_identity));
 path_candidate_cleanup:
         secure_zero_bytes(plain, sizeof(plain));
         secure_zero_bytes(secret, sizeof(secret));
@@ -3277,6 +3479,21 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
         return;
     }
 
+    d1l_meshcore_wire_packet_t packet = {0};
+    uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    const bool packet_hash_ready =
+        d1l_meshcore_wire_decode_v1(payload, size, &packet) &&
+        packet.type == D1L_MESHCORE_PAYLOAD_TRACE &&
+        d1l_meshcore_packet_hash_calculate(&packet, packet_hash) == ESP_OK;
+    d1l_store_lock_take(&s_trace_lock);
+    const bool trace_pending = s_trace_tracker.pending;
+    d1l_store_lock_give(&s_trace_lock);
+    if (packet_hash_ready && !trace_pending &&
+        d1l_meshcore_packet_hash_cache_contains(
+            &s_rx_packet_hash_cache, packet_hash)) {
+        return;
+    }
+
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     d1l_store_lock_take(&s_trace_lock);
     const bool pending_expired = s_trace_tracker.pending &&
@@ -3284,12 +3501,31 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
             D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS;
     const d1l_meshcore_trace_correlation_t correlation =
         d1l_meshcore_trace_tracker_consume(&s_trace_tracker, &terminal, now_ms);
+    bool retention_retry = false;
+    bool route_retention_needed = true;
+    bool packet_retention_needed = true;
     if (correlation == D1L_MESHCORE_TRACE_CORRELATION_MATCHED) {
         s_trace_last_rssi_dbm = rssi;
         s_trace_last_radio_snr_quarter_db = snr;
         s_trace_last_retention_attempted = false;
         s_trace_last_route_summary_accepted = false;
         s_trace_last_packet_preview_retained = false;
+    } else if (correlation == D1L_MESHCORE_TRACE_CORRELATION_DUPLICATE &&
+               s_trace_tracker.completed &&
+               s_trace_tracker.last_result.tag == terminal.tag &&
+               s_trace_tracker.last_result.auth_code == terminal.auth_code &&
+               d1l_meshcore_trace_path_matches(
+                   &terminal, s_trace_tracker.last_result.path_hops,
+                   s_trace_tracker.last_result.path_hashes) &&
+               s_trace_last_retention_attempted &&
+               (!s_trace_last_route_summary_accepted ||
+                !s_trace_last_packet_preview_retained)) {
+        /* Correlation is already terminal, but a prior retained side effect
+         * failed. Retry only the missing effect; this keeps TRACE fail-open
+         * without duplicating the effect that already committed. */
+        retention_retry = true;
+        route_retention_needed = !s_trace_last_route_summary_accepted;
+        packet_retention_needed = !s_trace_last_packet_preview_retained;
     }
     d1l_store_lock_give(&s_trace_lock);
 
@@ -3303,7 +3539,9 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
         s_status.rx_packets++;
         break;
     case D1L_MESHCORE_TRACE_CORRELATION_DUPLICATE:
-        s_status.trace_rx_duplicates++;
+        if (!retention_retry) {
+            s_status.trace_rx_duplicates++;
+        }
         break;
     case D1L_MESHCORE_TRACE_CORRELATION_EXPIRED:
         s_status.trace_rx_expired++;
@@ -3322,7 +3560,9 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
     status_unlock();
 
     if (correlation != D1L_MESHCORE_TRACE_CORRELATION_MATCHED) {
-        return;
+        if (!retention_retry) {
+            return;
+        }
     }
 
     char target[D1L_ROUTE_TARGET_LEN] = {0};
@@ -3331,16 +3571,18 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
              d1l_meshcore_trace_retained_target_for_tag(terminal.tag));
     snprintf(note, sizeof(note), "tag=%08lX hops=%u",
              (unsigned long)terminal.tag, terminal.path_hops);
-    const esp_err_t route_ret = d1l_route_store_upsert_observation(
-        target, "Explicit TRACE", "trace_reply", "direct", "rx", rssi,
-        (snr * 10) / 4, 1U, terminal.path_hops, size);
+    const esp_err_t route_ret = route_retention_needed ?
+        d1l_route_store_upsert_observation(
+            target, "Explicit TRACE", "trace_reply", "direct", "rx", rssi,
+            (snr * 10) / 4, 1U, terminal.path_hops, size) : ESP_OK;
     if (route_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store TRACE reply failed: %s",
                  esp_err_to_name(route_ret));
     }
-    const bool packet_retained = append_packet_log(
-        "rx", "trace_reply", rssi, snr, 1U, terminal.path_hops, size,
-        payload, size, note);
+    const bool packet_retained = !packet_retention_needed ||
+        append_packet_log_deferred(
+            "rx", "trace_reply", rssi, snr, 1U, terminal.path_hops, size,
+            payload, size, note);
     if (!packet_retained) {
         ESP_LOGW(TAG, "packet log TRACE reply retention failed");
     }
@@ -3352,10 +3594,19 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
             &terminal, s_trace_tracker.last_result.path_hops,
             s_trace_tracker.last_result.path_hashes)) {
         s_trace_last_retention_attempted = true;
-        s_trace_last_route_summary_accepted = route_ret == ESP_OK;
-        s_trace_last_packet_preview_retained = packet_retained;
+        s_trace_last_route_summary_accepted =
+            s_trace_last_route_summary_accepted || route_ret == ESP_OK;
+        s_trace_last_packet_preview_retained =
+            s_trace_last_packet_preview_retained || packet_retained;
     }
+    const bool retention_complete =
+        s_trace_last_route_summary_accepted &&
+        s_trace_last_packet_preview_retained;
     d1l_store_lock_give(&s_trace_lock);
+    if (retention_complete && packet_hash_ready) {
+        (void)d1l_meshcore_packet_hash_cache_remember(
+            &s_rx_packet_hash_cache, packet_hash);
+    }
 }
 
 static bool verify_advert_signature(const uint8_t *pub_key, const uint8_t *timestamp,
@@ -3539,6 +3790,14 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
         return;
     }
 
+    uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    const bool packet_hash_ready =
+        d1l_meshcore_packet_hash_calculate(&packet, packet_hash) == ESP_OK;
+    if (packet_hash_ready && d1l_meshcore_packet_hash_cache_contains(
+                                 &s_rx_packet_hash_cache, packet_hash)) {
+        return;
+    }
+
     const uint32_t advert_timestamp = read_le32(timestamp);
     d1l_meshcore_advert_admission_receipt_t admission = {0};
     const esp_err_t admission_ret = d1l_meshcore_advert_admit_verified(
@@ -3553,7 +3812,6 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
                           payload, size, esp_err_to_name(admission_ret));
         return;
     }
-
     switch (admission.outcome) {
         case D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED:
         case D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED: {
@@ -3561,7 +3819,7 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
             snprintf(retry_note, sizeof(retry_note), "retry %.8s c=%s",
                      pub_prefix,
                      verified_contact_result_name(admission.contact_result));
-            append_packet_log(
+            const bool packet_retained = append_packet_log_deferred(
                 "rx",
                 admission.outcome ==
                         D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED
@@ -3569,6 +3827,11 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
                     : "advert_contact_retry_error",
                 rssi, snr, packet.path_hash_bytes, packet.path_hops, size,
                 payload, size, retry_note);
+            if (packet_retained && packet_hash_ready &&
+                d1l_meshcore_advert_admission_receipt_cacheable(&admission)) {
+                (void)d1l_meshcore_packet_hash_cache_remember(
+                    &s_rx_packet_hash_cache, packet_hash);
+            }
             if (admission.contact_store_error != ESP_OK) {
                 ESP_LOGW(TAG, "verified advert contact retry %s: %s",
                          verified_contact_result_name(admission.contact_result),
@@ -3580,9 +3843,15 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
             char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
             snprintf(note, sizeof(note), "replay %.8s ts=%lu", pub_prefix,
                      (unsigned long)advert_timestamp);
-            append_packet_log("rx", "advert_replay", rssi, snr,
-                              packet.path_hash_bytes, packet.path_hops, size,
-                              payload, size, note);
+            const bool packet_retained = append_packet_log_deferred(
+                "rx", "advert_replay", rssi, snr,
+                packet.path_hash_bytes, packet.path_hops, size,
+                payload, size, note);
+            if (packet_retained && packet_hash_ready &&
+                d1l_meshcore_advert_admission_receipt_cacheable(&admission)) {
+                (void)d1l_meshcore_packet_hash_cache_remember(
+                    &s_rx_packet_hash_cache, packet_hash);
+            }
             return;
         }
         case D1L_MESHCORE_ADVERT_ADMISSION_KEY_COLLISION: {
@@ -3640,8 +3909,14 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
     if (route_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store advert rx failed: %s", esp_err_to_name(route_ret));
     }
-    append_packet_log("rx", "advert", rssi, snr, packet.path_hash_bytes,
-                      packet.path_hops, size, payload, size, note);
+    const bool packet_retained = append_packet_log_deferred(
+        "rx", "advert", rssi, snr, packet.path_hash_bytes,
+        packet.path_hops, size, payload, size, note);
+    if (route_ret == ESP_OK && packet_retained && packet_hash_ready &&
+        d1l_meshcore_advert_admission_receipt_cacheable(&admission)) {
+        (void)d1l_meshcore_packet_hash_cache_remember(
+            &s_rx_packet_hash_cache, packet_hash);
+    }
 }
 
 static void meshcore_service_handle_radio_tx_done(
@@ -5537,6 +5812,7 @@ void d1l_meshcore_service_init(void)
     clear_pending_ack_tx();
     clear_boot_routes();
     memset(&s_path_replay_cache, 0, sizeof(s_path_replay_cache));
+    d1l_meshcore_packet_hash_cache_reset(&s_rx_packet_hash_cache);
     d1l_store_lock_take(&s_path_response_lock);
     memset(&s_path_response_expectation, 0,
            sizeof(s_path_response_expectation));

@@ -25,6 +25,13 @@ typedef struct {
 } d1l_meshcore_advert_admission_receipt_t;
 
 /*
+ * True only after durable admission reached a terminal result. A transient
+ * contact-store failure intentionally stays retryable by an identical advert.
+ */
+bool d1l_meshcore_advert_admission_receipt_cacheable(
+    const d1l_meshcore_advert_admission_receipt_t *receipt);
+
+/*
  * Applies the durable node/contact admission policy after the caller has
  * verified an advert signature. The receipt distinguishes intentional replay
  * rejection, exact-key contact recovery, key collisions, and storage errors;

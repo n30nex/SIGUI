@@ -51,6 +51,28 @@ static void init_receipt(d1l_meshcore_advert_admission_receipt_t *receipt)
     receipt->contact_result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
 }
 
+bool d1l_meshcore_advert_admission_receipt_cacheable(
+    const d1l_meshcore_advert_admission_receipt_t *receipt)
+{
+    if (!receipt) {
+        return false;
+    }
+    switch (receipt->outcome) {
+        case D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED:
+            return receipt->contact_store_error == ESP_OK;
+        case D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_SUCCEEDED:
+            return receipt->contact_store_error == ESP_OK;
+        case D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED:
+            return true;
+        case D1L_MESHCORE_ADVERT_ADMISSION_INVALID:
+        case D1L_MESHCORE_ADVERT_ADMISSION_CONTACT_RETRY_FAILED:
+        case D1L_MESHCORE_ADVERT_ADMISSION_KEY_COLLISION:
+        case D1L_MESHCORE_ADVERT_ADMISSION_NODE_STORE_ERROR:
+        default:
+            return false;
+    }
+}
+
 esp_err_t d1l_meshcore_advert_admit_verified(
     const char *fingerprint, const char *public_key_hex, const char *name,
     char type_code, int rssi_dbm, int snr_tenths, uint8_t path_hash_bytes,

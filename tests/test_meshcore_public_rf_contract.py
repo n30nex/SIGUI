@@ -117,7 +117,7 @@ def test_meshcore_service_decodes_verified_adverts():
     assert "d1l_meshcore_advert_admit_verified" in source
     assert "d1l_node_store_upsert_advert" in admission
     assert '"mesh/meshcore_advert_admission.c"' in cmake
-    assert 'append_packet_log("rx", "advert"' in source
+    assert 'append_packet_log_deferred(\n        "rx", "advert"' in source
     assert "parse_rx_advert_packet(payload, size, rssi, snr)" in source
     assert "../third_party/MeshCore/lib/ed25519/verify.c" in cmake
     assert "uint32_t rx_adverts;" in header

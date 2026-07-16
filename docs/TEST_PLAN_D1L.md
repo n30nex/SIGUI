@@ -47,16 +47,23 @@ Coverage:
   `coverage_level="wire_envelope_only"` and `closure_ready=false`. The job runs
   the exact-commit signed-advert runtime before conformance, validates that
   sanitized receipt, and binds its canonical SHA-256 plus five distinct signed
-  timestamp replay outcomes into the conformance receipt. Actions, release
-  packaging, reproducibility comparison, and release audit must recompute that
-  canonical digest from the supplied exact-commit signed-runtime receipt and
-  reject any substituted binding. The declared WP-05
-  host matrix is currently 7 production suites / 41 scenarios / 28 translation
-  units / 58 source pins, plus 1 pinned-upstream companion suite / 5 replay
-  cases. Identical-wire hash suppression remains separate evidence. These
-  bounded semantic checks do not prove the remaining cryptographic surface,
-  generic packet replay, retained-state recovery, hardware, real-peer RF,
-  complete-surface, or issue #65 closure. See
+  timestamp outcomes, five upstream/D1L packet-hash outcomes, and the exact real
+  `SimpleMeshTables` lookup/duplicate receipt into the conformance receipt.
+  Actions, release packaging, reproducibility comparison, and release audit
+  must recompute that canonical digest from the supplied exact-commit
+  signed-runtime receipt and reject any substituted binding. The declared WP-05
+  host matrix is currently 8 production suites / 53 scenarios / 33 translation
+  units / 63 source pins, plus 1 pinned-upstream companion suite / 10 cases.
+  Native cases also require a 160-entry cyclic cache, correct all-zero occupancy,
+  deterministic FIFO eviction, multipart-ACK descriptor normalization, and
+  terminal-only admission. Production source contracts must prove authentication
+  and semantic authority before probing; one visible channel/DM row; bounded DM
+  re-ACK; exact-owner ACK persistence/reconciliation across simple, multipart,
+  and PATH encodings; one-shot authenticated PATH effects with ACK-only retry;
+  pending-first TRACE correlation with partial-retention retry; and terminal
+  advert receipts. These bounded checks do not prove persisted generic cache,
+  retained-state recovery, hardware, real-peer RF, complete-surface, or issue
+  #65 closure. See
   [MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).
 - Full MeshCore conformance release contract: the passing wire-envelope package
   gate is only a prerequisite. A separate P0

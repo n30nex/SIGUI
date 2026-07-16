@@ -89,7 +89,7 @@ def test_service_retains_only_a_matched_trace_result() -> None:
         "d1l_route_store_upsert_observation("
     )
     assert receive.index(matched_guard) < receive.index(
-        "const bool packet_retained = append_packet_log("
+        "const bool packet_retained = !packet_retention_needed"
     )
     terminal_guard = "if (frame_kind != D1L_MESHCORE_TRACE_FRAME_TERMINAL)"
     assert terminal_guard in receive
@@ -100,8 +100,8 @@ def test_service_retains_only_a_matched_trace_result() -> None:
         "d1l_route_store_upsert_observation("
     )
     assert "s_trace_last_retention_attempted = true" in receive
-    assert "s_trace_last_route_summary_accepted = route_ret == ESP_OK" in receive
-    assert "s_trace_last_packet_preview_retained = packet_retained" in receive
+    assert "s_trace_last_route_summary_accepted || route_ret == ESP_OK" in receive
+    assert "s_trace_last_packet_preview_retained || packet_retained" in receive
     assert "d1l_meshcore_trace_retained_target_for_tag(terminal.tag)" in receive
     assert '"trace_%08lX"' not in receive
     assert '"trace_reply"' in receive

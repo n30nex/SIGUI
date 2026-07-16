@@ -125,12 +125,21 @@ def test_only_verified_non_self_newer_adverts_reach_node_and_route_stores():
     admission_source = read("main/mesh/meshcore_advert_admission.c")
     node_upsert = admission_source.index("d1l_node_store_upsert_advert")
     stale = admission_source.index("if (stale)")
-    accepted = admission_source.index("D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED")
+    accepted = admission_source.index(
+        "out_receipt->outcome = D1L_MESHCORE_ADVERT_ADMISSION_ACCEPTED"
+    )
     assert node_upsert < stale < accepted
+    replay_case = function_slice(
+        receiver,
+        "case D1L_MESHCORE_ADVERT_ADMISSION_REPLAY_REJECTED:",
+        "case D1L_MESHCORE_ADVERT_ADMISSION_KEY_COLLISION:",
+    )
     assert 'append_packet_log("rx", "advert_bad_sig"' in receiver
     assert 'append_packet_log("rx", "advert_self"' in receiver
     assert 'append_packet_log("rx", "advert_bad_app"' in receiver
-    assert 'append_packet_log("rx", "advert_replay"' in receiver
+    assert "append_packet_log_deferred(" in replay_case
+    assert '"rx", "advert_replay"' in replay_case
+    assert "d1l_route_store_upsert_observation" not in replay_case
     assert "app_data_len = D1L_MESHCORE_MAX_ADVERT_DATA" not in receiver
     assert "Radio." not in receiver
     assert "request_advert" not in receiver

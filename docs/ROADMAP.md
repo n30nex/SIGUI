@@ -145,13 +145,18 @@ selected the overlay in production/oracle/runtime/package with zero exceptions;
 PR #98 merged durable ACK dispatch; and PR #99 merged freshness-gated learned
 route selection. The current receipt remains `closure_ready=false`: canonical
 TRACE, admin, retained-state, real-peer RF, and physical proof are still open.
-The current advert-replay source slice closes the previously missing WP-05
-timestamp requirement with 7 production host scenarios and binds 5 distinct
-validly signed pinned-upstream replay cases. The declared matrix is now 8
-implemented / 8 partial / 0 missing requirements, 7 production suites / 41
-scenarios / 28 translation units / 58 pins, plus 1 companion suite / 5 cases;
-identical-wire hash suppression remains separate. This does not close generic
-packet replay, retained recovery, RF, hardware, issue #65, or the release gate.
+The current dependent advert-replay/packet-hash source slice closes the bounded
+WP-05 timestamp and duplicate/hash requirements with 12 advert-admission and 7
+packet-hash production host scenarios. The pinned companion runtime binds five
+validly signed timestamp cases plus five D1L/upstream packet-hash and real
+`SimpleMeshTables` cases, including exact/path/transport duplicate suppression.
+The declared matrix is now 9 implemented / 7 partial / 0 missing requirements,
+8 production suites / 53 scenarios / 33 translation units / 63 pins, plus 1
+companion suite / 10 cases. Production now has the exact eight-byte upstream
+hash algorithm, a 160-entry boot-local cyclic cache, and terminal-only cache
+admission on the signed-advert service path. Broader Public/DM/ACK/PATH/TRACE
+dispatch integration, persistent duplicate state, retained recovery, RF,
+hardware, issue #65, and the release gate remain open.
 See
 [MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).
 
@@ -172,7 +177,7 @@ Stage 3 closes only when CI proves SIGUI-generated traffic is accepted upstream 
 5. Complete contact promote/import/export/rename/favorite/mute/route/forget/key-update behavior without fingerprint-prefix ambiguity.
 6. Implement persistent multi-channel configuration, selection, keyed RX/TX, history/unread separation, diagnostics identity, and official-client exchange on at least two independent channels.
 7. Implement real path discovery, reciprocal paths, route age/invalidation, deterministic selection, direct failure fallback, and a real MeshCore trace request/response that never pollutes DM history.
-8. Deduplicate Public, DM, ACK, advert, PATH, and trace traffic with bounded tables and no ACK/retry storms.
+8. Software now deduplicates Public/configured-channel, DM, simple/multipart ACK, advert, authenticated PATH, and correlated TRACE traffic with bounded semantic authorities plus the upstream-compatible 160-entry boot-local hash table. Exact-candidate controlled-peer RF must still prove no ACK/retry storms before this item closes.
 9. Implement #74: a Home-themed Messages root with two large Public and Direct-message destinations, then familiar left/right chat bubbles, truthful delivery metadata, sticky compose entry, and simple empty/offline/failure states.
 10. #75's bounded software slice is merged: user-visible Network is Nodes, and PR #165 adds truthful exact-role totals in a compact header over the existing bounded node/contact list. Remaining detail/capability actions, live-update stress, exact-candidate physical UI, and full #75/WP-16 acceptance remain open.
 11. #76 software is merged: More is Tools, the five-item icon-plus-text dock uses 44x44-or-larger targets, Home Network is Nodes, and the large Device status block is replaced by five evidence-backed status actions. Exact-candidate pixels, touch, focus, accessibility, lifecycle/UI-task, and 1,000-transition acceptance remain open.

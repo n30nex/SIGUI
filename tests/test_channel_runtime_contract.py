@@ -106,10 +106,14 @@ def test_tx_and_rx_use_exact_unique_channel_keys_before_side_effects():
     assert "d1l_meshcore_service_send_channel" in service_header
     assert "d1l_meshcore_service_send_active_channel" in service_header
 
-    append_rx = c_function(service, "static void append_channel_message_store_rx(")
+    append_rx = c_function(
+        service,
+        "static d1l_channel_rx_store_result_t append_channel_message_store_rx(",
+    )
     assert "sanitize_note(author, sizeof(author)," in append_rx
     assert 'channel_name && channel_name[0] ? channel_name : "Channel"' in append_rx
     assert "snprintf(author" not in append_rx
+    assert ".admitted = message_seq != 0U" in append_rx
     sanitizer = c_function(service, "static void sanitize_note(")
     assert "out + 1U < dest_size" in sanitizer
     assert "c < 32 || c > 126" in sanitizer

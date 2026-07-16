@@ -98,7 +98,18 @@ def test_service_revalidates_every_live_admin_binding_and_zeroizes_copies() -> N
     assert "if (!admin_response_considered)" in path_rx
     decrypted = path_rx[path_rx.index("uint8_t plain["):]
     before_cleanup, cleanup = decrypted.split("path_candidate_cleanup:", 1)
-    assert before_cleanup.count("goto path_candidate_cleanup;") == 3
+    cleanup_branches = (
+        ("if (!d1l_meshcore_path_plain_decode", "uint8_t packet_hash["),
+        ("if (packet_hash_ready && d1l_meshcore_packet_hash_cache_contains", "uint8_t replay_identity["),
+        ("esp_err_t ret = calc_path_replay_identity", "if (!d1l_meshcore_path_replay_take"),
+        ("if (!d1l_meshcore_path_replay_take", "d1l_contact_entry_t learned_contact"),
+        ("ret = d1l_contact_store_update_path_from_source", "} else {"),
+    )
+    for start, end in cleanup_branches:
+        branch = before_cleanup[before_cleanup.index(start):]
+        branch = branch[:branch.index(end)]
+        assert "goto path_candidate_cleanup;" in branch
+    assert before_cleanup.count("goto path_candidate_cleanup;") == len(cleanup_branches)
     assert "continue;" not in before_cleanup
     assert "return;" not in before_cleanup
     assert cleanup.count("secure_zero_bytes(plain, sizeof(plain));") == 1

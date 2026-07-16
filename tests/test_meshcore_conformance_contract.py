@@ -160,7 +160,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         summary["implemented_requirement_count"],
         summary["partial_requirement_count"],
         summary["missing_requirement_count"],
-    ) == (8, 8, 0)
+    ) == (9, 7, 0)
     assert (
         summary["implemented_fuzz_target_count"],
         summary["partial_fuzz_target_count"],
@@ -168,10 +168,10 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
     ) == (2, 1, 5)
     assert summary["oracle_semantic_vectors"] == 915
     assert summary["unique_referenced_oracle_semantic_vectors"] == 890
-    assert summary["production_suite_count"] == 7
-    assert summary["production_scenario_count"] == 41
+    assert summary["production_suite_count"] == 8
+    assert summary["production_scenario_count"] == 53
     assert summary["companion_upstream_suite_count"] == 1
-    assert summary["companion_upstream_case_count"] == 5
+    assert summary["companion_upstream_case_count"] == 10
     assert [suite["id"] for suite in summary["production_host_suites"]] == [
         "admin_dispatch",
         "runtime_queue_fairness",
@@ -180,13 +180,17 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "time_service_migration_integration",
         "text_admission",
         "advert_replay_admission",
+        "packet_hash_and_advert_dedupe",
     ]
     assert summary["companion_upstream_suites"] == [
         {
             "id": "pinned_signed_advert_runtime",
             "artifact_type": "d1l_meshcore_signed_advert_semantic_runtime",
             "capability": "identity_signed_advert_semantic_runtime",
-            "case_ids": list(conformance.SIGNED_ADVERT_REPLAY_OUTCOME_KEYS),
+            "case_ids": [
+                *conformance.SIGNED_ADVERT_REPLAY_OUTCOME_KEYS,
+                *conformance.SIGNED_ADVERT_PACKET_HASH_OUTCOME_KEYS,
+            ],
             "identical_wire_hash_case": "identical_wire_hash_suppressed",
             "closure_ready": False,
         }
@@ -209,8 +213,8 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         dependency_verification,
     )
     assert source_verification["verified"] is True
-    assert dependency_verification["dependency_count"] == 58
-    assert dependency_verification["translation_unit_count"] == 28
+    assert dependency_verification["dependency_count"] == 63
+    assert dependency_verification["translation_unit_count"] == 33
     assert dependency_verification["dependencies"] == sorted(
         conformance.EXPECTED_WP05_SOURCE_PATHS
     )
@@ -229,16 +233,17 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "time_service_migration_semantic",
         "meshcore_text_plaintext_semantic",
         "meshcore_advert_admission_semantic",
+        "meshcore_packet_hash_semantic",
     ):
         assert binary in commands
-    assert commands.count("-fsanitize=address,undefined") == 7
+    assert commands.count("-fsanitize=address,undefined") == 8
     assert not re.search(r"\bCOM\d+\b", commands, re.IGNORECASE)
 
     build_plans = conformance.production_semantic_command_plan("clang-18")
     dependency_plans = conformance.production_semantic_dependency_command_plan(
         "clang-18"
     )
-    assert len(build_plans) == 7
+    assert len(build_plans) == 8
     assert len(dependency_plans) == sum(
         len(spec["sources"])
         for spec in conformance.production_semantic_suite_specs()
@@ -285,6 +290,9 @@ def test_signed_advert_runtime_binding_is_exact_commit_and_canonical():
     binding = conformance.bind_signed_advert_runtime_receipt(receipt, commit)
 
     assert conformance.signed_advert_runtime_binding_valid(binding, commit)
+    assert conformance.signed_advert_runtime_binding_valid(
+        json.loads(json.dumps(binding, sort_keys=True)), commit
+    )
     assert binding["timestamp_replay_case_count"] == 5
     assert binding["timestamp_replay_rejection_count"] == 3
     assert binding["timestamp_newer_acceptance_count"] == 2
@@ -310,6 +318,14 @@ def test_signed_advert_runtime_binding_is_exact_commit_and_canonical():
             receipt,
             commit,
         )
+    assert binding["packet_hash_case_count"] == 5
+    assert binding["packet_hash_outcomes"] == {
+        key: True for key in conformance.SIGNED_ADVERT_PACKET_HASH_OUTCOME_KEYS
+    }
+    assert binding["simple_mesh_table_receipt"] == {
+        "lookups": 10,
+        "flood_duplicates": 3,
+    }
 
     other_time = copy.deepcopy(receipt)
     other_time["generated_at"] = "2099-01-01T00:00:00+00:00"
@@ -484,9 +500,9 @@ def test_production_service_uses_the_codec_exercised_by_the_harness():
 
     assert '#include "mesh/meshcore_wire.h"' in service
     assert '"mesh/meshcore_wire.c"' in cmake
-    # Channel, DM, ACK, PATH, advert, and authenticated admin RESPONSE each
-    # enter through the same fail-closed production decoder.
-    assert service.count("d1l_meshcore_wire_decode_v1(") == 6
+    # Channel, DM, ACK, PATH, TRACE hash binding, advert, and authenticated
+    # admin RESPONSE each enter through the same fail-closed decoder.
+    assert service.count("d1l_meshcore_wire_decode_v1(") == 7
     assert service.count("d1l_meshcore_wire_decode(") == 0
     ack_builder = service.split("static esp_err_t build_dm_ack_response", 1)[1].split(
         "static bool dispatch_bounded_dm_ack", 1
@@ -578,7 +594,7 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["scope"]["packet_semantics_covered"] is False
     assert report["scope"]["bounded_production_semantics_covered"] is True
     assert report["wp05_semantic_matrix"]["closure_ready"] is False
-    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 41
+    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 53
     assert report["signed_advert_runtime"] is None
     semantic_source = report["wp05_semantic_matrix"]["source_verification"]
     assert semantic_source["pins_verified"] is True

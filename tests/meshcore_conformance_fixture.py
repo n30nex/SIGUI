@@ -56,23 +56,69 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/mesh/contact_uri.h",
         "main/mesh/meshcore_advert_admission.c",
         "main/mesh/meshcore_advert_admission.h",
+        "main/mesh/meshcore_packet_hash.c",
+        "main/mesh/meshcore_packet_hash.h",
         "main/mesh/meshcore_path_state.c",
         "main/mesh/meshcore_path_state.h",
+        "main/mesh/meshcore_wire.c",
+        "main/mesh/meshcore_wire.h",
         "main/mesh/node_store.c",
         "main/mesh/node_store.h",
+        "main/mesh/store_lock.h",
+        "tests/native/esp_nvs_stubs.c",
+        "tests/native/mbedtls_md_stub.c",
+        "tests/native/mock_esp_nvs.h",
         "tests/native/store_behavior_test.c",
         "tests/native/stubs/esp_attr.h",
+        "tests/native/stubs/esp_err.h",
+        "tests/native/stubs/esp_timer.h",
+        "tests/native/stubs/freertos/FreeRTOS.h",
+        "tests/native/stubs/freertos/semphr.h",
+        "tests/native/stubs/mbedtls/md.h",
+        "tests/native/stubs/nvs.h",
+    }
+    packet_hash = {
+        "main/mesh/meshcore_packet_hash.c",
+        "main/mesh/meshcore_packet_hash.h",
+        "main/mesh/meshcore_wire.c",
+        "main/mesh/meshcore_wire.h",
+        "tests/native/meshcore_packet_hash_test.c",
+        "tests/native/stubs/esp_err.h",
+        "tests/native/stubs/mbedtls/md.h",
+    }
+    time_service = {
+        "main/app/identity_state.h",
+        "main/app/settings_envelope.c",
+        "main/app/settings_envelope.h",
+        "main/app/settings_model.h",
+        "main/app/settings_protocol_migration.c",
+        "main/app/settings_protocol_migration.h",
+        "main/app/settings_time_checkpoint.c",
+        "main/app/settings_time_checkpoint.h",
+        "main/hal/rp2040_bridge.h",
+        "main/mesh/meshcore_radio_profile.h",
+        "main/mesh/store_lock.h",
+        "main/platform/time_display.c",
+        "main/platform/time_display.h",
+        "main/platform/time_service.c",
+        "main/platform/time_service.h",
+        "main/platform/time_service_core.c",
+        "main/platform/time_service_core.h",
+        "main/storage/map_tile_store.h",
+        "main/storage/retained_blob_store.h",
+        "main/storage/storage_status.h",
+        "tests/native/esp_nvs_stubs.c",
+        "tests/native/mock_esp_nvs.h",
+        "tests/native/stubs/esp_err.h",
+        "tests/native/stubs/esp_netif_sntp.h",
+        "tests/native/stubs/esp_timer.h",
+        "tests/native/stubs/freertos/FreeRTOS.h",
+        "tests/native/stubs/freertos/semphr.h",
+        "tests/native/stubs/nvs.h",
+        "tests/native/stubs/sys/time.h",
+        "tests/native/time_service_checkpoint_integration_test.c",
     }
     all_dependencies = set(matrix["source_pins"])
-    time_service = (
-        all_dependencies
-        - admin
-        - runtime
-        - trace
-        - text_admission
-        - advert_admission
-        - {"tests/native/settings_protocol_migration_test.c"}
-    )
     suite_sets = [
         admin,
         runtime,
@@ -81,6 +127,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         time_service,
         text_admission,
         advert_admission,
+        packet_hash,
     ]
     suite_specs = conformance.production_semantic_suite_specs()
     commands = [

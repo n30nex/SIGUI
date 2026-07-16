@@ -45,14 +45,21 @@
   and self-advert suppression plus balanced packet allocation/release. Its
   push/PR Actions `29306794376` / `29306795470` each pass 914 host tests and 28
   checksum-contract tests. This closes only the signed-advert runtime slice.
-- [ ] Merge and bank exact-main Actions evidence for the advert replay/conformance
-  binding slice. Source coverage is 8 implemented / 8 partial / 0 missing WP-05
-  requirements, 7 production suites / 41 scenarios / 28 translation units / 58
-  source pins, plus 1 pinned-upstream companion suite / 5 distinct signed replay
-  cases. The conformance receipt must bind the exact runtime canonical SHA-256,
-  every Actions/package/audit consumer must recompute and compare that binding,
-  identical-wire hash suppression must remain separate, and the receipt remains
-  `closure_ready=false`; source or premerge success is not release closure.
+- [ ] Merge and bank exact-main Actions evidence for the dependent advert
+  replay/packet-hash conformance slice. Source coverage is 9 implemented / 7
+  partial / 0 missing WP-05 requirements, 8 production suites / 53 scenarios /
+  33 translation units / 63 source pins, plus 1 pinned-upstream companion suite
+  / 10 cases: five signed timestamp outcomes and five packet-hash/real
+  `SimpleMeshTables` outcomes. The conformance receipt must bind the exact
+  runtime canonical SHA-256 and exact table receipt, every
+  Actions/package/audit consumer must recompute and compare that binding, and
+  the production 160-entry boot-local cache must remain subordinate to channel
+  and DM retained admission, exact ACK owner revisions, authenticated PATH
+  replay, TRACE correlation, and advert admission receipts. Host source/native
+  coverage now exercises those Public/channel, DM, simple/multipart ACK, PATH,
+  TRACE, and advert bindings. The receipt remains `closure_ready=false`;
+  exact-candidate Actions, controlled-peer RF/hardware, retained recovery,
+  source-only success, or premerge success is not release closure.
 - [x] PR #101 merges the bounded flags-zero explicit-loop TRACE software slice. Head `db56604b52aa4f40606ad9e2d5d1ecd516cd9818`, synthetic merge `f93734aedc2a866abe727340582310fadacfbad0`, and merged main `4a85e827c251c6d1d22d276c7a40d71571b23563` share tree `bfb5627fc2b241756c68b276eec7892fafcb6f3c`; push/PR/main Actions `29339731042`, `29339752145`, and `29340630481` pass, with 15/15 API ZIP digests and 138/138 manifest entries verified. Portable aggregate SHA-256 is `e839fba55eab315fd03014aeb033c4389297905dba8e33ba1a9c34ee19fb1f76`.
 - [x] PR #103 merges fail-closed persisted-identity classification and exact-full-key verified-contact storage primitives. Head/synthetic/main share tree `1866d68023c8e5fb9969595a5fb47ba7c24b4ca3`; push/PR/main Actions `29341936653`, `29341936551`, and `29343533444` pass with 15/15 ZIP digests and 138/138 entries verified. Portable aggregate SHA-256 is `67295cd1c4ffbb8ffba22bd78049e7f1bb8bc0a0edb0c84d13d803eeaa24ae7e`.
 - [x] PR #102 merges the pinned host-only authenticated-admin transcript fixture. Corrected head/synthetic/main share tree `dcec8d1ff0835a3dfc585d50b36393ea0d94dff9`; push/PR/main Actions `29344396606`, `29344401273`, and `29345953951` pass with 15/15 ZIP digests and 138/138 entries verified. Portable aggregate SHA-256 is `f8f7c382fb13cf1cd524678692f389b83b66c3a047c723a44f248be7a5d75283`.
