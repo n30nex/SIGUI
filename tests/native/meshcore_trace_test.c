@@ -44,6 +44,78 @@ static size_t build_terminal(uint32_t tag, uint32_t auth_code,
                              raw);
 }
 
+static int test_contact_plan(void)
+{
+    const uint8_t direct_path[] = {0x11U, 0x22U, 0x33U};
+    const uint8_t original_path[] = {0x11U, 0x22U, 0x33U};
+    d1l_meshcore_contact_trace_plan_t plan = {0};
+    CHECK(d1l_meshcore_trace_plan_contact(
+              direct_path, 3U, false, 0x44U, &plan) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_OK);
+    const uint8_t chat_expected[] = {
+        0x11U, 0x22U, 0x33U, 0x22U, 0x11U,
+    };
+    CHECK(!plan.includes_contact);
+    CHECK(plan.path_hops == sizeof(chat_expected));
+    CHECK(memcmp(plan.path_hashes, chat_expected,
+                 sizeof(chat_expected)) == 0);
+
+    memset(&plan, 0, sizeof(plan));
+    CHECK(d1l_meshcore_trace_plan_contact(
+              direct_path, 3U, true, 0x44U, &plan) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_OK);
+    const uint8_t server_expected[] = {
+        0x11U, 0x22U, 0x33U, 0x44U,
+        0x33U, 0x22U, 0x11U,
+    };
+    CHECK(plan.includes_contact);
+    CHECK(plan.path_hops == sizeof(server_expected));
+    CHECK(memcmp(plan.path_hashes, server_expected,
+                 sizeof(server_expected)) == 0);
+    CHECK(memcmp(direct_path, original_path, sizeof(direct_path)) == 0);
+
+    memset(&plan, 0, sizeof(plan));
+    CHECK(d1l_meshcore_trace_plan_contact(
+              NULL, 0U, true, 0x7AU, &plan) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_OK);
+    CHECK(plan.includes_contact && plan.path_hops == 1U &&
+          plan.path_hashes[0] == 0x7AU);
+
+    d1l_meshcore_contact_trace_plan_t unchanged;
+    memset(&unchanged, 0xA5, sizeof(unchanged));
+    const d1l_meshcore_contact_trace_plan_t before = unchanged;
+    CHECK(d1l_meshcore_trace_plan_contact(
+              NULL, 0U, false, 0U, &unchanged) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY);
+    CHECK(memcmp(&unchanged, &before, sizeof(unchanged)) == 0);
+    CHECK(d1l_meshcore_trace_plan_contact(
+              direct_path, (uint8_t)(0x40U | 3U), true, 0x44U,
+              &unchanged) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH);
+    CHECK(memcmp(&unchanged, &before, sizeof(unchanged)) == 0);
+    CHECK(d1l_meshcore_trace_plan_contact(
+              direct_path, 3U, true, 0x44U, NULL) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID);
+    CHECK(d1l_meshcore_trace_plan_contact(
+              NULL, 1U, false, 0U, &unchanged) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID);
+    CHECK(memcmp(&unchanged, &before, sizeof(unchanged)) == 0);
+
+    uint8_t long_path[32];
+    for (size_t i = 0U; i < sizeof(long_path); ++i) {
+        long_path[i] = (uint8_t)(i + 1U);
+    }
+    CHECK(d1l_meshcore_trace_plan_contact(
+              long_path, 32U, false, 0U, &plan) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_OK);
+    CHECK(plan.path_hops == D1L_MESHCORE_TRACE_MAX_HOPS);
+    CHECK(d1l_meshcore_trace_plan_contact(
+              long_path, 32U, true, 0x55U, &unchanged) ==
+          D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG);
+    CHECK(memcmp(&unchanged, &before, sizeof(unchanged)) == 0);
+    return 0;
+}
+
 static int test_source_and_terminal(void)
 {
     CHECK(strcmp(D1L_MESHCORE_TRACE_RETAINED_TARGET, "trace_last") == 0);
@@ -245,6 +317,7 @@ static int test_tracker(void)
 
 int main(void)
 {
+    CHECK(test_contact_plan() == 0);
     CHECK(test_source_and_terminal() == 0);
     CHECK(test_tracker() == 0);
     puts("meshcore_trace_test: ok");

@@ -203,44 +203,6 @@ static void print_hex_bytes_json(const uint8_t *bytes, size_t len)
     putchar('"');
 }
 
-static int console_hex_nibble(char c)
-{
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-        return c - 'a' + 10;
-    }
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10;
-    }
-    return -1;
-}
-
-static bool parse_trace_loop_path(const char *text, uint8_t *out_hashes,
-                                  size_t *out_hops)
-{
-    if (!text || !out_hashes || !out_hops) {
-        return false;
-    }
-    const size_t hex_len = strlen(text);
-    if (hex_len < 2U || (hex_len & 1U) != 0U ||
-        hex_len > D1L_MESHCORE_TRACE_MAX_HOPS * 2U) {
-        return false;
-    }
-    const size_t hops = hex_len / 2U;
-    for (size_t i = 0; i < hops; ++i) {
-        const int hi = console_hex_nibble(text[i * 2U]);
-        const int lo = console_hex_nibble(text[i * 2U + 1U]);
-        if (hi < 0 || lo < 0) {
-            return false;
-        }
-        out_hashes[i] = (uint8_t)((hi << 4) | lo);
-    }
-    *out_hops = hops;
-    return true;
-}
-
 static void print_retained_sd_store_json(const d1l_retained_blob_store_sd_stats_t *stats)
 {
     const d1l_retained_blob_store_sd_stats_t empty = {0};
@@ -1722,7 +1684,7 @@ static void cmd_mesh_status(void)
            (unsigned long)status.runtime_task_heartbeat,
            (unsigned long)status.runtime_task_stack_free_words,
            (unsigned long long)status.runtime_last_event_monotonic_us);
-    printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"flags_zero_direct_only\":true,\"requires_explicit_loop\":true,\"contact_trace_supported\":false,\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to host-verified explicit-loop source, terminal parsing, and correlation\"}\n",
+    printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"flags_zero_direct_only\":true,\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":true,\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to a runtime-derived canonical contact loop, terminal parsing, and correlation\"}\n",
            (unsigned long)status.trace_tx_queued,
            (unsigned long)status.trace_rx_matched,
            (unsigned long)status.trace_rx_duplicates,
@@ -5316,36 +5278,58 @@ static size_t route_trace_best_index(const d1l_route_entry_t *entries, size_t co
     return best;
 }
 
-static void cmd_routes_trace_send(const char *line)
+static void cmd_routes_trace_contact(const char *line)
 {
-    const char *arg = line + strlen("routes trace send ");
+    const char *arg = line + strlen("routes trace contact ");
     while (*arg == ' ') {
         arg++;
     }
-    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS] = {0};
-    size_t path_hops = 0U;
-    if (!parse_trace_loop_path(arg, path_hashes, &path_hops)) {
-        err_result("routes trace send", "INVALID_LOOP_PATH",
-                   "usage: routes trace send <2-126 hex chars>; path must explicitly return to this node");
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result("routes trace contact", "INVALID_FINGERPRINT",
+                   "usage: routes trace contact <16-hex-fingerprint>");
+        return;
+    }
+    const char *tail = arg + strlen(fingerprint);
+    while (*tail == ' ') {
+        tail++;
+    }
+    if (*tail != '\0') {
+        err_result("routes trace contact", "INVALID_FINGERPRINT",
+                   "usage: routes trace contact <16-hex-fingerprint>");
         return;
     }
 
-    uint32_t tag = 0U;
-    const esp_err_t ret = d1l_meshcore_service_send_trace_loop(
-        path_hashes, path_hops, &tag);
+    const esp_err_t ret =
+        d1l_meshcore_service_send_trace_contact(fingerprint);
     if (ret != ESP_OK) {
-        err_result("routes trace send", esp_err_to_name(ret),
-                   ret == ESP_ERR_INVALID_STATE ?
-                   "another TRACE is pending or the radio is busy" :
-                   "could not queue the flags-zero direct TRACE");
+        const char *detail =
+            ret == ESP_ERR_NOT_FOUND ?
+                "exact canonical contact not found" :
+            ret == ESP_ERR_NOT_SUPPORTED ?
+                "contact route has no traceable loop or uses an unsupported hash width" :
+            ret == ESP_ERR_INVALID_SIZE ?
+                "derived contact route loop is too long" :
+            ret == ESP_ERR_INVALID_STATE ?
+                "contact/path is noncanonical, missing, expired, preboot, ambiguous, or another radio operation is active" :
+                "could not queue the contact-derived flags-zero TRACE";
+        err_result("routes trace contact", esp_err_to_name(ret), detail);
         return;
     }
 
-    ok_begin("routes trace send");
-    printf(",\"queued\":true,\"tag\":%lu,\"tag_hex\":\"%08lX\",\"path_hops\":%u,\"path_hashes_hex\":",
-           (unsigned long)tag, (unsigned long)tag, (unsigned)path_hops);
+    d1l_meshcore_trace_snapshot_t trace = {0};
+    d1l_meshcore_service_trace_snapshot(&trace);
+    const uint32_t tag = trace.pending ? trace.pending_tag : trace.last_tag;
+    const uint8_t path_hops = trace.pending ?
+        trace.pending_path_hops : trace.last_path_hops;
+    const uint8_t *path_hashes = trace.pending ?
+        trace.pending_path_hashes : trace.last_path_hashes;
+    ok_begin("routes trace contact");
+    printf(",\"fingerprint\":\"%s\",\"queued\":true,\"pending\":%s,\"tag\":%lu,\"tag_hex\":\"%08lX\",\"path_hops\":%u,\"path_hashes_hex\":",
+           fingerprint, bool_json(trace.pending), (unsigned long)tag,
+           (unsigned long)tag, (unsigned)path_hops);
     print_hex_bytes_json(path_hashes, path_hops);
-    printf(",\"route\":\"direct\",\"flags\":0,\"requires_explicit_loop\":true,\"contact_trace_supported\":false,\"generic_reply_packet\":false,\"hardware_verified\":false,\"note\":\"TRACE accepted for transmit; completion requires the same tag, opaque auth code, and immutable explicit loop path\"}\n");
+    printf(",\"route\":\"direct\",\"route_source\":\"current_boot_proven_contact_path\",\"flags\":0,\"path_hash_bytes\":1,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"public_rf_tx\":false,\"targeted_trace_rf_tx\":true,\"hardware_verified\":false,\"note\":\"Runtime derived the immutable loop from the exact canonical contact and current proven path; repeater/room routes include the contact hash while chat/sensor routes pivot at the farthest proven repeater\"}\n");
 }
 
 static void cmd_routes_trace_status(void)
@@ -5394,7 +5378,7 @@ static void cmd_routes_trace_status(void)
         printf("%s%d", i ? "," : "",
                (int)trace.last_path_snrs_quarter_db[i]);
     }
-    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,\"route_summary_durable_verified\":false,\"packet_preview_retained\":%s,\"per_hop_complete\":false,\"packet_preview_bytes\":%u},\"correlation_scope\":\"tag_auth_immutable_explicit_loop\",\"last_detail_scope\":\"boot_local\",\"flags_zero_direct_only\":true,\"requires_explicit_loop\":true,\"contact_trace_supported\":false,\"hardware_verified\":false,\"note\":\"%s; full per-hop detail is boot-local and TRACE forwarding/RF remain unverified\"}\n",
+    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,\"route_summary_durable_verified\":false,\"packet_preview_retained\":%s,\"per_hop_complete\":false,\"packet_preview_bytes\":%u},\"correlation_scope\":\"tag_auth_immutable_contact_loop\",\"last_detail_scope\":\"boot_local\",\"flags_zero_direct_only\":true,\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":true,\"hardware_verified\":false,\"note\":\"%s; full per-hop detail is boot-local and multi-byte TRACE forwarding/RF remain unverified\"}\n",
            trace.last_rssi_dbm, trace.last_radio_snr_quarter_db,
            bool_json(trace.last_retention_attempted),
            bool_json(trace.last_route_summary_accepted),
@@ -5448,7 +5432,7 @@ static void cmd_routes_trace(const char *line)
         printf("%s", i ? "," : "");
         print_route_entry_json(&entries[i]);
     }
-    printf("],\"path_discovery_probe_supported\":true,\"path_discovery_probe_command\":\"routes probe <fingerprint>\",\"real_trace_contact_supported\":false,\"explicit_trace_command\":\"routes trace send <loop-path-hex>\",\"note\":\"This view combines retained route/contact evidence; routes probe sends a DM token that may elicit ACK/PATH evidence, not a TRACE packet\"}\n");
+    printf("],\"path_discovery_probe_supported\":true,\"path_discovery_probe_command\":\"routes probe <fingerprint>\",\"real_trace_contact_supported\":true,\"contact_trace_command\":\"routes trace contact <fingerprint>\",\"contact_trace_requires_current_boot_proven_path\":true,\"contact_trace_hash_bytes\":1,\"operator_trace_path_accepted\":false,\"hardware_verified\":false,\"note\":\"This view combines retained route/contact evidence; routes probe sends a labelled DM/PATH discovery request while routes trace contact sends a real contact-derived TRACE packet\"}\n");
 }
 
 static void cmd_routes_probe(const char *line)
@@ -5923,7 +5907,7 @@ static void cmd_help(void)
            "\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\","
            "\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\","
            "\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\","
-           "\"routes trace send <loop-path-hex>\",\"routes trace status\","
+           "\"routes trace contact <fingerprint>\",\"routes trace status\","
            "\"routes probe <fingerprint>\",\"routes clear\",\"packets\","
            "\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\","
            "\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\","
@@ -6138,8 +6122,8 @@ static void handle_line(const char *line)
         cmd_routes();
     } else if (strncmp(line, "routes detail ", 14) == 0) {
         cmd_routes_detail(line);
-    } else if (strncmp(line, "routes trace send ", 18) == 0) {
-        cmd_routes_trace_send(line);
+    } else if (strncmp(line, "routes trace contact ", 21) == 0) {
+        cmd_routes_trace_contact(line);
     } else if (strcmp(line, "routes trace status") == 0) {
         cmd_routes_trace_status();
     } else if (strncmp(line, "routes trace ", 13) == 0) {

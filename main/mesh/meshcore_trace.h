@@ -47,6 +47,20 @@ typedef struct {
 } d1l_meshcore_trace_tracker_t;
 
 typedef enum {
+    D1L_MESHCORE_CONTACT_TRACE_PLAN_OK = 0,
+    D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID,
+    D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH,
+    D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY,
+    D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG,
+} d1l_meshcore_contact_trace_plan_result_t;
+
+typedef struct {
+    bool includes_contact;
+    uint8_t path_hops;
+    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS];
+} d1l_meshcore_contact_trace_plan_t;
+
+typedef enum {
     D1L_MESHCORE_TRACE_CORRELATION_MATCHED = 0,
     D1L_MESHCORE_TRACE_CORRELATION_DUPLICATE,
     D1L_MESHCORE_TRACE_CORRELATION_UNMATCHED,
@@ -78,6 +92,74 @@ static inline uint32_t d1l_meshcore_trace_read_le32(const uint8_t *src)
            ((uint32_t)src[1] << 8U) |
            ((uint32_t)src[2] << 16U) |
            ((uint32_t)src[3] << 24U);
+}
+
+/*
+ * Derive the only contact TRACE loop accepted by DeskOS. The caller must
+ * first authorize one immutable, current-boot direct route. One-byte route
+ * hashes are copied in transmit order. Repeater and room contacts can forward
+ * TRACE, so their exact public-key hash is the pivot; chat and sensor contacts
+ * cannot, so the farthest proven repeater is the pivot. The return leg omits
+ * that pivot and reverses only the already-authorized route. No caller-supplied
+ * arbitrary loop can enter this helper.
+ */
+static inline d1l_meshcore_contact_trace_plan_result_t
+d1l_meshcore_trace_plan_contact(
+    const uint8_t *out_path,
+    uint8_t out_path_len,
+    bool contact_forwards_trace,
+    uint8_t contact_hash,
+    d1l_meshcore_contact_trace_plan_t *out_plan)
+{
+    if (!out_plan || !d1l_meshcore_wire_path_len_valid(out_path_len)) {
+        return D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
+    }
+    const uint8_t hash_bytes =
+        d1l_meshcore_wire_path_hash_size(out_path_len);
+    const uint8_t path_hops =
+        d1l_meshcore_wire_path_hash_count(out_path_len);
+    const uint8_t path_bytes =
+        d1l_meshcore_wire_path_byte_len(out_path_len);
+    if (hash_bytes != 1U) {
+        return D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH;
+    }
+    if (path_bytes > 0U && !out_path) {
+        return D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
+    }
+    if (path_hops == 0U && !contact_forwards_trace) {
+        return D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY;
+    }
+
+    const size_t loop_hops = contact_forwards_trace ?
+        (size_t)path_hops * 2U + 1U :
+        (size_t)path_hops * 2U - 1U;
+    if (loop_hops > D1L_MESHCORE_TRACE_MAX_HOPS) {
+        return D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG;
+    }
+
+    d1l_meshcore_contact_trace_plan_t plan = {
+        .includes_contact = contact_forwards_trace,
+        .path_hops = (uint8_t)loop_hops,
+    };
+    if (path_hops > 0U) {
+        memcpy(plan.path_hashes, out_path, path_hops);
+    }
+    size_t write_index = path_hops;
+    if (contact_forwards_trace) {
+        plan.path_hashes[write_index++] = contact_hash;
+        for (size_t i = path_hops; i > 0U; --i) {
+            plan.path_hashes[write_index++] = out_path[i - 1U];
+        }
+    } else {
+        for (size_t i = path_hops - 1U; i > 0U; --i) {
+            plan.path_hashes[write_index++] = out_path[i - 1U];
+        }
+    }
+    if (write_index != loop_hops) {
+        return D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
+    }
+    *out_plan = plan;
+    return D1L_MESHCORE_CONTACT_TRACE_PLAN_OK;
 }
 
 /* Every completed tag replaces the same bounded route-store summary row. */

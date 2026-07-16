@@ -1117,6 +1117,32 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert pending["trace_forwarding_and_path_discovery"]["blocked_by"] == (
         "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
     )
+    assert pending["trace_forwarding_and_path_discovery"]["owner"] == (
+        "d1l_production_contact_trace"
+    )
+    assert pending["trace_forwarding_and_path_discovery"][
+        "implemented_prerequisites"
+    ] == [
+        "trace_source_frames",
+        "fingerprint_only_current_boot_proven_contact_loop_dispatch",
+    ]
+    assert pending["trace_forwarding_and_path_discovery"][
+        "production_receipt"
+    ] == {
+        "id": "RCPT-WP04-CONTACT-TRACE-20260716",
+        "status": "implemented_pending_actions_and_rf_evidence",
+        "sources": [
+            "main/mesh/meshcore_service.c",
+            "main/mesh/meshcore_service.h",
+            "main/mesh/meshcore_trace.h",
+            "main/comms/usb_console.c",
+        ],
+        "scope": (
+            "fingerprint_only_exact_canonical_contact_current_boot_proven_"
+            "one_byte_route_loop_runtime_dispatch_no_operator_path_multi_"
+            "byte_ui_rf_evidence_hardware_evidence_or_closure"
+        ),
+    }
     assert pending["route_selection_and_forwarding"]["blocked_by"] == (
         "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
     )

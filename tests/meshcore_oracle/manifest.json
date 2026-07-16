@@ -69,6 +69,7 @@
   },
   "production_binding_sources": {
     "main/CMakeLists.txt": "d5c1e8d7b825454932c263594f93039ab4105e308abed849c0abc321c778b46b",
+    "main/comms/usb_console.c": "d9f4ccecfe56d561e3845bce42d2fe10d4cdf3db2e75c36d6890df3068ba35e0",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "3f895213e9cb8fdf5da67a01fac26df35aa542c6f2ffcf179d1e0d276a1d9e14",
     "main/mesh/contact_store.h": "2252ef58b703c6721a1fd77f2a1306d6ea4d9f419af5c996666a212a29752750",
@@ -86,11 +87,11 @@
     "main/mesh/meshcore_path_state.c": "f3e4071574a0a65cab1caa4ad285f64943a0770c82ac2df803328212d9db9d77",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
-    "main/mesh/meshcore_service.c": "189deddfb5a4335509d6d07cc6a8c98e8434293f554367336c9099a82db18dae",
-    "main/mesh/meshcore_service.h": "7c1a0e0b7a25cc29231853cb207781b3a94376f9c4a7c7f55680c528ac08b8e4",
+    "main/mesh/meshcore_service.c": "589d1ad45ba74d1758ed9cb1da0c83048eff2793c55d3e5f5f02593868555d45",
+    "main/mesh/meshcore_service.h": "2c774d5d254e67900cf7b8bac0d862bde1777e02e1dea2fdad321dd93ab12337",
     "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
-    "main/mesh/meshcore_trace.h": "efc3a08ffb6adda5310ca57eef31535fe7dadeb993aedda9fdb2814b891d41f7",
+    "main/mesh/meshcore_trace.h": "dcfd9d18f65555baa018412f1b7c9e6079a04b1b6ad89fda1452ec3943a6dc78",
     "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
     "main/mesh/user_text.c": "483bdcce4b6303acd7a0a82ab7607ed7655454f8e9096d46615aaebbb255bc6f",
     "main/mesh/user_text.h": "e75c7b84efe66bd961ae0cf94e28150fedf639d1aa2d9ef57caad817924e7517",
@@ -754,8 +755,23 @@
     {
       "id": "trace_forwarding_and_path_discovery",
       "status": "pending",
-      "owner": "unassigned",
-      "blocked_by": "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
+      "owner": "d1l_production_contact_trace",
+      "blocked_by": "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures",
+      "implemented_prerequisites": [
+        "trace_source_frames",
+        "fingerprint_only_current_boot_proven_contact_loop_dispatch"
+      ],
+      "production_receipt": {
+        "id": "RCPT-WP04-CONTACT-TRACE-20260716",
+        "status": "implemented_pending_actions_and_rf_evidence",
+        "sources": [
+          "main/mesh/meshcore_service.c",
+          "main/mesh/meshcore_service.h",
+          "main/mesh/meshcore_trace.h",
+          "main/comms/usb_console.c"
+        ],
+        "scope": "fingerprint_only_exact_canonical_contact_current_boot_proven_one_byte_route_loop_runtime_dispatch_no_operator_path_multi_byte_ui_rf_evidence_hardware_evidence_or_closure"
+      }
     },
     {
       "id": "login_request_response_admin",
