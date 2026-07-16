@@ -45,7 +45,7 @@ def test_usb_status_is_fail_closed_and_does_not_log_supplied_confirmation():
     assert '"time migrate-legacy "' in console
     assert '\\"supplied_confirmation_logged\\":false' in console
     assert '\\"settings_reset_preserves_protocol_migration\\":true' in console
-    assert '\\"factory_reset_supported\\":false' in console
+    assert '\\"factory_reset_supported\\":true' in console
     assert "wipe_console_bytes(line, sizeof(line));" in console
     assert console.index("handle_line(line);") < console.index(
         "wipe_console_bytes(line, sizeof(line));", console.index("handle_line(line);")

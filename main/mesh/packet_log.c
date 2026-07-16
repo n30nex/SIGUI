@@ -10,6 +10,7 @@
 #include "hal/rp2040_bridge.h"
 #include "mesh/route_store_worker.h"
 #include "mesh/store_lock.h"
+#include "storage/factory_reset.h"
 #include "storage/retained_blob_store.h"
 
 #define D1L_PACKET_LOG_KEY "ring"
@@ -326,6 +327,14 @@ static esp_err_t probe_sd_history_slot(
     if (out_entry) {
         memset(out_entry, 0, sizeof(*out_entry));
     }
+    bool lineage_ready = false;
+    const esp_err_t lineage_ret =
+        d1l_retained_blob_store_sd_media_lineage_ready(
+            D1L_RETAINED_BLOB_STORE_PACKET_LOG, expected_generation,
+            &lineage_ready);
+    if (lineage_ret != ESP_OK || !lineage_ready) {
+        return lineage_ret == ESP_OK ? ESP_ERR_INVALID_STATE : lineage_ret;
+    }
     if (!packet_backend_generation_matches(expected_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -392,6 +401,18 @@ static bool read_sd_history_entry(uint32_t seq, d1l_packet_log_entry_t *out_entr
         !d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)) {
         return false;
     }
+    d1l_retained_blob_store_backend_state_t backend = {0};
+    if (!d1l_retained_blob_store_backend_state(
+            D1L_RETAINED_BLOB_STORE_PACKET_LOG, &backend) ||
+        !backend.enabled) {
+        return false;
+    }
+    bool lineage_ready = false;
+    if (d1l_retained_blob_store_sd_media_lineage_ready(
+            D1L_RETAINED_BLOB_STORE_PACKET_LOG, backend.generation,
+            &lineage_ready) != ESP_OK || !lineage_ready) {
+        return false;
+    }
 
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
     if (!history_segment_path(seq, path, sizeof(path))) {
@@ -406,7 +427,12 @@ static bool read_sd_history_entry(uint32_t seq, d1l_packet_log_entry_t *out_entr
                                                        (uint8_t *)&record,
                                                        sizeof(record), &result,
                                                        D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
-    if (ret != ESP_OK || result.length != sizeof(record) ||
+    d1l_retained_blob_store_backend_state_t final_backend = {0};
+    if (!d1l_retained_blob_store_backend_state(
+            D1L_RETAINED_BLOB_STORE_PACKET_LOG, &final_backend) ||
+        !final_backend.enabled ||
+        final_backend.generation != backend.generation || ret != ESP_OK ||
+        result.length != sizeof(record) ||
         !history_record_is_valid(&record, seq)) {
         return false;
     }
@@ -426,6 +452,14 @@ static esp_err_t append_sd_history_for_generation(
 {
     if (!entry) {
         return ESP_ERR_INVALID_ARG;
+    }
+    bool lineage_ready = false;
+    const esp_err_t lineage_ret =
+        d1l_retained_blob_store_sd_media_lineage_ready(
+            D1L_RETAINED_BLOB_STORE_PACKET_LOG, expected_generation,
+            &lineage_ready);
+    if (lineage_ret != ESP_OK || !lineage_ready) {
+        return lineage_ret == ESP_OK ? ESP_ERR_INVALID_STATE : lineage_ret;
     }
     /* A journal append/truncate is destructive in place, so it is forbidden
      * until the compact primary for this exact mounted generation has been
@@ -1091,6 +1125,28 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
 {
     if (!packet_backend_generation_matches(expected_generation)) {
         return note_reconcile_failure(ESP_ERR_INVALID_STATE);
+    }
+
+    bool lineage_ready = false;
+    esp_err_t lineage_ret =
+        d1l_retained_blob_store_sd_media_lineage_ready(
+            D1L_RETAINED_BLOB_STORE_PACKET_LOG, expected_generation,
+            &lineage_ready);
+    if (lineage_ret != ESP_OK) {
+        return note_reconcile_failure(lineage_ret);
+    }
+    if (!lineage_ready) {
+        lineage_ret = clear_sd_history_for_generation(expected_generation);
+        if (lineage_ret == ESP_OK) {
+            lineage_ret =
+                d1l_retained_blob_store_complete_packet_reset_lineage(
+                    expected_generation);
+        }
+        if (lineage_ret != ESP_OK ||
+            !packet_backend_generation_matches(expected_generation)) {
+            return note_reconcile_failure(
+                lineage_ret == ESP_OK ? ESP_ERR_INVALID_STATE : lineage_ret);
+        }
     }
 
     memset(&s_sd_primary_blob_scratch, 0, sizeof(s_sd_primary_blob_scratch));

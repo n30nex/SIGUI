@@ -127,6 +127,17 @@ esp_err_t d1l_retained_blob_store_erase_sd_primary_guarded(
     d1l_retained_blob_store_id_t store_id,
     const char *key,
     uint32_t expected_generation);
+/* True only when the currently mounted backend generation carries the exact
+ * durable marker for the onboard post-reset lineage and the onboard fence has
+ * completed. Missing/mismatched markers are a normal false result. */
+esp_err_t d1l_retained_blob_store_sd_media_lineage_ready(
+    d1l_retained_blob_store_id_t store_id,
+    uint32_t expected_backend_generation, bool *out_ready);
+/* packet_log.c calls this only after deleting every exact segment path for the
+ * same backend generation. It then erases the primary and clears the durable
+ * reset lineage fence as one fail-closed completion sequence. */
+esp_err_t d1l_retained_blob_store_complete_packet_reset_lineage(
+    uint32_t expected_backend_generation);
 esp_err_t d1l_retained_blob_store_erase_nvs_fallback(
     d1l_retained_blob_store_id_t store_id,
     const char *key);

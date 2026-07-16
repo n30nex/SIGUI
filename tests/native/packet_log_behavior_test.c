@@ -338,6 +338,29 @@ bool d1l_retained_blob_store_backend_state(
     return true;
 }
 
+esp_err_t d1l_retained_blob_store_sd_media_lineage_ready(
+    d1l_retained_blob_store_id_t store_id,
+    uint32_t expected_backend_generation, bool *out_ready)
+{
+    assert(store_id == D1L_RETAINED_BLOB_STORE_PACKET_LOG);
+    if (!out_ready) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_sd_enabled || expected_backend_generation != s_backend_generation) {
+        *out_ready = false;
+        return ESP_ERR_INVALID_STATE;
+    }
+    *out_ready = true;
+    return ESP_OK;
+}
+
+esp_err_t d1l_retained_blob_store_complete_packet_reset_lineage(
+    uint32_t expected_backend_generation)
+{
+    return s_sd_enabled && expected_backend_generation == s_backend_generation ?
+        ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
 esp_err_t d1l_retained_blob_store_read_sd_primary(
     d1l_retained_blob_store_id_t store_id, const char *key,
     void *dst, size_t *len_inout)

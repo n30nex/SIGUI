@@ -183,6 +183,25 @@ bool d1l_retained_blob_store_backend_state(
     return true;
 }
 
+esp_err_t d1l_retained_blob_store_sd_media_lineage_ready(
+    d1l_retained_blob_store_id_t store_id,
+    uint32_t expected_backend_generation, bool *out_ready)
+{
+    if (!out_ready || store_id != D1L_RETAINED_BLOB_STORE_PACKET_LOG ||
+        !s_use_packet_sd || expected_backend_generation != 1U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    *out_ready = true;
+    return ESP_OK;
+}
+
+esp_err_t d1l_retained_blob_store_complete_packet_reset_lineage(
+    uint32_t expected_backend_generation)
+{
+    return s_use_packet_sd && expected_backend_generation == 1U ?
+        ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
 esp_err_t d1l_retained_blob_store_read_sd_primary(
     d1l_retained_blob_store_id_t store_id, const char *key,
     void *dst, size_t *len_inout)
