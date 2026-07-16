@@ -7,15 +7,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_retained_backend_generation_and_partition_migration_contract(tmp_path):
+def test_factory_reset_native_behavior(tmp_path):
     compiler = shutil.which("gcc") or shutil.which("clang")
     if compiler is None:
-        raise AssertionError("A C compiler is required for native retained-store tests")
+        raise AssertionError("A C compiler is required for native factory reset tests")
 
     executable = tmp_path / (
-        "retained_blob_store_backend_state_test.exe"
-        if os.name == "nt"
-        else "retained_blob_store_backend_state_test"
+        "factory_reset_test.exe" if os.name == "nt" else "factory_reset_test"
     )
     command = [
         compiler,
@@ -27,10 +25,8 @@ def test_retained_backend_generation_and_partition_migration_contract(tmp_path):
         str(ROOT / "tests/native/stubs"),
         "-I",
         str(ROOT / "main"),
-        str(ROOT / "main/storage/retained_blob_store.c"),
         str(ROOT / "main/storage/factory_reset.c"),
-        str(ROOT / "main/mesh/packet_log.c"),
-        str(ROOT / "tests/native/retained_blob_store_backend_state_test.c"),
+        str(ROOT / "tests/native/factory_reset_test.c"),
         "-o",
         str(executable),
     ]
@@ -38,7 +34,4 @@ def test_retained_backend_generation_and_partition_migration_contract(tmp_path):
     completed = subprocess.run(
         [str(executable)], cwd=ROOT, check=True, capture_output=True, text=True
     )
-    assert (
-        completed.stdout.strip()
-        == "native retained backend generation and NVS partition: ok"
-    )
+    assert completed.stdout.strip() == "native factory reset coordinator: ok"

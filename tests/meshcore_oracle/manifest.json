@@ -68,8 +68,8 @@
     }
   },
   "production_binding_sources": {
-    "main/CMakeLists.txt": "2ef84535516a6b85450515aa01499cc24d529221c84844dbfcc7ba0c3683e063",
-    "main/comms/usb_console.c": "d5426a57fee2b95385a4fe86c3062951d68369b83f9ba0f308d1df65e210f95f",
+    "main/CMakeLists.txt": "dcefd43e138c68f5623ea13225cb5f8fdd91a2430e3e18758cd3595aabe1bd49",
+    "main/comms/usb_console.c": "c2db5626933b078675d703af1889adb7c2e193520c8f82ca1130a73a9af7df84",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "3f895213e9cb8fdf5da67a01fac26df35aa542c6f2ffcf179d1e0d276a1d9e14",
     "main/mesh/contact_store.h": "2252ef58b703c6721a1fd77f2a1306d6ea4d9f419af5c996666a212a29752750",
@@ -113,7 +113,7 @@
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "e02eea711371c538bbd6760267be9965f0beb94cbb04c733a47b646840ce15f9",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "1d350d6cc1e437d7687d275db9ef9a4034af6605f54c46e229fd108204900cc4",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",

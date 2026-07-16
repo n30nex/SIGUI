@@ -24,6 +24,7 @@
 #include "platform/time_service.h"
 #include "platform/secure_random.h"
 #include "storage/retained_blob_store.h"
+#include "storage/factory_reset.h"
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
 #include "comms/connectivity_manager.h"
@@ -47,10 +48,56 @@ void app_main(void)
         ESP_LOGE(TAG, "NVS unavailable; preserving persisted data: %s",
                  esp_err_to_name(nvs_ret));
     }
+    /* Inspect the default-NVS reset journal before initializing the retained
+     * store layer. A corrupt/future/error journal gets a producer-silent USB
+     * recovery console; no RF, connectivity, SD bridge, or message store is
+     * allowed to start in that boot lifetime. */
+    d1l_factory_reset_status_t factory_reset_status = {0};
+    esp_err_t factory_reset_ret =
+        d1l_factory_reset_inspect(&factory_reset_status);
+    if (factory_reset_ret != ESP_OK) {
+        ESP_LOGE(TAG, "factory reset journal quarantined before stores: %s",
+                 esp_err_to_name(factory_reset_ret));
+        printf("{\"schema\":%d,\"event\":\"factory_reset_recovery\","
+               "\"ok\":false,\"phase\":\"%s\",\"error\":\"%s\","
+               "\"recovery_console_started\":true,"
+               "\"producers_started\":false,\"rf_started\":false,"
+               "\"connectivity_started\":false,\"stores_started\":false,"
+               "\"sd_touched\":false}\n",
+               D1L_CONSOLE_SCHEMA,
+               d1l_factory_reset_phase_name(factory_reset_status.phase),
+               esp_err_to_name(factory_reset_ret));
+        d1l_usb_console_run_factory_reset_recovery(&factory_reset_status);
+        return;
+    }
     esp_err_t retained_nvs_ret = d1l_retained_blob_store_init();
     if (retained_nvs_ret != ESP_OK) {
         ESP_LOGE(TAG, "retained NVS unavailable; preserving legacy mirrors: %s",
                  esp_err_to_name(retained_nvs_ret));
+    }
+    /* Resume a confirmed reset before time/settings/store producers can
+     * recreate a key cleared by an earlier interrupted pass. The coordinator
+     * starts every retry from domain zero and never touches removable SD. */
+    factory_reset_ret = d1l_factory_reset_resume(&factory_reset_status);
+    if (factory_reset_ret != ESP_OK) {
+        ESP_LOGE(TAG, "factory reset recovery stopped before producers: %s",
+                 esp_err_to_name(factory_reset_ret));
+        printf("{\"schema\":%d,\"event\":\"factory_reset_recovery\","
+               "\"ok\":false,\"phase\":\"%s\",\"attempt\":%lu,"
+               "\"domains_completed\":%lu,\"domains_total\":%lu,"
+               "\"failed_domain\":\"%s\",\"error\":\"%s\","
+               "\"retry_on_next_boot\":true,\"global_atomic\":false,"
+               "\"physical_flash_scrubbed\":false,\"sd_touched\":false,"
+               "\"producers_started\":false}\n",
+               D1L_CONSOLE_SCHEMA,
+               d1l_factory_reset_phase_name(factory_reset_status.phase),
+               (unsigned long)factory_reset_status.attempt_count,
+               (unsigned long)factory_reset_status.domains_completed,
+               (unsigned long)factory_reset_status.domains_total,
+               factory_reset_status.last_failed_domain,
+               esp_err_to_name(factory_reset_ret));
+        d1l_usb_console_run_factory_reset_recovery(&factory_reset_status);
+        return;
     }
     esp_err_t time_ret = d1l_time_service_init();
     if (time_ret != ESP_OK) {

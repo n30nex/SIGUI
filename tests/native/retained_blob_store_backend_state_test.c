@@ -7,8 +7,12 @@
 
 #include "hal/rp2040_bridge.h"
 #include "esp_partition.h"
+#include "esp_timer.h"
+#include "freertos/semphr.h"
+#include "mesh/packet_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "storage/factory_reset.h"
 #include "storage/retained_blob_store.h"
 
 #define TEST_RETAINED_PARTITION "d1l_retained"
@@ -21,9 +25,12 @@
 #define TEST_NVS_ENTRY_COUNT 16U
 #define TEST_NVS_HANDLE_COUNT 4U
 #define TEST_NVS_NAME_MAX 31U
-#define TEST_NVS_BLOB_MAX 128U
+#define TEST_NVS_BLOB_MAX 32768U
 #define TEST_NVS_EVENT_COUNT 512U
 #define TEST_NVS_TOTAL_ENTRIES 512U
+#define TEST_SD_FILE_COUNT 96U
+#define TEST_SD_FILE_DATA_MAX 32768U
+#define TEST_SD_EVENT_COUNT 1024U
 
 typedef enum {
     TEST_NVS_EVENT_INIT_PARTITION = 0,
@@ -78,6 +85,27 @@ typedef struct {
     size_t pending_blob_len;
 } test_nvs_handle_t;
 
+typedef enum {
+    TEST_SD_EVENT_STAT = 0,
+    TEST_SD_EVENT_READ,
+    TEST_SD_EVENT_WRITE,
+    TEST_SD_EVENT_DELETE,
+    TEST_SD_EVENT_RENAME,
+    TEST_SD_EVENT_LINEAGE_COMMIT,
+} test_sd_event_kind_t;
+
+typedef struct {
+    bool used;
+    char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    uint8_t data[TEST_SD_FILE_DATA_MAX];
+    size_t length;
+} test_sd_file_t;
+
+typedef struct {
+    test_sd_event_kind_t kind;
+    char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+} test_sd_event_t;
+
 static bool s_toggle_backend_during_write;
 static bool s_toggle_backend_during_delete;
 static bool s_worker_should_yield;
@@ -106,6 +134,12 @@ static size_t s_nvs_event_count;
 static uint8_t s_retained_meta[TEST_RETAINED_META_SIZE];
 static bool s_retained_partition_erased;
 static size_t s_retained_partition_read_count;
+static bool s_sd_file_mode;
+static bool s_replace_card_during_delete;
+static int64_t s_now_us;
+static test_sd_file_t s_sd_files[TEST_SD_FILE_COUNT];
+static test_sd_event_t s_sd_events[TEST_SD_EVENT_COUNT];
+static size_t s_sd_event_count;
 static const esp_partition_t s_meta_partition = {
     .type = ESP_PARTITION_TYPE_DATA,
     .subtype = 0x40U,
@@ -172,6 +206,106 @@ static void copy_name(char *dst, const char *src)
     assert(src);
     assert(strlen(src) <= TEST_NVS_NAME_MAX);
     strcpy(dst, src);
+}
+
+static void note_sd_event(test_sd_event_kind_t kind, const char *path)
+{
+    assert(path);
+    assert(strlen(path) <= D1L_RP2040_FILE_PATH_MAX);
+    assert(s_sd_event_count < TEST_SD_EVENT_COUNT);
+    s_sd_events[s_sd_event_count].kind = kind;
+    strcpy(s_sd_events[s_sd_event_count].path, path);
+    s_sd_event_count++;
+}
+
+static test_sd_file_t *find_sd_file(const char *path)
+{
+    assert(path);
+    for (size_t i = 0U; i < TEST_SD_FILE_COUNT; ++i) {
+        if (s_sd_files[i].used && strcmp(s_sd_files[i].path, path) == 0) {
+            return &s_sd_files[i];
+        }
+    }
+    return NULL;
+}
+
+static test_sd_file_t *allocate_sd_file(const char *path)
+{
+    test_sd_file_t *file = find_sd_file(path);
+    if (file) {
+        return file;
+    }
+    for (size_t i = 0U; i < TEST_SD_FILE_COUNT; ++i) {
+        if (!s_sd_files[i].used) {
+            s_sd_files[i].used = true;
+            strcpy(s_sd_files[i].path, path);
+            return &s_sd_files[i];
+        }
+    }
+    assert(false && "native SD file capacity exhausted");
+    return NULL;
+}
+
+static void seed_sd_file(const char *path, const void *data, size_t length)
+{
+    assert(data || length == 0U);
+    assert(length <= TEST_SD_FILE_DATA_MAX);
+    test_sd_file_t *file = allocate_sd_file(path);
+    memset(file->data, 0, sizeof(file->data));
+    if (length > 0U) {
+        memcpy(file->data, data, length);
+    }
+    file->length = length;
+}
+
+static void reset_sd_files(void)
+{
+    memset(s_sd_files, 0, sizeof(s_sd_files));
+    memset(s_sd_events, 0, sizeof(s_sd_events));
+    s_sd_event_count = 0U;
+    s_sd_file_mode = true;
+    s_replace_card_during_delete = false;
+}
+
+static void reset_sd_events(void)
+{
+    memset(s_sd_events, 0, sizeof(s_sd_events));
+    s_sd_event_count = 0U;
+}
+
+static size_t first_sd_event(test_sd_event_kind_t kind, const char *path)
+{
+    for (size_t i = 0U; i < s_sd_event_count; ++i) {
+        if (s_sd_events[i].kind == kind &&
+            strcmp(s_sd_events[i].path, path) == 0) {
+            return i;
+        }
+    }
+    return SIZE_MAX;
+}
+
+static size_t count_sd_event(test_sd_event_kind_t kind, const char *path)
+{
+    size_t count = 0U;
+    for (size_t i = 0U; i < s_sd_event_count; ++i) {
+        if (s_sd_events[i].kind == kind &&
+            strcmp(s_sd_events[i].path, path) == 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static size_t first_sd_event_after(test_sd_event_kind_t kind,
+                                   const char *path, size_t after)
+{
+    for (size_t i = after + 1U; i < s_sd_event_count; ++i) {
+        if (s_sd_events[i].kind == kind &&
+            strcmp(s_sd_events[i].path, path) == 0) {
+            return i;
+        }
+    }
+    return SIZE_MAX;
 }
 
 static void note_nvs_event(test_nvs_event_t event)
@@ -598,6 +732,11 @@ esp_err_t nvs_commit(nvs_handle_t handle)
         assert(entry);
         memset(entry, 0, sizeof(*entry));
     }
+    if (s_sd_file_mode && context->pending == TEST_NVS_PENDING_SET &&
+        strcmp(context->namespace_name, "d1l_reset") == 0 &&
+        strncmp(context->pending_key, "sd_", 3U) == 0) {
+        note_sd_event(TEST_SD_EVENT_LINEAGE_COMMIT, context->pending_key);
+    }
     context->pending = TEST_NVS_PENDING_NONE;
     return ESP_OK;
 }
@@ -605,6 +744,30 @@ esp_err_t nvs_commit(nvs_handle_t handle)
 bool d1l_route_store_persistence_should_yield(void)
 {
     return s_worker_should_yield;
+}
+
+int64_t esp_timer_get_time(void)
+{
+    s_now_us += 1000LL;
+    return s_now_us;
+}
+
+SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *buffer)
+{
+    return buffer;
+}
+
+BaseType_t xSemaphoreTake(SemaphoreHandle_t handle, TickType_t ticks_to_wait)
+{
+    (void)handle;
+    (void)ticks_to_wait;
+    return pdTRUE;
+}
+
+BaseType_t xSemaphoreGive(SemaphoreHandle_t handle)
+{
+    (void)handle;
+    return pdTRUE;
 }
 
 esp_err_t d1l_rp2040_bridge_file_stat(const char *path,
@@ -618,6 +781,23 @@ esp_err_t d1l_rp2040_bridge_file_stat(const char *path,
         memset(out_result, 0, sizeof(*out_result));
         out_result->exists = true;
         out_result->size = D1L_RP2040_FILE_CHUNK_MAX * 2U;
+        return ESP_OK;
+    }
+    if (s_sd_file_mode) {
+        assert(path);
+        assert(out_result);
+        note_sd_event(TEST_SD_EVENT_STAT, path);
+        memset(out_result, 0, sizeof(*out_result));
+        test_sd_file_t *file = find_sd_file(path);
+        if (!file) {
+            strcpy(out_result->err, "not_found");
+            out_result->last_error = ESP_ERR_NOT_FOUND;
+            return ESP_ERR_NOT_FOUND;
+        }
+        out_result->ok = true;
+        out_result->exists = true;
+        out_result->size = (uint32_t)file->length;
+        out_result->last_error = ESP_OK;
         return ESP_OK;
     }
     (void)out_result;
@@ -647,6 +827,37 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path, uint32_t offset,
         s_worker_should_yield = true;
         return ESP_OK;
     }
+    if (s_sd_file_mode) {
+        assert(path);
+        assert(out_data);
+        assert(out_result);
+        note_sd_event(TEST_SD_EVENT_READ, path);
+        memset(out_result, 0, sizeof(*out_result));
+        out_result->offset = offset;
+        test_sd_file_t *file = find_sd_file(path);
+        if (!file) {
+            strcpy(out_result->err, "not_found");
+            out_result->last_error = ESP_ERR_NOT_FOUND;
+            return ESP_ERR_NOT_FOUND;
+        }
+        if (offset > file->length) {
+            strcpy(out_result->err, "range");
+            out_result->last_error = ESP_ERR_INVALID_SIZE;
+            return ESP_ERR_INVALID_SIZE;
+        }
+        const size_t available = file->length - offset;
+        const size_t length = available < max_len ? available : max_len;
+        if (length > 0U) {
+            memcpy(out_data, file->data + offset, length);
+        }
+        out_result->ok = true;
+        out_result->exists = true;
+        out_result->size = (uint32_t)file->length;
+        out_result->length = (uint32_t)length;
+        out_result->eof = offset + length == file->length;
+        out_result->last_error = ESP_OK;
+        return ESP_OK;
+    }
     (void)offset;
     (void)out_data;
     (void)max_len;
@@ -667,7 +878,35 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path, uint32_t offset,
     (void)truncate;
     assert(out_result);
     (void)timeout_ms;
-    out_result->length = (uint32_t)len;
+    if (s_sd_file_mode) {
+        assert(path);
+        assert(data || len == 0U);
+        note_sd_event(TEST_SD_EVENT_WRITE, path);
+        memset(out_result, 0, sizeof(*out_result));
+        test_sd_file_t *file = allocate_sd_file(path);
+        if (truncate) {
+            file->length = 0U;
+        }
+        if (offset > file->length || offset + len > sizeof(file->data)) {
+            strcpy(out_result->err, "range");
+            out_result->last_error = ESP_ERR_INVALID_SIZE;
+            return ESP_ERR_INVALID_SIZE;
+        }
+        if (len > 0U) {
+            memcpy(file->data + offset, data, len);
+        }
+        if (file->length < offset + len) {
+            file->length = offset + len;
+        }
+        out_result->ok = true;
+        out_result->exists = true;
+        out_result->size = (uint32_t)file->length;
+        out_result->offset = offset;
+        out_result->length = (uint32_t)len;
+        out_result->last_error = ESP_OK;
+    } else {
+        out_result->length = (uint32_t)len;
+    }
     if (s_chunked_write_yield_case) {
         ++s_chunked_write_count;
         s_worker_should_yield = true;
@@ -687,10 +926,37 @@ esp_err_t d1l_rp2040_bridge_file_delete(const char *path,
                                         d1l_rp2040_file_result_t *out_result,
                                         uint32_t timeout_ms)
 {
-    (void)path;
-    (void)out_result;
+    assert(path);
+    assert(out_result);
     (void)timeout_ms;
     s_delete_count++;
+    esp_err_t result = ESP_OK;
+    if (s_sd_file_mode) {
+        note_sd_event(TEST_SD_EVENT_DELETE, path);
+        memset(out_result, 0, sizeof(*out_result));
+        test_sd_file_t *file = find_sd_file(path);
+        if (file) {
+            memset(file, 0, sizeof(*file));
+            out_result->ok = true;
+            out_result->last_error = ESP_OK;
+        } else {
+            strcpy(out_result->err, "not_found");
+            out_result->last_error = ESP_ERR_NOT_FOUND;
+            result = ESP_ERR_NOT_FOUND;
+        }
+    }
+    if (s_replace_card_during_delete) {
+        static const uint8_t replacement_data[] = "replacement-card";
+        s_replace_card_during_delete = false;
+        memset(s_sd_files, 0, sizeof(s_sd_files));
+        seed_sd_file("replacement/keep.bin", replacement_data,
+                     sizeof(replacement_data));
+        d1l_retained_blob_store_note_sd_backend(false, false, false,
+                                                0U, 0U, 0U);
+        d1l_retained_blob_store_note_sd_backend(
+            true, true, true, D1L_RP2040_FILE_LINE_MAX,
+            D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    }
     if (s_toggle_backend_during_delete) {
         s_toggle_backend_during_delete = false;
         d1l_retained_blob_store_note_sd_backend(false, false, false,
@@ -699,7 +965,7 @@ esp_err_t d1l_rp2040_bridge_file_delete(const char *path,
             true, true, true, D1L_RP2040_FILE_LINE_MAX,
             D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
     }
-    return ESP_OK;
+    return result;
 }
 
 esp_err_t d1l_rp2040_bridge_file_rename(const char *from_path, const char *to_path,
@@ -707,12 +973,38 @@ esp_err_t d1l_rp2040_bridge_file_rename(const char *from_path, const char *to_pa
                                         d1l_rp2040_file_result_t *out_result,
                                         uint32_t timeout_ms)
 {
-    (void)from_path;
-    (void)to_path;
-    (void)replace;
-    (void)out_result;
+    assert(from_path);
+    assert(to_path);
+    assert(out_result);
     (void)timeout_ms;
     s_rename_count++;
+    if (s_sd_file_mode) {
+        note_sd_event(TEST_SD_EVENT_RENAME, to_path);
+        memset(out_result, 0, sizeof(*out_result));
+        test_sd_file_t *source = find_sd_file(from_path);
+        test_sd_file_t *target = find_sd_file(to_path);
+        if (!source) {
+            strcpy(out_result->err, "not_found");
+            out_result->last_error = ESP_ERR_NOT_FOUND;
+            return ESP_ERR_NOT_FOUND;
+        }
+        if (target && !replace) {
+            strcpy(out_result->err, "exists");
+            out_result->last_error = ESP_ERR_INVALID_STATE;
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (!target) {
+            target = allocate_sd_file(to_path);
+        }
+        const size_t length = source->length;
+        memcpy(target->data, source->data, length);
+        target->length = length;
+        memset(source, 0, sizeof(*source));
+        out_result->ok = true;
+        out_result->exists = true;
+        out_result->size = (uint32_t)length;
+        out_result->last_error = ESP_OK;
+    }
     return ESP_OK;
 }
 
@@ -1597,8 +1889,242 @@ static void test_background_write_yields_before_rename_without_degrading_sd(void
     s_delete_count = delete_count_before;
 }
 
+static uint32_t assert_reset_lineage(
+    d1l_factory_reset_sd_store_t store, bool expected_active)
+{
+    bool active = !expected_active;
+    uint32_t generation = 0U;
+    assert(d1l_factory_reset_sd_lineage_snapshot(
+               store, &active, &generation) == ESP_OK);
+    assert(active == expected_active);
+    assert(generation != 0U);
+    return generation;
+}
+
+static void assert_exact_marker(const char *path,
+                                d1l_factory_reset_sd_store_t store,
+                                uint32_t generation)
+{
+    test_sd_file_t *marker = find_sd_file(path);
+    assert(marker);
+    assert(d1l_factory_reset_sd_media_marker_matches(
+        (const d1l_factory_reset_sd_media_marker_t *)marker->data,
+        marker->length, store, generation));
+}
+
+static void test_factory_reset_sd_recovery_end_to_end(void)
+{
+    static const uint8_t stale[] = "pre-reset-owned-data";
+    static const uint8_t replacement[] = "post-reset-data";
+    static const uint8_t unrelated[] = "operator-owned-unrelated-data";
+    static const char public_marker_path[] =
+        "stores/messages/public/reset_lineage_v1.bin";
+    static const char public_marker_temp[] =
+        "stores/messages/public/reset_lineage_v1.tmp";
+    static const char dm_marker_path[] =
+        "stores/messages/dm/reset_lineage_v1.bin";
+    static const char route_marker_path[] =
+        "stores/routes/reset_lineage_v1.bin";
+    static const char packet_marker_path[] =
+        "stores/packet_log/reset_lineage_v1.bin";
+
+    clear_nvs_case();
+    seed_valid_default_sentinel();
+    seed_valid_dedicated_anchor();
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    reset_sd_files();
+    s_worker_should_yield = false;
+
+    /* The production coordinator creates one exact durable generation for
+     * every removable store while no card access is performed. */
+    d1l_factory_reset_status_t reset_status = {0};
+    assert(d1l_factory_reset_request(&reset_status) == ESP_OK);
+    assert(d1l_factory_reset_resume(&reset_status) == ESP_OK);
+    assert(reset_status.phase == D1L_FACTORY_RESET_PHASE_COMPLETE);
+    const uint32_t reset_generation = reset_status.sd_lineage_generation;
+    assert(reset_generation != 0U);
+    assert(d1l_factory_reset_resume(&reset_status) == ESP_OK);
+    for (uint32_t store = 0U; store < D1L_FACTORY_RESET_SD_STORE_COUNT;
+         ++store) {
+        assert(assert_reset_lineage(
+                   (d1l_factory_reset_sd_store_t)store, true) ==
+               reset_generation);
+    }
+
+    /* Start on a freshly observed card. A missing marker and then a marker
+     * for the wrong generation are both non-ready while the onboard fence is
+     * active. */
+    d1l_retained_blob_store_note_sd_backend(false, false, false,
+                                            0U, 0U, 0U);
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+    d1l_retained_blob_store_backend_state_t public_backend = {0};
+    assert(d1l_retained_blob_store_backend_state(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, &public_backend));
+    assert(public_backend.enabled);
+    bool ready = true;
+    assert(d1l_retained_blob_store_sd_media_lineage_ready(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+               public_backend.generation, &ready) == ESP_OK);
+    assert(!ready);
+
+    d1l_factory_reset_sd_media_marker_t wrong_marker = {0};
+    d1l_factory_reset_sd_media_marker_init(
+        &wrong_marker, D1L_FACTORY_RESET_SD_STORE_PUBLIC_MESSAGES,
+        reset_generation + 1U);
+    seed_sd_file(public_marker_path, &wrong_marker, sizeof(wrong_marker));
+    assert(d1l_retained_blob_store_sd_media_lineage_ready(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+               public_backend.generation, &ready) == ESP_OK);
+    assert(!ready);
+
+    /* Recovery purges only exact firmware-owned paths. It preserves nearby
+     * unknown files, installs the replacement and exact marker atomically,
+     * reads the marker back, and only then clears the onboard fence. */
+    seed_sd_file("stores/messages/public/public.bin", stale, sizeof(stale));
+    seed_sd_file("stores/messages/public/public.tmp", stale, sizeof(stale));
+    seed_sd_file("stores/messages/public/operator-notes.bin",
+                 unrelated, sizeof(unrelated));
+    reset_sd_events();
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               replacement, sizeof(replacement), public_backend.generation) ==
+           ESP_OK);
+    assert(find_sd_file("stores/messages/public/public.bin"));
+    assert(!find_sd_file("stores/messages/public/public.tmp"));
+    assert(find_sd_file("stores/messages/public/operator-notes.bin"));
+    assert_exact_marker(public_marker_path,
+                        D1L_FACTORY_RESET_SD_STORE_PUBLIC_MESSAGES,
+                        reset_generation);
+    assert(assert_reset_lineage(
+               D1L_FACTORY_RESET_SD_STORE_PUBLIC_MESSAGES, false) ==
+           reset_generation);
+    assert(d1l_retained_blob_store_sd_media_lineage_ready(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+               public_backend.generation, &ready) == ESP_OK);
+    assert(ready);
+
+    const size_t marker_write = first_sd_event(
+        TEST_SD_EVENT_WRITE, public_marker_temp);
+    const size_t marker_rename = first_sd_event(
+        TEST_SD_EVENT_RENAME, public_marker_path);
+    const size_t marker_readback = first_sd_event_after(
+        TEST_SD_EVENT_READ, public_marker_path, marker_rename);
+    const size_t fence_clear = first_sd_event(
+        TEST_SD_EVENT_LINEAGE_COMMIT, "sd_public_v1");
+    assert(marker_write < marker_rename);
+    assert(marker_rename < marker_readback);
+    assert(marker_readback < fence_clear);
+
+    /* A card-generation edge inside purge aborts recovery. The replacement
+     * card is not mistaken for the old card and the onboard fence remains
+     * active until a full retry on the new generation succeeds. */
+    seed_sd_file("stores/messages/dm/threads.bin", stale, sizeof(stale));
+    seed_sd_file("stores/messages/dm/threads.tmp", stale, sizeof(stale));
+    d1l_retained_blob_store_backend_state_t dm_backend = {0};
+    assert(d1l_retained_blob_store_backend_state(
+        D1L_RETAINED_BLOB_STORE_DM_MESSAGES, &dm_backend));
+    s_replace_card_during_delete = true;
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
+               replacement, sizeof(replacement), dm_backend.generation) ==
+           ESP_ERR_INVALID_STATE);
+    assert(find_sd_file("replacement/keep.bin"));
+    assert(assert_reset_lineage(
+               D1L_FACTORY_RESET_SD_STORE_DM_MESSAGES, true) ==
+           reset_generation);
+    assert(d1l_retained_blob_store_backend_state(
+        D1L_RETAINED_BLOB_STORE_DM_MESSAGES, &dm_backend));
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+               D1L_RETAINED_BLOB_STORE_DM_MESSAGES, "threads",
+               replacement, sizeof(replacement), dm_backend.generation) ==
+           ESP_OK);
+    assert(find_sd_file("replacement/keep.bin"));
+    assert_exact_marker(dm_marker_path,
+                        D1L_FACTORY_RESET_SD_STORE_DM_MESSAGES,
+                        reset_generation);
+    assert(assert_reset_lineage(
+               D1L_FACTORY_RESET_SD_STORE_DM_MESSAGES, false) ==
+           reset_generation);
+
+    /* Route recovery owns both the current and legacy alias, but nothing
+     * else in the directory. Exercise both exact paths through the same
+     * production purge/finalize coordinator. */
+    seed_sd_file("stores/routes/routes_v2.bin", stale, sizeof(stale));
+    seed_sd_file("stores/routes/routes_v2.tmp", stale, sizeof(stale));
+    seed_sd_file("stores/routes/routes.bin", stale, sizeof(stale));
+    seed_sd_file("stores/routes/routes.tmp", stale, sizeof(stale));
+    seed_sd_file("stores/routes/operator-route.bin",
+                 unrelated, sizeof(unrelated));
+    d1l_retained_blob_store_backend_state_t route_backend = {0};
+    assert(d1l_retained_blob_store_backend_state(
+        D1L_RETAINED_BLOB_STORE_ROUTES, &route_backend));
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+               D1L_RETAINED_BLOB_STORE_ROUTES, "routes_v2",
+               replacement, sizeof(replacement), route_backend.generation) ==
+           ESP_OK);
+    assert(find_sd_file("stores/routes/routes_v2.bin"));
+    assert(!find_sd_file("stores/routes/routes_v2.tmp"));
+    assert(!find_sd_file("stores/routes/routes.bin"));
+    assert(!find_sd_file("stores/routes/routes.tmp"));
+    assert(find_sd_file("stores/routes/operator-route.bin"));
+    assert_exact_marker(route_marker_path,
+                        D1L_FACTORY_RESET_SD_STORE_ROUTES,
+                        reset_generation);
+    assert(assert_reset_lineage(
+               D1L_FACTORY_RESET_SD_STORE_ROUTES, false) ==
+           reset_generation);
+
+    /* Packet recovery runs the real packet coordinator. It removes every
+     * one of the 64 deterministic history segments before the retained-store
+     * packet completion helper installs and verifies the marker. */
+    for (uint32_t segment = 0U;
+         segment < D1L_PACKET_LOG_SD_SEGMENT_COUNT; ++segment) {
+        char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+        const int written = snprintf(path, sizeof(path),
+                                     "stores/packet_log/segments/s%02lu.bin",
+                                     (unsigned long)segment);
+        assert(written > 0 && (size_t)written < sizeof(path));
+        seed_sd_file(path, stale, sizeof(stale));
+    }
+    seed_sd_file("stores/packet_log/ring.bin", stale, sizeof(stale));
+    seed_sd_file("stores/packet_log/ring.tmp", stale, sizeof(stale));
+    seed_sd_file("stores/packet_log/operator-export.bin",
+                 unrelated, sizeof(unrelated));
+    reset_sd_events();
+    assert(d1l_packet_log_init() == ESP_OK);
+    for (uint32_t segment = 0U;
+         segment < D1L_PACKET_LOG_SD_SEGMENT_COUNT; ++segment) {
+        char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+        const int written = snprintf(path, sizeof(path),
+                                     "stores/packet_log/segments/s%02lu.bin",
+                                     (unsigned long)segment);
+        assert(written > 0 && (size_t)written < sizeof(path));
+        assert(!find_sd_file(path));
+        assert(count_sd_event(TEST_SD_EVENT_DELETE, path) == 1U);
+    }
+    assert(find_sd_file("stores/packet_log/operator-export.bin"));
+    assert_exact_marker(packet_marker_path,
+                        D1L_FACTORY_RESET_SD_STORE_PACKET_LOG,
+                        reset_generation);
+    assert(assert_reset_lineage(
+               D1L_FACTORY_RESET_SD_STORE_PACKET_LOG, false) ==
+           reset_generation);
+    d1l_retained_blob_store_backend_state_t packet_backend = {0};
+    assert(d1l_retained_blob_store_backend_state(
+        D1L_RETAINED_BLOB_STORE_PACKET_LOG, &packet_backend));
+    assert(d1l_retained_blob_store_sd_media_lineage_ready(
+               D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+               packet_backend.generation, &ready) == ESP_OK);
+    assert(ready);
+}
+
 int main(void)
 {
+    /* Production initializes default NVS before enabling any SD backend; the
+     * lineage gate must be able to prove that no reset generation exists. */
+    s_nvs_enabled = true;
     assert_all_states(false, 0U);
 
     d1l_retained_blob_store_backend_state_t invalid = {
@@ -1687,6 +2213,7 @@ int main(void)
     test_erase_clears_dedicated_and_legacy_copies();
     test_nvs_capacity_and_write_amplification_telemetry();
     test_partition_init_failure_never_falls_back_or_resurrects();
+    test_factory_reset_sd_recovery_end_to_end();
 
     puts("native retained backend generation and NVS partition: ok");
     return 0;

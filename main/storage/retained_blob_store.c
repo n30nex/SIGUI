@@ -10,6 +10,7 @@
 #include "mesh/route_store_worker.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "storage/factory_reset.h"
 
 #define D1L_RETAINED_NVS_PARTITION "d1l_retained"
 #define D1L_RETAINED_NVS_META_PARTITION "d1l_ret_meta"
@@ -27,6 +28,7 @@
 #define D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"
 #define D1L_RETAINED_ROUTE_SD_DIR "stores/routes"
 #define D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"
+#define D1L_RETAINED_SD_LINEAGE_MARKER_KEY "reset_lineage_v1"
 #define D1L_RETAINED_SD_WRITE_TIMEOUT_MS 750U
 #define D1L_RETAINED_SD_READ_TIMEOUT_MS 750U
 #define D1L_RETAINED_NVS_MIGRATION_MAX_BYTES 8192U
@@ -44,6 +46,9 @@ typedef struct {
     uint32_t magic_inverse;
     uint32_t version_inverse;
 } d1l_retained_nvs_marker_t;
+
+_Static_assert(sizeof(d1l_retained_nvs_marker_t) == 16U,
+               "retained ownership marker layout must remain stable");
 
 typedef enum {
     D1L_RETAINED_SD_OP_READ,
@@ -78,6 +83,13 @@ static const d1l_retained_blob_store_config_t s_store_configs[] = {
     },
 };
 
+_Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_COUNT ==
+                   (uint32_t)D1L_FACTORY_RESET_SD_STORE_COUNT,
+               "retained and reset SD store inventories must match");
+_Static_assert((uint32_t)D1L_RETAINED_BLOB_STORE_PACKET_LOG ==
+                   (uint32_t)D1L_FACTORY_RESET_SD_STORE_PACKET_LOG,
+               "retained and reset SD store identifiers must match");
+
 static bool s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT];
 static uint32_t s_store_backend_generation[D1L_RETAINED_BLOB_STORE_COUNT];
 static d1l_retained_blob_store_sd_stats_t s_store_sd_stats[D1L_RETAINED_BLOB_STORE_COUNT];
@@ -96,6 +108,17 @@ static esp_err_t s_retained_nvs_migration_error = ESP_OK;
 static d1l_retained_blob_store_nvs_telemetry_t s_retained_nvs_telemetry;
 
 static esp_err_t retained_nvs_unavailable_error(void);
+static esp_err_t sd_write_blob_with_lineage(
+    const d1l_retained_blob_store_config_t *config, const char *key,
+    const void *src, size_t len, uint32_t expected_generation);
+static esp_err_t sd_erase_blob_with_lineage(
+    const d1l_retained_blob_store_config_t *config, const char *key,
+    uint32_t expected_generation);
+static esp_err_t sd_media_lineage_ready(
+    const d1l_retained_blob_store_config_t *config,
+    uint32_t expected_backend_generation, bool *out_ready,
+    bool *out_onboard_active, uint32_t *out_reset_generation,
+    bool *out_marker_matches);
 
 static void telemetry_add_u64(uint64_t *value, uint64_t increment)
 {
@@ -304,6 +327,91 @@ static bool store_sd_enabled(const d1l_retained_blob_store_config_t *config)
 {
     d1l_retained_blob_store_backend_state_t state = {0};
     return copy_store_backend_state(config, &state) && state.enabled;
+}
+
+static esp_err_t sd_media_lineage_ready(
+    const d1l_retained_blob_store_config_t *config,
+    uint32_t expected_backend_generation, bool *out_ready,
+    bool *out_onboard_active, uint32_t *out_reset_generation,
+    bool *out_marker_matches)
+{
+    if (!config || !out_ready || !out_onboard_active ||
+        !out_reset_generation || !out_marker_matches) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_ready = false;
+    *out_onboard_active = true;
+    *out_reset_generation = 0U;
+    *out_marker_matches = false;
+    if (!store_backend_generation_matches(config,
+                                          expected_backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = d1l_factory_reset_sd_lineage_snapshot(
+        (d1l_factory_reset_sd_store_t)config->id, out_onboard_active,
+        out_reset_generation);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (*out_reset_generation == 0U && !*out_onboard_active) {
+        /* Upgrade compatibility: media predating the first factory reset has
+         * no lineage domain yet. The first reset creates generation one and
+         * thereafter every card must carry an exact marker. */
+        *out_ready = true;
+        *out_marker_matches = true;
+        return ESP_OK;
+    }
+    if (*out_reset_generation == 0U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (d1l_route_store_persistence_should_yield()) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+
+    char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    if (!build_sd_path(config, D1L_RETAINED_SD_LINEAGE_MARKER_KEY,
+                       ".bin", path, sizeof(path))) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    d1l_rp2040_file_result_t stat = {0};
+    ret = d1l_rp2040_bridge_file_stat(
+        path, &stat, D1L_RETAINED_SD_READ_TIMEOUT_MS);
+    if (!store_backend_generation_matches(config,
+                                          expected_backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (ret == ESP_ERR_NOT_FOUND ||
+        (ret == ESP_OK && (!stat.exists || stat.is_directory ||
+                           stat.size != sizeof(
+                               d1l_factory_reset_sd_media_marker_t)))) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_factory_reset_sd_media_marker_t marker = {0};
+    d1l_rp2040_file_result_t read_result = {0};
+    ret = d1l_rp2040_bridge_file_read(
+        path, 0U, (uint8_t *)&marker, sizeof(marker), &read_result,
+        D1L_RETAINED_SD_READ_TIMEOUT_MS);
+    if (!store_backend_generation_matches(config,
+                                          expected_backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (ret == ESP_ERR_NOT_FOUND) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const bool marker_matches = read_result.length == sizeof(marker) &&
+        d1l_factory_reset_sd_media_marker_matches(
+            &marker, read_result.length,
+            (d1l_factory_reset_sd_store_t)config->id,
+            *out_reset_generation);
+    *out_marker_matches = marker_matches;
+    *out_ready = !*out_onboard_active && marker_matches;
+    return ESP_OK;
 }
 
 static esp_err_t nvs_open_store(const d1l_retained_blob_store_config_t *config,
@@ -1044,8 +1152,31 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
                               void *dst,
                               size_t *len_inout)
 {
+    if (!config || !key || !dst || !len_inout) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_retained_blob_store_backend_state_t backend = {0};
+    if (!copy_store_backend_state(config, &backend) || !backend.enabled) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    bool lineage_ready = false;
+    bool lineage_active = true;
+    bool marker_matches = false;
+    uint32_t lineage_generation = 0U;
+    const esp_err_t lineage_ret = sd_media_lineage_ready(
+        config, backend.generation, &lineage_ready, &lineage_active,
+        &lineage_generation, &marker_matches);
+    (void)lineage_active;
+    (void)lineage_generation;
+    (void)marker_matches;
+    if (lineage_ret != ESP_OK) {
+        return lineage_ret;
+    }
+    if (!lineage_ready) {
+        return ESP_ERR_NOT_FOUND;
+    }
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
-    if (!build_sd_path(config, key, ".bin", path, sizeof(path)) || !dst || !len_inout) {
+    if (!build_sd_path(config, key, ".bin", path, sizeof(path))) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -1054,6 +1185,9 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
     }
     d1l_rp2040_file_result_t stat = {0};
     esp_err_t ret = d1l_rp2040_bridge_file_stat(path, &stat, D1L_RETAINED_SD_READ_TIMEOUT_MS);
+    if (!store_backend_generation_matches(config, backend.generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (ret != ESP_OK) {
         return ret;
     }
@@ -1077,6 +1211,9 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
         if (d1l_route_store_persistence_should_yield()) {
             return ESP_ERR_NOT_FINISHED;
         }
+        if (!store_backend_generation_matches(config, backend.generation)) {
+            return ESP_ERR_INVALID_STATE;
+        }
         const size_t remaining = stat.size - offset;
         const size_t chunk = remaining > D1L_RP2040_FILE_CHUNK_MAX ?
                              D1L_RP2040_FILE_CHUNK_MAX : remaining;
@@ -1084,6 +1221,9 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
         ret = d1l_rp2040_bridge_file_read(path, (uint32_t)offset,
                                           out + offset, chunk, &read_result,
                                           D1L_RETAINED_SD_READ_TIMEOUT_MS);
+        if (!store_backend_generation_matches(config, backend.generation)) {
+            return ESP_ERR_INVALID_STATE;
+        }
         if (ret != ESP_OK) {
             return ret;
         }
@@ -1174,8 +1314,8 @@ static esp_err_t sd_write_blob(const d1l_retained_blob_store_config_t *config,
     if (!copy_store_backend_state(config, &state) || !state.enabled) {
         return ESP_ERR_INVALID_STATE;
     }
-    return sd_write_blob_for_generation(config, key, src, len,
-                                        state.generation);
+    return sd_write_blob_with_lineage(config, key, src, len,
+                                      state.generation);
 }
 
 static esp_err_t sd_erase_blob_for_generation(
@@ -1211,6 +1351,193 @@ static esp_err_t sd_erase_blob_for_generation(
     return ret == ESP_OK ? temp_ret : ret;
 }
 
+static bool sd_lineage_key_allowed(
+    const d1l_retained_blob_store_config_t *config, const char *key)
+{
+    if (!config || !key) {
+        return false;
+    }
+    switch (config->id) {
+    case D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES:
+        return strcmp(key, "public") == 0;
+    case D1L_RETAINED_BLOB_STORE_DM_MESSAGES:
+        return strcmp(key, "threads") == 0;
+    case D1L_RETAINED_BLOB_STORE_ROUTES:
+        return strcmp(key, "routes_v2") == 0 || strcmp(key, "routes") == 0;
+    case D1L_RETAINED_BLOB_STORE_PACKET_LOG:
+        return strcmp(key, "ring") == 0;
+    default:
+        return false;
+    }
+}
+
+static esp_err_t sd_purge_store_for_generation(
+    const d1l_retained_blob_store_config_t *config,
+    uint32_t expected_generation)
+{
+    static const char *const public_keys[] = {"public"};
+    static const char *const dm_keys[] = {"threads"};
+    static const char *const route_keys[] = {"routes_v2", "routes"};
+    static const char *const packet_keys[] = {"ring"};
+    const char *const *keys = NULL;
+    size_t key_count = 0U;
+    if (!config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    switch (config->id) {
+    case D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES:
+        keys = public_keys;
+        key_count = sizeof(public_keys) / sizeof(public_keys[0]);
+        break;
+    case D1L_RETAINED_BLOB_STORE_DM_MESSAGES:
+        keys = dm_keys;
+        key_count = sizeof(dm_keys) / sizeof(dm_keys[0]);
+        break;
+    case D1L_RETAINED_BLOB_STORE_ROUTES:
+        keys = route_keys;
+        key_count = sizeof(route_keys) / sizeof(route_keys[0]);
+        break;
+    case D1L_RETAINED_BLOB_STORE_PACKET_LOG:
+        keys = packet_keys;
+        key_count = sizeof(packet_keys) / sizeof(packet_keys[0]);
+        break;
+    default:
+        return ESP_ERR_INVALID_ARG;
+    }
+    for (size_t i = 0U; i < key_count; ++i) {
+        const esp_err_t ret = sd_erase_blob_for_generation(
+            config, keys[i], expected_generation);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    return ESP_OK;
+}
+
+static esp_err_t sd_finalize_lineage_for_generation(
+    const d1l_retained_blob_store_config_t *config,
+    uint32_t lineage_generation, uint32_t expected_backend_generation)
+{
+    if (!store_backend_generation_matches(config,
+                                          expected_backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_factory_reset_sd_media_marker_t marker = {0};
+    const d1l_factory_reset_sd_store_t reset_store =
+        (d1l_factory_reset_sd_store_t)config->id;
+    d1l_factory_reset_sd_media_marker_init(
+        &marker, reset_store, lineage_generation);
+    esp_err_t ret = sd_write_blob_for_generation(
+        config, D1L_RETAINED_SD_LINEAGE_MARKER_KEY, &marker,
+        sizeof(marker), expected_backend_generation);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    /* The marker rename is followed by an independent readback while the
+     * onboard fence is still active. A power cut or card swap before this
+     * point therefore cannot expose the media. */
+    bool ready = false;
+    bool onboard_active = true;
+    bool marker_matches = false;
+    uint32_t readback_generation = 0U;
+    ret = sd_media_lineage_ready(
+        config, expected_backend_generation, &ready, &onboard_active,
+        &readback_generation, &marker_matches);
+    (void)ready;
+    if (ret != ESP_OK || !marker_matches ||
+        readback_generation != lineage_generation) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    if (onboard_active) {
+        ret = d1l_factory_reset_sd_lineage_clear(
+            reset_store, lineage_generation);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    /* A post-clear card swap is still safe: every read independently requires
+     * an exact marker on the currently mounted backend generation. */
+    return store_backend_generation_matches(config,
+                                            expected_backend_generation) ?
+        ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+static esp_err_t sd_write_blob_with_lineage(
+    const d1l_retained_blob_store_config_t *config, const char *key,
+    const void *src, size_t len, uint32_t expected_generation)
+{
+    if (!config || !sd_lineage_key_allowed(config, key) || !src || len == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    bool ready = false;
+    bool active = true;
+    bool marker_matches = false;
+    uint32_t lineage_generation = 0U;
+    esp_err_t ret = sd_media_lineage_ready(
+        config, expected_generation, &ready, &active,
+        &lineage_generation, &marker_matches);
+    (void)active;
+    (void)marker_matches;
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (ready) {
+        return sd_write_blob_for_generation(config, key, src, len,
+                                            expected_generation);
+    }
+    if (config->id == D1L_RETAINED_BLOB_STORE_PACKET_LOG) {
+        /* Packet history has 64 segment aliases. packet_log.c must delete
+         * those first and then use the dedicated completion helper below. */
+        return ESP_ERR_INVALID_STATE;
+    }
+    ret = sd_purge_store_for_generation(config, expected_generation);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = sd_write_blob_for_generation(config, key, src, len,
+                                       expected_generation);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    return sd_finalize_lineage_for_generation(
+        config, lineage_generation, expected_generation);
+}
+
+static esp_err_t sd_erase_blob_with_lineage(
+    const d1l_retained_blob_store_config_t *config, const char *key,
+    uint32_t expected_generation)
+{
+    if (!config || !sd_lineage_key_allowed(config, key)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    bool ready = false;
+    bool active = true;
+    bool marker_matches = false;
+    uint32_t lineage_generation = 0U;
+    esp_err_t ret = sd_media_lineage_ready(
+        config, expected_generation, &ready, &active,
+        &lineage_generation, &marker_matches);
+    (void)active;
+    (void)marker_matches;
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (ready) {
+        return sd_erase_blob_for_generation(config, key,
+                                            expected_generation);
+    }
+    if (config->id == D1L_RETAINED_BLOB_STORE_PACKET_LOG) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ret = sd_purge_store_for_generation(config, expected_generation);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    return sd_finalize_lineage_for_generation(
+        config, lineage_generation, expected_generation);
+}
+
 static esp_err_t sd_erase_blob(const d1l_retained_blob_store_config_t *config,
                                const char *key)
 {
@@ -1218,7 +1545,7 @@ static esp_err_t sd_erase_blob(const d1l_retained_blob_store_config_t *config,
     if (!copy_store_backend_state(config, &state) || !state.enabled) {
         return ESP_ERR_INVALID_STATE;
     }
-    return sd_erase_blob_for_generation(config, key, state.generation);
+    return sd_erase_blob_with_lineage(config, key, state.generation);
 }
 
 const char *d1l_retained_blob_store_backend_name(d1l_retained_blob_store_id_t store_id)
@@ -1487,8 +1814,8 @@ esp_err_t d1l_retained_blob_store_write_sd_primary_guarded(
     if (!config || !key || !src || len == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
-    return sd_write_blob_for_generation(config, key, src, len,
-                                        expected_generation);
+    return sd_write_blob_with_lineage(config, key, src, len,
+                                      expected_generation);
 }
 
 esp_err_t d1l_retained_blob_store_write_nvs_fallback(
@@ -1529,7 +1856,53 @@ esp_err_t d1l_retained_blob_store_erase_sd_primary_guarded(
     if (!config || !key) {
         return ESP_ERR_INVALID_ARG;
     }
-    return sd_erase_blob_for_generation(config, key, expected_generation);
+    return sd_erase_blob_with_lineage(config, key, expected_generation);
+}
+
+esp_err_t d1l_retained_blob_store_sd_media_lineage_ready(
+    d1l_retained_blob_store_id_t store_id,
+    uint32_t expected_backend_generation, bool *out_ready)
+{
+    const d1l_retained_blob_store_config_t *config = find_store(store_id);
+    if (!config || !out_ready) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    bool active = true;
+    bool marker_matches = false;
+    uint32_t reset_generation = 0U;
+    return sd_media_lineage_ready(
+        config, expected_backend_generation, out_ready, &active,
+        &reset_generation, &marker_matches);
+}
+
+esp_err_t d1l_retained_blob_store_complete_packet_reset_lineage(
+    uint32_t expected_backend_generation)
+{
+    const d1l_retained_blob_store_config_t *config = find_store(
+        D1L_RETAINED_BLOB_STORE_PACKET_LOG);
+    if (!config || !store_backend_generation_matches(
+                       config, expected_backend_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    bool ready = false;
+    bool active = true;
+    bool marker_matches = false;
+    uint32_t lineage_generation = 0U;
+    esp_err_t ret = sd_media_lineage_ready(
+        config, expected_backend_generation, &ready, &active,
+        &lineage_generation, &marker_matches);
+    (void)active;
+    (void)marker_matches;
+    if (ret != ESP_OK || ready) {
+        return ret;
+    }
+    ret = sd_purge_store_for_generation(config,
+                                        expected_backend_generation);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    return sd_finalize_lineage_for_generation(
+        config, lineage_generation, expected_backend_generation);
 }
 
 esp_err_t d1l_retained_blob_store_erase_nvs_fallback(

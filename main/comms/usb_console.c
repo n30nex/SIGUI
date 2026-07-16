@@ -44,6 +44,7 @@
 #include "map/map_view_service.h"
 #include "platform/time_service.h"
 #include "storage/export_store.h"
+#include "storage/factory_reset.h"
 #include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
@@ -562,7 +563,7 @@ static void cmd_time_migration_status(void)
         "\"supplied_confirmation_logged\":false,"
         "\"settings_reset_scope\":\"settings_model_only\","
         "\"settings_reset_preserves_protocol_migration\":true,"
-        "\"factory_reset_supported\":false}\n",
+        "\"factory_reset_supported\":true}\n",
         d1l_time_protocol_migration_state_name(status->state),
         (unsigned)status->state,
         time_protocol_migration_stage(status),
@@ -758,7 +759,7 @@ static void cmd_time_migrate_legacy(const char *line)
            "\"retry_idempotent\":true,"
            "\"supplied_confirmation_logged\":false,"
            "\"settings_reset_preserves_protocol_migration\":true,"
-           "\"factory_reset_supported\":false}\n",
+           "\"factory_reset_supported\":true}\n",
            bool_json(written),
            d1l_time_protocol_migration_state_name(status.state),
            (unsigned long)status.revision,
@@ -5923,7 +5924,267 @@ static void cmd_help(void)
            "\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\","
            "\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\","
            "\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\","
-           "\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+           "\"ble on\",\"ble off\",\"reboot\",\"factory-reset-status\","
+           "\"factory-reset-confirm\"]}\n");
+}
+
+static void release_factory_reset_quiesces(void)
+{
+    d1l_rp2040_bridge_quiesce_end();
+    d1l_route_store_worker_quiesce_end();
+    d1l_storage_manager_quiesce_end();
+}
+
+static void restart_with_factory_reset_quiesces(void)
+{
+    fflush(stdout);
+    vTaskDelay(pdMS_TO_TICKS(D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS));
+    esp_rom_software_reset_system();
+    for (;;) {
+    }
+}
+
+static void cmd_factory_reset_status(void)
+{
+    d1l_factory_reset_status_t status = {0};
+    const esp_err_t inspect_ret = d1l_factory_reset_inspect(&status);
+    const esp_err_t effective_ret = inspect_ret == ESP_OK ?
+        status.last_error : inspect_ret;
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"factory-reset-status\","
+           "\"phase\":\"%s\",\"journal_found\":%s,\"pending\":%s,"
+           "\"complete\":%s,\"attempt\":%lu,\"domains_completed\":%lu,"
+           "\"domains_total\":%lu,\"keys_erased\":%lu,"
+           "\"keys_already_absent\":%lu,\"failed_domain\":\"%s\","
+           "\"failed_domain_index\":",
+           D1L_CONSOLE_SCHEMA, bool_json(effective_ret == ESP_OK),
+           d1l_factory_reset_phase_name(status.phase),
+           bool_json(status.journal_found), bool_json(status.reset_pending),
+           bool_json(status.reset_complete),
+           (unsigned long)status.attempt_count,
+           (unsigned long)status.domains_completed,
+           (unsigned long)status.domains_total,
+           (unsigned long)status.keys_erased,
+           (unsigned long)status.keys_already_absent,
+           status.last_failed_domain);
+    if (status.last_failed_domain_index == UINT32_MAX) {
+        printf("null");
+    } else {
+        printf("%lu", (unsigned long)status.last_failed_domain_index);
+    }
+    printf(",\"error\":\"%s\",\"stored_error\":\"%s\","
+           "\"inspection_error\":\"%s\",\"sd_lineage_generation\":%lu,"
+           "\"sd_lineage_active_mask\":%lu,"
+           "\"sd_media_marker_required\":true,\"global_atomic\":false,"
+           "\"physical_flash_scrubbed\":false,\"sd_touched\":false,"
+           "\"removable_sd_data_preserved\":true,"
+           "\"unknown_nvs_keys_preserved\":true,"
+           "\"protocol_high_water_preserved\":true,"
+           "\"migration_evidence_preserved\":true,"
+           "\"time_checkpoint_preserved\":true,"
+           "\"crash_forensics_preserved\":true,"
+           "\"retained_ownership_evidence_preserved\":true,"
+           "\"inventory_entry_count\":%u,\"clear_nvs_key_count\":%u,"
+           "\"preserved_raw_marker_slots\":%u}\n",
+           esp_err_to_name(effective_ret), esp_err_to_name(status.last_error),
+           esp_err_to_name(inspect_ret),
+           (unsigned long)status.sd_lineage_generation,
+           (unsigned long)status.sd_lineage_active_mask,
+           (unsigned int)D1L_FACTORY_RESET_INVENTORY_COUNT,
+           (unsigned int)D1L_FACTORY_RESET_CLEAR_DOMAIN_COUNT,
+           (unsigned int)D1L_FACTORY_RESET_RAW_MARKER_COUNT);
+}
+
+static void cmd_factory_reset_confirm(void)
+{
+    const int64_t started_us = esp_timer_get_time();
+    uint32_t remaining_ms = reboot_deadline_remaining_ms(started_us);
+    esp_err_t ret = d1l_storage_manager_quiesce_begin(remaining_ms);
+    if (ret != ESP_OK) {
+        err_result("factory-reset-confirm", esp_err_to_name(ret),
+                   "storage manager quiesce failed; no reset was started");
+        return;
+    }
+
+    remaining_ms = reboot_deadline_remaining_ms(started_us);
+    ret = remaining_ms > 0U ?
+        d1l_route_store_worker_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (ret != ESP_OK) {
+        d1l_storage_manager_quiesce_end();
+        err_result("factory-reset-confirm", esp_err_to_name(ret),
+                   "retained producer quiesce failed; no reset was started");
+        return;
+    }
+
+    remaining_ms = reboot_deadline_remaining_ms(started_us);
+    ret = remaining_ms > 0U ?
+        d1l_rp2040_bridge_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
+        err_result("factory-reset-confirm", esp_err_to_name(ret),
+                   "RP2040 bridge quiesce failed; no reset was started");
+        return;
+    }
+
+    remaining_ms = reboot_deadline_remaining_ms(started_us);
+    if (remaining_ms <= D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS +
+                            D1L_REBOOT_RESTART_MARGIN_MS) {
+        release_factory_reset_quiesces();
+        err_result("factory-reset-confirm", esp_err_to_name(ESP_ERR_TIMEOUT),
+                   "reset deadline lacks NVS and console drain headroom");
+        return;
+    }
+
+    const esp_err_t connectivity_ret = d1l_connectivity_prepare_reboot();
+    if (connectivity_ret != ESP_OK) {
+        /* Connectivity preparation can fail after retry cancellation or a
+         * partial stop. There is no proven in-place restoration boundary, so
+         * keep every quiesce and recover the runtime through a clean boot. */
+        printf("{\"schema\":%d,\"ok\":false,"
+               "\"cmd\":\"factory-reset-confirm\","
+               "\"phase\":\"connectivity_prepare_failed\","
+               "\"code\":\"%s\",\"partial_reset\":false,"
+               "\"reset_scheduled\":false,"
+               "\"request_write_may_have_applied\":false,"
+               "\"connectivity_prepare\":\"%s\","
+               "\"connectivity_state_restored\":false,"
+               "\"storage_manager_quiesced\":true,"
+               "\"retained_worker_quiesced\":true,"
+               "\"rp2040_bridge_quiesced\":true,"
+               "\"quiesces_released\":false,"
+               "\"recovery\":\"controlled_restart\","
+               "\"rebooting\":true,\"console_drain_grace_ms\":%lu}\n",
+               D1L_CONSOLE_SCHEMA, esp_err_to_name(connectivity_ret),
+               esp_err_to_name(connectivity_ret),
+               (unsigned long)D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS);
+        restart_with_factory_reset_quiesces();
+        return;
+    }
+
+    d1l_factory_reset_status_t status = {0};
+    ret = d1l_factory_reset_request(&status);
+    if (ret != ESP_OK) {
+        if (!status.request_write_may_have_applied) {
+            printf("{\"schema\":%d,\"ok\":false,"
+                   "\"cmd\":\"factory-reset-confirm\",\"phase\":\"%s\","
+                   "\"code\":\"%s\",\"attempt\":%lu,"
+                   "\"domains_completed\":%lu,\"domains_total\":%lu,"
+                   "\"failed_domain\":\"%s\",\"partial_reset\":false,"
+                   "\"reset_scheduled\":false,\"retry_required\":true,"
+                   "\"request_commit_attempted\":%s,"
+                   "\"request_write_may_have_applied\":false,"
+                   "\"request_outcome_ambiguous\":false,"
+                   "\"failure_telemetry_persisted\":%s,"
+                   "\"connectivity_prepare\":\"ESP_OK\","
+                   "\"connectivity_state_restored\":false,"
+                   "\"storage_manager_quiesced\":true,"
+                   "\"retained_worker_quiesced\":true,"
+                   "\"rp2040_bridge_quiesced\":true,"
+                   "\"quiesces_released\":false,"
+                   "\"recovery\":\"controlled_restart\","
+                   "\"global_atomic\":false,"
+                   "\"physical_flash_scrubbed\":false,"
+                   "\"sd_touched\":false,"
+                   "\"removable_sd_data_preserved\":true,"
+                   "\"rebooting\":true,"
+                   "\"console_drain_grace_ms\":%lu}\n",
+                   D1L_CONSOLE_SCHEMA,
+                   d1l_factory_reset_phase_name(status.phase),
+                   esp_err_to_name(ret), (unsigned long)status.attempt_count,
+                   (unsigned long)status.domains_completed,
+                   (unsigned long)status.domains_total,
+                   status.last_failed_domain,
+                   bool_json(status.request_commit_attempted),
+                   bool_json(status.failure_telemetry_persisted),
+                   (unsigned long)D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS);
+        } else {
+            const bool active_readback = status.reset_pending &&
+                status.phase == D1L_FACTORY_RESET_PHASE_ACTIVE;
+            printf("{\"schema\":%d,\"ok\":false,"
+                   "\"cmd\":\"factory-reset-confirm\",\"phase\":\"%s\","
+                   "\"code\":\"%s\",\"attempt\":%lu,"
+                   "\"domains_completed\":%lu,\"domains_total\":%lu,"
+                   "\"failed_domain\":\"%s\",\"partial_reset\":false,"
+                   "\"reset_schedule_state\":\"%s\","
+                   "\"reset_scheduled\":%s,\"retry_required\":%s,"
+                   "\"request_commit_attempted\":%s,"
+                   "\"request_write_may_have_applied\":true,"
+                   "\"request_readback_exact\":%s,"
+                   "\"request_outcome_ambiguous\":%s,"
+                   "\"connectivity_prepare\":\"ESP_OK\","
+                   "\"connectivity_state_restored\":false,"
+                   "\"storage_manager_quiesced\":true,"
+                   "\"retained_worker_quiesced\":true,"
+                   "\"rp2040_bridge_quiesced\":true,"
+                   "\"quiesces_released\":false,"
+                   "\"recovery\":\"controlled_restart\","
+                   "\"global_atomic\":false,"
+                   "\"physical_flash_scrubbed\":false,"
+                   "\"sd_touched\":false,"
+                   "\"removable_sd_data_preserved\":true,"
+                   "\"rebooting\":true,"
+                   "\"console_drain_grace_ms\":%lu}\n",
+                   D1L_CONSOLE_SCHEMA,
+                   d1l_factory_reset_phase_name(status.phase),
+                   esp_err_to_name(ret), (unsigned long)status.attempt_count,
+                   (unsigned long)status.domains_completed,
+                   (unsigned long)status.domains_total,
+                   status.last_failed_domain,
+                   active_readback ? "active_readback" : "ambiguous",
+                   active_readback ? "true" : "null",
+                   bool_json(!status.request_readback_exact),
+                   bool_json(status.request_commit_attempted),
+                   bool_json(status.request_readback_exact),
+                   bool_json(status.request_outcome_ambiguous),
+                   (unsigned long)D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS);
+        }
+        /* A set/commit error may have armed early-boot deletion, and even a
+         * definite no-write failure follows connectivity shutdown. Never
+         * release producers into either altered runtime lifetime. */
+        restart_with_factory_reset_quiesces();
+        return;
+    }
+
+    ok_begin("factory-reset-confirm");
+    printf(",\"factory_reset_requested\":true,"
+           "\"factory_reset_complete\":false,"
+           "\"reset_scope\":\"inventoried_onboard_nvs_user_keys\","
+           "\"phase\":\"active\",\"reset_scheduled\":true,"
+           "\"erase_boundary\":\"early_boot_before_producers\","
+           "\"attempt\":%lu,"
+           "\"domains_completed\":%lu,\"domains_total\":%lu,"
+           "\"keys_erased\":%lu,\"keys_already_absent\":%lu,"
+           "\"storage_manager_quiesced\":true,"
+           "\"retained_worker_quiesced\":true,"
+           "\"rp2040_bridge_quiesced\":true,"
+           "\"connectivity_prepare\":\"ESP_OK\","
+           "\"global_atomic\":false,\"physical_flash_scrubbed\":false,"
+           "\"sd_touched\":false,\"removable_sd_data_preserved\":true,"
+           "\"pre_reset_sd_history_fenced_on_boot\":true,"
+           "\"sd_media_marker_required\":true,"
+           "\"sd_lineage_generation\":%lu,"
+           "\"unknown_nvs_keys_preserved\":true,"
+           "\"protocol_high_water_preserved\":true,"
+           "\"migration_evidence_preserved\":true,"
+           "\"time_checkpoint_preserved\":true,"
+           "\"crash_forensics_preserved\":true,"
+           "\"retained_ownership_evidence_preserved\":true,"
+           "\"inventory_entry_count\":%u,\"clear_nvs_key_count\":%u,"
+           "\"preserved_raw_marker_slots\":%u,"
+           "\"rebooting\":true,\"console_drain_grace_ms\":%lu}\n",
+           (unsigned long)status.attempt_count,
+           (unsigned long)status.domains_completed,
+           (unsigned long)status.domains_total,
+           (unsigned long)status.keys_erased,
+           (unsigned long)status.keys_already_absent,
+           (unsigned long)status.sd_lineage_generation,
+           (unsigned int)D1L_FACTORY_RESET_INVENTORY_COUNT,
+           (unsigned int)D1L_FACTORY_RESET_CLEAR_DOMAIN_COUNT,
+           (unsigned int)D1L_FACTORY_RESET_RAW_MARKER_COUNT,
+           (unsigned long)D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS);
+    /* All producer/bridge quiesces remain held through system reset. The
+     * durable intent is executed by early boot before any producer starts. */
+    restart_with_factory_reset_quiesces();
 }
 
 static void handle_line(const char *line)
@@ -6181,6 +6442,8 @@ static void handle_line(const char *line)
         cmd_mesh_send_public(line);
     } else if (strncmp(line, "mesh send dm ", 13) == 0) {
         cmd_mesh_send_dm(line);
+    } else if (strcmp(line, "factory-reset-status") == 0) {
+        cmd_factory_reset_status();
     } else if (strcmp(line, "reboot") == 0) {
         const int64_t reboot_started_us = esp_timer_get_time();
         uint32_t remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
@@ -6255,8 +6518,7 @@ static void handle_line(const char *line)
         for (;;) {
         }
     } else if (strcmp(line, "factory-reset-confirm") == 0) {
-        err_result("factory-reset-confirm", "NOT_SUPPORTED",
-                   "factory reset is not implemented; settings reset preserves protocol migration and high-water state");
+        cmd_factory_reset_confirm();
     } else {
         err_result("unknown", "UNKNOWN_COMMAND", "send help for supported commands");
     }
@@ -6324,5 +6586,222 @@ void d1l_usb_console_run(void)
         }
 
         line[used++] = (char)ch;
+    }
+}
+
+static void factory_reset_recovery_status(const char *cmd)
+{
+    d1l_factory_reset_status_t status = {0};
+    const esp_err_t inspect_ret = d1l_factory_reset_inspect(&status);
+    const esp_err_t effective_ret = inspect_ret == ESP_OK ?
+        status.last_error : inspect_ret;
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"%s\","
+           "\"phase\":\"%s\",\"journal_found\":%s,"
+           "\"pending\":%s,\"complete\":%s,\"attempt\":%lu,"
+           "\"domains_completed\":%lu,\"domains_total\":%lu,"
+           "\"keys_erased\":%lu,\"keys_already_absent\":%lu,"
+           "\"failed_domain\":\"%s\",\"failed_domain_index\":",
+           D1L_CONSOLE_SCHEMA, bool_json(effective_ret == ESP_OK), cmd,
+           d1l_factory_reset_phase_name(status.phase),
+           bool_json(status.journal_found), bool_json(status.reset_pending),
+           bool_json(status.reset_complete),
+           (unsigned long)status.attempt_count,
+           (unsigned long)status.domains_completed,
+           (unsigned long)status.domains_total,
+           (unsigned long)status.keys_erased,
+           (unsigned long)status.keys_already_absent,
+           status.last_failed_domain);
+    if (status.last_failed_domain_index == UINT32_MAX) {
+        printf("null");
+    } else {
+        printf("%lu", (unsigned long)status.last_failed_domain_index);
+    }
+    printf(",\"error\":\"%s\",\"stored_error\":\"%s\","
+           "\"inspection_error\":\"%s\","
+           "\"sd_lineage_generation\":%lu,"
+           "\"sd_lineage_active_mask\":%lu,"
+           "\"recovery_mode\":true,\"producers_started\":false,"
+           "\"rf_started\":false,\"connectivity_started\":false,"
+           "\"stores_started\":false,\"sd_touched\":false}\n",
+           esp_err_to_name(effective_ret), esp_err_to_name(status.last_error),
+           esp_err_to_name(inspect_ret),
+           (unsigned long)status.sd_lineage_generation,
+           (unsigned long)status.sd_lineage_active_mask);
+}
+
+static void factory_reset_recovery_export(void)
+{
+    factory_reset_recovery_status("factory-reset-recovery-export");
+    for (size_t i = 0U; i < d1l_factory_reset_inventory_count(); ++i) {
+        d1l_factory_reset_inventory_entry_t entry = {0};
+        if (!d1l_factory_reset_inventory_entry(i, &entry)) {
+            continue;
+        }
+        printf("{\"schema\":%d,\"ok\":true,"
+               "\"cmd\":\"factory-reset-recovery-export\","
+               "\"inventory_index\":%lu,\"name\":\"%s\","
+               "\"partition\":\"%s\",\"namespace\":\"%s\","
+               "\"key\":\"%s\",\"disposition\":\"%s\"}\n",
+               D1L_CONSOLE_SCHEMA, (unsigned long)i, entry.name,
+               entry.partition_label, entry.nvs_namespace, entry.key,
+               d1l_factory_reset_disposition_name(entry.disposition));
+    }
+}
+
+void d1l_usb_console_run_factory_reset_recovery(
+    const d1l_factory_reset_status_t *boot_status)
+{
+    static char line[128];
+    char repair_token[9] = {0};
+    int64_t repair_deadline_us = 0;
+    size_t used = 0U;
+    bool dropping_overlong = false;
+    bool prompt_pending = true;
+    const char *boot_phase = boot_status ?
+        d1l_factory_reset_phase_name(boot_status->phase) : "storage_error";
+
+    printf("{\"schema\":%d,\"ok\":true,"
+           "\"event\":\"factory_reset_recovery_console\","
+           "\"boot_phase\":\"%s\",\"recovery_mode\":true,"
+           "\"commands\":[\"help\","
+           "\"factory-reset-recovery-status\","
+           "\"factory-reset-recovery-export\","
+           "\"factory-reset-repair-arm\","
+           "\"factory-reset-repair-confirm <token> "
+           "ERASE_ONBOARD_USER_STATE\"],"
+           "\"producers_started\":false,\"sd_touched\":false}\n",
+           D1L_CONSOLE_SCHEMA, boot_phase);
+
+    for (;;) {
+        if (prompt_pending) {
+            printf("d1l-reset-recovery> ");
+            fflush(stdout);
+            prompt_pending = false;
+        }
+        const int ch = fgetc(stdin);
+        if (ch == EOF) {
+            clearerr(stdin);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+        if (ch != '\n' && ch != '\r') {
+            if (dropping_overlong) {
+                continue;
+            }
+            if (used + 1U >= sizeof(line)) {
+                wipe_console_bytes(line, sizeof(line));
+                used = 0U;
+                dropping_overlong = true;
+                printf("\n");
+                err_result("factory-reset-recovery", "LINE_TOO_LONG",
+                           "recovery command exceeded the bounded line buffer");
+                prompt_pending = true;
+                continue;
+            }
+            line[used++] = (char)ch;
+            continue;
+        }
+        if (dropping_overlong) {
+            dropping_overlong = false;
+            wipe_console_bytes(line, sizeof(line));
+            used = 0U;
+            prompt_pending = true;
+            continue;
+        }
+        if (used == 0U) {
+            continue;
+        }
+        line[used] = '\0';
+        used = 0U;
+        trim_line(line);
+        printf("\n");
+
+        if (strcmp(line, "help") == 0) {
+            printf("{\"schema\":%d,\"ok\":true,\"cmd\":\"help\","
+                   "\"recovery_only\":true,"
+                   "\"repair_requires_two_confirmations\":true}\n",
+                   D1L_CONSOLE_SCHEMA);
+        } else if (strcmp(line, "factory-reset-recovery-status") == 0) {
+            factory_reset_recovery_status(
+                "factory-reset-recovery-status");
+        } else if (strcmp(line, "factory-reset-recovery-export") == 0) {
+            factory_reset_recovery_export();
+        } else if (strcmp(line, "factory-reset-repair-arm") == 0) {
+            const uint32_t token = esp_random();
+            (void)snprintf(repair_token, sizeof(repair_token), "%08" PRIx32,
+                           token);
+            repair_deadline_us = esp_timer_get_time() + 60000000LL;
+            printf("{\"schema\":%d,\"ok\":true,"
+                   "\"cmd\":\"factory-reset-repair-arm\","
+                   "\"confirmation\":1,\"token\":\"%s\","
+                   "\"expires_ms\":60000,"
+                   "\"next\":\"factory-reset-repair-confirm %s "
+                   "ERASE_ONBOARD_USER_STATE\"}\n",
+                   D1L_CONSOLE_SCHEMA, repair_token, repair_token);
+        } else if (strncmp(line, "factory-reset-repair-confirm ",
+                           strlen("factory-reset-repair-confirm ")) == 0) {
+            char supplied_token[9] = {0};
+            char phrase[32] = {0};
+            char extra = '\0';
+            const int fields = sscanf(
+                line + strlen("factory-reset-repair-confirm "),
+                "%8s %31s %c", supplied_token, phrase, &extra);
+            const bool armed = repair_token[0] != '\0' &&
+                repair_deadline_us > esp_timer_get_time();
+            const bool exact = fields == 2 && armed &&
+                strcmp(supplied_token, repair_token) == 0 &&
+                strcmp(phrase, "ERASE_ONBOARD_USER_STATE") == 0;
+            wipe_console_bytes(repair_token, sizeof(repair_token));
+            repair_deadline_us = 0;
+            wipe_console_bytes(supplied_token, sizeof(supplied_token));
+            wipe_console_bytes(phrase, sizeof(phrase));
+            if (!exact) {
+                err_result("factory-reset-repair-confirm",
+                           "CONFIRMATION_REQUIRED",
+                           "arm again, then submit the exact token and phrase");
+            } else {
+                d1l_factory_reset_status_t repaired = {0};
+                const esp_err_t repair_ret =
+                    d1l_factory_reset_repair_quarantined(&repaired);
+                if (repair_ret != ESP_OK) {
+                    d1l_factory_reset_status_t readback = {0};
+                    const esp_err_t inspect_ret =
+                        d1l_factory_reset_inspect(&readback);
+                    if (inspect_ret == ESP_OK && readback.reset_pending &&
+                        readback.phase == D1L_FACTORY_RESET_PHASE_ACTIVE) {
+                        printf("{\"schema\":%d,\"ok\":false,"
+                               "\"cmd\":\"factory-reset-repair-confirm\","
+                               "\"code\":\"%s\","
+                               "\"repair_write_may_have_applied\":true,"
+                               "\"active_readback\":true,"
+                               "\"rebooting\":true}\n",
+                               D1L_CONSOLE_SCHEMA,
+                               esp_err_to_name(repair_ret));
+                        restart_with_factory_reset_quiesces();
+                    } else {
+                        err_result(
+                            "factory-reset-repair-confirm",
+                            esp_err_to_name(repair_ret),
+                            "journal repair failed; recovery mode remains active");
+                    }
+                } else {
+                    printf("{\"schema\":%d,\"ok\":true,"
+                           "\"cmd\":\"factory-reset-repair-confirm\","
+                           "\"confirmation\":2,"
+                           "\"fresh_active_journal\":true,"
+                           "\"next_domain\":0,"
+                           "\"sd_lineage_generation\":%lu,"
+                           "\"rebooting\":true}\n",
+                           D1L_CONSOLE_SCHEMA,
+                           (unsigned long)repaired.sd_lineage_generation);
+                    restart_with_factory_reset_quiesces();
+                }
+            }
+        } else {
+            err_result("factory-reset-recovery", "UNKNOWN_COMMAND",
+                       "only bounded recovery status, export, and repair are available");
+        }
+        wipe_console_bytes(line, sizeof(line));
+        prompt_pending = true;
     }
 }

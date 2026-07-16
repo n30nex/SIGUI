@@ -63,6 +63,7 @@ idf_component_register(
         "mesh/meshcore_wire.c"
         "mesh/meshcore_radio_profile.c"
         "storage/retained_blob_store.c"
+        "storage/factory_reset.c"
         "storage/export_store.c"
         "storage/map_tile_store.c"
         "storage/retained_store_scheduler.c"
