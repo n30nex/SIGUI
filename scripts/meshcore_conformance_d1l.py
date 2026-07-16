@@ -266,6 +266,12 @@ EXPECTED_WP05_PRODUCTION_SUITES = {
         "invocation_count": 1,
         "expected_stdout": "meshcore_admin_dispatch_test: ok",
     },
+    "runtime_queue_fairness": {
+        "binary": "meshcore_runtime_guard_semantic",
+        "scenario_count": 5,
+        "invocation_count": 1,
+        "expected_stdout": "native mesh runtime guards: ok",
+    },
     "contact_trace": {
         "binary": "meshcore_trace_semantic",
         "scenario_count": 3,
@@ -297,7 +303,9 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/hal/rp2040_bridge.h",
     "main/mesh/meshcore_admin_dispatch.c",
     "main/mesh/meshcore_admin_dispatch.h",
+    "main/mesh/meshcore_command_guard.h",
     "main/mesh/meshcore_radio_profile.h",
+    "main/mesh/meshcore_runtime_guard.h",
     "main/mesh/meshcore_trace.h",
     "main/mesh/meshcore_wire.c",
     "main/mesh/meshcore_wire.h",
@@ -313,6 +321,7 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/storage/storage_status.h",
     "tests/native/esp_nvs_stubs.c",
     "tests/native/meshcore_admin_dispatch_test.c",
+    "tests/native/meshcore_runtime_guard_test.c",
     "tests/native/meshcore_trace_test.c",
     "tests/native/mock_esp_nvs.h",
     "tests/native/settings_protocol_migration_test.c",
@@ -614,6 +623,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "host_authenticated_admin_session_fixture",
             "production_admin_login_status_dispatch",
             "production_admin_single_owner_login_status_logout_dispatch",
+            "production_bounded_queue_saturation_and_fairness",
         ],
         "host_only_receipt": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
         "production_receipt": {
@@ -637,6 +647,27 @@ EXPECTED_ORACLE_CAPABILITIES = [
                 "single_owner_bounded_login_status_logout_commands_request_"
                 "deadline_queue_saturation_and_zeroization_guards_no_ui_"
                 "credential_storage_or_remote_mutating_admin_commands"
+            ),
+        },
+        "queue_fairness_receipt": {
+            "id": "RCPT-WP06-QUEUE-FAIRNESS-20260716",
+            "status": "implemented_host_only_pending_actions_hardware_rf_and_wp06_closure",
+            "sources": [
+                "main/comms/usb_console.c",
+                "main/mesh/meshcore_command_guard.h",
+                "main/mesh/meshcore_runtime_guard.h",
+                "main/mesh/meshcore_service.c",
+                "main/mesh/meshcore_service.h",
+            ],
+            "host_suite": "runtime_queue_fairness",
+            "scenario_count": 5,
+            "scope": (
+                "separate_fixed_normal_and_priority_command_queues_exact_"
+                "terminal_recovery_precedence_four_radio_event_and_two_"
+                "priority_command_burst_bounds_synchronous_request_"
+                "cancellation_credential_wipe_owner_recursion_guard_and_"
+                "truthful_saturation_fairness_maintenance_telemetry_no_"
+                "actions_hardware_rf_wp06_or_release_closure"
             ),
         },
     },
@@ -2790,6 +2821,15 @@ def production_semantic_suite_specs(
             ],
         },
         {
+            "id": "runtime_queue_fairness",
+            "binary": Path(build_dir) / "meshcore_runtime_guard_semantic",
+            "flags": [],
+            "include_dirs": [ROOT / "main"],
+            "sources": [
+                native / "meshcore_runtime_guard_test.c",
+            ],
+        },
+        {
             "id": "contact_trace",
             "binary": Path(build_dir) / "meshcore_trace_semantic",
             "flags": [],
@@ -3984,8 +4024,13 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("oracle_semantic_vectors") == 915
         and isinstance(value.get("unique_referenced_oracle_semantic_vectors"), int)
         and 0 < value["unique_referenced_oracle_semantic_vectors"] <= 915
-        and value.get("production_suite_count") == 4
-        and value.get("production_scenario_count") == 21
+        and value.get("production_suite_count")
+        == len(EXPECTED_WP05_PRODUCTION_SUITES)
+        and value.get("production_scenario_count")
+        == sum(
+            contract["scenario_count"]
+            for contract in EXPECTED_WP05_PRODUCTION_SUITES.values()
+        )
         and isinstance(requirements, list)
         and all(isinstance(item, dict) for item in requirements)
         and [item.get("id") for item in requirements]

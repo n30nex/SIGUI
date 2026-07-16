@@ -263,7 +263,7 @@ def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
     assert "D1L_MESHCORE_ACK_DISPATCH_FLOOD_ACK" in planner
     assert "build_dm_ack_response" in source
     assert "meshcore_service_send_ack_async" in source
-    assert "xQueueSendToFront(s_service_queue, &cmd, 0)" in source
+    assert "xQueueSend(s_priority_command_queue, &cmd, 0)" in source
     assert ".ack_response = true" in source
     assert "vTaskDelay(pdMS_TO_TICKS(cmd->delay_ms))" in source
     assert "const bool ack_queued = parse_rx_dm_packet" in source

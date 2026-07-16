@@ -311,10 +311,10 @@ def test_callback_terminal_snapshot_is_immutable_and_monotonically_identified():
     callbacks = source.split(
         "/* SX1262 callbacks are deliberately bounded", 1
     )[1].split("static RadioEvents_t s_radio_events", 1)[0]
-    enqueue = body(
+    take_terminal = body(
         source,
-        "static void enqueue_radio_event",
-        "/* SX1262 callbacks are deliberately bounded",
+        "static bool meshcore_service_take_latched_terminal",
+        "static void status_lock",
     )
 
     assert ".operation_id = ++s_next_radio_tx_operation_id" in begin
@@ -324,7 +324,7 @@ def test_callback_terminal_snapshot_is_immutable_and_monotonically_identified():
     assert callbacks.count(
         "capture_callback_tx_operation(origin, &identity)"
     ) == 2
-    assert "event.tx_operation = *tx_operation" in enqueue
+    assert "out_event->tx_operation = best_identity" in take_terminal
 
 
 def test_only_the_expected_ack_closes_the_awaiting_owner_session():
@@ -396,7 +396,7 @@ def test_owner_automatically_reconciles_background_durable_ack():
     clear = reconcile.index("clear_pending_dm_tx();")
     assert query < state < revision < delivered < publish < clear
     assert "transition_pending_dm_tx(" not in reconcile
-    assert task.count("meshcore_service_run_owner_maintenance();") == 2
+    assert task.count("meshcore_service_run_owner_maintenance();") >= 3
     assert "pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS)" in task
 
 

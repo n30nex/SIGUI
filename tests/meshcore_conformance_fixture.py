@@ -14,6 +14,11 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/mesh/meshcore_admin_dispatch.h",
         "tests/native/meshcore_admin_dispatch_test.c",
     }
+    runtime = {
+        "main/mesh/meshcore_command_guard.h",
+        "main/mesh/meshcore_runtime_guard.h",
+        "tests/native/meshcore_runtime_guard_test.c",
+    }
     trace = {
         "main/mesh/meshcore_trace.h",
         "main/mesh/meshcore_wire.c",
@@ -37,10 +42,10 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "tests/native/stubs/nvs.h",
     }
     all_dependencies = set(matrix["source_pins"])
-    time_service = all_dependencies - admin - trace - {
+    time_service = all_dependencies - admin - runtime - trace - {
         "tests/native/settings_protocol_migration_test.c"
     }
-    suite_sets = [admin, trace, migration, time_service]
+    suite_sets = [admin, runtime, trace, migration, time_service]
     suite_specs = conformance.production_semantic_suite_specs()
     commands = [
         [conformance._canonical_command_argument(argument) for argument in command]
@@ -186,8 +191,11 @@ def completed_report(
         "coverage_boundary": "declared_wp05_host_semantic_matrix",
         "closure_ready": False,
         "sanitizers": ["address", "undefined"],
-        "suite_count": 4,
-        "scenario_count": 21,
+        "suite_count": len(semantic_matrix["production_host_suites"]),
+        "scenario_count": sum(
+            len(suite["scenario_ids"])
+            for suite in semantic_matrix["production_host_suites"]
+        ),
         "suites": [
             {
                 "id": suite["id"],

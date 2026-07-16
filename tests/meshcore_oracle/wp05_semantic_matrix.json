@@ -103,7 +103,8 @@
         "login_response_creation_dispatch_orchestration_fixtures"
       ],
       "production_host_suites": [
-        "admin_dispatch"
+        "admin_dispatch",
+        "runtime_queue_fairness"
       ],
       "remaining": [
         "execute the complete production admin operation allowlist",
@@ -257,6 +258,21 @@
       "expected_stdout": "meshcore_admin_dispatch_test: ok"
     },
     {
+      "id": "runtime_queue_fairness",
+      "binary": "meshcore_runtime_guard_semantic",
+      "scenario_ids": [
+        "queue_overload_backpressure",
+        "bounded_normal_command_fairness",
+        "terminal_recovery_precedence",
+        "cancellation_and_secret_wipe_safety",
+        "owner_recursion_deadlock_guard"
+      ],
+      "invocations": [
+        []
+      ],
+      "expected_stdout": "native mesh runtime guards: ok"
+    },
+    {
       "id": "contact_trace",
       "binary": "meshcore_trace_semantic",
       "scenario_ids": [
@@ -333,7 +349,9 @@
     "main/hal/rp2040_bridge.h": "57af77842713ec9f2c2eeb6cf6bd856ccc5a75c79ca9540e82cd4b5d9cff099c",
     "main/mesh/meshcore_admin_dispatch.c": "3f91368320e13a138316d8a99ce9727d87695e1fbe2b770019ebda115e5be701",
     "main/mesh/meshcore_admin_dispatch.h": "10e1e73af1046bbcf610457d6ae3adbb5e52e25962c4c249d2afc0d36567d43f",
+    "main/mesh/meshcore_command_guard.h": "c266e8f1a28bce5469a7f072b12ae06410e8be04af0c31ce9375283746082f53",
     "main/mesh/meshcore_radio_profile.h": "79fc333c543d2215dab414067515763113a70bdd62eb43a63038819322854e9a",
+    "main/mesh/meshcore_runtime_guard.h": "5b3630e4a27b15d65a10f7b7524ee646123680b89efb9586f7b02ba33c899708",
     "main/mesh/meshcore_trace.h": "dcfd9d18f65555baa018412f1b7c9e6079a04b1b6ad89fda1452ec3943a6dc78",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
@@ -349,6 +367,7 @@
     "main/storage/storage_status.h": "9da4c29e51e6345de70770649f7e92b583edeb668cbb4017152130c20001700d",
     "tests/native/esp_nvs_stubs.c": "2ad701fb96d76e19518e193bcfafb7fada5d0e1a517a38406998fc386ad6b8ca",
     "tests/native/meshcore_admin_dispatch_test.c": "830b262f3f15f95c27d374e93ad60eab2e52647e478346df70d604125312bfda",
+    "tests/native/meshcore_runtime_guard_test.c": "f5a2c1b33ed1fd1545d934eceb05041fc348f9cfc8f6ef04399fcba444bc91e4",
     "tests/native/meshcore_trace_test.c": "c046cdc354a40d5feae8e79eb8e8f66fa1426ecae97a083ef6f6ca7c56092eff",
     "tests/native/mock_esp_nvs.h": "186a12a057672734ddeddeeba5667298aadf69fb2b074d42c4dbd588f9d552fd",
     "tests/native/settings_protocol_migration_test.c": "6e0093fed3ac42bc02fe8f5d4e18185eb52f6f86febca805e489c2d794de0b93",

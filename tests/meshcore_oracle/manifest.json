@@ -69,7 +69,7 @@
   },
   "production_binding_sources": {
     "main/CMakeLists.txt": "9f8d62ee0b11058ca68953644406cedc627f1baf4346871131df4c5ca5a916e4",
-    "main/comms/usb_console.c": "d9f4ccecfe56d561e3845bce42d2fe10d4cdf3db2e75c36d6890df3068ba35e0",
+    "main/comms/usb_console.c": "d5426a57fee2b95385a4fe86c3062951d68369b83f9ba0f308d1df65e210f95f",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/contact_store.c": "3f895213e9cb8fdf5da67a01fac26df35aa542c6f2ffcf179d1e0d276a1d9e14",
     "main/mesh/contact_store.h": "2252ef58b703c6721a1fd77f2a1306d6ea4d9f419af5c996666a212a29752750",
@@ -88,9 +88,9 @@
     "main/mesh/meshcore_path_state.c": "f3e4071574a0a65cab1caa4ad285f64943a0770c82ac2df803328212d9db9d77",
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
-    "main/mesh/meshcore_runtime_guard.h": "5cbd2cf819909fba2dc84870f4c64ffa1875d0aba63214b2248d9cf5a074db8f",
-    "main/mesh/meshcore_service.c": "82ccbd1fda9298bb5609d03beaf1eb56c836fa86fd5218bc57891cdbc03b1d1d",
-    "main/mesh/meshcore_service.h": "031d1799516ebc4e61e6abde4da457f4255adcf2bd42f1149c5d186b02335eb7",
+    "main/mesh/meshcore_runtime_guard.h": "5b3630e4a27b15d65a10f7b7524ee646123680b89efb9586f7b02ba33c899708",
+    "main/mesh/meshcore_service.c": "4da21ca94e2c89c623698e63da518098416237d9302061fb72413436aed2a7a7",
+    "main/mesh/meshcore_service.h": "0d2d94e1bce716d87213cf875834c99ed4bb503dc0c1f5099ad6c017fdcdb809",
     "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
     "main/mesh/meshcore_trace.h": "dcfd9d18f65555baa018412f1b7c9e6079a04b1b6ad89fda1452ec3943a6dc78",
@@ -113,7 +113,7 @@
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9c5fc00f795c0ec4ff3c385d66775f71c4cf54e20eff52fc78a3cc188f67f04d",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "e6c7dd80368e956f6e1769919f9f16d91e096a841ab06739ed16dd71edb25264",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "e02eea711371c538bbd6760267be9965f0beb94cbb04c733a47b646840ce15f9",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -796,7 +796,8 @@
         "login_response_creation_dispatch_orchestration_fixtures",
         "host_authenticated_admin_session_fixture",
         "production_admin_login_status_dispatch",
-        "production_admin_single_owner_login_status_logout_dispatch"
+        "production_admin_single_owner_login_status_logout_dispatch",
+        "production_bounded_queue_saturation_and_fairness"
       ],
       "host_only_receipt": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
       "production_receipt": {
@@ -815,6 +816,20 @@
           "main/mesh/meshcore_service.h"
         ],
         "scope": "repeater_admin_login_and_get_status_only_direct_or_flood_outbound_and_direct_or_path_response_inbound_room_rejected_single_owner_bounded_login_status_logout_commands_request_deadline_queue_saturation_and_zeroization_guards_no_ui_credential_storage_or_remote_mutating_admin_commands"
+      },
+      "queue_fairness_receipt": {
+        "id": "RCPT-WP06-QUEUE-FAIRNESS-20260716",
+        "status": "implemented_host_only_pending_actions_hardware_rf_and_wp06_closure",
+        "sources": [
+          "main/comms/usb_console.c",
+          "main/mesh/meshcore_command_guard.h",
+          "main/mesh/meshcore_runtime_guard.h",
+          "main/mesh/meshcore_service.c",
+          "main/mesh/meshcore_service.h"
+        ],
+        "host_suite": "runtime_queue_fairness",
+        "scenario_count": 5,
+        "scope": "separate_fixed_normal_and_priority_command_queues_exact_terminal_recovery_precedence_four_radio_event_and_two_priority_command_burst_bounds_synchronous_request_cancellation_credential_wipe_owner_recursion_guard_and_truthful_saturation_fairness_maintenance_telemetry_no_actions_hardware_rf_wp06_or_release_closure"
       }
     },
     {

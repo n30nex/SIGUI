@@ -65,10 +65,10 @@
 #define D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS 30000U
 #define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 8192U
 #define D1L_MESHCORE_SERVICE_QUEUE_LEN 6U
+#define D1L_MESHCORE_PRIORITY_QUEUE_LEN 4U
 #define D1L_MESHCORE_REQUEST_SLOT_COUNT D1L_MESHCORE_SERVICE_QUEUE_LEN
 #define D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN 8U
 #define D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN
-#define D1L_MESHCORE_MAX_EVENT_BURST 4U
 #define D1L_MESHCORE_OWNER_POLL_MS 250U
 #define D1L_MESHCORE_TX_WATCHDOG_GRACE_MS 250U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
@@ -95,11 +95,14 @@ _Static_assert(D1L_MESHCORE_PUB_KEY_SIZE ==
 _Static_assert(D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY ==
                    D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U,
                "admin command credential capacity must match protocol");
+_Static_assert(D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN <= 31U,
+               "terminal history must fit below the owner reservation bit");
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
 static SemaphoreHandle_t s_status_mutex;
 static QueueHandle_t s_service_queue;
+static QueueHandle_t s_priority_command_queue;
 static QueueHandle_t s_radio_event_queue;
 static TaskHandle_t s_service_task;
 static bool s_service_initialized;
@@ -123,9 +126,16 @@ static bool s_trace_last_route_summary_accepted;
 static bool s_trace_last_packet_preview_retained;
 static d1l_store_lock_t s_trace_lock = D1L_STORE_LOCK_INITIALIZER;
 static uint32_t s_runtime_command_queue_high_water;
+static uint32_t s_runtime_priority_queue_high_water;
 static uint32_t s_runtime_event_queue_high_water;
 static uint32_t s_runtime_queue_drops;
 static uint32_t s_runtime_callback_event_drops;
+static uint32_t s_runtime_command_queue_saturation;
+static uint32_t s_runtime_priority_queue_saturation;
+static uint32_t s_runtime_fairness_forced_commands;
+static uint32_t s_runtime_priority_burst_high_water;
+static uint32_t s_runtime_owner_maintenance_runs;
+static uint32_t s_runtime_terminal_recovery_dispatches;
 static uint32_t s_pending_rx_recovery;
 static uint64_t s_next_radio_tx_operation_id;
 static d1l_mesh_tx_operation_identity_t s_active_radio_tx;
@@ -139,7 +149,17 @@ typedef struct {
     volatile uint32_t dm_session_id_low;
     volatile uint32_t dm_session_id_high;
     volatile uint32_t dm_revision;
+    volatile uint32_t terminal_state;
+    volatile uint32_t terminal_monotonic_us_low;
+    volatile uint32_t terminal_monotonic_us_high;
 } d1l_callback_tx_snapshot_t;
+
+enum {
+    D1L_CALLBACK_TX_TERMINAL_NONE = 0U,
+    D1L_CALLBACK_TX_TERMINAL_WRITING,
+    D1L_CALLBACK_TX_TERMINAL_DONE,
+    D1L_CALLBACK_TX_TERMINAL_TIMEOUT,
+};
 
 static d1l_callback_tx_snapshot_t
     s_callback_tx_history[D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN];
@@ -252,15 +272,7 @@ static d1l_meshcore_request_slot_t
 static uint32_t s_request_slots_init_state;
 static uint32_t s_next_request_id;
 
-typedef enum {
-    D1L_LATCHED_TERMINAL_EMPTY = 0,
-    D1L_LATCHED_TERMINAL_WRITING,
-    D1L_LATCHED_TERMINAL_READY,
-    D1L_LATCHED_TERMINAL_READING,
-} d1l_latched_terminal_state_t;
-
-static volatile uint32_t s_latched_terminal_state;
-static d1l_meshcore_service_cmd_t s_latched_terminal_event;
+static volatile uint32_t s_terminal_lane;
 
 static void d1l_meshcore_start_rx(void);
 static esp_err_t meshcore_service_start_task(void);
@@ -561,6 +573,13 @@ static void publish_callback_tx_operation(
                      (uint32_t)(session_id >> 32U), __ATOMIC_RELAXED);
     __atomic_store_n(&snapshot->dm_revision, identity->dm_revision,
                      __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->terminal_monotonic_us_low, 0U,
+                     __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->terminal_monotonic_us_high, 0U,
+                     __ATOMIC_RELAXED);
+    __atomic_store_n(&snapshot->terminal_state,
+                     D1L_CALLBACK_TX_TERMINAL_NONE,
+                     __ATOMIC_RELAXED);
     __atomic_store_n(&snapshot->sequence, sequence + 2U,
                      __ATOMIC_RELEASE);
 }
@@ -677,10 +696,34 @@ static bool meshcore_radio_terminal_matches(
 
 static void runtime_note_queue_drop(bool callback_event)
 {
-    (void)__atomic_add_fetch(&s_runtime_queue_drops, 1U, __ATOMIC_RELAXED);
+    (void)d1l_mesh_runtime_counter_increment_saturating(
+        &s_runtime_queue_drops);
     if (callback_event) {
-        (void)__atomic_add_fetch(&s_runtime_callback_event_drops, 1U,
-                                 __ATOMIC_RELAXED);
+        (void)d1l_mesh_runtime_counter_increment_saturating(
+            &s_runtime_callback_event_drops);
+    }
+}
+
+static void runtime_note_command_saturation(bool priority_command)
+{
+    runtime_note_queue_drop(false);
+    uint32_t *counter = priority_command ?
+        &s_runtime_priority_queue_saturation :
+        &s_runtime_command_queue_saturation;
+    (void)d1l_mesh_runtime_counter_increment_saturating(counter);
+}
+
+static void runtime_note_value_high_water(uint32_t value,
+                                          uint32_t *high_water)
+{
+    if (!high_water) {
+        return;
+    }
+    uint32_t observed = __atomic_load_n(high_water, __ATOMIC_RELAXED);
+    while (value > observed &&
+           !__atomic_compare_exchange_n(high_water, &observed, value, false,
+                                        __ATOMIC_RELAXED,
+                                        __ATOMIC_RELAXED)) {
     }
 }
 
@@ -691,12 +734,7 @@ static void runtime_note_queue_depth(QueueHandle_t queue,
         return;
     }
     const uint32_t depth = (uint32_t)uxQueueMessagesWaiting(queue);
-    uint32_t observed = __atomic_load_n(high_water, __ATOMIC_RELAXED);
-    while (depth > observed &&
-           !__atomic_compare_exchange_n(high_water, &observed, depth, false,
-                                        __ATOMIC_RELAXED,
-                                        __ATOMIC_RELAXED)) {
-    }
+    runtime_note_value_high_water(depth, high_water);
 }
 
 static void meshcore_service_wake(void)
@@ -712,22 +750,40 @@ static void meshcore_service_latch_radio_recovery(
 {
     if (type == D1L_MESHCORE_SERVICE_EVENT_TX_DONE ||
         type == D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT) {
-        uint32_t expected = D1L_LATCHED_TERMINAL_EMPTY;
-        if (__atomic_compare_exchange_n(
-                &s_latched_terminal_state, &expected,
-                D1L_LATCHED_TERMINAL_WRITING, false,
-                __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-            memset(&s_latched_terminal_event, 0,
-                   sizeof(s_latched_terminal_event));
-            s_latched_terminal_event.type = type;
-            s_latched_terminal_event.monotonic_us =
-                (uint64_t)esp_timer_get_time();
-            if (tx_operation) {
-                s_latched_terminal_event.tx_operation = *tx_operation;
-            }
-            __atomic_store_n(&s_latched_terminal_state,
-                             D1L_LATCHED_TERMINAL_READY,
-                             __ATOMIC_RELEASE);
+        if (!d1l_mesh_tx_operation_identity_valid(tx_operation) ||
+            tx_operation->operation_id > UINT32_MAX) {
+            runtime_note_queue_drop(true);
+            meshcore_service_wake();
+            return;
+        }
+
+        const uint8_t terminal_slot = (uint8_t)(
+            (tx_operation->operation_id - 1U) %
+            D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN);
+        /* This single OR is the callback's linearization point. It happens
+         * before the immutable slot write, so an owner reservation can never
+         * skip a callback that began publication first. */
+        (void)d1l_mesh_terminal_lane_publish_slot(
+            &s_terminal_lane, terminal_slot);
+        d1l_callback_tx_snapshot_t *snapshot =
+            &s_callback_tx_history[terminal_slot];
+        uint32_t expected = D1L_CALLBACK_TX_TERMINAL_NONE;
+        const bool owns_snapshot = __atomic_compare_exchange_n(
+            &snapshot->terminal_state, &expected,
+            D1L_CALLBACK_TX_TERMINAL_WRITING, false,
+            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+        if (owns_snapshot) {
+            const uint64_t now_us = (uint64_t)esp_timer_get_time();
+            __atomic_store_n(&snapshot->terminal_monotonic_us_low,
+                             (uint32_t)now_us, __ATOMIC_RELAXED);
+            __atomic_store_n(&snapshot->terminal_monotonic_us_high,
+                             (uint32_t)(now_us >> 32U), __ATOMIC_RELAXED);
+            __atomic_store_n(
+                &snapshot->terminal_state,
+                type == D1L_MESHCORE_SERVICE_EVENT_TX_DONE ?
+                    D1L_CALLBACK_TX_TERMINAL_DONE :
+                    D1L_CALLBACK_TX_TERMINAL_TIMEOUT,
+                __ATOMIC_RELEASE);
         }
         meshcore_service_wake();
         return;
@@ -742,17 +798,75 @@ static bool meshcore_service_take_latched_terminal(
     if (!out_event) {
         return false;
     }
-    uint32_t expected = D1L_LATCHED_TERMINAL_READY;
-    if (!__atomic_compare_exchange_n(
-            &s_latched_terminal_state, &expected,
-            D1L_LATCHED_TERMINAL_READING, false,
-            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+    const uint32_t pending_slots = d1l_mesh_terminal_lane_take_pending(
+        &s_terminal_lane);
+    if (pending_slots == 0U) {
         return false;
     }
-    *out_event = s_latched_terminal_event;
-    memset(&s_latched_terminal_event, 0, sizeof(s_latched_terminal_event));
-    __atomic_store_n(&s_latched_terminal_state,
-                     D1L_LATCHED_TERMINAL_EMPTY, __ATOMIC_RELEASE);
+
+    bool incomplete_snapshot = false;
+    bool found = false;
+    uint32_t best_terminal_state = D1L_CALLBACK_TX_TERMINAL_NONE;
+    uint64_t best_monotonic_us = 0U;
+    d1l_mesh_tx_operation_identity_t best_identity = {0};
+    for (uint8_t slot = 0U;
+         slot < D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN; ++slot) {
+        const uint32_t slot_bit = 1UL << slot;
+        if ((pending_slots & slot_bit) == 0U) {
+            continue;
+        }
+        const d1l_callback_tx_snapshot_t *snapshot =
+            &s_callback_tx_history[slot];
+        const uint32_t terminal_state = __atomic_load_n(
+            &snapshot->terminal_state, __ATOMIC_ACQUIRE);
+        if (terminal_state == D1L_CALLBACK_TX_TERMINAL_NONE ||
+            terminal_state == D1L_CALLBACK_TX_TERMINAL_WRITING) {
+            incomplete_snapshot = true;
+            continue;
+        }
+        if (terminal_state != D1L_CALLBACK_TX_TERMINAL_DONE &&
+            terminal_state != D1L_CALLBACK_TX_TERMINAL_TIMEOUT) {
+            continue;
+        }
+        const uint32_t origin = __atomic_load_n(
+            &snapshot->operation_id_low, __ATOMIC_RELAXED);
+        d1l_mesh_tx_operation_identity_t identity = {0};
+        if (!capture_callback_tx_operation(origin, &identity)) {
+            continue;
+        }
+        if (found && identity.operation_id <= best_identity.operation_id) {
+            continue;
+        }
+        const uint32_t monotonic_low = __atomic_load_n(
+            &snapshot->terminal_monotonic_us_low, __ATOMIC_RELAXED);
+        const uint32_t monotonic_high = __atomic_load_n(
+            &snapshot->terminal_monotonic_us_high, __ATOMIC_RELAXED);
+        found = true;
+        best_terminal_state = terminal_state;
+        best_monotonic_us =
+            ((uint64_t)monotonic_high << 32U) | monotonic_low;
+        best_identity = identity;
+    }
+    if (incomplete_snapshot) {
+        for (uint8_t slot = 0U;
+             slot < D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN; ++slot) {
+            if ((pending_slots & (1UL << slot)) != 0U) {
+                (void)d1l_mesh_terminal_lane_publish_slot(
+                    &s_terminal_lane, slot);
+            }
+        }
+        return false;
+    }
+    if (!found) {
+        return false;
+    }
+    memset(out_event, 0, sizeof(*out_event));
+    out_event->type =
+        best_terminal_state == D1L_CALLBACK_TX_TERMINAL_DONE ?
+        D1L_MESHCORE_SERVICE_EVENT_TX_DONE :
+        D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT;
+    out_event->monotonic_us = best_monotonic_us;
+    out_event->tx_operation = best_identity;
     return true;
 }
 
@@ -3680,11 +3794,15 @@ static void meshcore_service_handle_radio_tx_watchdog(void)
     };
     ESP_LOGW(TAG, "TX watchdog recovered operation %lu",
              (unsigned long)operation.operation_id);
+    (void)d1l_mesh_runtime_counter_increment_saturating(
+        &s_runtime_terminal_recovery_dispatches);
     meshcore_service_handle_radio_tx_timeout(&event);
 }
 
 static void meshcore_service_run_owner_maintenance(void)
 {
+    (void)d1l_mesh_runtime_counter_increment_saturating(
+        &s_runtime_owner_maintenance_runs);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     meshcore_service_handle_radio_tx_watchdog();
     (void)d1l_meshcore_admin_runtime_expire(now_us);
@@ -3760,6 +3878,14 @@ static void enqueue_radio_event(d1l_meshcore_service_cmd_type_t type,
                                 const d1l_mesh_tx_operation_identity_t *
                                     tx_operation)
 {
+    if (type == D1L_MESHCORE_SERVICE_EVENT_TX_DONE ||
+        type == D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT) {
+        /* Every exact terminal bypasses the ordinary radio FIFO, including
+         * when that FIFO is merely backlogged rather than full. The dedicated
+         * slot lane is nonblocking and owner-preemptive. */
+        meshcore_service_latch_radio_recovery(type, tx_operation);
+        return;
+    }
     if (!s_radio_event_queue ||
         (type == D1L_MESHCORE_SERVICE_EVENT_RX_DONE &&
          (!payload || size == 0U || size > D1L_MESHCORE_MAX_RAW_PACKET))) {
@@ -3774,9 +3900,6 @@ static void enqueue_radio_event(d1l_meshcore_service_cmd_type_t type,
         .snr = snr,
         .monotonic_us = (uint64_t)esp_timer_get_time(),
     };
-    if (tx_operation) {
-        event.tx_operation = *tx_operation;
-    }
     if (type == D1L_MESHCORE_SERVICE_EVENT_RX_DONE) {
         event.raw_len = (uint8_t)size;
         memcpy(event.raw, payload, size);
@@ -3791,10 +3914,10 @@ static void enqueue_radio_event(d1l_meshcore_service_cmd_type_t type,
     meshcore_service_wake();
 }
 
-/* SX1262 callbacks are deliberately bounded: copy immutable metadata/raw
- * bytes into the event queue, timestamp from the monotonic clock, and return.
- * Protocol parsing, retained writes, status transitions, and RX restarts are
- * owned by meshcore_service_task. */
+/* SX1262 callbacks are deliberately bounded: copy immutable terminal metadata
+ * into the exact mailbox or raw RX bytes into the event queue, timestamp from
+ * the monotonic clock, wake the owner, and return. Protocol parsing, retained
+ * writes, status transitions, and RX restarts are owned by the service task. */
 static void on_tx_done(uint32_t origin)
 {
     d1l_mesh_tx_operation_identity_t identity = {0};
@@ -3893,7 +4016,9 @@ static esp_err_t ensure_radio_started(void)
 
 static void d1l_meshcore_start_rx(void)
 {
-    if (!s_radio_started || !s_status.radio_ready) {
+    if (!d1l_mesh_rx_restart_begin(
+            &s_pending_rx_recovery, s_tx_busy,
+            s_radio_started && s_status.radio_ready)) {
         return;
     }
     d1l_radio_profile_t profile = d1l_settings_radio_profile(NULL);
@@ -4818,6 +4943,25 @@ static void meshcore_service_reply(const d1l_meshcore_service_cmd_t *cmd, esp_er
     meshcore_request_complete(cmd, ret);
 }
 
+static bool meshcore_service_command_requires_idle_tx(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd) {
+        return false;
+    }
+    switch (cmd->type) {
+    case D1L_MESHCORE_SERVICE_CMD_SEND_RAW:
+    case D1L_MESHCORE_SERVICE_CMD_SEND_ADVERT:
+    case D1L_MESHCORE_SERVICE_CMD_SEND_DM:
+    case D1L_MESHCORE_SERVICE_CMD_SEND_TRACE_CONTACT:
+    case D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN:
+    case D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void meshcore_service_task(void *arg)
 {
     (void)arg;
@@ -4825,64 +4969,167 @@ static void meshcore_service_task(void *arg)
      * it on the same task that owns every later Admin transition. */
     d1l_meshcore_admin_runtime_init();
     d1l_meshcore_service_cmd_t cmd = {0};
-    uint8_t radio_event_burst = 0U;
+    d1l_meshcore_service_cmd_t held_cmd = {0};
+    d1l_mesh_owner_work_t held_work = D1L_MESH_OWNER_WORK_IDLE;
+    bool held_forced_normal = false;
+    bool held_cmd_valid = false;
+    d1l_mesh_owner_scheduler_t scheduler = {0};
     for (;;) {
         d1l_meshcore_service_cmd_t recovery_event = {0};
         const bool terminal_recovery =
             meshcore_service_take_latched_terminal(&recovery_event);
-        const bool rx_recovery = __atomic_exchange_n(
-            &s_pending_rx_recovery, 0U, __ATOMIC_ACQ_REL) != 0U;
-        if (terminal_recovery || rx_recovery) {
+        if (!terminal_recovery &&
+            d1l_mesh_terminal_lane_has_pending(&s_terminal_lane)) {
+            /* The callback set its slot bit before filling the immutable
+             * snapshot. It never waits; this owner yields until the exact
+             * terminal is ready instead of reserving ordinary work. */
+            taskYIELD();
+            continue;
+        }
+        if (terminal_recovery) {
             status_lock();
-            s_status.runtime_task_heartbeat++;
+            (void)d1l_mesh_runtime_counter_increment_saturating(
+                &s_status.runtime_task_heartbeat);
             s_status.runtime_task_stack_free_words =
                 (uint32_t)uxTaskGetStackHighWaterMark(NULL);
             status_unlock();
-        }
-        if (terminal_recovery) {
+            (void)d1l_mesh_runtime_counter_increment_saturating(
+                &s_runtime_terminal_recovery_dispatches);
             meshcore_service_handle_latched_radio_terminal(&recovery_event);
+            meshcore_service_run_owner_maintenance();
+            meshcore_service_command_wipe(&recovery_event);
+            continue;
         }
-        if (rx_recovery) {
-            if (s_tx_busy) {
+
+        const bool rx_recovery = d1l_mesh_rx_recovery_take(
+            &s_pending_rx_recovery, false);
+        const bool rx_recovery_deferred = rx_recovery && s_tx_busy;
+        if (rx_recovery_deferred) {
+            __atomic_store_n(&s_pending_rx_recovery, 1U,
+                             __ATOMIC_RELEASE);
+        }
+
+        /* This CAS is the sole ordinary-work reservation. A terminal callback
+         * that published first makes it fail; one that publishes afterward
+         * sets a slot bit that the pre-execution validation observes. */
+        if (!d1l_mesh_terminal_lane_try_reserve_owner(&s_terminal_lane)) {
+            if (rx_recovery && !rx_recovery_deferred) {
                 __atomic_store_n(&s_pending_rx_recovery, 1U,
                                  __ATOMIC_RELEASE);
-            } else {
-                meshcore_service_handle_radio_rx_error();
+            }
+            taskYIELD();
+            continue;
+        }
+
+        if (rx_recovery && !rx_recovery_deferred) {
+            if (!d1l_mesh_terminal_lane_owner_still_reserved(
+                    &s_terminal_lane)) {
+                __atomic_store_n(&s_pending_rx_recovery, 1U,
+                                 __ATOMIC_RELEASE);
+                d1l_mesh_terminal_lane_release_owner(&s_terminal_lane);
+                continue;
+            }
+            status_lock();
+            (void)d1l_mesh_runtime_counter_increment_saturating(
+                &s_status.runtime_task_heartbeat);
+            s_status.runtime_task_stack_free_words =
+                (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+            status_unlock();
+            meshcore_service_handle_radio_rx_error();
+            meshcore_service_run_owner_maintenance();
+            d1l_mesh_terminal_lane_release_owner(&s_terminal_lane);
+            continue;
+        }
+
+        bool forced_normal = false;
+        d1l_mesh_owner_work_t work = D1L_MESH_OWNER_WORK_IDLE;
+        bool received = false;
+        const bool from_held = held_cmd_valid;
+        if (from_held) {
+            cmd = held_cmd;
+            work = held_work;
+            forced_normal = held_forced_normal;
+            received = true;
+        } else {
+            work = d1l_mesh_owner_scheduler_choose(
+                &scheduler, false,
+                uxQueueMessagesWaiting(s_radio_event_queue) > 0U,
+                uxQueueMessagesWaiting(s_priority_command_queue) > 0U,
+                uxQueueMessagesWaiting(s_service_queue) > 0U,
+                &forced_normal);
+            runtime_note_value_high_water(
+                scheduler.priority_command_burst,
+                &s_runtime_priority_burst_high_water);
+            switch (work) {
+            case D1L_MESH_OWNER_WORK_RADIO_EVENT:
+                received =
+                    xQueueReceive(s_radio_event_queue, &cmd, 0) == pdTRUE;
+                break;
+            case D1L_MESH_OWNER_WORK_PRIORITY_COMMAND:
+                received = xQueueReceive(
+                    s_priority_command_queue, &cmd, 0) == pdTRUE;
+                break;
+            case D1L_MESH_OWNER_WORK_NORMAL_COMMAND:
+                received = xQueueReceive(s_service_queue, &cmd, 0) == pdTRUE;
+                break;
+            case D1L_MESH_OWNER_WORK_IDLE:
+            case D1L_MESH_OWNER_WORK_TERMINAL_RECOVERY:
+            default:
+                break;
             }
         }
 
-        bool radio_event = false;
-        bool received = false;
-        if (radio_event_burst < D1L_MESHCORE_MAX_EVENT_BURST) {
-            radio_event =
-                xQueueReceive(s_radio_event_queue, &cmd, 0) == pdTRUE;
-            received = radio_event;
-        }
-        if (!received && xQueueReceive(s_service_queue, &cmd, 0) == pdTRUE) {
-            received = true;
-            radio_event = false;
-        }
         if (!received) {
-            radio_event =
-                xQueueReceive(s_radio_event_queue, &cmd, 0) == pdTRUE;
-            received = radio_event;
-        }
-        if (!received) {
+            d1l_mesh_terminal_lane_release_owner(&s_terminal_lane);
             meshcore_service_run_owner_maintenance();
             (void)ulTaskNotifyTake(
                 pdTRUE, pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS));
             continue;
         }
-        if (radio_event) {
-            if (radio_event_burst < D1L_MESHCORE_MAX_EVENT_BURST) {
-                radio_event_burst++;
+
+        /* Validate the same reservation after dequeue and immediately before
+         * all admission/side effects. If a terminal won, retain this exact
+         * command locally; it remains ahead of every later item in its lane. */
+        if (!d1l_mesh_terminal_lane_owner_still_reserved(
+                &s_terminal_lane)) {
+            if (!from_held) {
+                held_cmd = cmd;
+                held_work = work;
+                held_forced_normal = forced_normal;
+                held_cmd_valid = true;
             }
-        } else {
-            radio_event_burst = 0U;
+            d1l_mesh_terminal_lane_release_owner(&s_terminal_lane);
+            continue;
         }
 
+        /* Accepted TX producers, especially priority ACK/raw responses, stay
+         * in the owner-held slot while an exact TX is active. They are never
+         * consumed merely to return ESP_ERR_INVALID_STATE. */
+        if (s_tx_busy && meshcore_service_command_requires_idle_tx(&cmd)) {
+            if (!from_held) {
+                held_cmd = cmd;
+                held_work = work;
+                held_forced_normal = forced_normal;
+                held_cmd_valid = true;
+            }
+            d1l_mesh_terminal_lane_release_owner(&s_terminal_lane);
+            meshcore_service_run_owner_maintenance();
+            (void)ulTaskNotifyTake(
+                pdTRUE, pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS));
+            continue;
+        }
+
+        if (from_held) {
+            held_cmd_valid = false;
+            held_work = D1L_MESH_OWNER_WORK_IDLE;
+            held_forced_normal = false;
+            meshcore_service_command_wipe(&held_cmd);
+        }
+        const bool radio_event =
+            work == D1L_MESH_OWNER_WORK_RADIO_EVENT;
         status_lock();
-        s_status.runtime_task_heartbeat++;
+        (void)d1l_mesh_runtime_counter_increment_saturating(
+            &s_status.runtime_task_heartbeat);
         s_status.runtime_task_stack_free_words =
             (uint32_t)uxTaskGetStackHighWaterMark(NULL);
         if (radio_event) {
@@ -4895,7 +5142,13 @@ static void meshcore_service_task(void *arg)
          * Cancelled, expired, and stale slot generations are dropped here. */
         if (!meshcore_request_admit(&cmd)) {
             meshcore_service_command_wipe(&cmd);
+            meshcore_service_run_owner_maintenance();
+            d1l_mesh_terminal_lane_release_owner(&s_terminal_lane);
             continue;
+        }
+        if (forced_normal) {
+            (void)d1l_mesh_runtime_counter_increment_saturating(
+                &s_runtime_fairness_forced_commands);
         }
 
         esp_err_t ret = ESP_ERR_INVALID_ARG;
@@ -4942,14 +5195,6 @@ static void meshcore_service_task(void *arg)
                 s_status.rejected_commands++;
             }
             break;
-        case D1L_MESHCORE_SERVICE_EVENT_TX_DONE:
-            meshcore_service_handle_radio_tx_done(&cmd);
-            ret = ESP_OK;
-            break;
-        case D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT:
-            meshcore_service_handle_radio_tx_timeout(&cmd);
-            ret = ESP_OK;
-            break;
         case D1L_MESHCORE_SERVICE_EVENT_RX_DONE:
             meshcore_service_handle_radio_rx_done(
                 cmd.raw, cmd.raw_len, cmd.rssi, cmd.snr);
@@ -4983,6 +5228,7 @@ static void meshcore_service_task(void *arg)
         }
         meshcore_service_run_owner_maintenance();
         meshcore_service_command_wipe(&cmd);
+        d1l_mesh_terminal_lane_release_owner(&s_terminal_lane);
     }
 }
 
@@ -5001,6 +5247,14 @@ static esp_err_t meshcore_service_start_task(void)
         s_service_queue =
             xQueueCreate(D1L_MESHCORE_SERVICE_QUEUE_LEN, sizeof(d1l_meshcore_service_cmd_t));
         if (!s_service_queue) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_priority_command_queue) {
+        s_priority_command_queue = xQueueCreate(
+            D1L_MESHCORE_PRIORITY_QUEUE_LEN,
+            sizeof(d1l_meshcore_service_cmd_t));
+        if (!s_priority_command_queue) {
             return ESP_ERR_NO_MEM;
         }
     }
@@ -5066,8 +5320,9 @@ static esp_err_t meshcore_service_send_claimed_command(
     if (enqueue_result != D1L_MESH_COMMAND_ENQUEUE_QUEUED) {
         if (enqueue_result == D1L_MESH_COMMAND_ENQUEUE_INVALID) {
             meshcore_request_abort_unqueued(cmd);
+        } else {
+            runtime_note_command_saturation(false);
         }
-        runtime_note_queue_drop(false);
         return enqueue_result == D1L_MESH_COMMAND_ENQUEUE_SATURATED ?
             ESP_ERR_TIMEOUT : ESP_ERR_INVALID_STATE;
     }
@@ -5143,7 +5398,7 @@ esp_err_t d1l_meshcore_service_start_rx_async(void)
         .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
     };
     if (xQueueSend(s_service_queue, &cmd, 0) != pdTRUE) {
-        runtime_note_queue_drop(false);
+        runtime_note_command_saturation(false);
         return ESP_ERR_TIMEOUT;
     }
     runtime_note_queue_depth(s_service_queue,
@@ -5183,7 +5438,7 @@ static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
 static esp_err_t meshcore_service_queue_raw_response(
     const uint8_t *raw, uint8_t raw_len, uint16_t delay_ms)
 {
-    if (!raw || raw_len == 0U || !s_service_queue) {
+    if (!raw || raw_len == 0U || !s_priority_command_queue) {
         return ESP_ERR_INVALID_ARG;
     }
     d1l_meshcore_service_cmd_t cmd = {
@@ -5193,12 +5448,12 @@ static esp_err_t meshcore_service_queue_raw_response(
         .delay_ms = delay_ms,
     };
     memcpy(cmd.raw, raw, raw_len);
-    if (xQueueSendToFront(s_service_queue, &cmd, 0) != pdTRUE) {
-        runtime_note_queue_drop(false);
+    if (xQueueSend(s_priority_command_queue, &cmd, 0) != pdTRUE) {
+        runtime_note_command_saturation(true);
         return ESP_ERR_TIMEOUT;
     }
-    runtime_note_queue_depth(s_service_queue,
-                             &s_runtime_command_queue_high_water);
+    runtime_note_queue_depth(s_priority_command_queue,
+                             &s_runtime_priority_queue_high_water);
     meshcore_service_wake();
     return ESP_OK;
 }
@@ -5243,13 +5498,13 @@ static esp_err_t meshcore_service_send_ack_async(
         .ack_response = true,
     };
     memcpy(cmd.raw, raw, raw_len);
-    if (xQueueSendToFront(s_service_queue, &cmd, 0) != pdTRUE) {
-        runtime_note_queue_drop(false);
+    if (xQueueSend(s_priority_command_queue, &cmd, 0) != pdTRUE) {
+        runtime_note_command_saturation(true);
         complete_pending_ack_tx(false, ESP_ERR_TIMEOUT);
         return ESP_ERR_TIMEOUT;
     }
-    runtime_note_queue_depth(s_service_queue,
-                             &s_runtime_command_queue_high_water);
+    runtime_note_queue_depth(s_priority_command_queue,
+                             &s_runtime_priority_queue_high_water);
     meshcore_service_wake();
     s_status.ack_tx_queued++;
     return ESP_OK;
@@ -5273,8 +5528,7 @@ void d1l_meshcore_service_init(void)
         s_next_radio_tx_operation_id = 0U;
         meshcore_radio_tx_operation_clear();
         memset(s_callback_tx_history, 0, sizeof(s_callback_tx_history));
-        __atomic_store_n(&s_latched_terminal_state,
-                         D1L_LATCHED_TERMINAL_EMPTY, __ATOMIC_RELEASE);
+        __atomic_store_n(&s_terminal_lane, 0U, __ATOMIC_RELEASE);
         __atomic_store_n(&s_pending_rx_recovery, 0U, __ATOMIC_RELEASE);
     }
     status_lock();
@@ -5409,17 +5663,36 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
     snapshot.runtime_command_queue_depth = s_service_queue
         ? (uint32_t)uxQueueMessagesWaiting(s_service_queue)
         : 0U;
+    snapshot.runtime_priority_queue_depth = s_priority_command_queue
+        ? (uint32_t)uxQueueMessagesWaiting(s_priority_command_queue)
+        : 0U;
     snapshot.runtime_event_queue_depth = s_radio_event_queue
         ? (uint32_t)uxQueueMessagesWaiting(s_radio_event_queue)
         : 0U;
     snapshot.runtime_command_queue_high_water = __atomic_load_n(
         &s_runtime_command_queue_high_water, __ATOMIC_RELAXED);
+    snapshot.runtime_priority_queue_high_water = __atomic_load_n(
+        &s_runtime_priority_queue_high_water, __ATOMIC_RELAXED);
     snapshot.runtime_event_queue_high_water = __atomic_load_n(
         &s_runtime_event_queue_high_water, __ATOMIC_RELAXED);
     snapshot.runtime_queue_drops = __atomic_load_n(
         &s_runtime_queue_drops, __ATOMIC_RELAXED);
     snapshot.runtime_callback_event_drops = __atomic_load_n(
         &s_runtime_callback_event_drops, __ATOMIC_RELAXED);
+    snapshot.runtime_command_queue_saturation = __atomic_load_n(
+        &s_runtime_command_queue_saturation, __ATOMIC_RELAXED);
+    snapshot.runtime_priority_queue_saturation = __atomic_load_n(
+        &s_runtime_priority_queue_saturation, __ATOMIC_RELAXED);
+    snapshot.runtime_fairness_forced_commands = __atomic_load_n(
+        &s_runtime_fairness_forced_commands, __ATOMIC_RELAXED);
+    snapshot.runtime_priority_burst_high_water = __atomic_load_n(
+        &s_runtime_priority_burst_high_water, __ATOMIC_RELAXED);
+    snapshot.runtime_priority_burst_bound =
+        D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX;
+    snapshot.runtime_owner_maintenance_runs = __atomic_load_n(
+        &s_runtime_owner_maintenance_runs, __ATOMIC_RELAXED);
+    snapshot.runtime_terminal_recovery_dispatches = __atomic_load_n(
+        &s_runtime_terminal_recovery_dispatches, __ATOMIC_RELAXED);
     return snapshot;
 }
 

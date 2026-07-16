@@ -54,14 +54,21 @@ def test_sx1262_callbacks_only_copy_timestamp_enqueue_and_return():
     assert "runtime_note_queue_drop(true)" in enqueue
     assert enqueue.count(
         "meshcore_service_latch_radio_recovery(type, tx_operation)"
-    ) == 2
-    assert "event.tx_operation = *tx_operation" in enqueue
+    ) == 3
+    terminal_latch = enqueue.index(
+        "meshcore_service_latch_radio_recovery(type, tx_operation)"
+    )
+    assert enqueue.index("D1L_MESHCORE_SERVICE_EVENT_TX_DONE") < terminal_latch
+    assert enqueue.index("return;", terminal_latch) < enqueue.index(
+        "xQueueSend(s_radio_event_queue, &event, 0)"
+    )
     assert "meshcore_service_wake()" in enqueue
 
 
 def test_mesh_runtime_task_owns_radio_event_processing_and_telemetry():
     source = read("main/mesh/meshcore_service.c")
     header = read("main/mesh/meshcore_service.h")
+    guard = read("main/mesh/meshcore_runtime_guard.h")
     console = read("main/comms/usb_console.c")
     task = function_body(
         source,
@@ -71,35 +78,54 @@ def test_mesh_runtime_task_owns_radio_event_processing_and_telemetry():
 
     assert "xQueueReceive(s_radio_event_queue, &cmd, 0)" in task
     assert "xQueueReceive(s_service_queue, &cmd, 0)" in task
+    assert "xQueueReceive(\n                    s_priority_command_queue" in task
     assert task.index("s_radio_event_queue") < task.index("s_service_queue")
     assert "D1L_MESHCORE_OWNER_POLL_MS 250U" in source
     assert "pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS)" in task
     assert "ulTaskNotifyTake(pdTRUE, portMAX_DELAY)" not in task
-    assert task.count("meshcore_service_run_owner_maintenance();") == 2
+    assert task.count("meshcore_service_run_owner_maintenance();") >= 3
     for handler in (
-        "meshcore_service_handle_radio_tx_done",
-        "meshcore_service_handle_radio_tx_timeout",
         "meshcore_service_handle_radio_rx_done",
         "meshcore_service_handle_radio_rx_timeout",
         "meshcore_service_handle_radio_rx_error",
     ):
         assert handler in task
-    assert "runtime_task_heartbeat++" in task
+    assert "meshcore_service_handle_latched_radio_terminal" in task
+    latched = function_body(
+        source,
+        "static void meshcore_service_handle_latched_radio_terminal",
+        "static void enqueue_radio_event",
+    )
+    assert "meshcore_service_handle_radio_tx_done(event)" in latched
+    assert "meshcore_service_handle_radio_tx_timeout(event)" in latched
+    assert "d1l_mesh_runtime_counter_increment_saturating(" in task
+    assert "&s_status.runtime_task_heartbeat" in task
     assert "uxTaskGetStackHighWaterMark(NULL)" in task
     assert "runtime_last_event_monotonic_us = cmd.monotonic_us" in task
 
     assert "D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN 8U" in source
+    assert "D1L_MESHCORE_PRIORITY_QUEUE_LEN 4U" in source
     assert "D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 8192U" in source
-    assert "D1L_MESHCORE_MAX_EVENT_BURST 4U" in source
-    assert "radio_event_burst < D1L_MESHCORE_MAX_EVENT_BURST" in task
+    assert "D1L_MESH_OWNER_RADIO_EVENT_BURST_MAX 4U" in guard
+    assert "D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX 2U" in guard
+    assert "d1l_mesh_owner_scheduler_choose(" in task
     assert "xQueueCreate(\n            D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN" in source
     for field in (
         "runtime_command_queue_depth",
         "runtime_command_queue_high_water",
+        "runtime_priority_queue_depth",
+        "runtime_priority_queue_high_water",
         "runtime_event_queue_depth",
         "runtime_event_queue_high_water",
         "runtime_queue_drops",
         "runtime_callback_event_drops",
+        "runtime_command_queue_saturation",
+        "runtime_priority_queue_saturation",
+        "runtime_fairness_forced_commands",
+        "runtime_priority_burst_high_water",
+        "runtime_priority_burst_bound",
+        "runtime_owner_maintenance_runs",
+        "runtime_terminal_recovery_dispatches",
         "runtime_task_heartbeat",
         "runtime_task_stack_free_words",
         "runtime_last_event_monotonic_us",
@@ -109,7 +135,7 @@ def test_mesh_runtime_task_owns_radio_event_processing_and_telemetry():
     assert '\\\"callback_boundary\\\":\\\"copy_timestamp_enqueue\\\"' in console
 
 
-def test_full_queues_latch_exact_terminal_recovery_on_the_owner_task():
+def test_all_exact_terminals_use_the_preemptive_owner_mailbox():
     source = read("main/mesh/meshcore_service.c")
     task = function_body(
         source,
@@ -130,22 +156,34 @@ def test_full_queues_latch_exact_terminal_recovery_on_the_owner_task():
         "static void meshcore_service_handle_radio_tx_done", 1
     )[1].split("/* SX1262 callbacks are deliberately bounded", 1)[0]
 
-    assert "D1L_LATCHED_TERMINAL_EMPTY" in latch
-    assert "D1L_LATCHED_TERMINAL_WRITING" in latch
-    assert "s_latched_terminal_event.tx_operation = *tx_operation" in latch
-    assert "D1L_LATCHED_TERMINAL_READY" in latch
-    assert "D1L_LATCHED_TERMINAL_READING" in take
-    assert "*out_event = s_latched_terminal_event" in take
+    assert "D1L_CALLBACK_TX_TERMINAL_WRITING" in latch
+    assert "D1L_CALLBACK_TX_TERMINAL_DONE" in latch
+    assert "D1L_CALLBACK_TX_TERMINAL_TIMEOUT" in latch
+    assert "d1l_mesh_terminal_lane_publish_slot(" in latch
+    assert "&s_terminal_lane, terminal_slot" in latch
+    assert latch.index("d1l_mesh_terminal_lane_publish_slot(") < latch.index(
+        "__atomic_compare_exchange_n("
+    )
+    assert "for (" not in latch
+    assert "while (" not in latch
+    assert "d1l_mesh_terminal_lane_take_pending(" in take
+    assert "capture_callback_tx_operation(origin, &identity)" in take
+    assert "out_event->tx_operation = best_identity" in take
     assert "meshcore_service_take_latched_terminal(&recovery_event)" in task
     assert task.index("meshcore_service_take_latched_terminal") < task.index(
         "xQueueReceive"
     )
-    assert "meshcore_service_handle_latched_radio_terminal(&recovery_event)" in task
+    assert "meshcore_service_handle_latched_radio_terminal(&recovery_event)" in (
+        "".join(task.split())
+    )
     assert "meshcore_service_handle_radio_tx_timeout(event)" in handlers
     assert "meshcore_service_handle_radio_tx_done(event)" in handlers
-    assert "__atomic_exchange_n(\n            &s_pending_rx_recovery" in task
+    assert "d1l_mesh_rx_recovery_take(" in task
+    assert "d1l_mesh_terminal_lane_has_pending(" in task
+    assert "d1l_mesh_terminal_lane_try_reserve_owner(" in task
+    assert "d1l_mesh_terminal_lane_owner_still_reserved(" in task
     assert "meshcore_service_handle_radio_rx_error()" in task
-    assert "if (s_tx_busy)" in task
+    assert "s_tx_busy && meshcore_service_command_requires_idle_tx" in task
 
     # Recovery executes directly on the sole radio owner. A full command queue
     # cannot suppress exact terminal handling or accumulate START_RX feedback.

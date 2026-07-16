@@ -1674,13 +1674,22 @@ static void cmd_mesh_status(void)
            d1l_meshcore_route_selection_reason_name(
                (d1l_meshcore_route_selection_reason_t)status.dm_route_last_reason),
            (unsigned long)status.dm_route_last_path_age_ms);
-    printf(",\"runtime\":{\"owner\":\"meshcore_service\",\"callback_boundary\":\"copy_timestamp_enqueue\",\"command_queue_depth\":%lu,\"command_queue_high_water\":%lu,\"event_queue_depth\":%lu,\"event_queue_high_water\":%lu,\"queue_drops\":%lu,\"callback_event_drops\":%lu,\"heartbeat\":%lu,\"stack_free_words\":%lu,\"last_event_monotonic_us\":%llu}",
+    printf(",\"runtime\":{\"owner\":\"meshcore_service\",\"callback_boundary\":\"copy_timestamp_enqueue\",\"command_queue_depth\":%lu,\"command_queue_high_water\":%lu,\"priority_queue_depth\":%lu,\"priority_queue_high_water\":%lu,\"event_queue_depth\":%lu,\"event_queue_high_water\":%lu,\"queue_drops\":%lu,\"callback_event_drops\":%lu,\"command_queue_saturation\":%lu,\"priority_queue_saturation\":%lu,\"fairness_forced_commands\":%lu,\"priority_burst_high_water\":%lu,\"priority_burst_bound\":%u,\"owner_maintenance_runs\":%lu,\"terminal_recovery_dispatches\":%lu,\"heartbeat\":%lu,\"stack_free_words\":%lu,\"last_event_monotonic_us\":%llu}",
            (unsigned long)status.runtime_command_queue_depth,
            (unsigned long)status.runtime_command_queue_high_water,
+           (unsigned long)status.runtime_priority_queue_depth,
+           (unsigned long)status.runtime_priority_queue_high_water,
            (unsigned long)status.runtime_event_queue_depth,
            (unsigned long)status.runtime_event_queue_high_water,
            (unsigned long)status.runtime_queue_drops,
            (unsigned long)status.runtime_callback_event_drops,
+           (unsigned long)status.runtime_command_queue_saturation,
+           (unsigned long)status.runtime_priority_queue_saturation,
+           (unsigned long)status.runtime_fairness_forced_commands,
+           (unsigned long)status.runtime_priority_burst_high_water,
+           (unsigned)status.runtime_priority_burst_bound,
+           (unsigned long)status.runtime_owner_maintenance_runs,
+           (unsigned long)status.runtime_terminal_recovery_dispatches,
            (unsigned long)status.runtime_task_heartbeat,
            (unsigned long)status.runtime_task_stack_free_words,
            (unsigned long long)status.runtime_last_event_monotonic_us);
