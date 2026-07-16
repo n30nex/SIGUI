@@ -11,7 +11,15 @@ static const d1l_ui_home_box_t k_destination_boxes[D1L_UI_HOME_DESTINATION_COUNT
     [D1L_UI_HOME_DESTINATION_MORE] = {246, 148, 222, 140},
 };
 
-static const d1l_ui_home_box_t k_device_box = {12, 296, 456, 116};
+static const d1l_ui_home_box_t k_device_box = {12, 296, 456, 88};
+
+static const d1l_ui_home_box_t k_status_boxes[D1L_UI_HOME_STATUS_COUNT] = {
+    [D1L_UI_HOME_STATUS_MESH] = {14, 298, 88, 84},
+    [D1L_UI_HOME_STATUS_WIFI] = {105, 298, 88, 84},
+    [D1L_UI_HOME_STATUS_BLE] = {196, 298, 88, 84},
+    [D1L_UI_HOME_STATUS_SD] = {287, 298, 88, 84},
+    [D1L_UI_HOME_STATUS_ATTENTION] = {378, 298, 88, 84},
+};
 
 
 d1l_ui_home_box_t d1l_ui_home_destination_box(d1l_ui_home_destination_slot_t slot)
@@ -26,6 +34,15 @@ d1l_ui_home_box_t d1l_ui_home_destination_box(d1l_ui_home_destination_slot_t slo
 d1l_ui_home_box_t d1l_ui_home_device_box(void)
 {
     return k_device_box;
+}
+
+d1l_ui_home_box_t d1l_ui_home_status_box(d1l_ui_home_status_slot_t slot)
+{
+    const int index = (int)slot;
+    if (index < 0 || index >= D1L_UI_HOME_STATUS_COUNT) {
+        return (d1l_ui_home_box_t){0, 0, 0, 0};
+    }
+    return k_status_boxes[index];
 }
 
 static lv_obj_t *home_create_label(lv_obj_t *parent, const char *text, uint32_t color)
@@ -81,7 +98,8 @@ static void home_action_event_cb(lv_event_t *event)
         return;
     }
     const d1l_ui_home_action_t action = binding->action;
-    if (action > D1L_UI_HOME_ACTION_NONE && action <= D1L_UI_HOME_ACTION_MORE) {
+    if (action > D1L_UI_HOME_ACTION_NONE &&
+        action <= D1L_UI_HOME_ACTION_ATTENTION) {
         binding->controller->action_handler(
             action, binding->controller->action_context);
     }
@@ -93,7 +111,8 @@ static void home_bind_action(lv_obj_t *object,
                              d1l_ui_home_action_t action)
 {
     if (!object || !binding || !controller || !controller->action_handler ||
-        action <= D1L_UI_HOME_ACTION_NONE || action > D1L_UI_HOME_ACTION_MORE) {
+        action <= D1L_UI_HOME_ACTION_NONE ||
+        action > D1L_UI_HOME_ACTION_ATTENTION) {
         return;
     }
     binding->controller = controller;
@@ -155,9 +174,58 @@ static void render_destination_card(lv_obj_t *parent,
     }
 }
 
+static void render_status_item(lv_obj_t *card,
+                               d1l_ui_home_status_slot_t slot,
+                               const char *icon,
+                               const char *label,
+                               const char *value,
+                               uint32_t color,
+                               d1l_ui_home_action_t action,
+                               d1l_ui_home_action_binding_t *binding,
+                               d1l_ui_home_controller_t *controller)
+{
+    if (!card || !icon || !label || !value) {
+        return;
+    }
+    const d1l_ui_home_box_t card_box = d1l_ui_home_device_box();
+    const d1l_ui_home_box_t box = d1l_ui_home_status_box(slot);
+    lv_obj_t *item = lv_obj_create(card);
+    if (!item) {
+        return;
+    }
+    lv_obj_set_size(item, box.width, box.height);
+    lv_obj_set_pos(item, box.x - card_box.x, box.y - card_box.y);
+    lv_obj_set_style_radius(item, 10, 0);
+    lv_obj_set_style_pad_all(item, 0, 0);
+    lv_obj_set_style_border_width(item, 0, 0);
+    lv_obj_set_style_bg_opa(item, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(item, LV_OBJ_FLAG_SCROLLABLE);
+    home_bind_action(item, binding, controller, action);
+    lv_obj_set_style_bg_opa(item, LV_OPA_50, LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(item, 1, LV_STATE_FOCUSED);
+
+    lv_obj_t *icon_label = home_create_label(item, icon, color);
+    if (icon_label) {
+        lv_obj_set_style_text_font(icon_label, &lv_font_montserrat_24, 0);
+        lv_obj_align(icon_label, LV_ALIGN_TOP_MID, 0, 4);
+    }
+    lv_obj_t *name_label = home_create_label(item, label, 0xA7B4BE);
+    if (name_label) {
+        home_set_dot_width(name_label, 80);
+        lv_obj_set_style_text_align(name_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(name_label, 4, 32);
+    }
+    lv_obj_t *value_label = home_create_label(item, value, color);
+    if (value_label) {
+        home_set_dot_width(value_label, 80);
+        lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(value_label, 4, 55);
+    }
+}
+
 static void render_device_status(lv_obj_t *parent,
                                  const d1l_ui_home_view_model_t *view_model,
-                                 d1l_ui_home_action_binding_t *binding,
+                                 d1l_ui_home_action_binding_t *bindings,
                                  d1l_ui_home_controller_t *controller)
 {
     lv_obj_t *card = home_create_panel(parent, d1l_ui_home_device_box());
@@ -166,49 +234,28 @@ static void render_device_status(lv_obj_t *parent,
     }
     lv_obj_set_style_border_color(card, lv_color_hex(0x28463A), 0);
     lv_obj_set_style_pad_all(card, 0, 0);
-    home_bind_action(card, binding, controller, D1L_UI_HOME_ACTION_MORE);
 
-    lv_obj_t *title = home_create_label(card, "Device status", 0xF4F7FB);
-    if (title) {
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        lv_obj_set_pos(title, 14, 10);
-    }
-    lv_obj_t *hint = home_create_label(card, "Settings and support", 0x8EA0AE);
-    if (hint) {
-        lv_obj_set_pos(hint, 14, 34);
-    }
-    lv_obj_t *arrow = home_create_label(card, LV_SYMBOL_RIGHT, 0x8EA0AE);
-    if (arrow) {
-        lv_obj_set_pos(arrow, 426, 14);
-    }
-
-    const char *labels[] = {"Time", "Wi-Fi", "BLE", "SD"};
-    const char *values[] = {
-        view_model->time_value,
-        view_model->wifi_value,
-        view_model->ble_value,
-        view_model->sd_value,
-    };
-    const uint32_t colors[] = {
-        view_model->time_value_color,
-        view_model->wifi_value_color,
-        view_model->ble_value_color,
-        view_model->sd_value_color,
-    };
-
-    for (int index = 0; index < 4; ++index) {
-        const lv_coord_t x = (lv_coord_t)(14 + index * 110);
-        lv_obj_t *label = home_create_label(card, labels[index], 0x8EA0AE);
-        if (label) {
-            home_set_dot_width(label, 100);
-            lv_obj_set_pos(label, x, 66);
-        }
-        lv_obj_t *value = home_create_label(card, values[index], colors[index]);
-        if (value) {
-            home_set_dot_width(value, 100);
-            lv_obj_set_pos(value, x, 88);
-        }
-    }
+    render_status_item(card, D1L_UI_HOME_STATUS_MESH, LV_SYMBOL_LOOP,
+                       "Mesh", view_model->mesh_value,
+                       view_model->mesh_value_color, D1L_UI_HOME_ACTION_RADIO,
+                       &bindings[D1L_UI_HOME_STATUS_MESH], controller);
+    render_status_item(card, D1L_UI_HOME_STATUS_WIFI, LV_SYMBOL_WIFI,
+                       "Wi-Fi", view_model->wifi_value,
+                       view_model->wifi_value_color, D1L_UI_HOME_ACTION_WIFI,
+                       &bindings[D1L_UI_HOME_STATUS_WIFI], controller);
+    render_status_item(card, D1L_UI_HOME_STATUS_BLE, LV_SYMBOL_BLUETOOTH,
+                       "BLE", view_model->ble_value,
+                       view_model->ble_value_color, D1L_UI_HOME_ACTION_BLE,
+                       &bindings[D1L_UI_HOME_STATUS_BLE], controller);
+    render_status_item(card, D1L_UI_HOME_STATUS_SD, LV_SYMBOL_SD_CARD,
+                       "SD", view_model->sd_compact_value,
+                       view_model->sd_value_color, D1L_UI_HOME_ACTION_STORAGE,
+                       &bindings[D1L_UI_HOME_STATUS_SD], controller);
+    render_status_item(card, D1L_UI_HOME_STATUS_ATTENTION, LV_SYMBOL_WARNING,
+                       "Attention", view_model->attention_value,
+                       view_model->attention_value_color,
+                       D1L_UI_HOME_ACTION_ATTENTION,
+                       &bindings[D1L_UI_HOME_STATUS_ATTENTION], controller);
 }
 
 void d1l_ui_home_render(d1l_ui_home_controller_t *controller,

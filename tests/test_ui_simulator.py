@@ -339,12 +339,11 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Nodes",
         "Map",
         "Tools",
-        "Device status",
-        "Settings and support",
-        "Time",
+        "Mesh",
         "Wi-Fi",
         "BLE",
         "SD",
+        "Attention",
     } <= labels_by_view["home"]
     assert "DeskOS" in labels_by_view["home"]
     assert "Mesh ready, listening" not in labels_by_view["home"]
@@ -614,6 +613,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "first_boot_onboarding",
         "lock_overlay_unlock",
         "home_launcher_navigation",
+        "home_status_modals_return_to_active_tab",
         "messages_hierarchy_navigation",
         "public_compose_and_send",
         "public_history_search",
@@ -724,8 +724,41 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["home"]["open_nodes"]["visual_box"] == [246, 16, 468, 156]
     assert actions_by_view["home"]["open_map"]["visual_box"] == [12, 164, 234, 304]
     assert actions_by_view["home"]["open_settings"]["visual_box"] == [246, 164, 468, 304]
-    assert actions_by_view["home"]["open_device_status"]["visual_box"] == [12, 312, 468, 428]
-    assert actions_by_view["home"]["open_device_status"]["kind"] == "device_status_card"
+    home_status_actions = (
+        ("open_radio_settings", [14, 314, 102, 398], "radio_settings_sheet", "LV_SYMBOL_LOOP"),
+        ("open_wifi_settings", [105, 314, 193, 398], "wifi_setup_sheet", "LV_SYMBOL_WIFI"),
+        ("open_ble_settings", [196, 314, 284, 398], "ble_setup_sheet", "LV_SYMBOL_BLUETOOTH"),
+        ("open_storage_setup", [287, 314, 375, 398], "storage_setup_sheet", "LV_SYMBOL_SD_CARD"),
+        ("open_diagnostics", [378, 314, 466, 398], "diagnostics_sheet", "LV_SYMBOL_WARNING"),
+    )
+    for action, box, destination, icon in home_status_actions:
+        target = actions_by_view["home"][action]
+        assert target["visual_box"] == box
+        assert target["kind"] == "home_status_item"
+        assert target["width"] == 88
+        assert target["height"] == 84
+        assert target["destination"] == destination
+        assert target["icon"] == icon
+        assert ": " in target["semantic_label"]
+        assert target["rf_tx"] is False
+        assert target["formats_sd"] is False
+        assert target["destructive"] is False
+    modal_close_actions = {
+        "radio_settings_sheet": "close_radio_settings",
+        "wifi_setup_sheet": "close_wifi_setup",
+        "ble_setup_sheet": "close_ble_setup",
+        "storage_setup_sheet": "close_storage_setup",
+        "diagnostics_sheet": "close_diagnostics",
+    }
+    for view_name, action in modal_close_actions.items():
+        assert actions_by_view[view_name][action]["destination"] == "active_tab"
+        assert views[view_name]["metrics"]["modal_return_policy"] == "active_tab"
+    assert (
+        actions_by_view["radio_settings_sheet"]["save_radio_profile"]["destination"]
+        == "radio_settings_sheet"
+    )
+    assert views["home"]["metrics"]["home_status_strip_height"] == 88
+    assert views["home"]["metrics"]["home_status_item_count"] == 5
     for docked_view in (
         "messages",
         "messages_public",
@@ -771,14 +804,13 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["home"]["open_nodes"]["destination"] == "nodes"
     assert actions_by_view["home"]["open_map"]["destination"] == "map"
     assert actions_by_view["home"]["open_settings"]["destination"] == "settings"
-    assert actions_by_view["home"]["open_device_status"]["destination"] == "settings"
-    assert actions_by_view["wifi_setup_sheet"]["close_wifi_setup"]["destination"] == "settings"
+    assert actions_by_view["wifi_setup_sheet"]["close_wifi_setup"]["destination"] == "active_tab"
     assert actions_by_view["wifi_setup_sheet"]["wifi_scan"]["destination"] is None
     assert actions_by_view["wifi_setup_sheet"]["wifi_connect"]["destination"] is None
     assert actions_by_view["wifi_setup_sheet"]["edit_wifi_ssid"]["kind"] == "text_field"
     assert actions_by_view["wifi_setup_sheet"]["edit_wifi_password"]["kind"] == "text_field"
     assert not any(target["kind"] == "dock_tab" for target in views["wifi_setup_sheet"]["touch_targets"])
-    assert actions_by_view["ble_setup_sheet"]["close_ble_setup"]["destination"] == "settings"
+    assert actions_by_view["ble_setup_sheet"]["close_ble_setup"]["destination"] == "active_tab"
     assert actions_by_view["map"]["open_map_options"]["destination"] == "map_options"
     assert set(actions_by_view["map_options"]) == {
         "close_map_options",
@@ -973,7 +1005,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         assert expanded_view["metrics"]["more_actionable_leaf_count"] == expected_actions
         assert expanded_view["metrics"]["more_scroll_anchor_y"] == 110
     assert actions_by_view["display_settings_sheet"]["close_display_settings"]["destination"] == "settings"
-    assert actions_by_view["diagnostics_sheet"]["close_diagnostics"]["destination"] == "settings"
+    assert actions_by_view["diagnostics_sheet"]["close_diagnostics"]["destination"] == "active_tab"
     assert actions_by_view["packets"]["pause_packet_feed"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["packet_detail_sheet"]["toggle_packet_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert set(actions_by_view["mesh_roles_sheet"]) == {
@@ -1016,7 +1048,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "open_storage_card",
         "open_storage_data",
     }
-    assert actions_by_view["storage_setup_sheet"]["close_storage_setup"]["destination"] == "settings"
+    assert actions_by_view["storage_setup_sheet"]["close_storage_setup"]["destination"] == "active_tab"
     assert actions_by_view["storage_setup_sheet"]["open_storage_card"]["destination"] == "storage_card_page"
     assert actions_by_view["storage_setup_sheet"]["open_storage_data"]["destination"] == "storage_data_page"
     assert set(actions_by_view["storage_card_page"]) == {"close_storage_card"}
@@ -1260,7 +1292,13 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
                 scenario=scenario,
             )
             parity_labels = {view["name"]: set(view["labels"]) for view in parity_report["views"]}
-            assert "Needs attention" in parity_labels["home"]
+            assert "Check" in parity_labels["home"]
+            home_metrics = next(
+                view["metrics"] for view in parity_report["views"]
+                if view["name"] == "home"
+            )
+            assert "SD: Check" in home_metrics["home_status_semantic_labels"]
+            assert "Attention: Check" in home_metrics["home_status_semantic_labels"]
             assert "Needs attention" in parity_labels["settings_storage_maps_expanded"]
             assert any(
                 label.endswith("SD Needs attention")
@@ -1514,6 +1552,105 @@ def test_ui_simulator_home_map_card_reports_honest_setup_state(tmp_path):
         assert status in labels, scenario
         assert "Map cache ready" not in labels, scenario
         assert "Set up Map" not in labels, scenario
+
+
+def test_home_status_strip_covers_ready_connecting_absent_and_error_states(tmp_path):
+    expected = {
+        "home-status-ready": {
+            "Mesh: Ready",
+            "Wi-Fi: Connected",
+            "BLE: On",
+            "SD: Ready",
+            "Attention: OK",
+        },
+        "home-status-connecting": {
+            "Mesh: Applying",
+            "Wi-Fi: Connecting",
+            "BLE: Off",
+            "SD: Setup",
+            "Attention: Notice",
+        },
+        "home-status-no-card": {
+            "Mesh: Ready",
+            "Wi-Fi: Off",
+            "BLE: Unavailable",
+            "SD: No card",
+            "Attention: Notice",
+        },
+        "home-status-error": {
+            "Mesh: Error",
+            "Wi-Fi: Off",
+            "BLE: Unavailable",
+            "SD: Check",
+            "Attention: Check",
+        },
+        "home-status-reconnecting": {
+            "Mesh: Ready",
+            "Wi-Fi: Connected",
+            "BLE: On",
+            "SD: Reconnect",
+            "Attention: Notice",
+        },
+        "home-status-busy": {
+            "Mesh: Busy",
+            "Wi-Fi: Connected",
+            "BLE: On",
+            "SD: Ready",
+            "Attention: OK",
+        },
+    }
+    for scenario, semantic_labels in expected.items():
+        report = ui_simulator.generate(
+            tmp_path / scenario,
+            views=("home",),
+            scenario=scenario,
+        )
+        view = report["views"][0]
+        status_targets = [
+            target for target in view["touch_targets"]
+            if target["kind"] == "home_status_item"
+        ]
+        assert report["ok"] is True, scenario
+        assert report["overflow_count"] == 0, scenario
+        assert report["touch_target_issue_count"] == 0, scenario
+        assert len(status_targets) == 5, scenario
+        assert all(target["width"] == 88 for target in status_targets), scenario
+        assert all(target["height"] == 84 for target in status_targets), scenario
+        assert set(view["metrics"]["home_status_semantic_labels"]) == semantic_labels
+        assert {target["semantic_label"] for target in status_targets} == semantic_labels
+        assert view["metrics"]["home_status_attention_required"] is (
+            scenario == "home-status-error"
+        )
+
+
+def test_home_mesh_status_unknown_ready_substrings_fail_closed():
+    base = replace(
+        ui_simulator.sample_snapshot(),
+        radio_ready=True,
+        radio_applied=True,
+    )
+    for state in ("not_ready", "unready", "listening", "READY"):
+        label, color, attention = ui_simulator.home_mesh_status(
+            replace(base, mesh_state=state)
+        )
+        assert label == "Starting", state
+        assert color == ui_simulator.AMBER, state
+        assert attention is False, state
+    assert ui_simulator.home_mesh_status(
+        replace(base, mesh_state="waiting_for_radio")
+    ) == ("Offline", ui_simulator.MUTED, False)
+    assert ui_simulator.home_mesh_status(
+        replace(base, mesh_state="tx_busy")
+    ) == ("Busy", ui_simulator.GREEN, False)
+    for radio_ready, radio_applied in ((False, False), (False, True), (True, False)):
+        assert ui_simulator.home_mesh_status(
+            replace(
+                base,
+                mesh_state="tx_busy",
+                radio_ready=radio_ready,
+                radio_applied=radio_applied,
+            )
+        ) == ("Starting", ui_simulator.AMBER, False)
 
 
 def test_map_storage_copy_state_table_distinguishes_starting_absent_fat32_and_error():
