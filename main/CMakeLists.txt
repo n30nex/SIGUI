@@ -13,6 +13,7 @@ idf_component_register(
         "app/dm_conversation_list.c"
         "app/settings_envelope.c"
         "app/settings_model.c"
+        "app/settings_protocol_migration.c"
         "app/settings_time_checkpoint.c"
         "comms/connectivity_boot_guard.c"
         "comms/connectivity_manager.c"

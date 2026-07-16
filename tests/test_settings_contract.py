@@ -14,6 +14,7 @@ def test_settings_model_defaults_and_nvs_contract():
     header = read("main/app/settings_model.h")
     source = read("main/app/settings_model.c")
     time_service = read("main/platform/time_service.c")
+    time_migration = read("main/app/settings_protocol_migration.h")
     assert "D1L_SETTINGS_SCHEMA_VERSION 8U" in header
     assert "D1L_WIFI_SSID_LEN 33U" in header
     assert "D1L_WIFI_PASSWORD_LEN 65U" in header
@@ -91,8 +92,8 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "dest->onboarding_complete = true" in source
     assert 'D1L_SETTINGS_NAMESPACE "d1l_settings"' in source
     assert 'D1L_SETTINGS_KEY "settings"' in source
-    assert 'D1L_TIME_PROTOCOL_LEGACY_KEY "mesh_ts"' in time_service
-    assert 'D1L_TIME_PROTOCOL_HIGH_WATER_KEY "mesh_hi_v2"' in time_service
+    assert 'D1L_TIME_PROTOCOL_LEGACY_KEY "mesh_ts"' in time_migration
+    assert 'D1L_TIME_PROTOCOL_HIGH_WATER_KEY "mesh_hi_v2"' in time_migration
     assert "d1l_settings_next_mesh_timestamp" not in source
     assert "d1l_settings_next_mesh_timestamp" in time_service
     assert "d1l_time_service_next_protocol_timestamp(timestamp)" in time_service

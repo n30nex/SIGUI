@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "app/settings_protocol_migration.h"
 #include "app/settings_time_checkpoint.h"
 #include "platform/time_display.h"
 #include "platform/time_service_core.h"
@@ -16,6 +17,7 @@ typedef bool (*d1l_time_continue_cb_t)(void *context);
 typedef struct {
     d1l_time_core_snapshot_t clock;
     d1l_time_protocol_persistence_state_t protocol_persistence_state;
+    d1l_time_protocol_migration_status_t protocol_migration;
     esp_err_t protocol_persistence_error;
     esp_err_t protocol_tx_error;
     esp_err_t sntp_init_error;
@@ -46,6 +48,12 @@ esp_err_t d1l_time_service_init(void);
 uint64_t d1l_time_service_boot_monotonic_us(void);
 esp_err_t d1l_time_service_preflight_protocol_timestamp(void);
 esp_err_t d1l_time_service_next_protocol_timestamp(uint32_t *out_timestamp);
+esp_err_t d1l_time_service_migrate_legacy_protocol_timestamp(
+    uint32_t expected_legacy_value,
+    uint32_t confirmed_upper_bound,
+    const char *confirmation,
+    bool *out_written,
+    d1l_time_protocol_migration_status_t *out_status);
 void d1l_time_service_status(d1l_time_service_status_t *out_status);
 bool d1l_time_service_certificate_time_valid(void);
 esp_err_t d1l_time_service_wait_for_certificate_time(
