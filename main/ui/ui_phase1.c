@@ -37,6 +37,7 @@
 #include "ui_more_view.h"
 #include "ui_modal.h"
 #include "ui_navigation.h"
+#include "ui_node_detail.h"
 #include "ui_nodes.h"
 #include "ui_packets.h"
 #include "ui_radio_settings.h"
@@ -100,7 +101,6 @@ static lv_obj_t *s_message_detail_sheet;
 static lv_obj_t *s_storage_sheet;
 static d1l_wifi_scan_result_t s_wifi_scan_result;
 static bool s_wifi_scan_loaded;
-static lv_obj_t *s_node_detail_sheet;
 static lv_obj_t *s_route_detail_sheet;
 static lv_obj_t *s_route_trace_sheet;
 static lv_obj_t *s_packet_detail_sheet;
@@ -134,6 +134,7 @@ static d1l_ui_device_sheets_controller_t s_device_sheets_controller EXT_RAM_BSS_
 static d1l_ui_radio_settings_controller_t s_radio_settings_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_contact_sheets_controller_t s_contact_sheets_controller EXT_RAM_BSS_ATTR;
 static d1l_ui_channel_sheets_controller_t s_channel_sheets_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_node_detail_controller_t s_node_detail_controller EXT_RAM_BSS_ATTR;
 static uint32_t s_settings_render_generation;
 static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
@@ -141,8 +142,6 @@ static esp_err_t s_compose_last_send_error;
 static int32_t s_map_location_lat_e7;
 static int32_t s_map_location_lon_e7;
 static bool s_map_location_returns_to_options;
-static d1l_node_view_t s_node_detail_node;
-static bool s_node_detail_returns_to_map;
 static d1l_route_entry_t s_route_detail_route;
 static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
@@ -195,13 +194,11 @@ static d1l_ui_compose_probe_result_t s_compose_probe_result;
 static void render_active_tab(void);
 static bool show_contact_detail_sheet(void);
 static bool show_contact_options_sheet(void);
-static void render_node_detail_sheet(void);
 static void open_public_history_event_cb(lv_event_t *event);
 static void open_public_search_event_cb(lv_event_t *event);
 static void open_home_dm_preview_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_map_node_detail(const char *fingerprint);
-static void node_detail_dm_event_cb(lv_event_t *event);
 static void open_route_trace_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
@@ -1529,9 +1526,7 @@ static void hide_channel_management_sheets(void)
 
 static void hide_node_detail_sheet(void)
 {
-    d1l_ui_modal_hide(s_node_detail_sheet);
-    memset(&s_node_detail_node, 0, sizeof(s_node_detail_node));
-    s_node_detail_returns_to_map = false;
+    d1l_ui_node_detail_deactivate(&s_node_detail_controller);
     restore_dock_for_active_tab();
 }
 
@@ -1835,71 +1830,6 @@ static bool parse_coord_text_e7(const char *text, int32_t min_value, int32_t max
     return true;
 }
 
-static const char *node_role_badge_text(const char *role)
-{
-    if (!role || role[0] == '\0') {
-        return "NODE";
-    }
-    if (strcmp(role, "room") == 0) {
-        return "ROOM";
-    }
-    if (strcmp(role, "repeater") == 0) {
-        return "RPT";
-    }
-    if (strcmp(role, "sensor") == 0) {
-        return "SNS";
-    }
-    if (strcmp(role, "companion") == 0) {
-        return "CMP";
-    }
-    return "NODE";
-}
-
-static const char *node_role_display_label(const char *role)
-{
-    if (!role || role[0] == '\0') {
-        return "Node";
-    }
-    if (strcmp(role, "room") == 0) {
-        return "Room Server";
-    }
-    if (strcmp(role, "repeater") == 0) {
-        return "Repeater";
-    }
-    if (strcmp(role, "sensor") == 0) {
-        return "Sensor";
-    }
-    if (strcmp(role, "companion") == 0) {
-        return "Companion";
-    }
-    return role;
-}
-
-static uint32_t node_role_color(const char *role)
-{
-    if (!role || role[0] == '\0') {
-        return 0x93C5FD;
-    }
-    if (strcmp(role, "room") == 0) {
-        return 0xA7F3D0;
-    }
-    if (strcmp(role, "repeater") == 0) {
-        return 0xFBBF24;
-    }
-    if (strcmp(role, "sensor") == 0) {
-        return 0xC4B5FD;
-    }
-    if (strcmp(role, "companion") == 0) {
-        return 0x5EEAD4;
-    }
-    return 0x93C5FD;
-}
-
-static bool node_role_is_managed_service(const char *role)
-{
-    return role && (strcmp(role, "room") == 0 || strcmp(role, "repeater") == 0);
-}
-
 static d1l_ui_dm_identity_eligibility_t dm_identity_for_contact(
     const d1l_contact_entry_t *entry,
     d1l_contact_entry_t *out_current)
@@ -1972,38 +1902,10 @@ static bool contact_can_dm(const d1l_contact_entry_t *entry)
     return dm_identity_for_contact(entry, NULL).can_open_compose;
 }
 
-static bool node_view_management_gated(const d1l_node_view_t *view)
-{
-    return view && node_role_is_managed_service(view->role);
-}
-
 static bool contact_can_export(const d1l_contact_entry_t *entry)
 {
     return entry && d1l_contact_store_has_export_key(entry) &&
            d1l_contact_store_meshcore_type_id(entry->type) != 0U;
-}
-
-static lv_obj_t *render_node_role_badge(lv_obj_t *parent, const char *role,
-                                        lv_coord_t x, lv_coord_t y,
-                                        lv_coord_t width)
-{
-    lv_obj_t *badge = create_object(parent, "node role badge");
-    if (!badge) {
-        return NULL;
-    }
-    lv_obj_set_size(badge, width, 24);
-    lv_obj_set_pos(badge, x, y);
-    lv_obj_set_style_radius(badge, 6, 0);
-    lv_obj_set_style_bg_color(badge, lv_color_hex(0x10202A), 0);
-    lv_obj_set_style_border_color(badge, lv_color_hex(node_role_color(role)), 0);
-    lv_obj_set_style_border_width(badge, 1, 0);
-    lv_obj_set_style_pad_all(badge, 0, 0);
-    lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *label = create_label(badge, node_role_badge_text(role), node_role_color(role));
-    label_set_dot_width(label, width - 6);
-    obj_align_if(label, LV_ALIGN_CENTER, 0, 0);
-    return badge;
 }
 
 static bool radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
@@ -2503,25 +2405,6 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     request_full_screen_repaint();
 }
 
-static void node_detail_dm_event_cb(lv_event_t *event)
-{
-    (void)event;
-    d1l_contact_entry_t contact = {0};
-    const d1l_ui_dm_identity_eligibility_t eligibility =
-        dm_identity_for_node(&s_node_detail_node, &contact);
-    if (!eligibility.can_open_compose) {
-        show_dm_identity_reason(eligibility);
-        return;
-    }
-    open_dm_compose_for_contact(&contact);
-}
-
-static void node_detail_dm_reason_event_cb(lv_event_t *event)
-{
-    (void)event;
-    show_dm_identity_reason(dm_identity_for_node(&s_node_detail_node, NULL));
-}
-
 static void open_node_dm_for(const d1l_node_view_t *view)
 {
     d1l_contact_entry_t contact = {0};
@@ -3002,157 +2885,34 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     show_contact_detail_for((const d1l_contact_entry_t *)user_data);
 }
 
-static void close_node_detail_event_cb(lv_event_t *event)
+static void handle_node_detail_action(
+    const d1l_ui_node_detail_action_event_t *event,
+    void *context)
 {
-    (void)event;
-    const bool return_to_map = s_node_detail_returns_to_map;
-    hide_node_detail_sheet();
-    if (return_to_map && d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
-        !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
-        map_interactive_touch_authorized() && !d1l_ui_map_viewport_reacquire()) {
-        request_content_refresh();
-    }
-}
-
-static void format_advert_coordinate(char *dest, size_t dest_len, int32_t value_e6)
-{
-    if (!dest || dest_len == 0U) {
+    (void)context;
+    if (!event) {
         return;
     }
-    const int64_t value = value_e6;
-    const bool negative = value < 0;
-    const uint64_t magnitude = (uint64_t)(negative ? -value : value);
-    snprintf(dest, dest_len, "%s%llu.%06llu", negative ? "-" : "",
-             (unsigned long long)(magnitude / 1000000ULL),
-             (unsigned long long)(magnitude % 1000000ULL));
-}
-
-static void render_node_detail_sheet(void)
-{
-    if (!s_node_detail_sheet) {
-        return;
-    }
-    lv_obj_clean(s_node_detail_sheet);
-
-    const d1l_node_view_t *view = &s_node_detail_node;
-    const d1l_node_entry_t *entry = &view->node;
-    const d1l_ui_dm_identity_eligibility_t dm_eligibility =
-        dm_identity_for_node(view, NULL);
-    const char *name = view->display_name[0] ? view->display_name :
-                       (entry->name[0] ? entry->name : entry->fingerprint);
-
-    lv_obj_t *title = create_label(s_node_detail_sheet, "Node Detail", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 160);
-    lv_obj_set_pos(title, 8, 4);
-    if (dm_eligibility.can_open_compose) {
-        create_button(s_node_detail_sheet, "DM", 208, 0, 54, 44,
-                      node_detail_dm_event_cb, NULL);
-    } else {
-        create_button(s_node_detail_sheet, "Why no DM?", 174, 0, 120, 44,
-                      node_detail_dm_reason_event_cb, NULL);
-    }
-    create_button(s_node_detail_sheet, "Close", 316, 0, 76, 44,
-                  close_node_detail_event_cb, NULL);
-
-    lv_obj_t *name_label = create_label(s_node_detail_sheet, name, 0xE5EDF5);
-    lv_label_set_long_mode(name_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(name_label, 392);
-    lv_obj_set_pos(name_label, 8, 48);
-
-    render_node_role_badge(s_node_detail_sheet, view->role, 8, 78, 74);
-    lv_obj_t *role = create_label(s_node_detail_sheet, "", node_role_color(view->role));
-    label_set_fmt(role, "Role %s", node_role_display_label(view->role));
-    lv_label_set_long_mode(role, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(role, 300);
-    lv_obj_set_pos(role, 94, 82);
-
-    lv_obj_t *fingerprint = create_label(s_node_detail_sheet, "", 0xE5EDF5);
-    label_set_fmt(fingerprint, "Fingerprint %.16s", entry->fingerprint[0] ? entry->fingerprint : "-");
-    lv_label_set_long_mode(fingerprint, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(fingerprint, 392);
-    lv_obj_set_pos(fingerprint, 8, 116);
-
-    lv_obj_t *key = create_label(s_node_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(key, "Public key %s  %s  %s",
-                  view->keyed ? "retained" : "missing",
-                  view->favorite ? "favorite" : "normal",
-                  view->muted ? "muted" : "audible");
-    lv_label_set_long_mode(key, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(key, 392);
-    lv_obj_set_pos(key, 8, 150);
-
-    const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
-    lv_obj_t *signal = create_label(s_node_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(signal, "Signal rssi %d  snr %s%d.%d  %s",
-                  entry->rssi_dbm,
-                  entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10,
-                  view->reachable ? "reachable" : "quiet");
-    lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(signal, 392);
-    lv_obj_set_pos(signal, 8, 184);
-
-    lv_obj_t *path = create_label(s_node_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(path, "Path hops %u  hash %u byte  advert %lums",
-                  entry->path_hops, entry->path_hash_bytes,
-                  (unsigned long)entry->advert_timestamp);
-    lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(path, 392);
-    lv_obj_set_pos(path, 8, 218);
-
-    lv_obj_t *location = create_label(s_node_detail_sheet, "", 0x93C5FD);
-    if (entry->location_valid) {
-        char latitude[16];
-        char longitude[16];
-        format_advert_coordinate(latitude, sizeof(latitude), entry->lat_e6);
-        format_advert_coordinate(longitude, sizeof(longitude), entry->lon_e6);
-        label_set_fmt(location, "Advert location %s, %s", latitude, longitude);
-    } else {
-        lv_label_set_text(location, "Advert location not provided");
-    }
-    lv_label_set_long_mode(location, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(location, 392);
-    lv_obj_set_pos(location, 8, 242);
-
-    lv_obj_t *heard = create_label(s_node_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(heard, "Last heard %lums  first %lums  count %lu",
-                  (unsigned long)entry->last_heard_ms,
-                  (unsigned long)entry->first_heard_ms,
-                  (unsigned long)entry->heard_count);
-    lv_label_set_long_mode(heard, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(heard, 392);
-    lv_obj_set_pos(heard, 8, 266);
-
-    char dm_status[160];
-    snprintf(dm_status, sizeof(dm_status), "DM %s [%s]: %s",
-             dm_eligibility.can_open_compose ? "ready" : "unavailable",
-             d1l_ui_dm_identity_reason_code(dm_eligibility.reason),
-             d1l_ui_dm_identity_reason_text(dm_eligibility.reason));
-    lv_obj_t *dm_reason = create_label(
-        s_node_detail_sheet, dm_status,
-        dm_eligibility.can_open_compose ? 0x5EEAD4 : 0xFBBF24);
-    if (dm_reason) {
-        lv_label_set_long_mode(dm_reason, LV_LABEL_LONG_WRAP);
-        lv_obj_set_size(dm_reason, 392, 54);
-        lv_obj_set_pos(dm_reason, 8, 298);
-    }
-    if (node_view_management_gated(view)) {
-        lv_obj_t *managed = create_label(s_node_detail_sheet,
-                                         "Manage locked", 0x8EA0AE);
-        if (managed) {
-            lv_label_set_long_mode(managed, LV_LABEL_LONG_DOT);
-            lv_obj_set_size(managed, 392, 20);
-            lv_obj_set_pos(managed, 8, 354);
+    switch (event->action) {
+    case D1L_UI_NODE_DETAIL_ACTION_CLOSE:
+        hide_node_detail_sheet();
+        if (event->return_to_map &&
+            d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
+            !d1l_ui_modal_has_active() && !s_lock_visible &&
+            !s_onboarding_visible && map_interactive_touch_authorized() &&
+            !d1l_ui_map_viewport_reacquire()) {
+            request_content_refresh();
         }
-        lv_obj_t *managed_reason = create_label(
-            s_node_detail_sheet,
-            "Authenticated admin session required.", 0x8EA0AE);
-        if (managed_reason) {
-            lv_label_set_long_mode(managed_reason, LV_LABEL_LONG_DOT);
-            lv_obj_set_size(managed_reason, 392, 20);
-            lv_obj_set_pos(managed_reason, 8, 376);
-        }
+        break;
+    case D1L_UI_NODE_DETAIL_ACTION_OPEN_DM:
+        open_node_dm_for(event->node);
+        break;
+    case D1L_UI_NODE_DETAIL_ACTION_EXPLAIN_DM:
+        show_dm_identity_reason(dm_identity_for_node(event->node, NULL));
+        break;
+    case D1L_UI_NODE_DETAIL_ACTION_NONE:
+    default:
+        break;
     }
 }
 
@@ -3176,12 +2936,21 @@ static void show_node_detail_view(const d1l_node_view_t *view, bool return_to_ma
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
-    s_node_detail_node = *view;
-    s_node_detail_returns_to_map = return_to_map;
-    render_node_detail_sheet();
-    if (s_node_detail_sheet) {
-        show_modal(s_node_detail_sheet);
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        dm_identity_for_node(view, NULL);
+    d1l_ui_node_detail_view_model_t view_model;
+    if (!d1l_ui_node_detail_build_view_model(
+            view, eligibility, return_to_map, &view_model)) {
+        show_toast("Node", ESP_ERR_INVALID_STATE);
+        return;
     }
+    if (!d1l_ui_node_detail_render(
+            &s_node_detail_controller, &view_model,
+            handle_node_detail_action, NULL)) {
+        show_toast("Node", ESP_ERR_NO_MEM);
+        return;
+    }
+    show_modal(d1l_ui_node_detail_sheet(&s_node_detail_controller));
 }
 
 static void open_map_node_detail(const char *fingerprint)
@@ -7852,26 +7621,6 @@ static void create_storage_sheet(lv_obj_t *screen)
     d1l_ui_modal_hide(s_storage_sheet);
 }
 
-static void create_node_detail_sheet(lv_obj_t *screen)
-{
-    s_node_detail_sheet = create_object(screen, "node detail sheet");
-    if (!s_node_detail_sheet) {
-        return;
-    }
-    /* The deepest managed-role copy ends at local y=396. With the retained
-     * 12 px padding this bounded 416 px sheet keeps every reason visible
-     * below the 56 px top bar and above the physical display edge. */
-    lv_obj_set_size(s_node_detail_sheet, 448, 416);
-    lv_obj_set_pos(s_node_detail_sheet, 16, 60);
-    lv_obj_set_style_radius(s_node_detail_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_node_detail_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_node_detail_sheet, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_border_width(s_node_detail_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_node_detail_sheet, 12, 0);
-    lv_obj_clear_flag(s_node_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    d1l_ui_modal_hide(s_node_detail_sheet);
-}
-
 static void create_route_detail_sheet(lv_obj_t *screen)
 {
     s_route_detail_sheet = create_object(screen, "route detail sheet");
@@ -8182,7 +7931,9 @@ esp_err_t d1l_ui_phase1_show_home(void)
             &s_channel_sheets_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
     }
-    create_node_detail_sheet(s_screen);
+    if (!d1l_ui_node_detail_create(&s_node_detail_controller, s_screen)) {
+        return ESP_ERR_NO_MEM;
+    }
     create_route_detail_sheet(s_screen);
     create_route_trace_sheet(s_screen);
     create_packet_detail_sheet(s_screen);

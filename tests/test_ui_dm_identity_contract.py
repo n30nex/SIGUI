@@ -68,16 +68,17 @@ def test_production_paths_use_full_key_resolution_and_never_alias_match_public_s
 
 def test_invalid_identity_taps_explain_without_compose_or_rf_and_controls_are_touch_sized() -> None:
     ui = read("main/ui/ui_phase1.c")
+    node_detail = read("main/ui/ui_node_detail.c")
 
     node_reason_action = ui.split(
-        "static void node_detail_dm_reason_event_cb", 1
-    )[1].split("static void open_node_dm_for", 1)[0]
+        "static void handle_node_detail_action", 1
+    )[1].split("static void show_node_detail_view", 1)[0]
     assert "show_dm_identity_reason" in node_reason_action
     assert "open_dm_compose_for_contact" not in node_reason_action
     assert "d1l_app_model_send_dm_text" not in node_reason_action
 
-    render_node = ui.split("static void render_node_detail_sheet(void)", 2)[2].split(
-        "static void show_node_detail_view", 1
+    render_node = node_detail.split("bool d1l_ui_node_detail_render", 1)[1].split(
+        "void d1l_ui_node_detail_deactivate", 1
     )[0]
     assert '"Why no DM?", 174, 0, 120, 44' in render_node
     assert '"DM", 208, 0, 54, 44' in render_node
@@ -94,17 +95,17 @@ def test_invalid_identity_taps_explain_without_compose_or_rf_and_controls_are_to
 
 
 def test_node_detail_geometry_contains_all_reason_and_management_copy() -> None:
-    ui = read("main/ui/ui_phase1.c")
-    create = ui.split("static void create_node_detail_sheet", 1)[1].split(
-        "static void create_route_detail_sheet", 1
+    node_detail = read("main/ui/ui_node_detail.c")
+    create = node_detail.split("bool d1l_ui_node_detail_create", 1)[1].split(
+        "bool d1l_ui_node_detail_render", 1
     )[0]
-    render = ui.split("static void render_node_detail_sheet(void)", 2)[2].split(
-        "static void show_node_detail_view", 1
+    render = node_detail.split("bool d1l_ui_node_detail_render", 1)[1].split(
+        "void d1l_ui_node_detail_deactivate", 1
     )[0]
 
-    assert "lv_obj_set_size(s_node_detail_sheet, 448, 416);" in create
-    assert "lv_obj_set_pos(s_node_detail_sheet, 16, 60);" in create
-    assert "lv_obj_set_style_pad_all(s_node_detail_sheet, 12, 0);" in create
+    assert "lv_obj_set_size(controller->sheet, 448, 416);" in create
+    assert "lv_obj_set_pos(controller->sheet, 16, 60);" in create
+    assert "lv_obj_set_style_pad_all(controller->sheet, 12, 0);" in create
     assert "lv_obj_set_pos(managed_reason, 8, 376);" in render
     # 12 px top padding + local y 376 + h 20 stays inside 416 px.
     assert 12 + 376 + 20 <= 416

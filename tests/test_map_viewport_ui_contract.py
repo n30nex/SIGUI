@@ -261,10 +261,11 @@ def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():
 
 def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view():
     source = read("main/ui/ui_phase1.c")
+    node_detail = read("main/ui/ui_node_detail.c")
     detail = function_body(
-        source,
-        "static void render_node_detail_sheet",
-        "static void show_node_detail_view",
+        node_detail,
+        "bool d1l_ui_node_detail_render",
+        "void d1l_ui_node_detail_deactivate",
     )
     open_from_map = function_body(
         source,
@@ -273,8 +274,8 @@ def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view
     )
     close = function_body(
         source,
-        "static void close_node_detail_event_cb",
-        "static void format_advert_coordinate",
+        "static void handle_node_detail_action",
+        "static void show_node_detail_view",
     )
 
     assert '"Advert location %s, %s"' in detail
@@ -283,14 +284,14 @@ def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view
     assert "entry->lat_e6" in detail
     assert "entry->lon_e6" in detail
     assert "GPS" not in detail
-    assert "lv_obj_set_size(s_node_detail_sheet, 448, 416);" in source
-    assert "lv_obj_set_pos(s_node_detail_sheet, 16, 60);" in source
+    assert "lv_obj_set_size(controller->sheet, 448, 416);" in node_detail
+    assert "lv_obj_set_pos(controller->sheet, 16, 60);" in node_detail
     assert "d1l_app_model_query_nodes(" in open_from_map
     assert "&query, s_map_node_rows, D1L_NODE_STORE_CAPACITY" in open_from_map
     assert "D1L_NODE_STORE_CAPACITY" in open_from_map
     assert "strcmp(s_map_node_rows[i].node.fingerprint, fingerprint) == 0" in open_from_map
     assert "show_node_detail_view(&s_map_node_rows[i], true);" in open_from_map
-    assert "s_node_detail_returns_to_map" in close
+    assert "event->return_to_map" in close
     assert "d1l_ui_map_viewport_reacquire()" in close
     assert "request_content_refresh();" in close
 
@@ -305,7 +306,7 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
         source, "static bool contact_can_dm", "static bool contact_can_export"
     )
     compose = function_body(
-        source, "static void open_dm_compose_for_contact", "static void node_detail_dm_event_cb"
+        source, "static void open_dm_compose_for_contact", "static void open_node_dm_for"
     )
     detail = function_body(
         contact_source,
