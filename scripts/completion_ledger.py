@@ -29,6 +29,25 @@ DEPENDENCY_GATES = ("merged", "proof_banked", "implementation_merged")
 WORKING_DOC_STATES = ("working", "hardware_proven", "released")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TEMPLATE_TOKEN_RE = re.compile(r"<[^>]+>")
+COMPLETION_BUCKETS = (
+    "implementation_complete",
+    "advanced",
+    "partial",
+    "not_started",
+)
+GREEN_RELEASE_GATE_STATES = ("hardware_green", "merged", "released")
+AUTOMATED_ACCEPTANCE_MAIN_FIELDS = {
+    "host_tests_passed": "host_tests_passed",
+    "checksum_contract_tests_passed": "checksum_contract_tests_passed",
+    "focused_tests_passed": "focused_tests_passed",
+    "wire_vectors": "wire_vectors",
+    "oracle_checks": "oracle_checks",
+    "wire_fuzz_runs_completed": "wire_fuzz_runs_completed",
+    "advert_fuzz_runs_completed": "advert_fuzz_runs_completed",
+    "fuzz_findings": "fuzz_findings",
+    "artifact_archives_verified": "artifact_archives_verified",
+    "checksum_entries_verified": "checksum_entries_present",
+}
 
 
 class LedgerError(ValueError):
@@ -132,6 +151,235 @@ def release_ready(ledger: dict) -> bool:
         "ready_to_tag",
         "released",
     )
+
+
+def _rounded_percent(value: float) -> int:
+    return int(value + 0.5)
+
+
+def _same_number(actual: object, expected: float) -> bool:
+    return (
+        isinstance(actual, (int, float))
+        and not isinstance(actual, bool)
+        and abs(float(actual) - expected) < 1e-9
+    )
+
+
+def _format_number(value: float) -> str:
+    return (
+        str(int(value))
+        if float(value).is_integer()
+        else ("%.10f" % value).rstrip("0").rstrip(".")
+    )
+
+
+def completion_reporting_metrics(ledger: dict) -> dict:
+    """Recompute every derived progress value from the ledger's source rows."""
+
+    reporting = ledger.get("completion_reporting", {})
+    capability = reporting.get("capability_implementation", {})
+    points = capability.get("rubric_points", {})
+    counts = {
+        bucket: len(capability.get(bucket, []))
+        if isinstance(capability.get(bucket), list)
+        else 0
+        for bucket in COMPLETION_BUCKETS
+    }
+    domain_count = sum(counts.values())
+    capability_raw = (
+        sum(counts[bucket] * points.get(bucket, 0) for bucket in COMPLETION_BUCKETS)
+        / domain_count
+        if domain_count
+        else 0.0
+    )
+
+    main = ledger.get("repository", {}).get("main", {})
+    acceptance = reporting.get("applicable_exact_main_automated_acceptance", {})
+    exact_main_acceptance = (
+        reporting.get("scope_commit") == main.get("commit")
+        and acceptance.get("actions_run") == main.get("actions_run")
+        and main.get("actions_status") == "success"
+        and main.get("exact_main_gate_pending") is False
+        and main.get("exact_main_evidence_bank_pending") is False
+        and main.get("checksum_status") == "strict_pass_after_download"
+        and main.get("checksum_manifests_total")
+        == main.get("checksum_manifests_verified")
+        and isinstance(main.get("checksum_manifests_total"), int)
+        and main.get("checksum_manifests_total") > 0
+        and all(
+            acceptance.get(reporting_key) == main.get(main_key)
+            for reporting_key, main_key in AUTOMATED_ACCEPTANCE_MAIN_FIELDS.items()
+        )
+        and all(
+            isinstance(acceptance.get(field), int)
+            and not isinstance(acceptance.get(field), bool)
+            and acceptance.get(field) > 0
+            for field in (
+                "host_tests_passed",
+                "checksum_contract_tests_passed",
+                "focused_tests_passed",
+                "wire_vectors",
+                "oracle_checks",
+                "wire_fuzz_runs_completed",
+                "advert_fuzz_runs_completed",
+                "artifact_archives_verified",
+                "checksum_entries_verified",
+            )
+        )
+        and acceptance.get("fuzz_findings") == 0
+        and acceptance.get("artifact_archives_verified")
+        == len(main.get("downloaded_artifact_zip_sha256", {}))
+    )
+    acceptance_percent = 100 if exact_main_acceptance else 0
+
+    release_gates = ledger.get("release_gates", [])
+    gate_total = len(release_gates) if isinstance(release_gates, list) else 0
+    gate_green = (
+        sum(
+            1
+            for gate in release_gates
+            if isinstance(gate, dict)
+            and gate.get("status") in GREEN_RELEASE_GATE_STATES
+        )
+        if isinstance(release_gates, list)
+        else 0
+    )
+    gate_percent = 100.0 * gate_green / gate_total if gate_total else 0.0
+
+    weighted = reporting.get("weighted_full_release_progress", {})
+    weights = weighted.get("weights", {})
+    weighted_raw = (
+        capability_raw * weights.get("capability_implementation", 0)
+        + acceptance_percent
+        * weights.get("applicable_exact_main_automated_acceptance", 0)
+        + gate_percent * weights.get("final_release_gate_closure", 0)
+    )
+    return {
+        "capability_counts": counts,
+        "capability_domain_count": domain_count,
+        "capability_raw_percent": capability_raw,
+        "capability_reported_percent": _rounded_percent(capability_raw),
+        "acceptance_status": "pass" if exact_main_acceptance else "fail",
+        "acceptance_percent": acceptance_percent,
+        "gate_green": gate_green,
+        "gate_total": gate_total,
+        "gate_percent": gate_percent,
+        "weighted_raw_percent": weighted_raw,
+        "weighted_reported_percent": _rounded_percent(weighted_raw),
+    }
+
+
+def _validate_completion_reporting(ledger: dict) -> list[str]:
+    reporting = ledger.get("completion_reporting")
+    if not isinstance(reporting, dict):
+        return ["completion_reporting must be an object"]
+
+    errors = []
+    main = ledger.get("repository", {}).get("main", {})
+    if reporting.get("scope_commit") != main.get("commit"):
+        errors.append("completion_reporting.scope_commit must match repository.main.commit")
+    if reporting.get("reporting_only_not_a_release_gate_waiver") is not True:
+        errors.append(
+            "completion_reporting must explicitly remain reporting-only, not a gate waiver"
+        )
+
+    capability = reporting.get("capability_implementation")
+    if not isinstance(capability, dict):
+        return errors + ["completion_reporting.capability_implementation must be an object"]
+    expected_points = {
+        "implementation_complete": 100,
+        "advanced": 90,
+        "partial": 60,
+        "not_started": 0,
+    }
+    if capability.get("rubric_points") != expected_points:
+        errors.append("completion reporting rubric points must remain 100/90/60/0")
+    domains = []
+    for bucket in COMPLETION_BUCKETS:
+        values = capability.get(bucket)
+        if not isinstance(values, list) or any(
+            not isinstance(value, str) or not value for value in values
+        ):
+            errors.append("completion reporting %s must be a list of domain names" % bucket)
+            continue
+        domains.extend(values)
+    if len(domains) != len(set(domains)):
+        errors.append("completion reporting capability domains must be unique")
+
+    metrics = completion_reporting_metrics(ledger)
+    if capability.get("domain_count") != metrics["capability_domain_count"]:
+        errors.append("completion reporting domain_count does not match bucket partition")
+    if metrics["capability_domain_count"] != 27:
+        errors.append("completion reporting must partition all 27 audited feature domains")
+    if not _same_number(
+        capability.get("raw_percent"), metrics["capability_raw_percent"]
+    ):
+        errors.append("completion reporting capability raw_percent is stale")
+    if capability.get("reported_percent") != metrics["capability_reported_percent"]:
+        errors.append("completion reporting capability reported_percent is stale")
+
+    acceptance = reporting.get("applicable_exact_main_automated_acceptance")
+    if not isinstance(acceptance, dict):
+        errors.append("completion reporting automated acceptance must be an object")
+    else:
+        if acceptance.get("actions_run") != main.get("actions_run"):
+            errors.append(
+                "completion reporting automated acceptance actions_run is stale"
+            )
+        for reporting_field, main_field in AUTOMATED_ACCEPTANCE_MAIN_FIELDS.items():
+            if acceptance.get(reporting_field) != main.get(main_field):
+                errors.append(
+                    "completion reporting automated acceptance %s is stale"
+                    % reporting_field
+                )
+        if main.get("artifact_archives_verified") != len(
+            main.get("downloaded_artifact_zip_sha256", {})
+        ):
+            errors.append(
+                "repository.main artifact archive count does not match downloaded ZIPs"
+            )
+        if acceptance.get("status") != metrics["acceptance_status"]:
+            errors.append("completion reporting automated acceptance status is stale")
+        if acceptance.get("percent") != metrics["acceptance_percent"]:
+            errors.append("completion reporting automated acceptance percent is stale")
+
+    final_gates = reporting.get("final_release_gate_closure")
+    if not isinstance(final_gates, dict):
+        errors.append("completion reporting final release gates must be an object")
+    else:
+        for field, expected in (
+            ("green", metrics["gate_green"]),
+            ("total", metrics["gate_total"]),
+            ("percent", metrics["gate_percent"]),
+            ("release_ready", release_ready(ledger)),
+        ):
+            if field == "percent":
+                matches = _same_number(final_gates.get(field), expected)
+            else:
+                matches = final_gates.get(field) == expected
+            if not matches:
+                errors.append("completion reporting final release gate %s is stale" % field)
+
+    weighted = reporting.get("weighted_full_release_progress")
+    if not isinstance(weighted, dict):
+        errors.append("completion reporting weighted progress must be an object")
+    else:
+        expected_weights = {
+            "capability_implementation": 0.8,
+            "applicable_exact_main_automated_acceptance": 0.1,
+            "final_release_gate_closure": 0.1,
+        }
+        if weighted.get("weights") != expected_weights:
+            errors.append("completion reporting weights must remain 0.8/0.1/0.1")
+        if not _same_number(
+            weighted.get("raw_percent"), metrics["weighted_raw_percent"]
+        ):
+            errors.append("completion reporting weighted raw_percent is stale")
+        if weighted.get("reported_percent") != metrics["weighted_reported_percent"]:
+            errors.append("completion reporting weighted reported_percent is stale")
+        if weighted.get("release_ready") != release_ready(ledger):
+            errors.append("completion reporting weighted release_ready is stale")
+    return errors
 
 
 def open_package_blocker_ids(ledger: dict) -> set:
@@ -463,6 +711,8 @@ def validate_ledger(ledger: dict) -> list:
                         "%s depends on unknown release gate %s" % (gate_id, dependency)
                     )
 
+    errors.extend(_validate_completion_reporting(ledger))
+
     return errors
 
 
@@ -528,12 +778,82 @@ def render_status(ledger: dict) -> str:
         "- Ledger release ready: **%s**" % ("yes" if release_ready(ledger) else "no"),
         "- Highest-priority pending: `%s`" % overall,
         "- Highest-priority runnable now: `%s`" % (runnable[0] if runnable else "none"),
-        "",
-        "## Work packages",
-        "",
-        "| Package | Status | Dependency gate | Proof banked | Blockers |",
-        "|---|---|---|---:|---|",
     ]
+    reporting = ledger.get("completion_reporting")
+    if isinstance(reporting, dict):
+        capability = reporting.get("capability_implementation", {})
+        acceptance = reporting.get("applicable_exact_main_automated_acceptance", {})
+        metrics = completion_reporting_metrics(ledger)
+        counts = metrics["capability_counts"]
+        points = capability.get("rubric_points", {})
+        capability_formula = "(%s) / %s" % (
+            " + ".join(
+                "%s*%s" % (counts[bucket], points.get(bucket))
+                for bucket in COMPLETION_BUCKETS
+            ),
+            metrics["capability_domain_count"],
+        )
+        weights = reporting.get("weighted_full_release_progress", {}).get("weights", {})
+        weighted_formula = "%s*%s + %s*%s + %s*%s" % (
+            weights.get("capability_implementation"),
+            _format_number(metrics["capability_raw_percent"]),
+            weights.get("applicable_exact_main_automated_acceptance"),
+            metrics["acceptance_percent"],
+            weights.get("final_release_gate_closure"),
+            _format_number(metrics["gate_percent"]),
+        )
+        lines.extend(
+            [
+                "",
+                "## Progress estimate",
+                "",
+                "- Capability implementation: **%s%%** (`%s`)"
+                % (metrics["capability_reported_percent"], capability_formula),
+                "- Applicable exact-main automated acceptance: **%s%%**"
+                % metrics["acceptance_percent"],
+                "- Final release-gate closure: **%s%%** (%s of %s green)"
+                % (
+                    _format_number(metrics["gate_percent"]),
+                    metrics["gate_green"],
+                    metrics["gate_total"],
+                ),
+                "- Weighted full-release progress: **%s%%** (`%s`)"
+                % (metrics["weighted_reported_percent"], weighted_formula),
+                "- Implementation-complete (%s): %s"
+                % (
+                    counts["implementation_complete"],
+                    ", ".join(capability.get("implementation_complete", [])),
+                ),
+                "- Advanced (%s): %s"
+                % (
+                    counts["advanced"],
+                    ", ".join(capability.get("advanced", [])),
+                ),
+                "- Partial (%s): %s"
+                % (
+                    counts["partial"],
+                    ", ".join(capability.get("partial", [])),
+                ),
+                "- Not started (%s): %s"
+                % (
+                    counts["not_started"],
+                    ", ".join(capability.get("not_started", [])),
+                ),
+                "",
+                "This estimate is a repeatable reporting aid, not a release-gate waiver. "
+                "The authoritative release decision remains fail-closed until every "
+                "applicable final gate is green.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Work packages",
+            "",
+            "| Package | Status | Dependency gate | Proof banked | Blockers |",
+            "|---|---|---|---:|---|",
+        ]
+    )
     for package_id in ledger["execution_priority"]:
         item = package_by_id[package_id]
         blockers = ", ".join(item.get("blockers", [])) or "—"

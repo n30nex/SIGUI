@@ -12,7 +12,7 @@
 
 > This document supersedes the older broad roadmap as the execution source of truth. It does not erase the detailed evidence already recorded in `docs/ROADMAP.md`, `docs/KRABSTHOUGHTS.MD`, issue threads, CI artifacts, or hardware receipts. It converts that evidence into a dependency-ordered completion program with explicit stop conditions.
 
-**Live reconciliation, 2026-07-15:** live main is merged and strict-banked through PR #157 at `404a2fa9e3b28b86d3118920753c85fdd5e0e95e`. Exact-main Actions `29452355824` pass 1,158 host, 32 checksum, 33 focused security, 1,008 wire-vector, 931 oracle, 74 oracle-pin, 100,000 wire-fuzz, and 100,000 advert-fuzz checks with zero findings. All five API ZIPs and 46 nested checksum entries verify across 339 files / 79,439,771 bytes with exact-source provenance and SPDX; strict receipt SHA-256 is `35319a7b0a5e7e527846121e8bc30f6456532650b816fd7026e4b01c17be4144`, and gate-manifest SHA-256 is `57ff3427cabf3ebbfd169db6cb99202763748ca39e70e536a6e42e69f687e045`. PR #157 adds secure New/Import/Manage/rename/enable/default/remove/one-shot QR sheets and a fail-closed hardware-entropy-backed DRBG for channel secrets and identity material. Pinned official-client RF interoperability, exact-candidate reboot/reset/recovery and physical UI qualification, `channel_acceptance_<sha>.json`, dependency closure, WP-09 closure, and release closure remain open. The release audit remains fail-closed with 33 P0 / 35 total failures; provenance is valid but unauthenticated and claims no SLSA level.
+**Live reconciliation, 2026-07-16:** live main is merged and strict-banked through PR #160 at `5ee89e3d3956e39cd8eff4c87374d22b3f40613b`. Exact-main Actions `29460262807` pass 1,166 host, 32 checksum, 32 focused retained-time, 1,008 wire-vector, 931 oracle, 100,000 wire-fuzz, and 100,000 advert-fuzz checks with zero findings. All five API ZIPs and 46 nested checksum entries verify across 339 files / 79,775,680 bytes with exact-source provenance and SPDX; strict receipt SHA-256 is `dad1a84d81b45a7c5c94e51e2ffb1e8cd28febd4f4f98a4d6a862566aeb38a91`, and gate-manifest SHA-256 is `214deb9d1f74952cec7784de15154e2c36b5cecf5b9de1b9208763c423569284`. PR #158 banks fail-closed versioned settings, corrected PR #159 banks the 44-pixel icon-plus-text dock/shared Map geometry, and PR #160 banks bounded retained validated-wall checkpoint recovery; portable aggregate SHA-256 values are `eb82dd9f8763812597f6d9dda0c3e783594c5666b3b23abb8c5375670c1fbb2e`, `855ee4c118df03758d38f546cd7fff8fab9ee711b2758701f57d7fe6ac0be34b`, and `15ff143e6e226201017fc3d34fd5e4c12c52ac2e4de8bd1271b2ca473222bc2b`. Full-reset/power-loss/endurance durability, time migration/timezone/authenticated-transport/physical qualification, Home status icons, UI-task/lifecycle/1,000-transition/physical qualification, required acceptance artifacts, official-client RF interoperability, exact-candidate reboot/reset/recovery, dependency closure, WP-09/WP-11/WP-12/WP-14, and release closure remain open. The release audit remains fail-closed with 33 P0 / 35 total failures; provenance is valid but unauthenticated and claims no SLSA level.
 
 ---
 
@@ -476,6 +476,8 @@ The roadmap must build on these assets rather than replacing them.
 | Observer/MQTT | Setting exists, runtime not release-ready | Hide/disable or implement explicitly with opt-in/privacy/TLS |
 | Diagnostics/crash/health | Strong | Structured heartbeat/task/heap/store metrics and final long-soak evidence |
 | Packaging/release | Strong foundation | Immutable dependencies, SBOM/provenance, final exact-tag evidence bundle |
+
+**Reproducible progress report, not a gate waiver:** classifying these 27 domains at the current live checkpoint as 7 implementation-complete, 13 advanced, 5 partial, and 2 not started under a 100/90/60/0 rubric yields `(7*100 + 13*90 + 5*60 + 2*0) / 27 = 80.37%`, reported as **80% capability implementation**. Applicable exact-main automated acceptance is 100%, while actual final release-gate closure is 0 of 11. The reporting weight `0.8*80.37 + 0.1*100 + 0.1*0` yields **74% weighted full-release progress**. `docs/COMPLETION_LEDGER.yaml` is the validator-backed source for this estimate; release readiness remains fail-closed.
 
 ---
 
@@ -1229,6 +1231,8 @@ Store:
 - `retained_powerloss_<sha>.json`
 - `nvs_write_amplification_<sha>.json`
 
+**Live partial evidence:** PR #118 banks the shared retained scheduler/deadline boundary with portable aggregate SHA-256 `8d2991f4ce60d4482610ba606540bf17f1942d32a8ce93cbdfaba4317e203847`. PR #154 banks boot-local retained-NVS telemetry. PR #158 head `8e0dd27c5351a1d16cadb3c5a4307489ac3957cd` then merges as `3de6e8d634bd76fc52e5e4bf98f93fc48adf6648`, sharing tree `780045e67537d15f701a9c904659ccfd1df0a644` with its retained synthetic checkout. Retained PR Actions `29455768778` and exact-main Actions `29456320080` pass; exact-main receipt SHA-256 is `dcb2c1dcfd7b64091609c1b686208f247a38d45905b62196c964331b45787086`, gate-manifest SHA-256 is `e67633d808742f830e0d8a20060c19aefe964358fc8f18bac337797bd05381ba`, and portable aggregate `settings_schema_durability_3de6e8d634bd76fc52e5e4bf98f93fc48adf6648.json` has SHA-256 `eb82dd9f8763812597f6d9dda0c3e783594c5666b3b23abb8c5375670c1fbb2e`. This banks checksummed version/revision settings envelopes, bounded raw-v2-through-v7 migration, fail-closed corrupt/future-state preservation, serialized/redacted access, and secret wiping only. Full reset, injected interrupted-write/power-loss, named-workload NVS write amplification/endurance, exact-candidate physical durability, and WP-11 closure remain open.
+
 ---
 
 ### WP-12 — Truthful time service
@@ -1267,6 +1271,8 @@ Store:
 - Map TLS waits for valid certificate time but remains cancellable.
 
 **Artifact:** `time_service_acceptance_<sha>.json`
+
+**Live partial evidence:** PRs #120 and #124 bank centralized monotonic/wall/certificate/protocol clock ownership, reserve-before-use protocol high water, exact-source build anchoring, bounded SNTP forward quarantine, representable authenticated-companion recovery, protocol-time preflight, and truthful diagnostics. PR #160 head `b10ceb773d90592bfb764328516eee79bac68187`, retained synthetic merge `c6003f193d887031962bced9b3079c7284daeedd`, and exact main `5ee89e3d3956e39cd8eff4c87374d22b3f40613b` share tree `8254d1137b3983314131571dc8202bf39bff4018`. Retained PR Actions `29459701337` and exact-main Actions `29460262807` pass; PR/main receipt SHA-256 values are `227955d2dda0f22db1e15968685e2c14f794f2c2197bdb94b58c57d3df265e4d` and `dad1a84d81b45a7c5c94e51e2ffb1e8cd28febd4f4f98a4d6a862566aeb38a91`, exact-main gate-manifest SHA-256 is `214deb9d1f74952cec7784de15154e2c36b5cecf5b9de1b9208763c423569284`, and portable aggregate `retained_wall_checkpoint_5ee89e3d3956e39cd8eff4c87374d22b3f40613b.json` has SHA-256 `15ff143e6e226201017fc3d34fd5e4c12c52ac2e4de8bd1271b2ca473222bc2b`. This banks a versioned/domain-bound/CRC checkpoint, approximate-only recovery, rollback rejection, worker-owned generation-protected coalesced writes, bounded retry, preservation, and telemetry. Legacy `mesh_ts` migration, timezone/display conversion, authenticated companion transport acceptance, exact-candidate physical SNTP/jump/TLS/reboot/power-interruption proof, the required artifact, WP-12, and release closure remain open.
 
 ---
 
@@ -1352,6 +1358,8 @@ Store:
 - each extracted screen has focused tests and no direct radio/storage dependency.
 
 **Artifact:** `ui_runtime_safety_<sha>_<d1l>.json`
+
+**Live partial evidence:** PRs #108/#110/#115/#125/#127/#129-#133/#135/#136 bank the planned hierarchy/controller extraction in code. Corrected PR #159 head `55548377c62c024a8b00be61b9a40ae14b9d9e9b` merges as `fada8311a6e63acb7fd4f791478660ce3926c48a`, sharing tree `308a1e0df307e73753491e5122e10fb041626993` with its retained synthetic checkout. Retained PR Actions `29457490172` and exact-main Actions `29457974800` pass; PR/main receipt SHA-256 values are `3322d1dbf2810ceb3671ba51b17611d10d356afab69223d79edd05f00c98643b` and `721f52cc194e0cc35c19f2d58eacf46abf6f2022b1ee0a57246691c44701f612`, exact-main gate-manifest SHA-256 is `b552d5c6bcb943ee08b48b89796b19f3a436a678c95d874e23169ca23a534a89`, and portable aggregate `compact_dock_fada8311a6e63acb7fd4f791478660ce3926c48a.json` has SHA-256 `855ee4c118df03758d38f546cd7fff8fab9ee711b2758701f57d7fe6ac0be34b`. Superseded head `31c5799e413ebaab218c5c9d01c88172f8a33185` is rejected by blocker receipt SHA-256 `fb6a6e564fe2d67ae2fd2af815b147578ee28a47d1ba604b096b5dae1e232ed6` for a 10-pixel Map mismatch. This banks compact `Home`/`Messages`/`Nodes`/`Map`/`Tools` icon-plus-text targets and shared Map/chrome geometry only. UI-task-only LVGL proof, repeated lifecycle proof, 1,000 transitions, exact-candidate touch/scroll/focus/keyboard and pixel/accessibility review, Home status icons, the required runtime-safety artifact, and WP-14 closure remain open.
 
 ---
 

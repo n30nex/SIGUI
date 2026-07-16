@@ -2,6 +2,7 @@ import copy
 from pathlib import Path
 
 from scripts.completion_ledger import (
+    completion_reporting_metrics,
     dependency_satisfied,
     load_ledger,
     pending_work_packages,
@@ -63,6 +64,94 @@ def test_repository_ledger_validates_and_status_is_current():
 
     assert validate_ledger(ledger) == []
     assert STATUS_PATH.read_text(encoding="utf-8") == render_status(ledger)
+
+
+def test_completion_reporting_is_recomputed_and_does_not_waive_release_gates():
+    ledger = load_ledger(LEDGER_PATH)
+
+    metrics = completion_reporting_metrics(ledger)
+    rendered = render_status(ledger)
+
+    assert metrics["capability_counts"] == {
+        "implementation_complete": 7,
+        "advanced": 13,
+        "partial": 5,
+        "not_started": 2,
+    }
+    assert metrics["capability_reported_percent"] == 80
+    assert metrics["acceptance_percent"] == 100
+    assert metrics["gate_green"] == 0
+    assert metrics["gate_total"] == 11
+    assert metrics["weighted_reported_percent"] == 74
+    assert release_ready(ledger) is False
+    assert "not a release-gate waiver" in rendered
+
+
+def test_completion_reporting_rejects_duplicate_or_incomplete_domain_partition():
+    ledger = ledger_copy()
+    capability = ledger["completion_reporting"]["capability_implementation"]
+    capability["partial"].append(capability["advanced"][0])
+    capability["domain_count"] += 1
+
+    errors = validate_ledger(ledger)
+
+    assert any("domains must be unique" in error for error in errors)
+    assert any("all 27 audited feature domains" in error for error in errors)
+
+
+def test_completion_reporting_rejects_stale_capability_and_weighted_percentages():
+    ledger = ledger_copy()
+    reporting = ledger["completion_reporting"]
+    reporting["capability_implementation"]["raw_percent"] = 99
+    reporting["capability_implementation"]["reported_percent"] = 99
+    reporting["weighted_full_release_progress"]["raw_percent"] = 99
+    reporting["weighted_full_release_progress"]["reported_percent"] = 99
+
+    errors = validate_ledger(ledger)
+
+    assert any("capability raw_percent is stale" in error for error in errors)
+    assert any("capability reported_percent is stale" in error for error in errors)
+    assert any("weighted raw_percent is stale" in error for error in errors)
+    assert any("weighted reported_percent is stale" in error for error in errors)
+
+
+def test_completion_reporting_rejects_stale_exact_main_automated_acceptance():
+    ledger = ledger_copy()
+    reporting = ledger["completion_reporting"]
+    reporting["scope_commit"] = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+    errors = validate_ledger(ledger)
+
+    assert any("scope_commit must match" in error for error in errors)
+    assert any("automated acceptance status is stale" in error for error in errors)
+    assert any("automated acceptance percent is stale" in error for error in errors)
+
+
+def test_completion_reporting_rejects_tampered_automated_acceptance_metric():
+    ledger = ledger_copy()
+    acceptance = ledger["completion_reporting"][
+        "applicable_exact_main_automated_acceptance"
+    ]
+    acceptance["host_tests_passed"] -= 1
+
+    errors = validate_ledger(ledger)
+
+    assert any(
+        "automated acceptance host_tests_passed is stale" in error for error in errors
+    )
+    assert any("automated acceptance status is stale" in error for error in errors)
+    assert any("automated acceptance percent is stale" in error for error in errors)
+
+
+def test_completion_reporting_rejects_stale_final_gate_counts_and_weight():
+    ledger = ledger_copy()
+    ledger["release_gates"][0]["status"] = "released"
+
+    errors = validate_ledger(ledger)
+
+    assert any("final release gate green is stale" in error for error in errors)
+    assert any("final release gate percent is stale" in error for error in errors)
+    assert any("weighted raw_percent is stale" in error for error in errors)
 
 
 def test_current_runnable_selection_includes_banked_wp05_and_wp06_slices():
