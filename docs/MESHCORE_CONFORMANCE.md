@@ -560,14 +560,15 @@ This bounded gate makes no claim about:
   key loading/management, DM sessions,
   request/response schemas or tags beyond the bounded canonical login-success
   response, ACL-miss password decision, blank-password existing-ACL reuse, and
-  authorized-login ACL transition fixtures, dispatch, ACK
-  correlation/delivery, or
-  retained state;
-- semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
+  authorized-login ACL transition fixtures or complete retained-state behavior.
+  Production-bound host coverage now includes exact-owner ACK completion, but
+  not retained-fault/power-loss or compatible-peer delivery evidence;
+- complete semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
   traffic. Public-group payload creation/parsing, plain-DM layout/crypto,
   simple/multipart ACK framing, expected-ACK/ACK-specific PATH layout, general
-  PATH-return extra/no-extra layout and route-code preparation, and initial
-  flags-zero TRACE payload framing are covered, but delivery, PATH dispatch,
+  PATH-return extra/no-extra layout and route-code preparation, initial
+  flags-zero TRACE payload framing, and simple/multipart/ACK+PATH exact-owner
+  ACK completion are covered, but broader delivery, PATH dispatch,
   stored route choice/reciprocal decisions, TRACE forwarding/SNR/path discovery,
   correlation, and remaining Dispatcher behavior are not;
 - complete official-peer duplicate/replay qualification, persistent generic
@@ -577,8 +578,9 @@ This bounded gate makes no claim about:
   retained/correlation authorities. The separate signed-advert runtime gate covers the
   exact upstream/D1L packet hash, real-table exact/path/transport duplicate
   suppression, self suppression, packet lifetime, and contact lifetime;
-- persisted/retained state, schema migration, reboot recovery, or write
-  durability;
+- complete persisted/retained state, schema migration, reboot recovery,
+  write-fault, or power-loss durability beyond the bounded ACK CAS/reconcile
+  transition;
 - radio behavior, interoperability with an official client or second radio,
   or any hardware path; or
 - the complete declared MeshCore 1.0 surface or release readiness.

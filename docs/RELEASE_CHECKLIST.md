@@ -45,16 +45,18 @@
   and self-advert suppression plus balanced packet allocation/release. Its
   push/PR Actions `29306794376` / `29306795470` each pass 914 host tests and 28
   checksum-contract tests. This closes only the signed-advert runtime slice.
-- [ ] Merge and bank exact-main Actions evidence for the dependent advert
-  replay/packet-hash conformance slice. Source coverage is 9 implemented / 7
-  partial / 0 missing WP-05 requirements, 8 production suites / 53 scenarios /
-  33 translation units / 63 source pins, plus 1 pinned-upstream companion suite
+- [ ] Merge and bank exact-main Actions evidence for the dependent ACK,
+  lifetime, advert-replay, and packet-hash conformance slice. Source coverage is
+  11 implemented / 5 partial / 0 missing WP-05 requirements, 10 production
+  suites / 69 scenarios / 36 translation units / 70 source pins, plus 1
+  pinned-upstream companion suite
   / 10 cases: five signed timestamp outcomes and five packet-hash/real
   `SimpleMeshTables` outcomes. The conformance receipt must bind the exact
   runtime canonical SHA-256 and exact table receipt, every
   Actions/package/audit consumer must recompute and compare that binding, and
   the production 160-entry boot-local cache must remain subordinate to channel
-  and DM retained admission, exact ACK owner revisions, authenticated PATH
+  and DM retained admission, exact ACK owner revisions with durable take-once
+  completion effects, authenticated PATH
   replay, TRACE correlation, and advert admission receipts. Host source/native
   coverage now exercises those Public/channel, DM, simple/multipart ACK, PATH,
   TRACE, and advert bindings. The receipt remains `closure_ready=false`;
