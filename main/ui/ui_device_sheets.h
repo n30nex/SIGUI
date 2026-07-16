@@ -43,6 +43,7 @@ bool d1l_ui_device_sheets_create(
     lv_obj_t *parent);
 bool d1l_ui_device_sheets_render_display(
     d1l_ui_device_sheets_controller_t *controller,
+    const d1l_app_snapshot_t *snapshot,
     d1l_ui_device_sheets_action_handler_t action_handler,
     void *action_context);
 bool d1l_ui_device_sheets_render_diagnostics(

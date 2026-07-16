@@ -408,8 +408,16 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->map_tile_provider_attribution = D1L_MAP_TILE_PROVIDER_ATTRIBUTION;
     snapshot->storage_setup_action = storage.setup_action;
     snapshot->storage_note = storage.note;
-    snapshot->time_available = false;
-    snprintf(snapshot->time_label, sizeof(snapshot->time_label), "--:--");
+    snapshot->time_available = time_status.display_time_valid;
+    snapshot->time_approximate = time_status.display_time_approximate;
+    snapshot->timezone_settings_ready =
+        time_status.timezone_settings_ready;
+    snapshot->timezone_offset_minutes =
+        time_status.timezone_offset_minutes;
+    copy_cstr(snapshot->time_label, sizeof(snapshot->time_label),
+              time_status.display_time);
+    copy_cstr(snapshot->timezone_label, sizeof(snapshot->timezone_label),
+              time_status.timezone_label);
     snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings.node_name);
     copy_cstr(snapshot->wifi_ssid, sizeof(snapshot->wifi_ssid),
               connectivity.wifi_ssid);
@@ -898,6 +906,21 @@ esp_err_t d1l_app_model_clear_map_location(void)
     settings.map_lon_e7 = 0;
     return d1l_settings_update_fields(
         &settings, D1L_SETTINGS_UPDATE_MAP_LOCATION);
+}
+
+esp_err_t d1l_app_model_set_timezone_offset_minutes(
+    int16_t offset_minutes)
+{
+    if (!d1l_time_display_offset_valid(offset_minutes)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_settings_t settings = {
+        .timezone_schema_version =
+            D1L_TIMEZONE_SETTING_SCHEMA_VERSION,
+        .timezone_offset_minutes = offset_minutes,
+    };
+    return d1l_settings_update_fields(
+        &settings, D1L_SETTINGS_UPDATE_TIMEZONE);
 }
 
 esp_err_t d1l_app_model_set_wifi_enabled(bool enabled)

@@ -535,7 +535,13 @@ static void cmd_version(void)
            "\"idf\":\"%s\",\"meshcore_ca_desk_mode\":true,"
            "\"time\":{\"build_epoch_sec\":%lu,\"wall_valid\":%s,"
            "\"wall_epoch_sec\":%" PRId64 ",\"validity\":\"%s\","
-           "\"source\":\"%s\",\"protocol_wall_admission\":\"%s\","
+           "\"source\":\"%s\",\"display_time_valid\":%s,"
+           "\"display_time\":\"%s\",\"display_approximate\":%s,"
+           "\"timezone\":{\"settings_ready\":%s,\"schema_version\":%u,"
+           "\"model\":\"fixed_utc_offset\",\"offset_minutes\":%d,"
+           "\"label\":\"%s\",\"auto_dst\":false,"
+           "\"settings_error\":\"%s\"},"
+           "\"protocol_wall_admission\":\"%s\","
            "\"protocol_persistence_state\":\"%s\","
            "\"protocol_persistence_state_code\":%u,"
            "\"protocol_persistence_error\":\"%s\","
@@ -562,6 +568,14 @@ static void cmd_version(void)
            time_status.clock.wall_epoch_sec,
            d1l_time_validity_name(time_status.clock.wall_validity),
            d1l_time_source_name(time_status.clock.wall_source),
+           bool_json(time_status.display_time_valid),
+           time_status.display_time,
+           bool_json(time_status.display_time_approximate),
+           bool_json(time_status.timezone_settings_ready),
+           (unsigned)time_status.timezone_schema_version,
+           (int)time_status.timezone_offset_minutes,
+           time_status.timezone_label,
+           esp_err_to_name(time_status.timezone_settings_error),
            d1l_time_protocol_wall_admission_name(
                time_status.clock.protocol_wall_admission),
            d1l_time_protocol_persistence_state_name(
@@ -610,16 +624,25 @@ static void cmd_board(void)
 static void cmd_settings_get(void)
 {
     d1l_settings_t settings_snapshot = {0};
-    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    const esp_err_t settings_snapshot_error =
+        d1l_settings_public_snapshot(&settings_snapshot);
     const d1l_settings_t *settings = &settings_snapshot;
     const d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
+    char timezone_label[D1L_TIMEZONE_LABEL_LEN] = {0};
+    (void)d1l_time_display_timezone_label(
+        settings->timezone_offset_minutes, timezone_label,
+        sizeof(timezone_label));
     ok_begin("settings get");
-    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,\"map_location\":{\"set\":%s,\"lat\":",
+    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,\"timezone\":{\"settings_ready\":%s,\"settings_error\":\"%s\",\"schema_version\":%u,\"model\":\"fixed_utc_offset\",\"offset_minutes\":%d,\"label\":\"%s\",\"auto_dst\":false},\"map_location\":{\"set\":%s,\"lat\":",
            settings->node_name, d1l_settings_role_name(settings->role),
            bool_json(settings->onboarding_complete),
            bool_json(settings->wifi_enabled), bool_json(settings->ble_companion_enabled),
            bool_json(settings->observer_enabled), bool_json(settings->high_contrast),
            bool_json(settings->night_mode), settings->path_hash_bytes,
+           bool_json(settings_snapshot_error == ESP_OK),
+           esp_err_to_name(settings_snapshot_error),
+           (unsigned)settings->timezone_schema_version,
+           (int)settings->timezone_offset_minutes, timezone_label,
            bool_json(settings->map_location_set));
     print_e7_json(settings->map_location_set ? settings->map_lat_e7 : 0);
     printf(",\"lon\":");
@@ -759,6 +782,35 @@ static void cmd_settings_set_pathhash(const char *line)
     printf(",\"persisted\":true,\"path_hash_bytes\":%u,\"legacy_warning\":%s}\n",
            (unsigned)settings.path_hash_bytes,
            value > 1 ? "true" : "false");
+}
+
+static void cmd_settings_set_timezone(const char *line)
+{
+    const char *arg = line + strlen("settings set timezone ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    int16_t offset_minutes = 0;
+    if (!d1l_time_display_parse_timezone(arg, &offset_minutes)) {
+        err_result("settings set timezone", "INVALID_TIMEZONE",
+                   "usage: settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>");
+        return;
+    }
+    const esp_err_t ret =
+        d1l_app_model_set_timezone_offset_minutes(offset_minutes);
+    if (ret != ESP_OK) {
+        err_result("settings set timezone", esp_err_to_name(ret),
+                   "could not persist fixed UTC display offset");
+        return;
+    }
+    char label[D1L_TIMEZONE_LABEL_LEN] = {0};
+    (void)d1l_time_display_timezone_label(
+        offset_minutes, label, sizeof(label));
+    ok_begin("settings set timezone");
+    printf(",\"persisted\":true,\"model\":\"fixed_utc_offset\","
+           "\"offset_minutes\":%d,\"label\":\"%s\","
+           "\"auto_dst\":false}\n",
+           (int)offset_minutes, label);
 }
 
 static void print_map_location_result(const char *cmd, const d1l_settings_t *settings,
@@ -5635,6 +5687,7 @@ static void cmd_help(void)
     printf(",\"map_probes_read_only\":true");
     printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\","
            "\"settings set name <name>\",\"settings set pathhash <1|2|3>\","
+           "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
            "\"settings set location <lat> <lon>\",\"settings clear location\","
            "\"settings onboarding status\",\"settings onboarding complete <name>\","
            "\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\","
@@ -5695,6 +5748,9 @@ static void handle_line(const char *line)
         cmd_settings_set_name(line);
     } else if (strncmp(line, "settings set pathhash ", 22) == 0) {
         cmd_settings_set_pathhash(line);
+    } else if (strncmp(line, "settings set timezone ",
+                       strlen("settings set timezone ")) == 0) {
+        cmd_settings_set_timezone(line);
     } else if (strncmp(line, "settings set location ", strlen("settings set location ")) == 0) {
         cmd_settings_set_location(line);
     } else if (strcmp(line, "settings clear location") == 0) {

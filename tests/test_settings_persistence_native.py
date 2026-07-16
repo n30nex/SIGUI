@@ -35,6 +35,7 @@ def test_settings_persistence_native_behavior(tmp_path):
         str(ROOT / "third_party/MeshCore/lib/ed25519"),
         str(ROOT / "main/app/settings_model.c"),
         str(ROOT / "main/app/settings_envelope.c"),
+        str(ROOT / "main/platform/time_display.c"),
         str(ROOT / "overlays/meshcore_ed25519_defined/fe.c"),
         str(ROOT / "overlays/meshcore_ed25519_defined/ge.c"),
         str(ROOT / "third_party/MeshCore/lib/ed25519/keypair.c"),

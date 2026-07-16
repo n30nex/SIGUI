@@ -248,7 +248,7 @@ def test_map_delegates_certificate_time_without_owning_sntp_or_wall_clock():
     assert 'download_step(&result, "time_sync"' in fetch
 
 
-def test_wall_checkpoint_is_implemented_while_timezone_and_transport_stay_owned_by_service():
+def test_wall_checkpoint_timezone_and_transport_stay_owned_by_service():
     header = read("main/platform/time_service.h")
     cmake = read("main/CMakeLists.txt")
     console = read("main/comms/usb_console.c")
@@ -257,7 +257,9 @@ def test_wall_checkpoint_is_implemented_while_timezone_and_transport_stay_owned_
     assert "persists validated wall checkpoints" in header
     assert "d1l_time_service_wall_checkpoint_flush" in header
     assert "authenticated companion" in header
-    assert "timezone/display conversion" in header
+    assert "fixed-offset presentation only" in header
+    assert "protocol/certificate clocks remain UTC" in header
+    assert "no automatic DST is claimed" in header
     assert "d1l_time_service_set_companion_time" in header
     assert "d1l_time_service_note_authenticated_lower_bound" in header
     assert "capability boundary, not user input" in header
@@ -361,6 +363,26 @@ def test_validated_adoption_queues_checkpoint_and_worker_owns_nvs_io():
     assert "d1l_time_service_wall_checkpoint_flush_if_due" in worker
 
 
+def test_timezone_snapshot_precedes_time_lock_and_update_does_not_call_back():
+    service = read("main/platform/time_service.c")
+    app = read("main/app/app_model.c")
+    status = body(
+        service,
+        "void d1l_time_service_status",
+        "bool d1l_time_service_certificate_time_valid",
+    )
+    assert status.index("populate_timezone_status(out_status)") < status.index(
+        "time_lock()"
+    )
+    update = body(
+        app,
+        "esp_err_t d1l_app_model_set_timezone_offset_minutes",
+        "esp_err_t d1l_app_model_set_wifi_enabled",
+    )
+    assert "d1l_settings_update_fields" in update
+    assert "d1l_time_service" not in update
+
+
 def test_lower_bound_cannot_replace_a_stronger_or_later_clock():
     core = read("main/platform/time_service_core.c")
     lower_bound = body(
@@ -460,6 +482,10 @@ def test_usb_version_exposes_truthful_protocol_admission_and_recovery():
     assert '\\"skip_count\\"' in console
     assert '\\"failure_count\\"' in console
     assert '\\"retry_not_before_us\\"' in console
+    assert '\\"display_time_valid\\"' in console
+    assert '\\"display_approximate\\"' in console
+    assert '\\"model\\":\\"fixed_utc_offset\\"' in console
+    assert '\\"auto_dst\\":false' in console
     assert '"authenticated_companion_or_newer_firmware"' in console
     assert '"protocol_persistence_migration_or_repair"' in console
     assert '"protocol_upgrade_required"' in console
@@ -469,6 +495,7 @@ def test_usb_version_exposes_truthful_protocol_admission_and_recovery():
     assert '"recoverable_wall_unrepresentable"' in console
     assert "d1l_time_protocol_persistence_state_name" in console
     assert "protocol_tx_ready" in header
+    assert "timezone_settings_ready" in header
     assert "protocol_tx_error" in header
     assert "wall_checkpoint_pending" in header
     assert "wall_checkpoint_failure_count" in header

@@ -111,6 +111,8 @@ typedef struct {
     bool message_store_persistence_degraded;
     bool dm_store_persistence_degraded;
     bool time_available;
+    bool time_approximate;
+    bool timezone_settings_ready;
     bool protocol_tx_ready;
     esp_err_t protocol_tx_error;
     esp_err_t settings_load_status;
@@ -151,6 +153,8 @@ typedef struct {
     const char *storage_note;
     esp_err_t storage_last_error;
     char time_label[8];
+    char timezone_label[D1L_TIMEZONE_LABEL_LEN];
+    int16_t timezone_offset_minutes;
     char node_name[32];
     char wifi_ssid[D1L_WIFI_SSID_LEN];
     char wifi_ip[16];
@@ -340,6 +344,8 @@ esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);
 esp_err_t d1l_app_model_clear_map_location(void);
+esp_err_t d1l_app_model_set_timezone_offset_minutes(
+    int16_t offset_minutes);
 esp_err_t d1l_app_model_set_wifi_enabled(bool enabled);
 esp_err_t d1l_app_model_wifi_scan(d1l_wifi_scan_result_t *out_result);
 esp_err_t d1l_app_model_wifi_connect(void);

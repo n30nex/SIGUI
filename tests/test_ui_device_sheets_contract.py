@@ -81,7 +81,11 @@ def test_display_render_is_truthful_disabled_and_fails_closed():
         assert f'"{label}"' in render
     assert render.count("D1L_UI_DEVICE_SHEETS_ACTION_NONE") == 4
     assert "LV_STATE_DISABLED" in render
-    assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in render
+    assert "const d1l_app_snapshot_t *snapshot" in render
+    assert '"Local display time"' in render
+    assert '"Fixed UTC offset only; daylight saving is not automatic.' in render
+    assert "snapshot->timezone_settings_ready" in render
+    assert "snapshot->time_available" in render
     assert "if (!complete)" in render
     assert "invalidate_sheet(controller, sheet);" in render
 

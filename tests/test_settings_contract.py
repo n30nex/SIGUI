@@ -14,7 +14,7 @@ def test_settings_model_defaults_and_nvs_contract():
     header = read("main/app/settings_model.h")
     source = read("main/app/settings_model.c")
     time_service = read("main/platform/time_service.c")
-    assert "D1L_SETTINGS_SCHEMA_VERSION 7U" in header
+    assert "D1L_SETTINGS_SCHEMA_VERSION 8U" in header
     assert "D1L_WIFI_SSID_LEN 33U" in header
     assert "D1L_WIFI_PASSWORD_LEN 65U" in header
     assert "wifi_profile_saved" in header
@@ -42,11 +42,13 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "d1l_settings_v4_t" in source
     assert "d1l_settings_v5_t" in source
     assert "d1l_settings_v6_t" in source
+    assert "d1l_settings_v7_t" in source
     assert "migrate_v2_settings" in source
     assert "migrate_v3_settings" in source
     assert "migrate_v4_settings" in source
     assert "migrate_v5_settings" in source
     assert "migrate_v6_settings" in source
+    assert "migrate_v7_settings" in source
     assert '#include "settings_envelope.h"' in source
     assert "persist_settings_envelope" in source
     persist = source.split("static esp_err_t persist_settings_envelope", 1)[1].split(
@@ -66,7 +68,15 @@ def test_settings_model_defaults_and_nvs_contract():
     legacy = source.split("static bool migrate_legacy_settings_blob", 1)[1].split(
         "static esp_err_t quarantine_settings", 1
     )[0]
-    for schema in ["D1L_SETTINGS_SCHEMA_VERSION", "6U", "5U", "4U", "3U", "2U"]:
+    for schema in [
+        "D1L_SETTINGS_SCHEMA_VERSION",
+        "7U",
+        "6U",
+        "5U",
+        "4U",
+        "3U",
+        "2U",
+    ]:
         assert f"case {schema}:" in legacy
     assert "D1L_SETTINGS_PERSISTENCE_QUARANTINED_NEWER_SCHEMA" in source
     assert "D1L_SETTINGS_PERSISTENCE_QUARANTINED_MALFORMED" in source
@@ -100,6 +110,9 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->map_lat_e7 = 0" in source
     assert "settings->map_lon_e7 = 0" in source
     assert "settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM" in source
+    assert "settings->timezone_schema_version" in source
+    assert "settings->timezone_offset_minutes = 0" in source
+    assert "D1L_SETTINGS_UPDATE_TIMEZONE" in header
     assert "settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;" in source
     assert "settings->path_hash_bytes = 1" in source
     assert "settings->frequency_hz = D1L_RADIO_FREQ_HZ" in source
@@ -184,6 +197,7 @@ def test_console_exposes_phase2_foundation_commands():
         "settings reset",
         "settings set name",
         "settings set pathhash",
+        "settings set timezone",
         "settings set location",
         "settings clear location",
         "map center",
@@ -252,6 +266,10 @@ def test_console_exposes_phase2_foundation_commands():
     assert "print_map_location_result" in console
     assert "d1l_app_model_set_map_location(lat_e7, lon_e7)" in console
     assert "d1l_app_model_clear_map_location()" in console
+    assert "d1l_time_display_parse_timezone" in console
+    assert "d1l_app_model_set_timezone_offset_minutes" in console
+    assert '\\"model\\":\\"fixed_utc_offset\\"' in console
+    assert '\\"auto_dst\\":false' in console
 
 
 def test_v5_and_v6_migrations_preserve_wifi_location_and_identity():
@@ -285,6 +303,24 @@ def test_v5_and_v6_migrations_preserve_wifi_location_and_identity():
     assert "case 6U:" in legacy
     assert "blob_length != sizeof(d1l_settings_v6_t)" in legacy
     assert "migrate_v6_settings(destination" in legacy
+
+
+def test_v7_envelope_migration_adds_safe_utc_default():
+    source = read("main/app/settings_model.c")
+    migration = source.split("static void migrate_v7_settings", 1)[1].split(
+        "static void migrate_v6_settings", 1
+    )[0]
+    assert "d1l_settings_defaults(dest)" in migration
+    assert "dest->schema_version = D1L_SETTINGS_SCHEMA_VERSION" in migration
+    assert "d1l_settings_sanitize(dest)" in migration
+
+    load = source.split("static esp_err_t settings_load_locked", 1)[1].split(
+        "esp_err_t d1l_settings_load", 1
+    )[0]
+    assert "header.payload_length" in load
+    assert "legacy_header.revision" in load
+    assert "d1l_settings_envelope_next_revision" in load
+    assert "D1L_SETTINGS_PERSISTENCE_MIGRATED_LEGACY" in load
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():

@@ -6,9 +6,10 @@
 #include "esp_err.h"
 #include "identity_state.h"
 #include "mesh/meshcore_radio_profile.h"
+#include "platform/time_display.h"
 #include "storage/map_tile_store.h"
 
-#define D1L_SETTINGS_SCHEMA_VERSION 7U
+#define D1L_SETTINGS_SCHEMA_VERSION 8U
 #define D1L_NODE_NAME_LEN 32U
 #define D1L_WIFI_SSID_LEN 33U
 #define D1L_WIFI_PASSWORD_LEN 65U
@@ -61,6 +62,7 @@ typedef uint32_t d1l_settings_update_mask_t;
 #define D1L_SETTINGS_UPDATE_TCXO            (1UL << 16)
 #define D1L_SETTINGS_UPDATE_MAP_LOCATION    (1UL << 17)
 /* Bit 18 is reserved: identity secrets use save_identity_if_absent(). */
+#define D1L_SETTINGS_UPDATE_TIMEZONE        (1UL << 19)
 #define D1L_SETTINGS_UPDATE_ALL \
     (D1L_SETTINGS_UPDATE_NODE_NAME | D1L_SETTINGS_UPDATE_ROLE | \
      D1L_SETTINGS_UPDATE_WIFI_ENABLED | D1L_SETTINGS_UPDATE_BLE_ENABLED | \
@@ -70,7 +72,7 @@ typedef uint32_t d1l_settings_update_mask_t;
      D1L_SETTINGS_UPDATE_BANDWIDTH | D1L_SETTINGS_UPDATE_SPREADING | \
      D1L_SETTINGS_UPDATE_CODING_RATE | D1L_SETTINGS_UPDATE_TX_POWER | \
      D1L_SETTINGS_UPDATE_RX_BOOST | D1L_SETTINGS_UPDATE_TCXO | \
-     D1L_SETTINGS_UPDATE_MAP_LOCATION)
+     D1L_SETTINGS_UPDATE_MAP_LOCATION | D1L_SETTINGS_UPDATE_TIMEZONE)
 #define D1L_SETTINGS_UPDATE_RADIO_PROFILE \
     (D1L_SETTINGS_UPDATE_FREQUENCY | D1L_SETTINGS_UPDATE_BANDWIDTH | \
      D1L_SETTINGS_UPDATE_SPREADING | D1L_SETTINGS_UPDATE_CODING_RATE | \
@@ -102,6 +104,8 @@ typedef struct {
     int32_t map_lat_e7;
     int32_t map_lon_e7;
     uint8_t map_tile_zoom;
+    uint16_t timezone_schema_version;
+    int16_t timezone_offset_minutes;
     bool identity_ready;
     uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
     uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
