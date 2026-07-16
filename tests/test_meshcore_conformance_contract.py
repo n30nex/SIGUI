@@ -203,21 +203,28 @@ def test_v1_decoder_rejects_future_versions_without_changing_output():
 
 def test_production_service_uses_the_codec_exercised_by_the_harness():
     service = read("main/mesh/meshcore_service.c")
+    admin_runtime = read("main/mesh/meshcore_admin_runtime.c")
     cmake = read("main/CMakeLists.txt")
 
     assert '#include "mesh/meshcore_wire.h"' in service
     assert '"mesh/meshcore_wire.c"' in cmake
-    assert service.count("d1l_meshcore_wire_decode_v1(") == 5
+    # Channel, DM, ACK, PATH, advert, and authenticated admin RESPONSE each
+    # enter through the same fail-closed production decoder.
+    assert service.count("d1l_meshcore_wire_decode_v1(") == 6
     assert service.count("d1l_meshcore_wire_decode(") == 0
     ack_builder = service.split("static esp_err_t build_dm_ack_response", 1)[1].split(
         "static bool dispatch_bounded_dm_ack", 1
     )[0]
+    # Existing packet builders plus admin ANON_REQ and regular REQ both use
+    # the single production prefix encoder exercised by conformance vectors.
     assert service.count("d1l_meshcore_wire_write_prefix(") == 7
+    assert admin_runtime.count("d1l_meshcore_wire_write_prefix(") == 2
     assert ack_builder.count("d1l_meshcore_wire_write_prefix(") == 3
     assert (
         service.count("d1l_meshcore_wire_write_prefix(")
+        + admin_runtime.count("d1l_meshcore_wire_write_prefix(")
         - ack_builder.count("d1l_meshcore_wire_write_prefix(")
-        == 4
+        == 6
     )
     assert "parse_wire_packet" not in service
     for legacy_helper in [

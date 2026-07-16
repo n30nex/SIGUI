@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "mesh/meshcore_admin_runtime.h"
 #include "mesh/meshcore_trace.h"
 
 typedef enum {
@@ -96,11 +97,19 @@ typedef struct {
     bool last_packet_preview_retained;
 } d1l_meshcore_trace_snapshot_t;
 
+typedef d1l_meshcore_admin_runtime_snapshot_t d1l_meshcore_admin_snapshot_t;
+
 void d1l_meshcore_service_init(void);
 esp_err_t d1l_meshcore_service_start_rx_async(void);
 esp_err_t d1l_meshcore_service_ensure_identity(void);
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
 void d1l_meshcore_service_trace_snapshot(d1l_meshcore_trace_snapshot_t *out_snapshot);
+void d1l_meshcore_service_admin_snapshot(
+    d1l_meshcore_admin_snapshot_t *out_snapshot);
+esp_err_t d1l_meshcore_service_admin_login(const char *fingerprint,
+                                           const char *password);
+esp_err_t d1l_meshcore_service_admin_request_status(void);
+void d1l_meshcore_service_admin_logout(void);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
                                             const char *text);
