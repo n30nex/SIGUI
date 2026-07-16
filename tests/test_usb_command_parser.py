@@ -122,6 +122,10 @@ def test_corpus_and_manifest_are_hash_bound():
 
 
 def test_libfuzzer_target_is_executable_when_clang_is_available(tmp_path: Path):
+    if os.name == "nt":
+        pytest.skip(
+            "libFuzzer execution is covered by the dedicated pinned Linux Actions job"
+        )
     clang = shutil.which("clang") or shutil.which("clang-18")
     if not clang:
         pytest.skip("libFuzzer execution is covered by the pinned Clang Actions job")
@@ -178,6 +182,23 @@ def test_libfuzzer_target_is_executable_when_clang_is_available(tmp_path: Path):
     )
     assert re.search(r"#100000\b", completed.stderr)
     assert list(findings.iterdir()) == []
+
+
+def test_libfuzzer_execution_is_pinned_to_dedicated_linux_actions_job():
+    workflow = (ROOT / ".github" / "workflows" / "d1l-ci.yml").read_text(
+        encoding="utf-8"
+    )
+    conformance_job = workflow.split("\n  meshcore-conformance:", 1)[1].split(
+        "\n  rp2040-sd-bridge-build:", 1
+    )[0]
+
+    assert "runs-on: ubuntu-24.04" in conformance_job
+    assert "Install pinned Clang sanitizer toolchain" in conformance_job
+    assert "Run production USB command parser fuzz gate" in conformance_job
+    assert "python ./scripts/usb_command_parser_fuzz_d1l.py" in conformance_job
+    assert "--cc clang-18" in conformance_job
+    assert "--seed 13746277" in conformance_job
+    assert "--runs 100000" in conformance_job
 
 
 def test_fuzz_receipt_dry_run_is_exact_source_bound(tmp_path: Path):

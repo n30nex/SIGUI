@@ -236,7 +236,17 @@ def test_console_exposes_phase2_foundation_commands():
     assert "int ch = fgetc(stdin)" in console
     assert "line[used++] = (char)ch" in console
     assert "LINE_TOO_LONG" in console
-    assert "handle_line(line)" in console
+    normal_console = console.split("void d1l_usb_console_run(void)", 1)[1].split(
+        "static void factory_reset_recovery_status", 1
+    )[0]
+    admission = normal_console.index("d1l_usb_command_admit_in_place(")
+    dispatch = normal_console.index("handle_line(&command);")
+    wipe = normal_console.index(
+        "wipe_console_bytes(line, sizeof(line));", dispatch
+    )
+    assert "const size_t received_length = used;" in normal_console
+    assert "line, received_length, sizeof(line), &command" in normal_console
+    assert admission < dispatch < wipe
     assert '\\"expected\\":[\\"0x20\\",\\"0x48\\"]' in console
     assert "stored_nvs_ed25519" in console
     assert "d1l_connectivity_set_wifi_enabled(false)" in console
