@@ -139,6 +139,7 @@ def test_only_verified_non_self_newer_adverts_reach_node_and_route_stores():
     assert 'append_packet_log("rx", "advert_bad_app"' in receiver
     assert "append_packet_log_deferred(" in replay_case
     assert '"rx", "advert_replay"' in replay_case
+    assert "d1l_route_store_upsert_observation" not in replay_case
     assert "app_data_len = D1L_MESHCORE_MAX_ADVERT_DATA" not in receiver
     assert "Radio." not in receiver
     assert "request_advert" not in receiver

@@ -3843,16 +3843,11 @@ static void parse_rx_advert_packet(const uint8_t *payload, uint16_t size,
             char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
             snprintf(note, sizeof(note), "replay %.8s ts=%lu", pub_prefix,
                      (unsigned long)advert_timestamp);
-            const esp_err_t route_ret = d1l_route_store_upsert_observation(
-                pub_prefix, advert.name[0] ? advert.name : pub_prefix,
-                "advert", route_name(packet.route), "rx", rssi,
-                (snr * 10) / 4, packet.path_hash_bytes,
-                packet.path_hops, size);
             const bool packet_retained = append_packet_log_deferred(
                 "rx", "advert_replay", rssi, snr,
                 packet.path_hash_bytes, packet.path_hops, size,
                 payload, size, note);
-            if (route_ret == ESP_OK && packet_retained && packet_hash_ready &&
+            if (packet_retained && packet_hash_ready &&
                 d1l_meshcore_advert_admission_receipt_cacheable(&admission)) {
                 (void)d1l_meshcore_packet_hash_cache_remember(
                     &s_rx_packet_hash_cache, packet_hash);
