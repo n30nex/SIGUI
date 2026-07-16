@@ -477,10 +477,9 @@ EXPECTED_ORACLE_CAPABILITIES = [
     {
         "id": "login_request_response_admin",
         "status": "pending",
-        "owner": "unassigned",
+        "owner": "d1l_production_admin_dispatch",
         "blocked_by": (
-            "concrete_packet_pool_dispatch_runtime_and_physical_delivery_"
-            "evidence"
+            "exact_actions_build_runtime_and_physical_delivery_evidence"
         ),
         "implemented_prerequisites": [
             "anonymous_login_request_packets",
@@ -494,8 +493,28 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "authenticated_text_replay_response_session_fixtures",
             "login_response_creation_dispatch_orchestration_fixtures",
             "host_authenticated_admin_session_fixture",
+            "production_admin_login_status_dispatch",
         ],
         "host_only_receipt": "RCPT-WP04-HOST-ADMIN-SESSION-20260714",
+        "production_receipt": {
+            "id": "RCPT-WP04-PRODUCTION-ADMIN-DISPATCH-20260715",
+            "status": "implemented_pending_actions_and_physical_evidence",
+            "sources": [
+                "main/mesh/meshcore_admin_dispatch.c",
+                "main/mesh/meshcore_admin_dispatch.h",
+                "main/mesh/meshcore_admin_runtime.c",
+                "main/mesh/meshcore_admin_runtime.h",
+                "main/mesh/meshcore_identity_exchange.c",
+                "main/mesh/meshcore_identity_exchange.h",
+                "main/mesh/meshcore_service.c",
+                "main/mesh/meshcore_service.h",
+            ],
+            "scope": (
+                "repeater_admin_login_and_get_status_only_direct_or_flood_"
+                "outbound_and_direct_or_path_response_inbound_room_rejected_"
+                "no_ui_credential_storage_or_mutating_admin_commands"
+            ),
+        },
     },
     {
         "id": "signed_advert_packet_creation",
@@ -1033,6 +1052,12 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/dm_store.c",
     "main/mesh/dm_store.h",
     "main/mesh/ed25519_canonical.h",
+    "main/mesh/meshcore_admin_dispatch.c",
+    "main/mesh/meshcore_admin_dispatch.h",
+    "main/mesh/meshcore_admin_runtime.c",
+    "main/mesh/meshcore_admin_runtime.h",
+    "main/mesh/meshcore_identity_exchange.c",
+    "main/mesh/meshcore_identity_exchange.h",
     "main/mesh/meshcore_dm_retry.h",
     "main/mesh/meshcore_path_dispatch.h",
     "main/mesh/meshcore_path_state.c",

@@ -187,7 +187,7 @@ def test_meshcore_status_getter_is_passive_and_radio_owned_by_service_task():
     app_main = read("main/app_main.c")
     status_body = source.split("d1l_meshcore_service_status_t d1l_meshcore_service_status", 1)[
         1
-    ].split("esp_err_t d1l_meshcore_service_request_advert", 1)[0]
+    ].split("void d1l_meshcore_service_admin_snapshot", 1)[0]
 
     forbidden = [
         "d1l_meshcore_service_ensure_identity",

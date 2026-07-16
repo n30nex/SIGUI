@@ -1121,7 +1121,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
     )
     assert pending["login_request_response_admin"]["blocked_by"] == (
-        "concrete_packet_pool_dispatch_runtime_and_physical_delivery_evidence"
+        "exact_actions_build_runtime_and_physical_delivery_evidence"
     )
     assert pending["login_request_response_admin"]["implemented_prerequisites"] == [
         "anonymous_login_request_packets",
@@ -1135,10 +1135,30 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "authenticated_text_replay_response_session_fixtures",
         "login_response_creation_dispatch_orchestration_fixtures",
         "host_authenticated_admin_session_fixture",
+        "production_admin_login_status_dispatch",
     ]
     assert pending["login_request_response_admin"]["host_only_receipt"] == (
         "RCPT-WP04-HOST-ADMIN-SESSION-20260714"
     )
+    assert pending["login_request_response_admin"]["production_receipt"] == {
+        "id": "RCPT-WP04-PRODUCTION-ADMIN-DISPATCH-20260715",
+        "status": "implemented_pending_actions_and_physical_evidence",
+        "sources": [
+            "main/mesh/meshcore_admin_dispatch.c",
+            "main/mesh/meshcore_admin_dispatch.h",
+            "main/mesh/meshcore_admin_runtime.c",
+            "main/mesh/meshcore_admin_runtime.h",
+            "main/mesh/meshcore_identity_exchange.c",
+            "main/mesh/meshcore_identity_exchange.h",
+            "main/mesh/meshcore_service.c",
+            "main/mesh/meshcore_service.h",
+        ],
+        "scope": (
+            "repeater_admin_login_and_get_status_only_direct_or_flood_"
+            "outbound_and_direct_or_path_response_inbound_room_rejected_no_"
+            "ui_credential_storage_or_mutating_admin_commands"
+        ),
+    }
 
     for relative, expected in {
         **manifest["upstream"]["sources"],
