@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "encoding": "hex",
+  "coverage_boundary": "production_usb_command_admission",
+  "seeds": [
+    {
+      "name": "help",
+      "hex": "68656c70",
+      "sha256": "106a5842fc5fce6f663176285ed1516dbb1e3d15c05abab12fdca46d60b539b7"
+    },
+    {
+      "name": "public_utf8",
+      "hex": "6d6573682073656e64207075626c69632068c3a9",
+      "sha256": "15254b1927fcbc3ca9089cd4f9db80fd85e3fa0d74c2dcbeea596e345010c8ff"
+    },
+    {
+      "name": "embedded_nul_suffix",
+      "hex": "68656c70007265626f6f74",
+      "sha256": "2f281d8ecab76a7bd1d0f6f0cd64a93f132eafcd183edbc3eee44877c05d4168"
+    },
+    {
+      "name": "control_escape",
+      "hex": "7265626f6f741b",
+      "sha256": "5627bf969b4f3d8e181c3990752582a6ddfba28122fae2a1bd5e68b05a052e54"
+    },
+    {
+      "name": "truncated_argument",
+      "hex": "6d6573682073656e64207075626c696320",
+      "sha256": "5564c8d0feae544e2831f7fcd7820f281aa4c0611c28b821aa12ae63ead0a824"
+    },
+    {
+      "name": "suffix_smuggle",
+      "hex": "7265626f6f7458",
+      "sha256": "f77b25bb97ef6c492bea92ffba7add0542747b7c07d9106cb63e7f477b91ff84"
+    },
+    {
+      "name": "all_spaces",
+      "hex": "202020",
+      "sha256": "0aad7da77d2ed59c396c99a74e49f3a4524dcdbcb5163251b1433d640247aeb4"
+    }
+  ]
+}

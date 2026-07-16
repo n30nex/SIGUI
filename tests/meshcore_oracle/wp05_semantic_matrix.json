@@ -252,7 +252,7 @@
     },
     {
       "id": "usb_protocol_command_parser",
-      "status": "missing"
+      "status": "implemented"
     }
   ],
   "production_host_suites": [
@@ -405,6 +405,24 @@
         []
       ],
       "expected_stdout": "native MeshCore packet hash: ok"
+    },
+    {
+      "id": "usb_command_parser",
+      "binary": "usb_command_parser_semantic",
+      "scenario_ids": [
+        "normal_console_explicit_receive_length",
+        "recovery_console_explicit_receive_length",
+        "embedded_nul_hidden_suffix_rejected_and_wiped",
+        "c0_del_and_escape_bytes_rejected_and_wiped",
+        "empty_255_and_256_byte_boundaries",
+        "exact_token_and_numeric_argument_boundaries",
+        "valid_utf8_and_trailing_space_canonicalization",
+        "deterministic_100000_input_contract"
+      ],
+      "invocations": [
+        []
+      ],
+      "expected_stdout": "native USB command parser: ok (100000 deterministic cases)"
     }
   ],
   "companion_upstream_suites": [
@@ -437,6 +455,8 @@
     "main/app/settings_protocol_migration.h": "8955e2e503fe4919ef7fdb354afd97f573dc954d8ceb05173fb64f767b820cb9",
     "main/app/settings_time_checkpoint.c": "0d27c2bd30e045025751ac1a79bb0ad01bbbf04f1b547b5b5f492d8bee0e6dbf",
     "main/app/settings_time_checkpoint.h": "4721f99c3542bdcaea4b0ad513c23e819792fb2dcd7657aba8d90c9e1be08225",
+    "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
+    "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
     "main/hal/rp2040_bridge.h": "57af77842713ec9f2c2eeb6cf6bd856ccc5a75c79ca9540e82cd4b5d9cff099c",
     "main/mesh/meshcore_admin_dispatch.c": "3f91368320e13a138316d8a99ce9727d87695e1fbe2b770019ebda115e5be701",
     "main/mesh/meshcore_admin_dispatch.h": "10e1e73af1046bbcf610457d6ae3adbb5e52e25962c4c249d2afc0d36567d43f",
@@ -491,6 +511,7 @@
     "tests/native/stubs/nvs.h": "a0895d23196ac486164d00e42ed6a7af09e40e5f60f4e1bc8918f00aaa747683",
     "tests/native/stubs/sys/time.h": "251d586ea591ff51aa9d51e6843deadd6c578b5591658df50eb5121c9e6b39c7",
     "tests/native/time_service_checkpoint_integration_test.c": "2de100718160702b5ab54f5d8ca0f3d802e8b89f3d16756185be1b0f82f0ad41",
+    "tests/native/usb_command_parser_test.c": "74ff93eaed93e832455c2e7c150cc60dcdd645a1d3f38575caf27c96145b72a5",
     "tests/native/store_behavior_test.c": "d76f11b94a5209d78138c7ac2590033563df70522eaab68c7ea6be010ab3b487"
   }
 }

@@ -269,7 +269,7 @@ EXPECTED_WP05_FUZZ_TARGET_STATUSES = {
     "dm_session_transition_input": "missing",
     "retained_envelope_decoder": "missing",
     "route_path_parser": "partial",
-    "usb_protocol_command_parser": "missing",
+    "usb_protocol_command_parser": "implemented",
 }
 EXPECTED_WP05_PRODUCTION_SUITES = {
     "admin_dispatch": {
@@ -320,6 +320,14 @@ EXPECTED_WP05_PRODUCTION_SUITES = {
         "invocation_count": 1,
         "expected_stdout": "native MeshCore packet hash: ok",
     },
+    "usb_command_parser": {
+        "binary": "usb_command_parser_semantic",
+        "scenario_count": 8,
+        "invocation_count": 1,
+        "expected_stdout": (
+            "native USB command parser: ok (100000 deterministic cases)"
+        ),
+    },
 }
 EXPECTED_WP05_COMPANION_UPSTREAM_SUITES = {
     "pinned_signed_advert_runtime": {
@@ -350,6 +358,8 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/app/settings_protocol_migration.h",
     "main/app/settings_time_checkpoint.c",
     "main/app/settings_time_checkpoint.h",
+    "main/comms/usb_command_parser.c",
+    "main/comms/usb_command_parser.h",
     "main/hal/rp2040_bridge.h",
     "main/mesh/meshcore_admin_dispatch.c",
     "main/mesh/meshcore_admin_dispatch.h",
@@ -404,6 +414,7 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "tests/native/stubs/nvs.h",
     "tests/native/stubs/sys/time.h",
     "tests/native/time_service_checkpoint_integration_test.c",
+    "tests/native/usb_command_parser_test.c",
     "tests/native/store_behavior_test.c",
 }
 SIGNED_ADVERT_REPLAY_OUTCOME_KEYS = (
@@ -1309,6 +1320,8 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
 }
 EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/CMakeLists.txt",
+    "main/comms/usb_command_parser.c",
+    "main/comms/usb_command_parser.h",
     "main/comms/usb_console.c",
     "main/mesh/advert_data.h",
     "main/mesh/contact_store.c",
@@ -3065,6 +3078,16 @@ def production_semantic_suite_specs(
                 native / "meshcore_packet_hash_test.c",
             ],
         },
+        {
+            "id": "usb_command_parser",
+            "binary": Path(build_dir) / "usb_command_parser_semantic",
+            "flags": [],
+            "include_dirs": [ROOT / "main"],
+            "sources": [
+                ROOT / "main" / "comms" / "usb_command_parser.c",
+                native / "usb_command_parser_test.c",
+            ],
+        },
     ]
 
 
@@ -4396,9 +4419,9 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("partial_requirement_count") == 7
         and value.get("missing_requirement_count") == 0
         and value.get("fuzz_target_count") == 8
-        and value.get("implemented_fuzz_target_count") == 2
+        and value.get("implemented_fuzz_target_count") == 3
         and value.get("partial_fuzz_target_count") == 1
-        and value.get("missing_fuzz_target_count") == 5
+        and value.get("missing_fuzz_target_count") == 4
         and value.get("oracle_semantic_vectors") == 915
         and isinstance(value.get("unique_referenced_oracle_semantic_vectors"), int)
         and 0 < value["unique_referenced_oracle_semantic_vectors"] <= 915
