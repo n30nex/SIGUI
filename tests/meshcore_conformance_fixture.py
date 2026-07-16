@@ -49,6 +49,14 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/mesh/user_text.h",
         "tests/native/meshcore_text_plaintext_test.c",
     }
+    ack_delivery = {
+        "main/mesh/dm_delivery_state.c",
+        "main/mesh/dm_delivery_state.h",
+        "main/mesh/meshcore_ack_completion.h",
+        "main/mesh/meshcore_dm_retry.h",
+        "main/mesh/meshcore_wire.h",
+        "tests/native/meshcore_ack_completion_test.c",
+    }
     advert_admission = {
         "main/mesh/contact_store.c",
         "main/mesh/contact_store.h",
@@ -91,6 +99,10 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "main/comms/usb_command_parser.h",
         "tests/native/usb_command_parser_test.c",
     }
+    lifetime = {
+        "main/mesh/meshcore_lifetime.h",
+        "tests/native/meshcore_lifetime_test.c",
+    }
     time_service = {
         "main/app/identity_state.h",
         "main/app/settings_envelope.c",
@@ -131,9 +143,11 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         migration,
         time_service,
         text_admission,
+        ack_delivery,
         advert_admission,
         packet_hash,
         usb_command_parser,
+        lifetime,
     ]
     suite_specs = conformance.production_semantic_suite_specs()
     commands = [

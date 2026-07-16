@@ -160,7 +160,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         summary["implemented_requirement_count"],
         summary["partial_requirement_count"],
         summary["missing_requirement_count"],
-    ) == (9, 7, 0)
+    ) == (11, 5, 0)
     assert (
         summary["implemented_fuzz_target_count"],
         summary["partial_fuzz_target_count"],
@@ -168,8 +168,8 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
     ) == (3, 1, 4)
     assert summary["oracle_semantic_vectors"] == 915
     assert summary["unique_referenced_oracle_semantic_vectors"] == 890
-    assert summary["production_suite_count"] == 9
-    assert summary["production_scenario_count"] == 61
+    assert summary["production_suite_count"] == 11
+    assert summary["production_scenario_count"] == 77
     assert summary["companion_upstream_suite_count"] == 1
     assert summary["companion_upstream_case_count"] == 10
     assert [suite["id"] for suite in summary["production_host_suites"]] == [
@@ -179,9 +179,11 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "legacy_protocol_timestamp_migration",
         "time_service_migration_integration",
         "text_admission",
+        "ack_delivery_correlation",
         "advert_replay_admission",
         "packet_hash_and_advert_dedupe",
         "usb_command_parser",
+        "lifetime_boundaries",
     ]
     assert summary["companion_upstream_suites"] == [
         {
@@ -214,8 +216,8 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         dependency_verification,
     )
     assert source_verification["verified"] is True
-    assert dependency_verification["dependency_count"] == 66
-    assert dependency_verification["translation_unit_count"] == 35
+    assert dependency_verification["dependency_count"] == 73
+    assert dependency_verification["translation_unit_count"] == 38
     assert dependency_verification["dependencies"] == sorted(
         conformance.EXPECTED_WP05_SOURCE_PATHS
     )
@@ -233,19 +235,21 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "settings_protocol_migration_semantic",
         "time_service_migration_semantic",
         "meshcore_text_plaintext_semantic",
+        "meshcore_ack_completion_semantic",
         "meshcore_advert_admission_semantic",
         "meshcore_packet_hash_semantic",
         "usb_command_parser_semantic",
+        "meshcore_lifetime_semantic",
     ):
         assert binary in commands
-    assert commands.count("-fsanitize=address,undefined") == 9
+    assert commands.count("-fsanitize=address,undefined") == 11
     assert not re.search(r"\bCOM\d+\b", commands, re.IGNORECASE)
 
     build_plans = conformance.production_semantic_command_plan("clang-18")
     dependency_plans = conformance.production_semantic_dependency_command_plan(
         "clang-18"
     )
-    assert len(build_plans) == 9
+    assert len(build_plans) == 11
     assert len(dependency_plans) == sum(
         len(spec["sources"])
         for spec in conformance.production_semantic_suite_specs()
@@ -596,7 +600,7 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["scope"]["packet_semantics_covered"] is False
     assert report["scope"]["bounded_production_semantics_covered"] is True
     assert report["wp05_semantic_matrix"]["closure_ready"] is False
-    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 61
+    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 77
     assert report["signed_advert_runtime"] is None
     semantic_source = report["wp05_semantic_matrix"]["source_verification"]
     assert semantic_source["pins_verified"] is True

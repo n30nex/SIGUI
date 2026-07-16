@@ -912,6 +912,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "public_group_packets",
             "dm_encrypt_decrypt",
             "expected_ack_hash_and_ack_path",
+            "ack_dispatch_correlation_and_delivery",
             "path_return_route_codes",
             "signed_advert_packet_creation",
             "anonymous_login_request_packets",
@@ -1111,9 +1112,27 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         for capability in manifest["capabilities"]
         if capability["status"] == "pending"
     }
-    assert pending["ack_dispatch_correlation_and_delivery"]["blocked_by"] == (
-        "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
-    )
+    implemented = {
+        capability["id"]: capability
+        for capability in manifest["capabilities"]
+        if capability["status"] == "implemented"
+    }
+    ack = implemented["ack_dispatch_correlation_and_delivery"]
+    assert ack["implementation_receipt"] == {
+        "id": "RCPT-WP05-ACK-COMPLETION-20260716",
+        "status": "implemented_host_only_pending_rf_and_retained_fault_evidence",
+        "observed_at": "2026-07-16",
+        "pinned_sources": [
+            "main/mesh/dm_delivery_state.c",
+            "main/mesh/dm_delivery_state.h",
+            "main/mesh/meshcore_ack_completion.h",
+            "main/mesh/meshcore_service.c",
+            "tests/native/meshcore_ack_completion_test.c",
+        ],
+        "host_suite": "ack_delivery_correlation",
+        "scenario_count": 8,
+        "closure_ready": False,
+    }
     assert pending["trace_forwarding_and_path_discovery"]["blocked_by"] == (
         "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
     )
@@ -1247,8 +1266,8 @@ def test_oracle_coverage_manifest_accounts_for_every_required_surface():
     assert summary["local_packet_type_count"] == 7
     assert summary["wire_vector_covered_packet_type_count"] == 7
     assert summary["unknown_packet_type_policy"] == "fail_closed"
-    assert len(summary["blocker_receipts"]) == 5
-    assert len(summary["unresolved_capabilities"]) == 5
+    assert len(summary["blocker_receipts"]) == 4
+    assert len(summary["unresolved_capabilities"]) == 4
     assert len(summary["local_packet_types"]) == 7
     identity_receipt = next(
         item
@@ -1571,7 +1590,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["repository_commit"] == git_head()
     assert artifact["upstream_commit"] == UPSTREAM_COMMIT
     assert artifact["oracle_result"] is None
-    assert len(artifact["pending_capabilities"]) == 5
+    assert len(artifact["pending_capabilities"]) == 4
     assert "packet_envelope" not in artifact["pending_capabilities"]
     assert "advert_data_fields" not in artifact["pending_capabilities"]
     assert "signed_advert_packet_creation" not in artifact["pending_capabilities"]

@@ -21,6 +21,7 @@
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/ed25519_canonical.h"
+#include "mesh/meshcore_ack_completion.h"
 #include "mesh/meshcore_ack_dispatch.h"
 #include "mesh/meshcore_admin_runtime.h"
 #include "mesh/meshcore_advert_admission.h"
@@ -167,6 +168,19 @@ static d1l_callback_tx_snapshot_t
     s_callback_tx_history[D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN];
 
 typedef struct {
+    bool valid;
+    char source[20U];
+    uint8_t route;
+    int16_t rssi;
+    int8_t snr;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    uint16_t wire_size;
+    uint16_t raw_len;
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
+} d1l_pending_dm_ack_receipt_t;
+
+typedef struct {
     d1l_dm_delivery_owner_t delivery;
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char alias[D1L_CONTACT_ALIAS_LEN];
@@ -182,6 +196,8 @@ typedef struct {
     uint8_t ack_packet_hashes[3U][D1L_MESHCORE_PACKET_HASH_BYTES];
     uint8_t ack_packet_hash_count;
     d1l_meshcore_dm_ack_deadline_t ack_deadline;
+    d1l_meshcore_ack_completion_t ack_completion;
+    d1l_pending_dm_ack_receipt_t ack_receipt;
 } d1l_pending_dm_tx_t;
 
 static d1l_pending_dm_tx_t s_pending_dm_tx;
@@ -297,6 +313,8 @@ static esp_err_t meshcore_service_queue_raw_response(
 static void finalize_pending_dm_radio_result(bool sent, esp_err_t error);
 static esp_err_t retry_pending_dm_as_flood(uint64_t now_us);
 static void fail_pending_dm_ack_timeout(esp_err_t error);
+static void record_pending_direct_path_result(bool success);
+static bool finalize_pending_dm_ack_completion(void);
 static void secure_zero_bytes(void *data, size_t size);
 static esp_err_t prepare_admin_route(
     const char *fingerprint, const d1l_settings_t *settings, uint32_t now_ms,
@@ -1293,6 +1311,34 @@ static void remember_pending_dm_ack_packet_hashes(void)
     }
 }
 
+static bool retain_pending_dm_ack_receipt(
+    const d1l_meshcore_wire_packet_t *packet, int16_t rssi, int8_t snr,
+    uint16_t size, const uint8_t *raw, size_t raw_len, const char *source)
+{
+    if (!packet || !raw || raw_len == 0U ||
+        raw_len > sizeof(s_pending_dm_tx.ack_receipt.raw)) {
+        return false;
+    }
+    d1l_pending_dm_ack_receipt_t *receipt =
+        &s_pending_dm_tx.ack_receipt;
+    if (receipt->valid) {
+        return true;
+    }
+    memset(receipt, 0, sizeof(*receipt));
+    snprintf(receipt->source, sizeof(receipt->source), "%s",
+             source ? source : "ack");
+    receipt->route = packet->route;
+    receipt->rssi = rssi;
+    receipt->snr = snr;
+    receipt->path_hash_bytes = packet->path_hash_bytes;
+    receipt->path_hops = packet->path_hops;
+    receipt->wire_size = size;
+    receipt->raw_len = (uint16_t)raw_len;
+    memcpy(receipt->raw, raw, raw_len);
+    receipt->valid = true;
+    return true;
+}
+
 static void clear_pending_dm_tx(void)
 {
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
@@ -1357,7 +1403,8 @@ static esp_err_t transition_pending_dm_tx(
     d1l_dm_delivery_state_t next_state,
     d1l_dm_delivery_reason_t reason, esp_err_t error)
 {
-    if (!s_pending_dm_tx.delivery.active) {
+    if (!s_pending_dm_tx.delivery.active ||
+        next_state == D1L_DM_DELIVERY_ACKNOWLEDGED) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1369,13 +1416,7 @@ static esp_err_t transition_pending_dm_tx(
     esp_err_t ret = d1l_dm_store_transition_delivery(
         session_id, expected_state, expected_revision, next_state,
         reason, error, &outcome);
-    const bool accepted = outcome.changed || outcome.persistence_retry;
-    const bool publish_to_owner = accepted &&
-        (next_state != D1L_DM_DELIVERY_ACKNOWLEDGED || outcome.durable);
-    if (next_state == D1L_DM_DELIVERY_ACKNOWLEDGED && accepted &&
-        !outcome.durable) {
-        s_pending_dm_tx.ack_persistence_pending = true;
-    }
+    const bool publish_to_owner = outcome.changed || outcome.persistence_retry;
     if (publish_to_owner) {
         if (!d1l_dm_delivery_owner_apply(
                 &s_pending_dm_tx.delivery, outcome.delivery_session_id,
@@ -1386,11 +1427,31 @@ static esp_err_t transition_pending_dm_tx(
                                       ESP_ERR_INVALID_STATE);
             return ESP_ERR_INVALID_STATE;
         }
-        if (next_state == D1L_DM_DELIVERY_ACKNOWLEDGED) {
-            s_pending_dm_tx.ack_persistence_pending = false;
-        }
     }
     if (publish_to_owner) {
+        if (next_state == D1L_DM_DELIVERY_AWAITING_ACK) {
+            /* Bind ACK admission to the revision that actually owns the peer
+             * deadline, not the QUEUED revision that began the session. */
+            memset(&s_pending_dm_tx.ack_completion, 0,
+                   sizeof(s_pending_dm_tx.ack_completion));
+            if (!d1l_meshcore_ack_completion_begin(
+                    &s_pending_dm_tx.ack_completion,
+                    s_pending_dm_tx.delivery.session_id,
+                    s_pending_dm_tx.delivery.revision)) {
+                record_dm_delivery_status(
+                    s_pending_dm_tx.delivery.session_id,
+                    s_pending_dm_tx.delivery.revision,
+                    s_pending_dm_tx.delivery.state,
+                    ESP_ERR_INVALID_STATE);
+                return ESP_ERR_INVALID_STATE;
+            }
+        } else if (s_pending_dm_tx.ack_completion.active &&
+                   !s_pending_dm_tx.ack_completion.cas_admitted) {
+            /* A timeout/retry that wins before an ACK retires only the old
+             * unadmitted revision.  The next AWAITING_ACK transition rearms. */
+            memset(&s_pending_dm_tx.ack_completion, 0,
+                   sizeof(s_pending_dm_tx.ack_completion));
+        }
         record_dm_delivery_status(
             s_pending_dm_tx.delivery.session_id,
             s_pending_dm_tx.delivery.revision,
@@ -1401,6 +1462,75 @@ static esp_err_t transition_pending_dm_tx(
                                   expected_state, ret);
     }
     return ret;
+}
+
+typedef enum {
+    D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE = 0,
+    D1L_PENDING_DM_ACK_TRANSITION_PERSISTENCE_PENDING,
+    D1L_PENDING_DM_ACK_TRANSITION_DURABLE,
+} d1l_pending_dm_ack_transition_result_t;
+
+static d1l_pending_dm_ack_transition_result_t transition_pending_dm_ack(
+    esp_err_t *out_error)
+{
+    if (out_error) {
+        *out_error = ESP_ERR_INVALID_STATE;
+    }
+    d1l_dm_delivery_owner_t *owner = &s_pending_dm_tx.delivery;
+    if (!owner->active || owner->state != D1L_DM_DELIVERY_AWAITING_ACK ||
+        owner->revision == UINT32_MAX) {
+        return D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE;
+    }
+
+    const uint64_t session_id = owner->session_id;
+    const uint32_t expected_revision = owner->revision;
+    d1l_dm_delivery_transition_outcome_t outcome = {0};
+    const esp_err_t ret = d1l_dm_store_transition_delivery(
+        session_id, D1L_DM_DELIVERY_AWAITING_ACK, expected_revision,
+        D1L_DM_DELIVERY_ACKNOWLEDGED,
+        D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &outcome);
+    if (out_error) {
+        *out_error = ret;
+    }
+    const bool admitted = outcome.changed || outcome.persistence_retry;
+    const d1l_meshcore_ack_cas_result_t cas_result =
+        d1l_meshcore_ack_completion_observe_cas(
+            &s_pending_dm_tx.ack_completion,
+            outcome.delivery_session_id, expected_revision,
+            outcome.delivery_revision, admitted, outcome.durable);
+    if (cas_result == D1L_MESHCORE_ACK_CAS_REJECTED ||
+        cas_result == D1L_MESHCORE_ACK_CAS_STALE) {
+        record_dm_delivery_status(session_id, expected_revision,
+                                  owner->state, ret);
+        return D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE;
+    }
+
+    /* An admitted retained CAS suppresses RF retry immediately.  The owner
+     * remains AWAITING_ACK until the exact next revision is durable. */
+    if (!outcome.durable) {
+        s_pending_dm_tx.ack_persistence_pending = true;
+        record_dm_delivery_status(session_id, expected_revision,
+                                  owner->state, ret);
+        return D1L_PENDING_DM_ACK_TRANSITION_PERSISTENCE_PENDING;
+    }
+
+    if (!d1l_dm_delivery_owner_apply(
+            owner, outcome.delivery_session_id, expected_revision,
+            outcome.current_state, outcome.delivery_revision)) {
+        /* The retained row is already authoritative.  Keep maintenance in
+         * reconciliation mode and do not clear the deadline or credit route. */
+        s_pending_dm_tx.ack_persistence_pending = true;
+        record_dm_delivery_status(session_id, expected_revision,
+                                  owner->state, ESP_ERR_INVALID_STATE);
+        if (out_error) {
+            *out_error = ESP_ERR_INVALID_STATE;
+        }
+        return D1L_PENDING_DM_ACK_TRANSITION_PERSISTENCE_PENDING;
+    }
+    s_pending_dm_tx.ack_persistence_pending = false;
+    record_dm_delivery_status(owner->session_id, owner->revision,
+                              owner->state, ret);
+    return D1L_PENDING_DM_ACK_TRANSITION_DURABLE;
 }
 
 static esp_err_t transition_pending_dm_retry(uint32_t retry_ack_hash)
@@ -1437,8 +1567,19 @@ static esp_err_t transition_pending_dm_retry(uint32_t retry_ack_hash)
 static void reconcile_pending_dm_ack_persistence(void)
 {
     d1l_dm_delivery_owner_t *owner = &s_pending_dm_tx.delivery;
-    if (!s_pending_dm_tx.ack_persistence_pending || !owner->active ||
-        owner->state != D1L_DM_DELIVERY_AWAITING_ACK ||
+    if (!s_pending_dm_tx.ack_persistence_pending || !owner->active) {
+        return;
+    }
+
+    /* A durable owner publish can precede only the take-once ancillary
+     * effects.  Retry that local finalization without touching the store. */
+    if (owner->state == D1L_DM_DELIVERY_ACKNOWLEDGED) {
+        if (finalize_pending_dm_ack_completion()) {
+            return;
+        }
+        return;
+    }
+    if (owner->state != D1L_DM_DELIVERY_AWAITING_ACK ||
         owner->revision == UINT32_MAX) {
         return;
     }
@@ -1453,20 +1594,22 @@ static void reconcile_pending_dm_ack_persistence(void)
     }
 
     /* The store query masks an ACK while any persistence receipt is pending.
-     * Reaching this branch therefore proves the same revision is durable; the
-     * sole runtime owner may now publish delivery and release the session. */
+     * Reaching this branch proves the exact next revision is durable. */
+    if (!d1l_meshcore_ack_completion_mark_reconciled(
+            &s_pending_dm_tx.ack_completion, owner->session_id,
+            durable.delivery_revision)) {
+        return;
+    }
     if (!d1l_dm_delivery_owner_apply(
             owner, durable.delivery_session_id, owner->revision,
             durable.delivery_state, durable.delivery_revision)) {
         return;
     }
-    s_pending_dm_tx.ack_persistence_pending = false;
     record_dm_delivery_status(owner->session_id, owner->revision,
                               owner->state, ESP_OK);
     ESP_LOGI(TAG, "DM ACK persistence reconciled at revision %lu",
              (unsigned long)owner->revision);
-    remember_pending_dm_ack_packet_hashes();
-    clear_pending_dm_tx();
+    (void)finalize_pending_dm_ack_completion();
 }
 
 static esp_err_t record_detached_dm_queue_failure(
@@ -1717,6 +1860,46 @@ static void record_pending_direct_path_result(bool success)
     if (result == D1L_MESHCORE_PATH_RESULT_FLOOD_FALLBACK) {
         ESP_LOGW(TAG, "direct path failure threshold reached; flood required");
     }
+}
+
+static bool finalize_pending_dm_ack_completion(void)
+{
+    d1l_dm_delivery_owner_t *owner = &s_pending_dm_tx.delivery;
+    d1l_pending_dm_ack_receipt_t *receipt =
+        &s_pending_dm_tx.ack_receipt;
+    if (!owner->active || owner->state != D1L_DM_DELIVERY_ACKNOWLEDGED ||
+        !receipt->valid ||
+        !d1l_meshcore_ack_completion_take_terminal_effects(
+            &s_pending_dm_tx.ack_completion, owner->session_id,
+            owner->revision)) {
+        return false;
+    }
+
+    /* These are the take-once effects authorized by the durable exact-owner
+     * revision.  No rejected/stale/persistence-pending ACK can reach here. */
+    d1l_meshcore_dm_ack_deadline_clear(&s_pending_dm_tx.ack_deadline);
+    record_pending_direct_path_result(true);
+    const esp_err_t route_ret = d1l_route_store_upsert_observation(
+        s_pending_dm_tx.fingerprint, s_pending_dm_tx.alias,
+        "dm_ack", route_name(receipt->route), "rx", receipt->rssi,
+        (receipt->snr * 10) / 4, receipt->path_hash_bytes,
+        receipt->path_hops, receipt->wire_size);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store DM ACK rx failed: %s",
+                 esp_err_to_name(route_ret));
+    }
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(note, sizeof(note), "ack %lu %.12s",
+             (unsigned long)s_pending_dm_tx.ack_hash,
+             s_pending_dm_tx.alias);
+    (void)append_packet_log_deferred(
+        "rx", "dm_ack", receipt->rssi, receipt->snr,
+        receipt->path_hash_bytes, receipt->path_hops,
+        receipt->wire_size, receipt->raw, receipt->raw_len, note);
+    remember_pending_dm_ack_packet_hashes();
+    s_pending_dm_tx.ack_persistence_pending = false;
+    clear_pending_dm_tx();
+    return true;
 }
 
 static void clear_pending_ack_tx(void)
@@ -3058,9 +3241,10 @@ static d1l_rx_ack_result_t record_dm_ack(
     const uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES])
 {
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    if (s_pending_dm_tx.ack_persistence_pending &&
-        d1l_dm_delivery_owner_ack_matches(
-            &s_pending_dm_tx.delivery, ack_hash)) {
+    if (d1l_meshcore_ack_completion_suppresses_rf_retry(
+            &s_pending_dm_tx.ack_completion) &&
+        s_pending_dm_tx.delivery.active &&
+        s_pending_dm_tx.delivery.ack_hash == ack_hash) {
         /* The retained transition already admitted this exact owner revision.
          * The storage worker is the only retry owner from here. */
         bank_pending_dm_ack_packet_hash(packet_hash);
@@ -3068,16 +3252,15 @@ static d1l_rx_ack_result_t record_dm_ack(
     }
     if (d1l_dm_delivery_owner_ack_matches(
             &s_pending_dm_tx.delivery, ack_hash)) {
-        snprintf(note, sizeof(note), "ack %lu %.12s", (unsigned long)ack_hash,
-                 s_pending_dm_tx.alias);
-        const esp_err_t transition_ret = transition_pending_dm_tx(
-            D1L_DM_DELIVERY_ACKNOWLEDGED,
-            D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK);
-        const bool persistence_pending =
-            s_pending_dm_tx.ack_persistence_pending;
-        const bool durable = s_pending_dm_tx.delivery.active &&
-            s_pending_dm_tx.delivery.state == D1L_DM_DELIVERY_ACKNOWLEDGED;
-        if (!durable && !persistence_pending) {
+        if (!retain_pending_dm_ack_receipt(
+                packet, rssi, snr, size, raw, raw_len, source)) {
+            ESP_LOGW(TAG, "DM ACK receipt retention failed");
+            return D1L_RX_ACK_RETRYABLE;
+        }
+        esp_err_t transition_error = ESP_ERR_INVALID_STATE;
+        const d1l_pending_dm_ack_transition_result_t transition =
+            transition_pending_dm_ack(&transition_error);
+        if (transition == D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE) {
             snprintf(note, sizeof(note), "%s persistence %lu",
                      source ? source : "ack", (unsigned long)ack_hash);
             (void)append_packet_log_deferred(
@@ -3085,26 +3268,12 @@ static d1l_rx_ack_result_t record_dm_ack(
                 packet->path_hash_bytes, packet->path_hops, size, raw,
                 raw_len, note);
             ESP_LOGW(TAG, "DM ACK state transition failed: %s",
-                     esp_err_to_name(transition_ret));
+                     esp_err_to_name(transition_error));
             return D1L_RX_ACK_RETRYABLE;
         }
         bank_pending_dm_ack_packet_hash(packet_hash);
-
-        /* The exact-owner CAS is the canonical semantic effect. Backend
-         * reconciliation owns an admitted-but-nondurable transition; replaying
-         * the RF ACK would only duplicate route credit and history. */
-        d1l_meshcore_dm_ack_deadline_clear(&s_pending_dm_tx.ack_deadline);
-        (void)record_pending_direct_path_result(true);
-        const esp_err_t route_ret = d1l_route_store_upsert_observation(
-            s_pending_dm_tx.fingerprint, s_pending_dm_tx.alias,
-            "dm_ack", route_name(packet->route), "rx", rssi,
-            (snr * 10) / 4, packet->path_hash_bytes,
-            packet->path_hops, size);
-        if (route_ret != ESP_OK) {
-            ESP_LOGW(TAG, "route store DM ACK rx failed: %s",
-                     esp_err_to_name(route_ret));
-        }
-        if (persistence_pending) {
+        if (transition ==
+            D1L_PENDING_DM_ACK_TRANSITION_PERSISTENCE_PENDING) {
             snprintf(note, sizeof(note), "%s persistence %lu",
                      source ? source : "ack", (unsigned long)ack_hash);
             (void)append_packet_log_deferred(
@@ -3112,15 +3281,15 @@ static d1l_rx_ack_result_t record_dm_ack(
                 packet->path_hash_bytes, packet->path_hops, size, raw,
                 raw_len, note);
             ESP_LOGW(TAG, "DM ACK state persistence pending: %s",
-                     esp_err_to_name(transition_ret));
+                     esp_err_to_name(transition_error));
             return D1L_RX_ACK_ACCEPTED_PENDING;
         }
-        (void)append_packet_log_deferred(
-            "rx", "dm_ack", rssi, snr, packet->path_hash_bytes,
-            packet->path_hops, size, raw, raw_len, note);
-        remember_pending_dm_ack_packet_hashes();
-        clear_pending_dm_tx();
-        return D1L_RX_ACK_ACCEPTED;
+        if (finalize_pending_dm_ack_completion()) {
+            return D1L_RX_ACK_ACCEPTED;
+        }
+        s_pending_dm_tx.ack_persistence_pending = true;
+        ESP_LOGE(TAG, "DM ACK durable finalization deferred");
+        return D1L_RX_ACK_ACCEPTED_PENDING;
     } else {
         snprintf(note, sizeof(note), "%s unmatched %lu", source ? source : "ack",
                  (unsigned long)ack_hash);
@@ -4066,6 +4235,12 @@ static void meshcore_service_run_owner_maintenance(void)
     if (channel_reconcile_ret != ESP_OK) {
         ESP_LOGW(TAG, "channel retained cursor retry failed: %s",
                  esp_err_to_name(channel_reconcile_ret));
+    }
+    if (d1l_meshcore_ack_completion_suppresses_rf_retry(
+            &s_pending_dm_tx.ack_completion)) {
+        /* The exact ACK CAS/storage reconciliation owns this session.  Do not
+         * consume its peer deadline or launch a second RF delivery attempt. */
+        return;
     }
     if (!s_pending_dm_tx.delivery.active ||
         s_pending_dm_tx.delivery.state != D1L_DM_DELIVERY_AWAITING_ACK) {

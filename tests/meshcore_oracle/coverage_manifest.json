@@ -97,7 +97,7 @@
     },
     {
       "id": "ack_dispatch_correlation_and_delivery",
-      "status": "blocked"
+      "status": "implemented"
     },
     {
       "id": "route_selection_and_forwarding",
@@ -106,7 +106,6 @@
   ],
   "unresolved_capabilities": [
     "identity_signed_advert",
-    "ack_dispatch_correlation_and_delivery",
     "route_selection_and_forwarding",
     "trace_forwarding_and_path_discovery",
     "login_request_response_admin"

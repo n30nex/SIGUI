@@ -212,7 +212,7 @@ def test_stale_guard_location_preservation_and_material_marker_generation():
     )
     material = function_slice(source, "static bool marker_material_changed", "static void fill_blob")
 
-    assert upsert.index("advert_timestamp <= s_entries[existing].advert_timestamp") < upsert.index(
+    assert upsert.index("d1l_meshcore_lifetime_advert_is_strictly_newer(") < upsert.index(
         "entry->seq = s_next_seq++"
     )
     assert "*out_stale = true;" in upsert

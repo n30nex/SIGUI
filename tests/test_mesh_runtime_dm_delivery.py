@@ -155,7 +155,12 @@ def test_tx_callbacks_advance_the_exact_session_and_never_claim_delivery():
     transition = body(
         source,
         "static esp_err_t transition_pending_dm_tx",
-        "static esp_err_t record_detached_dm_queue_failure",
+        "typedef enum {\n    D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE",
+    )
+    ack_transition = body(
+        source,
+        "static d1l_pending_dm_ack_transition_result_t transition_pending_dm_ack",
+        "static esp_err_t transition_pending_dm_retry",
     )
 
     assert done.index("d1l_meshcore_start_rx();") < done.index(
@@ -173,12 +178,16 @@ def test_tx_callbacks_advance_the_exact_session_and_never_claim_delivery():
     assert "s_pending_dm_tx.delivery.state" in transition
     assert "outcome.row_seq" not in transition
     assert "d1l_dm_delivery_owner_apply(" in transition
-    assert "outcome.changed || outcome.persistence_retry" in transition
-    durable_gate = transition.index(
-        "next_state != D1L_DM_DELIVERY_ACKNOWLEDGED || outcome.durable"
-    )
-    owner_apply = transition.index("d1l_dm_delivery_owner_apply(")
+    assert "next_state == D1L_DM_DELIVERY_ACKNOWLEDGED" in transition
+    assert (
+        "const bool publish_to_owner = "
+        "outcome.changed || outcome.persistence_retry;"
+    ) in transition
+    assert "outcome.changed || outcome.persistence_retry" in ack_transition
+    durable_gate = ack_transition.index("if (!outcome.durable)")
+    owner_apply = ack_transition.index("d1l_dm_delivery_owner_apply(")
     assert durable_gate < owner_apply
+    assert "d1l_meshcore_ack_completion_observe_cas(" in ack_transition
 
 
 def test_terminal_events_must_match_the_exact_active_operation_and_dm_revision():
@@ -334,16 +343,16 @@ def test_only_the_expected_ack_closes_the_awaiting_owner_session():
     )[0]
 
     matches_at = ack.index("d1l_dm_delivery_owner_ack_matches(")
-    acknowledged_at = ack.index("D1L_DM_DELIVERY_ACKNOWLEDGED")
-    persistence_check = ack.index("if (!durable && !persistence_pending)")
-    clear_at = ack.index("clear_pending_dm_tx();")
-    assert matches_at < acknowledged_at < persistence_check < clear_at
-    assert "D1L_DM_DELIVERY_REASON_ACK_RECEIVED" in ack
+    retain_at = ack.index("retain_pending_dm_ack_receipt(")
+    transition_at = ack.index("transition_pending_dm_ack(")
+    finalize_at = ack.index("finalize_pending_dm_ack_completion()")
+    assert matches_at < retain_at < transition_at < finalize_at
+    assert "d1l_meshcore_ack_completion_suppresses_rf_retry(" in ack
     assert "d1l_dm_store_mark_acked" not in ack
     assert '"dm_ack_persistence_pending"' in ack
-    assert "return D1L_RX_ACK_RETRYABLE;" in ack[persistence_check:clear_at]
+    assert "return D1L_RX_ACK_RETRYABLE;" in ack[matches_at:transition_at]
     assert "D1L_RX_ACK_ACCEPTED_PENDING" in ack
-    assert "remember_pending_dm_ack_packet_hashes()" in ack
+    assert "bank_pending_dm_ack_packet_hash(packet_hash)" in ack
     assert '"dm_ack_unmatched"' in ack
 
 
@@ -372,7 +381,7 @@ def test_owner_automatically_reconciles_background_durable_ack():
     header = read("main/mesh/dm_store.h")
     transition = body(
         source,
-        "static esp_err_t transition_pending_dm_tx",
+        "static d1l_pending_dm_ack_transition_result_t transition_pending_dm_ack",
         "static void reconcile_pending_dm_ack_persistence",
     )
     reconcile = body(
@@ -387,16 +396,18 @@ def test_owner_automatically_reconciles_background_durable_ack():
     )
 
     assert "bool ack_persistence_pending;" in source
-    assert "accepted &&\n        !outcome.durable" in transition
+    assert "if (!outcome.durable)" in transition
+    assert "d1l_meshcore_ack_completion_observe_cas(" in transition
     assert "s_pending_dm_tx.ack_persistence_pending = true" in transition
     assert "d1l_dm_store_find_delivery_session" in header
     query = reconcile.index("d1l_dm_store_find_delivery_session")
-    state = reconcile.index("D1L_DM_DELIVERY_ACKNOWLEDGED")
+    state = reconcile.index("D1L_DM_DELIVERY_ACKNOWLEDGED", query)
     revision = reconcile.index("durable.delivery_revision != owner->revision + 1U")
     delivered = reconcile.index("!durable.acked || !durable.delivered")
+    reconcile_cas = reconcile.index("d1l_meshcore_ack_completion_mark_reconciled(")
     publish = reconcile.index("d1l_dm_delivery_owner_apply(")
-    clear = reconcile.index("clear_pending_dm_tx();")
-    assert query < state < revision < delivered < publish < clear
+    finalize = reconcile.rindex("finalize_pending_dm_ack_completion()")
+    assert query < state < revision < delivered < reconcile_cas < publish < finalize
     assert "transition_pending_dm_tx(" not in reconcile
     assert task.count("meshcore_service_run_owner_maintenance();") >= 3
     assert "pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS)" in task
@@ -426,3 +437,25 @@ def test_delivery_owner_service_keeps_the_exact_oracle_binding_pin():
     assert manifest["production_binding_sources"][relative] == hashlib.sha256(
         payload
     ).hexdigest()
+
+
+def test_ack_completion_is_armed_from_the_actual_awaiting_revision():
+    source = read("main/mesh/meshcore_service.c")
+    begin = source.index("static bool begin_pending_dm_tx(")
+    transition = source.index("static esp_err_t transition_pending_dm_tx(")
+    ack_transition = source.index(
+        "static d1l_pending_dm_ack_transition_result_t transition_pending_dm_ack("
+    )
+
+    begin_body = source[begin:transition]
+    transition_body = source[transition:ack_transition]
+    assert "d1l_meshcore_ack_completion_begin(" not in begin_body
+    awaiting = transition_body.index(
+        "next_state == D1L_DM_DELIVERY_AWAITING_ACK"
+    )
+    owner_publish = transition_body.index("d1l_dm_delivery_owner_apply(")
+    completion_arm = transition_body.index("d1l_meshcore_ack_completion_begin(")
+    assert owner_publish < awaiting < completion_arm
+    assert "s_pending_dm_tx.delivery.revision" in transition_body[
+        completion_arm:completion_arm + 400
+    ]

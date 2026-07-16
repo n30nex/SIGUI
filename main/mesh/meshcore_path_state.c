@@ -3,6 +3,8 @@
 #include <limits.h>
 #include <string.h>
 
+#include "mesh/meshcore_lifetime.h"
+
 static bool next_generation(uint32_t generation, uint32_t *out_generation)
 {
     if (!out_generation || generation == UINT32_MAX) {
@@ -69,8 +71,8 @@ bool d1l_meshcore_path_state_expire_if_due(d1l_meshcore_path_state_t *state,
     }
     const uint32_t validated_at =
         d1l_meshcore_path_state_validated_at_ms(state);
-    if ((uint32_t)(now_ms - validated_at) <=
-        D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS) {
+    if (d1l_meshcore_lifetime_age_current_u32(
+            validated_at, now_ms, D1L_MESHCORE_DIRECT_PATH_MAX_AGE_MS)) {
         return false;
     }
     state->lifecycle = D1L_MESHCORE_PATH_STATE_EXPIRED;

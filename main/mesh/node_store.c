@@ -9,6 +9,7 @@
 #include "nvs.h"
 
 #include "mesh/contact_store.h"
+#include "mesh/meshcore_lifetime.h"
 #include "mesh/store_lock.h"
 
 #define D1L_NODE_STORE_NAMESPACE "d1l_nodes"
@@ -475,7 +476,8 @@ static uint8_t node_role_order(const char *role)
     return 4U;
 }
 
-static void build_node_view(const d1l_node_entry_t *node, d1l_node_view_t *view)
+static void build_node_view(const d1l_node_entry_t *node,
+                            d1l_node_view_t *view, uint32_t now_ms)
 {
     if (!node || !view) {
         return;
@@ -489,7 +491,8 @@ static void build_node_view(const d1l_node_entry_t *node, d1l_node_view_t *view)
     view->favorite = has_contact && contact.favorite;
     view->muted = has_contact && contact.muted;
     view->keyed = node_has_key(node, has_contact ? &contact : NULL);
-    view->reachable = node->last_heard_ms != 0;
+    view->reachable = d1l_meshcore_lifetime_contact_reachable(
+        node->last_heard_ms, now_ms);
     sanitize_ascii(view->role, sizeof(view->role), node_role_name(node));
     if (has_contact && contact.alias[0] != '\0') {
         sanitize_ascii(view->display_name, sizeof(view->display_name), contact.alias);
@@ -718,7 +721,9 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
         d1l_store_lock_give(&s_store_lock);
         return ESP_ERR_INVALID_STATE;
     }
-    if (existing >= 0 && advert_timestamp <= s_entries[existing].advert_timestamp) {
+    if (existing >= 0 &&
+        !d1l_meshcore_lifetime_advert_is_strictly_newer(
+            true, s_entries[existing].advert_timestamp, advert_timestamp)) {
         d1l_store_lock_give(&s_store_lock);
         *out_stale = true;
         return ESP_OK;
@@ -859,9 +864,10 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
     if (!s_loaded && d1l_node_store_init() != ESP_OK) {
         return 0;
     }
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     d1l_store_lock_take(&s_store_lock);
     for (size_t i = 0; i < s_count; ++i) {
-        build_node_view(&s_entries[i], &s_query_scratch[i]);
+        build_node_view(&s_entries[i], &s_query_scratch[i], now_ms);
     }
 
     const d1l_node_sort_t sort = query ? query->sort : D1L_NODE_SORT_LAST_HEARD;
