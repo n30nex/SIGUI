@@ -52,8 +52,17 @@ Coverage:
   Actions, release packaging, reproducibility comparison, and release audit
   must recompute that canonical digest from the supplied exact-commit
   signed-runtime receipt and reject any substituted binding. The declared WP-05
-  host matrix is currently 8 production suites / 53 scenarios / 33 translation
-  units / 63 source pins, plus 1 pinned-upstream companion suite / 10 cases.
+  host matrix is currently 9 production suites / 61 scenarios / 35 translation
+  units / 66 source pins, plus 1 pinned-upstream companion suite / 10 cases.
+  The ninth suite executes the production USB command-admission module for
+  100,000 deterministic inputs. The separate pinned-Clang gate must also run
+  `scripts/usb_command_parser_fuzz_d1l.py` for exactly 100,000 libFuzzer inputs,
+  upload `usb_command_parser_fuzz_<full-commit>.json`, and prove that both the
+  normal and factory-reset recovery consoles pass the real received byte count
+  before any command dispatch. Embedded NUL, C0/DEL, hidden suffix, empty,
+  truncated-argument, token-suffix, and over-255-byte cases must fail before
+  side effects and wipe the complete command buffer. This is host/parser proof,
+  not hardware, RF, WP-05, or release closure.
   Native cases also require a 160-entry cyclic cache, correct all-zero occupancy,
   deterministic FIFO eviction, multipart-ACK descriptor normalization, and
   terminal-only admission. Production source contracts must prove authentication
