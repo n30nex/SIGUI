@@ -159,6 +159,38 @@ static void test_trace_path_bytes_excluded(void)
     assert(memcmp(first_hash, second_hash, sizeof(first_hash)) == 0);
 }
 
+/* multipart_ack_descriptor_normalization */
+static void test_multipart_ack_descriptor_normalization(void)
+{
+    static const uint8_t first_payload[] = {
+        D1L_MESHCORE_PAYLOAD_ACK, 0x78U, 0x56U, 0x34U, 0x12U};
+    static const uint8_t second_payload[] = {
+        (uint8_t)(0xa0U | D1L_MESHCORE_PAYLOAD_ACK),
+        0x78U, 0x56U, 0x34U, 0x12U};
+    d1l_meshcore_wire_packet_t first = packet_for(
+        D1L_MESHCORE_PAYLOAD_MULTIPART, D1L_MESHCORE_ROUTE_FLOOD,
+        0U, NULL, first_payload, sizeof(first_payload));
+    d1l_meshcore_wire_packet_t second = packet_for(
+        D1L_MESHCORE_PAYLOAD_MULTIPART, D1L_MESHCORE_ROUTE_DIRECT,
+        0U, NULL, second_payload, sizeof(second_payload));
+    first.payload++;
+    first.payload_len--;
+    second.payload++;
+    second.payload_len--;
+    uint8_t first_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    uint8_t second_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    assert(d1l_meshcore_packet_hash_calculate(&first, first_hash) == ESP_OK);
+    assert(d1l_meshcore_packet_hash_calculate(&second, second_hash) == ESP_OK);
+    assert(memcmp(first_hash, second_hash, sizeof(first_hash)) == 0);
+
+    d1l_meshcore_wire_packet_t simple = packet_for(
+        D1L_MESHCORE_PAYLOAD_ACK, D1L_MESHCORE_ROUTE_FLOOD,
+        0U, NULL, &first_payload[1], sizeof(first_payload) - 1U);
+    uint8_t simple_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    assert(d1l_meshcore_packet_hash_calculate(&simple, simple_hash) == ESP_OK);
+    assert(memcmp(first_hash, simple_hash, sizeof(first_hash)) != 0);
+}
+
 /* cache_miss_remember_hit_forget */
 static void test_cache_miss_remember_hit_forget(void)
 {
@@ -216,6 +248,7 @@ int main(void)
     test_payload_type_and_content_domain_separation();
     test_trace_path_length_little_endian_uint16();
     test_trace_path_bytes_excluded();
+    test_multipart_ack_descriptor_normalization();
     test_cache_miss_remember_hit_forget();
     test_cache_160_entry_fifo_eviction();
     puts("native MeshCore packet hash: ok");

@@ -53,9 +53,12 @@
   `SimpleMeshTables` outcomes. The conformance receipt must bind the exact
   runtime canonical SHA-256 and exact table receipt, every
   Actions/package/audit consumer must recompute and compare that binding, and
-  the production 160-entry boot-local cache must leave transient advert-storage
-  failures uncached for retry. The receipt remains `closure_ready=false`;
-  generic all-packet dispatch integration, retained cache recovery, RF/hardware,
+  the production 160-entry boot-local cache must remain subordinate to channel
+  and DM retained admission, exact ACK owner revisions, authenticated PATH
+  replay, TRACE correlation, and advert admission receipts. Host source/native
+  coverage now exercises those Public/channel, DM, simple/multipart ACK, PATH,
+  TRACE, and advert bindings. The receipt remains `closure_ready=false`;
+  exact-candidate Actions, controlled-peer RF/hardware, retained recovery,
   source-only success, or premerge success is not release closure.
 - [x] PR #101 merges the bounded flags-zero explicit-loop TRACE software slice. Head `db56604b52aa4f40606ad9e2d5d1ecd516cd9818`, synthetic merge `f93734aedc2a866abe727340582310fadacfbad0`, and merged main `4a85e827c251c6d1d22d276c7a40d71571b23563` share tree `bfb5627fc2b241756c68b276eec7892fafcb6f3c`; push/PR/main Actions `29339731042`, `29339752145`, and `29340630481` pass, with 15/15 API ZIP digests and 138/138 manifest entries verified. Portable aggregate SHA-256 is `e839fba55eab315fd03014aeb033c4389297905dba8e33ba1a9c34ee19fb1f76`.
 - [x] PR #103 merges fail-closed persisted-identity classification and exact-full-key verified-contact storage primitives. Head/synthetic/main share tree `1866d68023c8e5fb9969595a5fb47ba7c24b4ca3`; push/PR/main Actions `29341936653`, `29341936551`, and `29343533444` pass with 15/15 ZIP digests and 138/138 entries verified. Portable aggregate SHA-256 is `67295cd1c4ffbb8ffba22bd78049e7f1bb8bc0a0edb0c84d13d803eeaa24ae7e`.

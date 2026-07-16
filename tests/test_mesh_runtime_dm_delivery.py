@@ -329,19 +329,21 @@ def test_callback_terminal_snapshot_is_immutable_and_monotonically_identified():
 
 def test_only_the_expected_ack_closes_the_awaiting_owner_session():
     source = read("main/mesh/meshcore_service.c")
-    ack = source.rsplit("static void record_dm_ack", 1)[1].split(
+    ack = source.rsplit("static d1l_rx_ack_result_t record_dm_ack", 1)[1].split(
         "static void parse_rx_ack_packet", 1
     )[0]
 
     matches_at = ack.index("d1l_dm_delivery_owner_ack_matches(")
     acknowledged_at = ack.index("D1L_DM_DELIVERY_ACKNOWLEDGED")
-    persistence_check = ack.index("if (ret != ESP_OK)")
+    persistence_check = ack.index("if (!durable && !persistence_pending)")
     clear_at = ack.index("clear_pending_dm_tx();")
     assert matches_at < acknowledged_at < persistence_check < clear_at
     assert "D1L_DM_DELIVERY_REASON_ACK_RECEIVED" in ack
     assert "d1l_dm_store_mark_acked" not in ack
     assert '"dm_ack_persistence_pending"' in ack
-    assert "return;" in ack[persistence_check:clear_at]
+    assert "return D1L_RX_ACK_RETRYABLE;" in ack[persistence_check:clear_at]
+    assert "D1L_RX_ACK_ACCEPTED_PENDING" in ack
+    assert "remember_pending_dm_ack_packet_hashes()" in ack
     assert '"dm_ack_unmatched"' in ack
 
 

@@ -500,9 +500,9 @@ def test_production_service_uses_the_codec_exercised_by_the_harness():
 
     assert '#include "mesh/meshcore_wire.h"' in service
     assert '"mesh/meshcore_wire.c"' in cmake
-    # Channel, DM, ACK, PATH, advert, and authenticated admin RESPONSE each
-    # enter through the same fail-closed production decoder.
-    assert service.count("d1l_meshcore_wire_decode_v1(") == 6
+    # Channel, DM, ACK, PATH, TRACE hash binding, advert, and authenticated
+    # admin RESPONSE each enter through the same fail-closed decoder.
+    assert service.count("d1l_meshcore_wire_decode_v1(") == 7
     assert service.count("d1l_meshcore_wire_decode(") == 0
     ack_builder = service.split("static esp_err_t build_dm_ack_response", 1)[1].split(
         "static bool dispatch_bounded_dm_ack", 1

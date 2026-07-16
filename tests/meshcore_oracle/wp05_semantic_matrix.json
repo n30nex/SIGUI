@@ -476,7 +476,7 @@
     "tests/native/mbedtls_md_stub.c": "db5f82347ce2e70303a71a7b8dc0cae4c7de237e3a353605845763f6e61bda52",
     "tests/native/meshcore_admin_dispatch_test.c": "830b262f3f15f95c27d374e93ad60eab2e52647e478346df70d604125312bfda",
     "tests/native/meshcore_runtime_guard_test.c": "f5a2c1b33ed1fd1545d934eceb05041fc348f9cfc8f6ef04399fcba444bc91e4",
-    "tests/native/meshcore_packet_hash_test.c": "d5e479d8383560b0cc216f33cb35da03393c6359fd21f718f36c1e3675a0df5f",
+    "tests/native/meshcore_packet_hash_test.c": "c8d9bbed666168cccd2e1dab86676a252e3aee5a8cb900077ba7ab972a35fb97",
     "tests/native/meshcore_text_plaintext_test.c": "b7f4edbe648c00b5725878b631c705c251c3a81ffe4652cd706d8b996d1e6e7b",
     "tests/native/meshcore_trace_test.c": "c046cdc354a40d5feae8e79eb8e8f66fa1426ecae97a083ef6f6ca7c56092eff",
     "tests/native/mock_esp_nvs.h": "186a12a057672734ddeddeeba5667298aadf69fb2b074d42c4dbd588f9d552fd",

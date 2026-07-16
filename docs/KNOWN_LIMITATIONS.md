@@ -94,9 +94,14 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   and payload form the normal domain, TRACE also includes its `uint16_t`
   little-endian path length plus the upstream separator byte, and route,
   transport, and path bytes are excluded. Production exposes a boot-local
-  160-entry cyclic hash cache and applies it to verified signed adverts. A hash
-  is remembered only after a terminal admission outcome; transient node/contact
-  storage failures remain uncached so exact-wire contact promotion can retry.
+  160-entry cyclic hash cache across authenticated Public/configured-channel,
+  DM, ACK, advert, PATH, and correlated TRACE receive paths. The hash is only a
+  post-authority accelerator: channel admission uses the visible retained row,
+  DM uses its full durable identity and bounded re-ACK state, ACK uses the exact
+  active delivery owner/revision, PATH keeps its authenticated replay identity,
+  TRACE keeps tag/auth/path correlation, and advert keeps its admission receipt.
+  Invalid, unauthenticated, unmatched, or preplayed traffic cannot poison those
+  authorities; hash calculation errors fail open to their semantic paths.
   The WP-05 conformance receipt validates the sanitized exact-commit runtime
   receipt and binds its canonical SHA-256, all five timestamp outcomes, all five
   packet-hash outcomes, and the exact table receipt. The declared matrix is 9
@@ -104,10 +109,11 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   scenarios / 33 translation units / 63 source pins, plus 1 companion suite /
   10 cases. Actions and downstream package/audit consumers recompute and compare
   the binding from the supplied receipt rather than accepting any shaped digest;
-  the matrix remains `closure_ready=false`. This does not provide a persisted
-  duplicate cache or generic Public/DM/ACK/PATH/TRACE dispatch integration, and
-  it does not prove persisted keypair consistency, retained-contact recovery,
-  peer/RF interoperability, ACK delivery, trace, admin sessions, or hardware.
+  the matrix remains `closure_ready=false`. The cache is deliberately
+  boot-local, while DM/ACK/PATH/TRACE durability and correlation remain owned by
+  their existing retained state. This does not prove persisted keypair
+  consistency, retained-contact recovery, peer/RF interoperability, ACK
+  delivery, trace, admin sessions, or hardware.
   The pinned `BaseChatMesh` callback reports
   `is_new=false` for the tested newly auto-added contact; integration must not
   rely on that flag as a truthful new-contact indicator until upstream behavior

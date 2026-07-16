@@ -393,9 +393,12 @@ release, and byte-identical two-run replay. It also compares the production D1L
 eight-byte packet hash with upstream for five normal/TRACE framing cases,
 including TRACE `uint16_t` little-endian path length and path-byte exclusion. It
 does not call an oracle projection helper. The production D1L service applies
-the matching 160-entry boot-local cyclic cache to verified signed adverts and
-remembers only terminal admission outcomes, preserving exact-wire retry after a
-transient storage failure.
+the matching 160-entry boot-local cyclic cache only after each RX family's
+stronger authority: retained channel/DM admission, exact ACK owner revision,
+authenticated PATH replay identity, correlated TRACE result, or verified advert
+admission. Cached DM packets still enter bounded durable re-ACK handling;
+pending ACK persistence and PATH ACK-only retry remain semantic exceptions to a
+generic hash hit.
 The receipt also preserves a pinned-upstream quirk instead of hiding it:
 `BaseChatMesh::onAdvertRecv` reports `is_new=false` to the discovery callback
 for a newly auto-added contact even though the contact count advances from zero
@@ -555,12 +558,13 @@ This bounded gate makes no claim about:
   flags-zero TRACE payload framing are covered, but delivery, PATH dispatch,
   stored route choice/reciprocal decisions, TRACE forwarding/SNR/path discovery,
   correlation, and remaining Dispatcher behavior are not;
-- ACK timing, retry/delivery state, complete all-packet duplicate/replay
-  dispatch, persistent duplicate state, route selection/fallback, or non-advert
-  self-message behavior. The separate signed-advert runtime gate covers the
+- complete official-peer duplicate/replay qualification, persistent generic
+  duplicate state, or non-advert self-message behavior. Production now binds
+  Public/channel, DM, simple/multipart ACK, authenticated PATH, correlated TRACE,
+  and advert RX to the boot-local cache without replacing their stronger
+  retained/correlation authorities. The separate signed-advert runtime gate covers the
   exact upstream/D1L packet hash, real-table exact/path/transport duplicate
-  suppression, self suppression, packet lifetime, and contact lifetime. The
-  production cache integration is currently limited to verified signed adverts;
+  suppression, self suppression, packet lifetime, and contact lifetime;
 - persisted/retained state, schema migration, reboot recovery, or write
   durability;
 - radio behavior, interoperability with an official client or second radio,

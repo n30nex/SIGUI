@@ -90,7 +90,7 @@ def test_path_probe_is_a_real_correlated_flood_request():
 def test_inbound_dm_ack_consumes_the_same_immutable_route_selection():
     service = read("main/mesh/meshcore_service.c")
     dm_parse = service.split("static bool parse_rx_dm_packet", 1)[1].split(
-        "static void record_dm_ack", 1
+        "static d1l_rx_ack_result_t record_dm_ack", 1
     )[0]
     ack_planning = dm_parse.split("uint8_t ack_hash_bytes[4]", 1)[1].split(
         "ack_build_ret = planned", 1
@@ -120,7 +120,7 @@ def test_direct_results_mutate_retained_path_only_in_runtime_owner():
     timeout = service.split(
         "static void meshcore_service_handle_radio_tx_timeout", 1
     )[1].split("static void meshcore_service_handle_radio_tx_watchdog", 1)[0]
-    ack = service.split("static void record_dm_ack", 1)[1].split(
+    ack = service.split("static d1l_rx_ack_result_t record_dm_ack", 1)[1].split(
         "static void parse_rx_ack_packet", 1
     )[0]
     callback = service.split("static void on_tx_done", 1)[1].split(
@@ -150,7 +150,7 @@ def test_ack_deadline_retry_and_contact_revalidation_are_fail_closed():
         "static esp_err_t meshcore_service_handle_send_dm", 1
     )[1].split("static void meshcore_service_reply", 1)[0]
     inbound = service.split("static bool parse_rx_dm_packet", 1)[1].split(
-        "static void record_dm_ack", 1
+        "static d1l_rx_ack_result_t record_dm_ack", 1
     )[0]
     maintenance = service.split(
         "static void meshcore_service_run_owner_maintenance", 1
