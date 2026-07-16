@@ -194,7 +194,10 @@ def completion_reporting_metrics(ledger: dict) -> dict:
     )
 
     main = ledger.get("repository", {}).get("main", {})
-    acceptance = reporting.get("applicable_exact_main_automated_acceptance", {})
+    acceptance_value = reporting.get(
+        "applicable_exact_main_automated_acceptance", {}
+    )
+    acceptance = acceptance_value if isinstance(acceptance_value, dict) else {}
     exact_main_acceptance = (
         reporting.get("scope_commit") == main.get("commit")
         and acceptance.get("actions_run") == main.get("actions_run")

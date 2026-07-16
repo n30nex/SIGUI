@@ -143,6 +143,18 @@ def test_completion_reporting_rejects_tampered_automated_acceptance_metric():
     assert any("automated acceptance percent is stale" in error for error in errors)
 
 
+def test_completion_reporting_rejects_non_object_acceptance_without_crashing():
+    ledger = ledger_copy()
+    ledger["completion_reporting"][
+        "applicable_exact_main_automated_acceptance"
+    ] = []
+
+    errors = validate_ledger(ledger)
+
+    assert "completion reporting automated acceptance must be an object" in errors
+    assert completion_reporting_metrics(ledger)["acceptance_status"] == "fail"
+
+
 def test_completion_reporting_rejects_stale_final_gate_counts_and_weight():
     ledger = ledger_copy()
     ledger["release_gates"][0]["status"] = "released"
