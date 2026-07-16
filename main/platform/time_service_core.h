@@ -31,6 +31,7 @@ typedef enum {
     D1L_TIME_SOURCE_RETAINED_AUTHENTICATED,
     D1L_TIME_SOURCE_SNTP,
     D1L_TIME_SOURCE_COMPANION_AUTHENTICATED,
+    D1L_TIME_SOURCE_RETAINED_VALIDATED_CHECKPOINT,
 } d1l_time_source_t;
 
 typedef enum {
@@ -126,6 +127,11 @@ esp_err_t d1l_time_core_note_authenticated_lower_bound(
     d1l_time_service_core_t *core,
     int64_t epoch_sec,
     uint64_t observed_now_us);
+esp_err_t d1l_time_core_recover_retained_checkpoint(
+    d1l_time_service_core_t *core,
+    int64_t epoch_sec,
+    uint32_t protocol_reserved_through_at_commit,
+    uint64_t observed_now_us);
 /* Pure readiness check: no reservation, allocation, clock, or persistence
  * state is changed.  The allocator repeats this check under the same owner
  * lock before it commits a timestamp. */
@@ -142,6 +148,8 @@ void d1l_time_core_snapshot(d1l_time_service_core_t *core,
                             uint64_t observed_now_us,
                             d1l_time_core_snapshot_t *out_snapshot);
 bool d1l_time_core_certificate_validity(d1l_time_validity_t validity);
+bool d1l_time_core_wall_checkpoint_eligible(
+    const d1l_time_service_core_t *core);
 const char *d1l_time_validity_name(d1l_time_validity_t validity);
 const char *d1l_time_source_name(d1l_time_source_t source);
 const char *d1l_time_protocol_wall_admission_name(

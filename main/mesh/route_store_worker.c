@@ -14,6 +14,7 @@
 #include "mesh/message_store.h"
 #include "mesh/packet_log.h"
 #include "mesh/route_store.h"
+#include "platform/time_service.h"
 #include "storage/retained_store_scheduler.h"
 
 #define D1L_ROUTE_STORE_WORKER_INTERVAL_MS 1000U
@@ -177,6 +178,33 @@ static void observe_contacts(
     };
 }
 
+static esp_err_t flush_time_checkpoint(void *context)
+{
+    (void)context;
+    return d1l_time_service_wall_checkpoint_flush();
+}
+
+static esp_err_t flush_time_checkpoint_if_due(void *context)
+{
+    (void)context;
+    return d1l_time_service_wall_checkpoint_flush_if_due();
+}
+
+static void observe_time_checkpoint(
+    void *context, d1l_retained_store_observation_t *out_observation)
+{
+    (void)context;
+    d1l_time_service_status_t status;
+    d1l_time_service_status(&status);
+    *out_observation = (d1l_retained_store_observation_t) {
+        .revision = status.wall_checkpoint.revision,
+        .commit_count = status.wall_checkpoint_write_count,
+        .failure_count = status.wall_checkpoint_failure_count,
+        .dirty = status.wall_checkpoint_pending,
+        .reconcile_pending = false,
+    };
+}
+
 static const d1l_retained_store_descriptor_t s_retained_stores[] = {
     {
         .kind = D1L_RETAINED_STORE_MESSAGES,
@@ -212,6 +240,13 @@ static const d1l_retained_store_descriptor_t s_retained_stores[] = {
         .flush = flush_contacts,
         .flush_if_due = flush_contacts_if_due,
         .observe = observe_contacts,
+    },
+    {
+        .kind = D1L_RETAINED_STORE_TIME_CHECKPOINT,
+        .name = "time_checkpoint",
+        .flush = flush_time_checkpoint,
+        .flush_if_due = flush_time_checkpoint_if_due,
+        .observe = observe_time_checkpoint,
     },
 };
 

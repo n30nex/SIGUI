@@ -18,6 +18,7 @@ typedef struct {
 #define portMUX_INITIALIZER_UNLOCKED {0U}
 #define portMAX_DELAY UINT32_MAX
 #define pdTRUE 1
+#define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
 
 #define portENTER_CRITICAL(mux) do { (void)(mux); } while (0)
 #define portEXIT_CRITICAL(mux) do { (void)(mux); } while (0)

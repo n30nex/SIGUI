@@ -239,6 +239,7 @@ static void test_approximate_wall_never_advances_protocol(void)
     d1l_time_core_snapshot(&core, 0U, &snapshot);
     assert(snapshot.protocol_wall_admission ==
            D1L_TIME_PROTOCOL_WALL_APPROXIMATE_IGNORED);
+    assert(!d1l_time_core_wall_checkpoint_eligible(&core));
     assert(!snapshot.certificate_time_valid);
 
     reserve_fixture_t reserve = {.result = ESP_OK};
@@ -476,6 +477,87 @@ static void test_lower_bound_never_rewinds_or_downgrades_validated_time(void)
     assert(snapshot.wall_validity == D1L_TIME_VALIDITY_NETWORK_VALIDATED);
 }
 
+static void test_retained_checkpoint_is_approximate_and_guarded(void)
+{
+    d1l_time_service_core_t core;
+    init_core(&core, 0U);
+    assert(d1l_time_core_recover_retained_checkpoint(
+               NULL, INT64_C(1800000000),
+               D1L_TIME_PROTOCOL_TIMESTAMP_BASE, 0U) ==
+           ESP_ERR_INVALID_ARG);
+    assert(d1l_time_core_recover_retained_checkpoint(
+               &core, D1L_TIME_WALL_MIN_EPOCH - 1,
+               D1L_TIME_PROTOCOL_TIMESTAMP_BASE, 0U) ==
+           ESP_ERR_INVALID_ARG);
+    assert(d1l_time_core_recover_retained_checkpoint(
+               &core, INT64_C(1800000000),
+               D1L_TIME_PROTOCOL_TIMESTAMP_BASE - 1U, 0U) ==
+           ESP_ERR_INVALID_ARG);
+    assert(d1l_time_core_recover_retained_checkpoint(
+               &core, INT64_C(1800000000),
+               D1L_TIME_PROTOCOL_TIMESTAMP_BASE + 1U, 0U) ==
+           ESP_ERR_INVALID_ARG);
+
+    assert(d1l_time_core_recover_retained_checkpoint(
+               &core, INT64_C(1800000000),
+               D1L_TIME_PROTOCOL_TIMESTAMP_BASE, 0U) == ESP_OK);
+    d1l_time_core_snapshot_t snapshot;
+    d1l_time_core_snapshot(&core, UINT64_C(2000000), &snapshot);
+    assert(snapshot.wall_epoch_sec == INT64_C(1800000002));
+    assert(snapshot.wall_validity == D1L_TIME_VALIDITY_APPROXIMATE);
+    assert(snapshot.wall_source ==
+           D1L_TIME_SOURCE_RETAINED_VALIDATED_CHECKPOINT);
+    assert(!snapshot.certificate_time_valid);
+    assert(snapshot.protocol_wall_admission ==
+           D1L_TIME_PROTOCOL_WALL_APPROXIMATE_IGNORED);
+
+    reserve_fixture_t reserve = {.result = ESP_OK};
+    uint32_t timestamp = 0U;
+    assert(d1l_time_core_next_protocol_timestamp(
+               &core, UINT64_C(2000000), fake_reserve, &reserve,
+               &timestamp) == ESP_OK);
+    assert(timestamp == TEST_BUILD_EPOCH);
+
+    d1l_time_service_core_t seeded;
+    init_core(&seeded, 0U);
+    const uint32_t high_water = D1L_TIME_PROTOCOL_TIMESTAMP_BASE + 128U;
+    assert(d1l_time_core_seed_protocol(&seeded, true, high_water) == ESP_OK);
+    assert(d1l_time_core_recover_retained_checkpoint(
+               &seeded, INT64_C(1800000000), high_water, 0U) == ESP_OK);
+    assert(d1l_time_core_recover_retained_checkpoint(
+               &seeded, INT64_C(1900000000), high_water + 1U, 0U) ==
+           ESP_ERR_INVALID_ARG);
+
+    assert(d1l_time_core_set_wall(
+               &seeded, (int64_t)TEST_BUILD_EPOCH + 100, 0U,
+               D1L_TIME_VALIDITY_NETWORK_VALIDATED,
+               D1L_TIME_SOURCE_SNTP) == ESP_OK);
+    assert(d1l_time_core_recover_retained_checkpoint(
+               &seeded, INT64_C(1900000000), high_water, 0U) == ESP_OK);
+    d1l_time_core_snapshot(&seeded, 0U, &snapshot);
+    assert(snapshot.wall_epoch_sec == (int64_t)TEST_BUILD_EPOCH + 100);
+    assert(snapshot.wall_validity == D1L_TIME_VALIDITY_NETWORK_VALIDATED);
+    assert(snapshot.wall_source == D1L_TIME_SOURCE_SNTP);
+    assert(d1l_time_core_wall_checkpoint_eligible(&seeded));
+
+    d1l_time_service_core_t blocked;
+    init_core(&blocked, 0U);
+    assert(d1l_time_core_set_wall(
+               &blocked,
+               (int64_t)TEST_BUILD_EPOCH +
+                   D1L_TIME_SNTP_MAX_FORWARD_SEC + 1,
+               0U, D1L_TIME_VALIDITY_NETWORK_VALIDATED,
+               D1L_TIME_SOURCE_SNTP) == ESP_OK);
+    assert(!d1l_time_core_wall_checkpoint_eligible(&blocked));
+    assert(d1l_time_core_set_wall(
+               &blocked, INT64_C(2000000000), 0U,
+               D1L_TIME_VALIDITY_COMPANION_VALIDATED,
+               D1L_TIME_SOURCE_COMPANION_AUTHENTICATED) == ESP_OK);
+    assert(d1l_time_core_wall_checkpoint_eligible(&blocked));
+
+    assert(!d1l_time_core_wall_checkpoint_eligible(NULL));
+}
+
 static void test_companion_unrepresentable_and_protocol_exhaustion_fail_closed(void)
 {
     d1l_time_service_core_t unrepresentable;
@@ -489,6 +571,7 @@ static void test_companion_unrepresentable_and_protocol_exhaustion_fail_closed(v
     assert(snapshot.wall_valid && snapshot.certificate_time_valid);
     assert(snapshot.protocol_wall_admission ==
            D1L_TIME_PROTOCOL_WALL_UNREPRESENTABLE);
+    assert(!d1l_time_core_wall_checkpoint_eligible(&unrepresentable));
     assert(!snapshot.protocol_tx_ready);
     reserve_fixture_t reserve = {.result = ESP_OK};
     uint32_t timestamp = UINT32_C(0xA5A5A5A5);
@@ -549,6 +632,7 @@ int main(void)
     test_stale_sntp_generation_cannot_overwrite_companion_time();
     test_invalid_wall_pairs_and_generation_fail_preflight();
     test_lower_bound_never_rewinds_or_downgrades_validated_time();
+    test_retained_checkpoint_is_approximate_and_guarded();
     test_companion_unrepresentable_and_protocol_exhaustion_fail_closed();
     test_protocol_seed_cannot_rewind_after_allocation();
     puts("native truthful-time core: ok");

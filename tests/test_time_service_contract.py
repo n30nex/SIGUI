@@ -248,16 +248,117 @@ def test_map_delegates_certificate_time_without_owning_sntp_or_wall_clock():
     assert 'download_step(&result, "time_sync"' in fetch
 
 
-def test_future_wall_persistence_timezone_and_transport_stay_owned_by_service():
+def test_wall_checkpoint_is_implemented_while_timezone_and_transport_stay_owned_by_service():
     header = read("main/platform/time_service.h")
+    cmake = read("main/CMakeLists.txt")
     console = read("main/comms/usb_console.c")
-    assert "persist validated wall" in header
+    assert '"app/settings_time_checkpoint.c"' in cmake
+    assert '#include "app/settings_time_checkpoint.h"' in header
+    assert "persists validated wall checkpoints" in header
+    assert "d1l_time_service_wall_checkpoint_flush" in header
     assert "authenticated companion" in header
     assert "timezone/display conversion" in header
     assert "d1l_time_service_set_companion_time" in header
     assert "d1l_time_service_note_authenticated_lower_bound" in header
     assert "capability boundary, not user input" in header
     assert "d1l_time_service_set_companion_time" not in console
+
+
+def test_retained_checkpoint_envelope_is_domain_bound_and_fail_closed():
+    header = read("main/app/settings_time_checkpoint.h")
+    source = read("main/app/settings_time_checkpoint.c")
+    assert "D1L_SETTINGS_TIME_CHECKPOINT_SCHEMA_VERSION 1U" in header
+    assert "D1L_SETTINGS_TIME_CHECKPOINT_MIN_ADVANCE_SEC INT64_C(21600)" in header
+    assert '#define D1L_TIME_CHECKPOINT_NVS_NAMESPACE "d1l_time"' in source
+    assert '#define D1L_TIME_CHECKPOINT_NVS_KEY "wall_ckpt_v1"' in source
+    assert "D1L_TIME_CHECKPOINT_PAYLOAD_MAGIC" in source
+    assert "payload.revision == header.revision" in source
+    assert "payload.domain_magic ==" in source
+    assert "d1l_settings_envelope_validate(" in source
+    assert "d1l_settings_envelope_build(" in source
+    assert "QUARANTINED_NEWER_SCHEMA" in source
+    assert "QUARANTINED_MALFORMED" in source
+    assert "QUARANTINED_CHECKSUM" in source
+    save = body(
+        source,
+        "esp_err_t d1l_settings_time_checkpoint_save(",
+        "const char *d1l_settings_time_checkpoint_state_name(",
+    )
+    assert save.index("load_locked(&current, &current_status)") < save.index(
+        "nvs_set_blob("
+    )
+    assert "if (ret != ESP_OK)" in save
+    assert "d1l_settings_envelope_next_revision" in save
+
+
+def test_checkpoint_recovery_is_guarded_and_never_grants_tls_or_protocol_authority():
+    service = read("main/platform/time_service.c")
+    core = read("main/platform/time_service_core.c")
+    init = body(
+        service,
+        "esp_err_t d1l_time_service_init(void)",
+        "uint64_t d1l_time_service_boot_monotonic_us(void)",
+    )
+    assert init.index("load_protocol_seed_locked()") < init.index(
+        "load_wall_checkpoint_locked()"
+    )
+    recover = body(
+        core,
+        "esp_err_t d1l_time_core_recover_retained_checkpoint(",
+        "esp_err_t d1l_time_core_preflight_protocol_timestamp(",
+    )
+    assert "protocol_reserved_through_at_commit >" in recover
+    assert "core->protocol_reserved_through" in recover
+    assert "D1L_TIME_VALIDITY_APPROXIMATE" in recover
+    assert "D1L_TIME_SOURCE_RETAINED_VALIDATED_CHECKPOINT" in recover
+    assert "D1L_TIME_VALIDITY_NETWORK_VALIDATED" not in recover
+    assert "settimeofday" not in recover
+
+
+def test_validated_adoption_queues_checkpoint_and_worker_owns_nvs_io():
+    service = read("main/platform/time_service.c")
+    core = read("main/platform/time_service_core.c")
+    worker = read("main/mesh/route_store_worker.c")
+    scheduler = read("main/storage/retained_store_scheduler.h")
+    accept = body(
+        service,
+        "static esp_err_t accept_sntp_system_time",
+        "static esp_err_t certificate_state",
+    )
+    assert "d1l_time_core_wall_checkpoint_eligible(&s_time_core)" in accept
+    assert "queue_validated_wall_checkpoint_locked(" in accept
+    assert "d1l_settings_time_checkpoint_save(" not in accept
+    companion = body(
+        service,
+        "esp_err_t d1l_time_service_set_companion_time",
+        "esp_err_t d1l_time_service_note_authenticated_lower_bound",
+    )
+    assert "d1l_time_core_wall_checkpoint_eligible(&s_time_core)" in companion
+    assert "queue_validated_wall_checkpoint_locked(" in companion
+    assert "d1l_settings_time_checkpoint_save(" not in companion
+    eligible = body(
+        core,
+        "bool d1l_time_core_wall_checkpoint_eligible(",
+        "const char *d1l_time_validity_name(",
+    )
+    assert "D1L_TIME_PROTOCOL_WALL_SNTP_ADMITTED" in eligible
+    assert "D1L_TIME_PROTOCOL_WALL_COMPANION_AUTHORIZED" in eligible
+    assert "D1L_TIME_PROTOCOL_WALL_SNTP_FORWARD_BLOCKED" not in eligible
+    assert "D1L_TIME_PROTOCOL_WALL_UNREPRESENTABLE" not in eligible
+    flush = body(
+        service,
+        "static esp_err_t flush_wall_checkpoint",
+        "static esp_err_t reserve_protocol_range",
+    )
+    assert flush.index("time_unlock();") < flush.index(
+        "d1l_settings_time_checkpoint_save("
+    ) < flush.rindex("time_lock()")
+    assert "s_wall_checkpoint_pending_generation" in flush
+    assert "D1L_TIME_CHECKPOINT_RETRY_BACKOFF_US" in flush
+    assert "s_wall_checkpoint_retry_not_before_us" in flush
+    assert "D1L_RETAINED_STORE_TIME_CHECKPOINT" in scheduler
+    assert '.name = "time_checkpoint"' in worker
+    assert "d1l_time_service_wall_checkpoint_flush_if_due" in worker
 
 
 def test_lower_bound_cannot_replace_a_stronger_or_later_clock():
@@ -350,6 +451,15 @@ def test_usb_version_exposes_truthful_protocol_admission_and_recovery():
     assert '\\"protocol_tx_block\\"' in console
     assert '\\"protocol_trust_anchor\\"' in console
     assert '\\"sntp_ceiling\\"' in console
+    assert '\\"checkpoint\\"' in console
+    assert '\\"protocol_reserved_through\\"' in console
+    assert '\\"recovered\\"' in console
+    assert '\\"pending\\"' in console
+    assert '\\"write_blocked\\"' in console
+    assert '\\"write_count\\"' in console
+    assert '\\"skip_count\\"' in console
+    assert '\\"failure_count\\"' in console
+    assert '\\"retry_not_before_us\\"' in console
     assert '"authenticated_companion_or_newer_firmware"' in console
     assert '"protocol_persistence_migration_or_repair"' in console
     assert '"protocol_upgrade_required"' in console
@@ -360,3 +470,6 @@ def test_usb_version_exposes_truthful_protocol_admission_and_recovery():
     assert "d1l_time_protocol_persistence_state_name" in console
     assert "protocol_tx_ready" in header
     assert "protocol_tx_error" in header
+    assert "wall_checkpoint_pending" in header
+    assert "wall_checkpoint_failure_count" in header
+    assert "wall_checkpoint_write_blocked" in header

@@ -40,8 +40,11 @@ typedef struct {
 
 static mock_nvs_slot_t s_slots[MOCK_NVS_SLOT_COUNT];
 static esp_err_t s_fail_next_set;
+static esp_err_t s_fail_next_commit;
 static esp_err_t s_fail_next_open;
 static size_t s_open_count;
+static size_t s_set_count;
+static size_t s_commit_count;
 static size_t s_fail_open_call;
 static esp_err_t s_fail_scheduled_open;
 static int64_t s_now_us;
@@ -96,8 +99,11 @@ void mock_nvs_reset(void)
 {
     memset(s_slots, 0, sizeof(s_slots));
     s_fail_next_set = ESP_OK;
+    s_fail_next_commit = ESP_OK;
     s_fail_next_open = ESP_OK;
     s_open_count = 0U;
+    s_set_count = 0U;
+    s_commit_count = 0U;
     s_fail_open_call = 0U;
     s_fail_scheduled_open = ESP_OK;
     s_now_us = 0;
@@ -143,6 +149,11 @@ void mock_nvs_fail_next_set(esp_err_t error)
     s_fail_next_set = error == ESP_OK ? ESP_FAIL : error;
 }
 
+void mock_nvs_fail_next_commit(esp_err_t error)
+{
+    s_fail_next_commit = error == ESP_OK ? ESP_FAIL : error;
+}
+
 void mock_nvs_fail_next_open(esp_err_t error)
 {
     s_fail_next_open = error == ESP_OK ? ESP_FAIL : error;
@@ -152,6 +163,16 @@ void mock_nvs_fail_open_after(size_t successful_opens, esp_err_t error)
 {
     s_fail_open_call = s_open_count + successful_opens + 1U;
     s_fail_scheduled_open = error == ESP_OK ? ESP_FAIL : error;
+}
+
+size_t mock_nvs_set_call_count(void)
+{
+    return s_set_count;
+}
+
+size_t mock_nvs_commit_call_count(void)
+{
+    return s_commit_count;
 }
 
 void mock_nvs_run_during_next_set(void (*hook)(void))
@@ -288,6 +309,7 @@ esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value,
     if (!slot || !key || !value) {
         return ESP_ERR_INVALID_ARG;
     }
+    s_set_count++;
     if (s_fail_next_set != ESP_OK) {
         const esp_err_t error = s_fail_next_set;
         s_fail_next_set = ESP_OK;
@@ -336,6 +358,12 @@ esp_err_t nvs_commit(nvs_handle_t handle)
     mock_nvs_slot_t *slot = slot_for_handle(handle);
     if (!slot) {
         return ESP_ERR_INVALID_ARG;
+    }
+    s_commit_count++;
+    if (s_fail_next_commit != ESP_OK) {
+        const esp_err_t error = s_fail_next_commit;
+        s_fail_next_commit = ESP_OK;
+        return error;
     }
     if (slot->pending_kind == MOCK_PENDING_SET) {
         (void)snprintf(slot->key, sizeof(slot->key), "%s", slot->pending_key);
