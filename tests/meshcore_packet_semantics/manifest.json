@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "target": "semantic_packet_parser",
+  "status": "implemented",
+  "coverage_boundary": "production_meshcore_semantic_packet_admission",
+  "engine": "libFuzzer",
+  "runs": 100000,
+  "seed": 13746277,
+  "max_input_bytes": 256,
+  "sanitizers": [
+    "address",
+    "undefined"
+  ],
+  "corpus": {
+    "path": "tests/meshcore_packet_semantics/corpus.json",
+    "seed_count": 14,
+    "sha256": "940f9e88f5034e80cb8fcc67c82f1993540427c986078dc28a74f7c80c41a3ef"
+  },
+  "production_integration": [
+    "main/CMakeLists.txt",
+    "main/mesh/meshcore_service.c",
+    "main/mesh/meshcore_packet_semantics.c",
+    "main/mesh/meshcore_packet_semantics.h",
+    "main/mesh/meshcore_wire.c",
+    "main/mesh/meshcore_wire.h"
+  ],
+  "source_pins": {
+    ".github/workflows/d1l-ci.yml": "c90ff9453217dd7da84c63a9553bad0a928aa83b7df459a578eb6fa28edbbeac",
+    "main/CMakeLists.txt": "be0658c2bc79e2bfcf67cacd9947733145228cdca5c2d8ce5cb5f4690275e83e",
+    "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
+    "main/mesh/meshcore_packet_semantics.c": "a5c17a544edf1eefce22bd5bc433ceef6549d08e22d243351751890dc4a2f412",
+    "main/mesh/meshcore_packet_semantics.h": "3515d04930c9554906c658a4f0cf8e9b70c6fc3d3889891aae2de71cfc10f192",
+    "main/mesh/meshcore_service.c": "9b26ba8228272b4886b21694970649754222e30660280fd13296fa192daa9186",
+    "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
+    "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
+    "scripts/meshcore_conformance_d1l.py": "7087e810bfd69a1654519abbef322608e52e3b1b08475c37394cf09f02ba8065",
+    "scripts/meshcore_semantic_packet_fuzz_d1l.py": "5765cddb1560f8355d26fd4e7dc1679858ae99aa5d3836b237e72fd523f04bd5",
+    "tests/fuzz/meshcore_packet_semantics_fuzz.c": "49563874ea8b87f150153da28c0e9c86416a0908f744ff616d2921f8a1c4c9a8",
+    "tests/native/meshcore_packet_semantics_test.c": "0ee4c25f8e1c8bf4dee9e5e68dc14cc69013e14a6ff17f9339698aca2d806f48",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "da37c2e2a7206beb357e8798c9419f86498d5c68fad144f421528792e0b56e16",
+    "tests/test_meshcore_packet_semantics.py": "925ac7ab080c916c154e44d5962b6186af52379669df3ee8b0a8cafc91686243"
+  },
+  "accepted_families": [
+    "admin_response",
+    "configured_channel_text",
+    "direct_message_text",
+    "simple_ack",
+    "multipart_ack",
+    "path",
+    "trace",
+    "advert"
+  ],
+  "rejection_contract": [
+    "null_and_empty_input",
+    "truncated_envelope_or_transport_codes",
+    "future_payload_version",
+    "invalid_path_encoding",
+    "unsupported_payload_type",
+    "family_payload_below_minimum",
+    "invalid_multipart_ack_descriptor",
+    "advert_app_data_over_32_bytes",
+    "raw_input_over_255_bytes"
+  ],
+  "side_effect_free_rejection": true,
+  "canonical_zero_output_on_reject": true,
+  "production_receive_dispatch_bound": true,
+  "simple_ack_extended_body_allowed": true,
+  "decrypt_auth_covered": false,
+  "state_transition_covered": false,
+  "host_only": true,
+  "hardware_closure_eligible": false,
+  "rf_closure_eligible": false,
+  "wp05_closure_ready": false,
+  "release_closure_ready": false
+}

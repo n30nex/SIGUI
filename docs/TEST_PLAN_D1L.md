@@ -63,6 +63,17 @@ Coverage:
   truncated-argument, token-suffix, and over-255-byte cases must fail before
   side effects and wipe the complete command buffer. This is host/parser proof,
   not hardware, RF, WP-05, or release closure.
+  The job must independently run
+  `scripts/meshcore_semantic_packet_fuzz_d1l.py` with pinned `clang-18`, seed
+  `13746277`, and exactly 100,000 libFuzzer inputs, then upload
+  `meshcore_semantic_packet_fuzz_<full-commit>.json`. Its 100,000-case native
+  contract and 14 hash-bound seeds must cover every locally dispatched packet
+  family, malformed/truncated/future-version/unsupported inputs, family length
+  boundaries, invalid multipart subtype, maximum advert data, and oversize
+  advert rejection. Every reject must leave a canonical zero output and must not
+  reach a semantic handler. This implements only the structural
+  `semantic_packet_parser` target; decrypt/auth, state/replay, RF, physical,
+  WP-05, and release closure remain open.
   Native cases also require a 160-entry cyclic cache, correct all-zero occupancy,
   deterministic FIFO eviction, multipart-ACK descriptor normalization, and
   terminal-only admission. Production source contracts must prove authentication

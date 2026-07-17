@@ -25,6 +25,7 @@
 #include "mesh/meshcore_ack_dispatch.h"
 #include "mesh/meshcore_admin_runtime.h"
 #include "mesh/meshcore_advert_admission.h"
+#include "mesh/meshcore_packet_semantics.h"
 #include "mesh/meshcore_packet_hash.h"
 #include "mesh/meshcore_command_guard.h"
 #include "mesh/meshcore_dm_retry.h"
@@ -4384,13 +4385,37 @@ static void meshcore_service_run_owner_maintenance(void)
 static void meshcore_service_handle_radio_rx_done(
     const uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
-    (void)parse_rx_admin_response_packet(payload, size);
-    parse_rx_channel_packet(payload, size, rssi, snr);
-    const bool ack_queued = parse_rx_dm_packet(payload, size, rssi, snr);
-    parse_rx_path_packet(payload, size, rssi, snr);
-    parse_rx_ack_packet(payload, size, rssi, snr);
-    parse_rx_trace_packet(payload, size, rssi, snr);
-    parse_rx_advert_packet(payload, size, rssi, snr);
+    d1l_meshcore_packet_semantic_view_t packet = {0};
+    bool ack_queued = false;
+    if (d1l_meshcore_packet_semantic_parse(payload, size, &packet)) {
+        switch (packet.kind) {
+        case D1L_MESHCORE_PACKET_SEMANTIC_ADMIN_RESPONSE:
+            (void)parse_rx_admin_response_packet(payload, size);
+            break;
+        case D1L_MESHCORE_PACKET_SEMANTIC_CHANNEL_TEXT:
+            parse_rx_channel_packet(payload, size, rssi, snr);
+            break;
+        case D1L_MESHCORE_PACKET_SEMANTIC_DIRECT_MESSAGE:
+            ack_queued = parse_rx_dm_packet(payload, size, rssi, snr);
+            break;
+        case D1L_MESHCORE_PACKET_SEMANTIC_ACK:
+        case D1L_MESHCORE_PACKET_SEMANTIC_MULTIPART_ACK:
+            parse_rx_ack_packet(payload, size, rssi, snr);
+            break;
+        case D1L_MESHCORE_PACKET_SEMANTIC_PATH:
+            parse_rx_path_packet(payload, size, rssi, snr);
+            break;
+        case D1L_MESHCORE_PACKET_SEMANTIC_TRACE:
+            parse_rx_trace_packet(payload, size, rssi, snr);
+            break;
+        case D1L_MESHCORE_PACKET_SEMANTIC_ADVERT:
+            parse_rx_advert_packet(payload, size, rssi, snr);
+            break;
+        case D1L_MESHCORE_PACKET_SEMANTIC_INVALID:
+        default:
+            break;
+        }
+    }
     if (!ack_queued) {
         d1l_meshcore_start_rx();
     }

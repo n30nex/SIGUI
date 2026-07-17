@@ -45,6 +45,7 @@ idf_component_register(
         "mesh/channel_store.c"
         "mesh/contact_store.c"
         "mesh/meshcore_advert_admission.c"
+        "mesh/meshcore_packet_semantics.c"
         "mesh/meshcore_rx_admission.c"
         "mesh/meshcore_packet_hash.c"
         "mesh/meshcore_path_state.c"

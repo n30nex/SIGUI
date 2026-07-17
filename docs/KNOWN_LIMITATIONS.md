@@ -133,6 +133,15 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   run, and the exact-commit Actions job executes a 100,000-run libFuzzer gate.
   The other missing/partial targets remain open; this is software/Actions proof
   only and does not claim physical USB, WP-05, firmware, or release closure.
+  The production semantic packet-admission slice advances that summary again to
+  4 implemented / 1 partial / 3 missing. It classifies one supported RX family
+  from the explicit raw length and rejects malformed, truncated, future-version,
+  unsupported-type, invalid multipart, and advert-size inputs with a zeroed
+  output before handler dispatch. The pinned Actions gate adds 100,000 native
+  deterministic cases plus 100,000 ASan/UBSan libFuzzer executions. This is a
+  structural dispatch boundary only: decrypt/MAC/signature authentication,
+  replay/state transitions, remaining fuzz targets, RF, physical behavior,
+  WP-05, firmware, and release closure remain open.
   The pinned `BaseChatMesh` callback reports
   `is_new=false` for the tested newly auto-added contact; integration must not
   rely on that flag as a truthful new-contact indicator until upstream behavior

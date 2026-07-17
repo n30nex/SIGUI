@@ -165,7 +165,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         summary["implemented_fuzz_target_count"],
         summary["partial_fuzz_target_count"],
         summary["missing_fuzz_target_count"],
-    ) == (3, 1, 4)
+    ) == (4, 1, 3)
     assert summary["oracle_semantic_vectors"] == 915
     assert summary["unique_referenced_oracle_semantic_vectors"] == 890
     assert summary["production_suite_count"] == 11
