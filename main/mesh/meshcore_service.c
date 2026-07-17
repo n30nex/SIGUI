@@ -2980,11 +2980,6 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
         packet.payload_len < 3U) {
         return;
     }
-    if (!channel_message_generation_ready()) {
-        s_status.channel_rx_reconcile_blocked++;
-        return;
-    }
-
     d1l_channel_protocol_key_t
         candidates[D1L_CHANNEL_STORE_CAPACITY] = {0};
     const size_t candidate_count = d1l_channel_store_copy_hash_matches(
@@ -3079,6 +3074,11 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     if (packet_hash_ready && d1l_meshcore_packet_hash_cache_contains(
                                  &s_rx_packet_hash_cache, packet_hash)) {
         secure_zero_bytes(plain, sizeof(plain));
+        return;
+    }
+    if (!channel_message_generation_ready()) {
+        secure_zero_bytes(plain, sizeof(plain));
+        s_status.channel_rx_reconcile_blocked++;
         return;
     }
     char route_target[17] = {0};

@@ -146,12 +146,17 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     assert "D1L_CHANNEL_PUBLIC_ID" in public
 
     receive = c_function(service, "static void parse_rx_channel_packet(")
-    ready_index = receive.index("channel_message_generation_ready()")
     matches_index = receive.index("d1l_channel_store_copy_hash_matches")
     decrypt_index = receive.index("meshcore_decrypt_after_mac")
     finish_index = receive.index("d1l_meshcore_channel_dispatch_finish")
+    current_key_index = receive.index("d1l_channel_store_copy_protocol_key")
+    plaintext_index = receive.index("d1l_meshcore_text_plaintext_view(")
+    duplicate_index = receive.index("d1l_meshcore_packet_hash_cache_contains")
+    ready_index = receive.index("channel_message_generation_ready()")
     append_index = receive.index("append_channel_message_store_rx(")
-    assert ready_index < matches_index < decrypt_index < finish_index < append_index
+    assert matches_index < decrypt_index < finish_index < current_key_index
+    assert current_key_index < plaintext_index < duplicate_index < ready_index
+    assert ready_index < append_index
     assert "D1L_CHANNEL_STORE_CAPACITY" in receive
     assert "d1l_channel_store_find_unique_hash" not in receive
     assert "channel_protocol_keys_equal" in receive
@@ -166,6 +171,68 @@ def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     assert "d1l_channel_message_reconcile_pending()" in gate
     assert "d1l_channel_message_reconcile()" in gate
     assert "return false" in gate
+
+
+def test_rejected_channel_rx_is_retained_side_effect_free_in_production_order():
+    service = read("main/mesh/meshcore_service.c")
+    receive = c_function(service, "static void parse_rx_channel_packet(")
+
+    ready_index = receive.index("channel_message_generation_ready()")
+    append_index = receive.index("append_channel_message_store_rx(")
+    route_index = receive.index("d1l_route_store_upsert_observation(")
+    packet_log_index = receive.index("append_packet_log_deferred(")
+    remember_index = receive.index("d1l_meshcore_packet_hash_cache_remember(")
+    assert ready_index < append_index < remember_index < route_index < packet_log_index
+
+    adversarial_rejections = (
+        (
+            "if (!d1l_meshcore_channel_dispatch_begin(&dispatch, candidate_count))",
+            "d1l_meshcore_channel_dispatch_observe(",
+        ),
+        (
+            "if (!d1l_meshcore_channel_dispatch_observe(",
+            "secure_zero_bytes(candidates, sizeof(candidates));\n\n    size_t selected_index",
+        ),
+        (
+            "if (dispatch_outcome != D1L_MESHCORE_CHANNEL_DISPATCH_ACCEPTED)",
+            "d1l_channel_protocol_key_t current_key",
+        ),
+        ("if (!selected_current)", "if (plain_len < 6U"),
+        (
+            "if (plain_len < 6U || (plain[4] >> 2) != 0)",
+            "d1l_meshcore_text_plaintext_view_t text_view",
+        ),
+        (
+            "if (!d1l_meshcore_text_plaintext_view(",
+            "plain[5U + text_view.text_length]",
+        ),
+        (
+            "if (packet_hash_ready && d1l_meshcore_packet_hash_cache_contains(",
+            "if (!channel_message_generation_ready())",
+        ),
+    )
+    retained_mutations = (
+        "channel_message_generation_ready()",
+        "append_channel_message_store_rx(",
+        "d1l_meshcore_packet_hash_cache_remember(",
+        "d1l_route_store_upsert_observation(",
+        "append_packet_log_deferred(",
+    )
+    for start_marker, end_marker in adversarial_rejections:
+        start = receive.index(start_marker)
+        end = receive.index(end_marker, start)
+        rejection = receive[start:end]
+        assert "return;" in rejection
+        assert end <= ready_index
+        for mutation in retained_mutations:
+            assert mutation not in rejection
+
+    reconcile_gate = receive[
+        ready_index : receive.index("char route_target[17]", ready_index)
+    ]
+    assert "secure_zero_bytes(plain, sizeof(plain))" in reconcile_gate
+    assert "channel_rx_reconcile_blocked++" in reconcile_gate
+    assert "return;" in reconcile_gate
 
 
 def test_pending_history_is_bound_to_exact_channel_radio_operation():
