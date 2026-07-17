@@ -11,13 +11,20 @@
 
 #define D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES
 #define D1L_DM_STORE_KEY "threads"
-#define D1L_DM_STORE_SCHEMA 6U
+#define D1L_DM_STORE_SCHEMA 7U
+#define D1L_DM_STORE_SCHEMA_V6 6U
 #define D1L_DM_STORE_SCHEMA_V5 5U
 #define D1L_DM_STORE_SCHEMA_V4 4U
 #define D1L_DM_STORE_SCHEMA_V3 3U
 #define D1L_DM_STORE_SCHEMA_V2 2U
 #define D1L_DM_STORE_SCHEMA_V1 1U
 #define D1L_DM_TEXT_LEN_V1 96U
+#define D1L_DM_CONTACT_ALIAS_LEN_LEGACY 24U
+#define D1L_DM_CONTACT_ALIAS_LEN_V6_WIDE 32U
+
+_Static_assert(D1L_DM_CONTACT_ALIAS_LEN ==
+                   D1L_DM_CONTACT_ALIAS_LEN_V6_WIDE,
+               "schema-v7 DM alias width must remain frozen");
 
 typedef struct {
     uint32_t schema;
@@ -39,7 +46,7 @@ typedef struct {
     uint32_t seq;
     uint32_t uptime_ms;
     char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
-    char contact_alias[D1L_CONTACT_ALIAS_LEN];
+    char contact_alias[D1L_DM_CONTACT_ALIAS_LEN_LEGACY];
     char direction[D1L_DM_DIRECTION_LEN];
     char text[D1L_MESSAGE_TEXT_LEN];
     int rssi_dbm;
@@ -72,7 +79,7 @@ typedef struct {
     uint32_t seq;
     uint32_t uptime_ms;
     char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
-    char contact_alias[D1L_CONTACT_ALIAS_LEN];
+    char contact_alias[D1L_DM_CONTACT_ALIAS_LEN_LEGACY];
     char direction[D1L_DM_DIRECTION_LEN];
     char text[D1L_MESSAGE_TEXT_LEN];
     int rssi_dbm;
@@ -104,6 +111,60 @@ typedef struct {
     d1l_dm_entry_v5_t entries[D1L_DM_STORE_CAPACITY];
 } d1l_dm_store_blob_v5_t;
 
+/* Schema v6 was emitted with two different entry ABIs.  The first writer used
+ * the historical 24-byte contact alias; a later contact-only change widened
+ * the shared alias macro to 32 without advancing the DM schema.  Preserve both
+ * exact layouts and distinguish them only by their complete byte length. */
+typedef struct {
+    uint32_t seq;
+    uint64_t delivery_session_id;
+    uint32_t uptime_ms;
+    char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char contact_alias[D1L_DM_CONTACT_ALIAS_LEN_LEGACY];
+    char direction[D1L_DM_DIRECTION_LEN];
+    char text[D1L_MESSAGE_TEXT_LEN];
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    uint8_t attempt;
+    bool delivered;
+    bool acked;
+    uint32_t ack_hash;
+    uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES];
+    uint8_t ack_dispatch_count;
+    uint8_t ack_dispatch_kind;
+    d1l_dm_ack_state_t ack_state;
+    esp_err_t ack_last_error;
+    bool identity_digest_valid;
+    d1l_dm_delivery_state_t delivery_state;
+    d1l_dm_delivery_reason_t delivery_reason;
+    esp_err_t delivery_last_error;
+    uint8_t delivery_retry_count;
+    uint32_t delivery_revision;
+} d1l_dm_entry_v6_narrow_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t head;
+    uint32_t count;
+    uint32_t epoch;
+    uint32_t content_revision;
+    uint64_t clear_lineage;
+    d1l_dm_entry_v6_narrow_t entries[D1L_DM_STORE_CAPACITY];
+} d1l_dm_store_blob_v6_narrow_t;
+
+/* The second schema-v6 ABI is byte-for-byte the current 32-byte alias layout.
+ * Schema v7 changes only the schema discriminator, not this representation. */
+typedef d1l_dm_store_blob_t d1l_dm_store_blob_v6_wide_t;
+
+_Static_assert(sizeof(d1l_dm_store_blob_v6_narrow_t) !=
+                   sizeof(d1l_dm_store_blob_v6_wide_t),
+               "schema-v6 DM ABI lengths must remain distinguishable");
+
 typedef struct {
     uint32_t schema;
     uint32_t next_seq;
@@ -130,7 +191,7 @@ typedef struct {
     uint32_t seq;
     uint32_t uptime_ms;
     char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
-    char contact_alias[D1L_CONTACT_ALIAS_LEN];
+    char contact_alias[D1L_DM_CONTACT_ALIAS_LEN_LEGACY];
     char direction[D1L_DM_DIRECTION_LEN];
     char text[D1L_DM_TEXT_LEN_V1];
     int rssi_dbm;
@@ -155,7 +216,9 @@ typedef struct {
 
 typedef union {
     uint32_t schema;
-    d1l_dm_store_blob_t v6;
+    d1l_dm_store_blob_t v7;
+    d1l_dm_store_blob_v6_wide_t v6_wide;
+    d1l_dm_store_blob_v6_narrow_t v6_narrow;
     d1l_dm_store_blob_v5_t v5;
     d1l_dm_store_blob_v4_t v4;
     d1l_dm_store_blob_v3_t v3;
@@ -663,9 +726,45 @@ static bool persisted_entry_is_valid(const d1l_dm_entry_t *entry,
            delivery_metadata_is_valid(entry);
 }
 
-static bool blob_is_valid(const d1l_dm_store_blob_t *blob, size_t len)
+static void convert_v6_narrow_entry(const d1l_dm_entry_v6_narrow_t *old,
+                                    d1l_dm_entry_t *out)
 {
-    if (!blob || len != sizeof(*blob) || blob->schema != D1L_DM_STORE_SCHEMA ||
+    memset(out, 0, sizeof(*out));
+    out->seq = old->seq;
+    out->delivery_session_id = old->delivery_session_id;
+    out->uptime_ms = old->uptime_ms;
+    memcpy(out->contact_fingerprint, old->contact_fingerprint,
+           sizeof(old->contact_fingerprint));
+    memcpy(out->contact_alias, old->contact_alias,
+           sizeof(old->contact_alias));
+    memcpy(out->direction, old->direction, sizeof(old->direction));
+    memcpy(out->text, old->text, sizeof(old->text));
+    out->rssi_dbm = old->rssi_dbm;
+    out->snr_tenths = old->snr_tenths;
+    out->path_hash_bytes = old->path_hash_bytes;
+    out->path_hops = old->path_hops;
+    out->attempt = old->attempt;
+    out->delivered = old->delivered;
+    out->acked = old->acked;
+    out->ack_hash = old->ack_hash;
+    memcpy(out->identity_digest, old->identity_digest,
+           sizeof(old->identity_digest));
+    out->ack_dispatch_count = old->ack_dispatch_count;
+    out->ack_dispatch_kind = old->ack_dispatch_kind;
+    out->ack_state = old->ack_state;
+    out->ack_last_error = old->ack_last_error;
+    out->identity_digest_valid = old->identity_digest_valid;
+    out->delivery_state = old->delivery_state;
+    out->delivery_reason = old->delivery_reason;
+    out->delivery_last_error = old->delivery_last_error;
+    out->delivery_retry_count = old->delivery_retry_count;
+    out->delivery_revision = old->delivery_revision;
+}
+
+static bool blob_layout_is_valid(const d1l_dm_store_blob_t *blob, size_t len,
+                                 uint32_t expected_schema)
+{
+    if (!blob || len != sizeof(*blob) || blob->schema != expected_schema ||
         blob->epoch == 0U || blob->content_revision == 0U ||
         blob->head >= D1L_DM_STORE_CAPACITY ||
         blob->count > D1L_DM_STORE_CAPACITY || blob->next_seq == 0U ||
@@ -691,6 +790,61 @@ static bool blob_is_valid(const d1l_dm_store_blob_t *blob, size_t len)
             }
         }
         previous_seq = blob->entries[i].seq;
+    }
+    return true;
+}
+
+static bool blob_is_valid(const d1l_dm_store_blob_t *blob, size_t len)
+{
+    return blob_layout_is_valid(blob, len, D1L_DM_STORE_SCHEMA);
+}
+
+static bool blob_v6_wide_is_valid(const d1l_dm_store_blob_v6_wide_t *blob,
+                                  size_t len)
+{
+    return blob_layout_is_valid(blob, len, D1L_DM_STORE_SCHEMA_V6);
+}
+
+static bool blob_v6_narrow_is_valid(
+    const d1l_dm_store_blob_v6_narrow_t *blob, size_t len)
+{
+    if (!blob || len != sizeof(*blob) ||
+        blob->schema != D1L_DM_STORE_SCHEMA_V6 || blob->epoch == 0U ||
+        blob->content_revision == 0U ||
+        blob->head >= D1L_DM_STORE_CAPACITY ||
+        blob->count > D1L_DM_STORE_CAPACITY || blob->next_seq == 0U ||
+        blob->total_written < blob->count ||
+        blob->head != blob->count % D1L_DM_STORE_CAPACITY) {
+        return false;
+    }
+    uint32_t previous_seq = 0U;
+    for (size_t i = 0U; i < blob->count; ++i) {
+        const d1l_dm_entry_v6_narrow_t *entry = &blob->entries[i];
+        d1l_dm_entry_t current = {0};
+        if (!persisted_ascii_is_valid(entry->contact_alias,
+                                      sizeof(entry->contact_alias), false)) {
+            return false;
+        }
+        convert_v6_narrow_entry(entry, &current);
+        if (!persisted_entry_is_valid(&current, blob->next_seq) ||
+            entry->seq <= previous_seq) {
+            return false;
+        }
+        for (size_t previous = 0U; previous < i; ++previous) {
+            if (entry->identity_digest_valid &&
+                blob->entries[previous].identity_digest_valid &&
+                memcmp(blob->entries[previous].identity_digest,
+                       entry->identity_digest,
+                       D1L_DM_IDENTITY_DIGEST_BYTES) == 0) {
+                return false;
+            }
+            if (entry->delivery_session_id != 0U &&
+                blob->entries[previous].delivery_session_id ==
+                    entry->delivery_session_id) {
+                return false;
+            }
+        }
+        previous_seq = entry->seq;
     }
     return true;
 }
@@ -850,7 +1004,7 @@ static void convert_v5_entry(const d1l_dm_entry_v5_t *old,
     memcpy(out->contact_fingerprint, old->contact_fingerprint,
            sizeof(out->contact_fingerprint));
     memcpy(out->contact_alias, old->contact_alias,
-           sizeof(out->contact_alias));
+           sizeof(old->contact_alias));
     memcpy(out->direction, old->direction, sizeof(out->direction));
     memcpy(out->text, old->text, sizeof(out->text));
     out->rssi_dbm = old->rssi_dbm;
@@ -903,7 +1057,7 @@ static void convert_v4_entry(const d1l_dm_entry_v4_t *old,
     memcpy(out->contact_fingerprint, old->contact_fingerprint,
            sizeof(out->contact_fingerprint));
     memcpy(out->contact_alias, old->contact_alias,
-           sizeof(out->contact_alias));
+           sizeof(old->contact_alias));
     memcpy(out->direction, old->direction, sizeof(out->direction));
     memcpy(out->text, old->text, sizeof(out->text));
     out->rssi_dbm = old->rssi_dbm;
@@ -1034,6 +1188,31 @@ static void convert_v1_blob(const d1l_dm_store_blob_v1_t *old,
     }
 }
 
+static void convert_v6_narrow_blob(const d1l_dm_store_blob_v6_narrow_t *old,
+                                   d1l_dm_store_blob_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->schema = D1L_DM_STORE_SCHEMA;
+    out->epoch = old->epoch;
+    out->content_revision = old->content_revision;
+    out->clear_lineage = old->clear_lineage;
+    out->next_seq = old->next_seq;
+    out->total_written = old->total_written;
+    out->dropped_oldest = old->dropped_oldest;
+    out->head = old->count % D1L_DM_STORE_CAPACITY;
+    out->count = old->count;
+    for (size_t i = 0U; i < old->count; ++i) {
+        convert_v6_narrow_entry(&old->entries[i], &out->entries[i]);
+    }
+}
+
+static void convert_v6_wide_blob(const d1l_dm_store_blob_v6_wide_t *old,
+                                 d1l_dm_store_blob_t *out)
+{
+    *out = *old;
+    out->schema = D1L_DM_STORE_SCHEMA;
+}
+
 static esp_err_t decode_raw_blob(const d1l_dm_store_raw_blob_t *raw, size_t len,
                                  d1l_dm_store_blob_t *out, bool *out_upgrade)
 {
@@ -1042,10 +1221,30 @@ static esp_err_t decode_raw_blob(const d1l_dm_store_raw_blob_t *raw, size_t len,
     }
     *out_upgrade = false;
     if (raw->schema == D1L_DM_STORE_SCHEMA) {
-        if (!blob_is_valid(&raw->v6, len)) {
+        if (!blob_is_valid(&raw->v7, len)) {
             return ESP_ERR_INVALID_STATE;
         }
-        *out = raw->v6;
+        *out = raw->v7;
+        return ESP_OK;
+    }
+    if (raw->schema == D1L_DM_STORE_SCHEMA_V6) {
+        if (len == sizeof(raw->v6_narrow)) {
+            if (!blob_v6_narrow_is_valid(&raw->v6_narrow, len)) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            convert_v6_narrow_blob(&raw->v6_narrow, out);
+        } else if (len == sizeof(raw->v6_wide)) {
+            if (!blob_v6_wide_is_valid(&raw->v6_wide, len)) {
+                return ESP_ERR_INVALID_STATE;
+            }
+            convert_v6_wide_blob(&raw->v6_wide, out);
+        } else {
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (!blob_is_valid(out, sizeof(*out))) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        *out_upgrade = true;
         return ESP_OK;
     }
     if (raw->schema == D1L_DM_STORE_SCHEMA_V5) {

@@ -10,6 +10,8 @@
 #include "storage/retained_blob_store.h"
 
 #define MOCK_BLOB_MAX 8192U
+#define TEST_LEGACY_CONTACT_ALIAS_LEN 24U
+#define TEST_SCHEMA_V7 7U
 #define TEST_SCHEMA_V6 6U
 #define TEST_SCHEMA_V5 5U
 #define TEST_SCHEMA_V4 4U
@@ -35,11 +37,56 @@ typedef struct {
     d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
 } test_blob_v6_t;
 
+typedef test_blob_v6_t test_blob_v7_t;
+typedef test_blob_v6_t test_blob_v6_wide_t;
+
+typedef struct {
+    uint32_t seq;
+    uint64_t delivery_session_id;
+    uint32_t uptime_ms;
+    char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char contact_alias[TEST_LEGACY_CONTACT_ALIAS_LEN];
+    char direction[D1L_DM_DIRECTION_LEN];
+    char text[D1L_MESSAGE_TEXT_LEN];
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    uint8_t attempt;
+    bool delivered;
+    bool acked;
+    uint32_t ack_hash;
+    uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES];
+    uint8_t ack_dispatch_count;
+    uint8_t ack_dispatch_kind;
+    d1l_dm_ack_state_t ack_state;
+    esp_err_t ack_last_error;
+    bool identity_digest_valid;
+    d1l_dm_delivery_state_t delivery_state;
+    d1l_dm_delivery_reason_t delivery_reason;
+    esp_err_t delivery_last_error;
+    uint8_t delivery_retry_count;
+    uint32_t delivery_revision;
+} test_entry_v6_narrow_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t head;
+    uint32_t count;
+    uint32_t epoch;
+    uint32_t content_revision;
+    uint64_t clear_lineage;
+    test_entry_v6_narrow_t entries[D1L_DM_STORE_CAPACITY];
+} test_blob_v6_narrow_t;
+
 typedef struct {
     uint32_t seq;
     uint32_t uptime_ms;
     char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
-    char contact_alias[D1L_CONTACT_ALIAS_LEN];
+    char contact_alias[TEST_LEGACY_CONTACT_ALIAS_LEN];
     char direction[D1L_DM_DIRECTION_LEN];
     char text[D1L_MESSAGE_TEXT_LEN];
     int rssi_dbm;
@@ -75,7 +122,7 @@ typedef struct {
     uint32_t seq;
     uint32_t uptime_ms;
     char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
-    char contact_alias[D1L_CONTACT_ALIAS_LEN];
+    char contact_alias[TEST_LEGACY_CONTACT_ALIAS_LEN];
     char direction[D1L_DM_DIRECTION_LEN];
     char text[D1L_MESSAGE_TEXT_LEN];
     int rssi_dbm;
@@ -294,11 +341,49 @@ static test_entry_v5_t make_v5_entry(uint32_t seq, const char *text,
     return legacy;
 }
 
+static test_entry_v6_narrow_t make_v6_narrow_entry(
+    const d1l_dm_entry_t *current)
+{
+    assert(current != NULL);
+    test_entry_v6_narrow_t narrow = {
+        .seq = current->seq,
+        .delivery_session_id = current->delivery_session_id,
+        .uptime_ms = current->uptime_ms,
+        .rssi_dbm = current->rssi_dbm,
+        .snr_tenths = current->snr_tenths,
+        .path_hash_bytes = current->path_hash_bytes,
+        .path_hops = current->path_hops,
+        .attempt = current->attempt,
+        .delivered = current->delivered,
+        .acked = current->acked,
+        .ack_hash = current->ack_hash,
+        .ack_dispatch_count = current->ack_dispatch_count,
+        .ack_dispatch_kind = current->ack_dispatch_kind,
+        .ack_state = current->ack_state,
+        .ack_last_error = current->ack_last_error,
+        .identity_digest_valid = current->identity_digest_valid,
+        .delivery_state = current->delivery_state,
+        .delivery_reason = current->delivery_reason,
+        .delivery_last_error = current->delivery_last_error,
+        .delivery_retry_count = current->delivery_retry_count,
+        .delivery_revision = current->delivery_revision,
+    };
+    memcpy(narrow.contact_fingerprint, current->contact_fingerprint,
+           sizeof(narrow.contact_fingerprint));
+    memcpy(narrow.contact_alias, current->contact_alias,
+           sizeof(narrow.contact_alias));
+    memcpy(narrow.direction, current->direction, sizeof(narrow.direction));
+    memcpy(narrow.text, current->text, sizeof(narrow.text));
+    memcpy(narrow.identity_digest, current->identity_digest,
+           sizeof(narrow.identity_digest));
+    return narrow;
+}
+
 static test_blob_v6_t make_v3(uint32_t epoch, uint32_t revision,
-                              const char *text)
+                               const char *text)
 {
     test_blob_v6_t blob = {
-        .schema = TEST_SCHEMA_V6,
+        .schema = TEST_SCHEMA_V7,
         .epoch = epoch,
         .content_revision = revision,
         .next_seq = text ? 2U : 1U,
@@ -322,7 +407,7 @@ static void seed_v3(mock_blob_t *dest, uint32_t epoch, uint32_t revision,
 static void seed_full_v3(mock_blob_t *dest, const char *prefix)
 {
     test_blob_v6_t blob = {
-        .schema = TEST_SCHEMA_V6,
+        .schema = TEST_SCHEMA_V7,
         .epoch = 1U,
         .content_revision = 17U,
         .next_seq = D1L_DM_STORE_CAPACITY + 1U,
@@ -345,7 +430,7 @@ static void seed_range_v3(mock_blob_t *dest, uint32_t total_written,
 {
     assert(count <= D1L_DM_STORE_CAPACITY);
     test_blob_v6_t blob = {
-        .schema = TEST_SCHEMA_V6,
+        .schema = TEST_SCHEMA_V7,
         .epoch = 1U,
         .content_revision = total_written + 1U,
         .next_seq = total_written + 1U,
@@ -716,7 +801,7 @@ static void test_v2_migrates_without_init_erase(void)
     assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
     assert(strcmp(row.text, "v2-row") == 0);
     assert(d1l_dm_store_flush() == ESP_OK);
-    assert(((const test_blob_v6_t *)s_nvs.data)->schema == TEST_SCHEMA_V6);
+    assert(((const test_blob_v7_t *)s_nvs.data)->schema == TEST_SCHEMA_V7);
     assert(((const test_blob_v6_t *)s_nvs.data)->clear_lineage == 0U);
 }
 
@@ -761,7 +846,7 @@ static void test_v3_migrates_without_inventing_clear_lineage(void)
     assert(d1l_dm_store_stats().nvs_fallback_dirty);
     assert(d1l_dm_store_flush() == ESP_OK);
     const test_blob_v6_t *migrated = (const test_blob_v6_t *)s_nvs.data;
-    assert(migrated->schema == TEST_SCHEMA_V6);
+    assert(migrated->schema == TEST_SCHEMA_V7);
     assert(migrated->epoch == 44U);
     assert(migrated->clear_lineage == 0U);
     assert(blob_contains(&s_nvs, "v3-row"));
@@ -833,7 +918,7 @@ static void test_noncanonical_v4_and_v3_order_fail_closed(void)
 {
     reset_backend();
     test_blob_v6_t malformed = {
-        .schema = TEST_SCHEMA_V6,
+        .schema = TEST_SCHEMA_V7,
         .next_seq = 3U,
         .total_written = 2U,
         .head = 2U,
@@ -1171,7 +1256,200 @@ static void test_v4_migration_preserves_rows_as_legacy_unverified(void)
     assert(row.ack_state == D1L_DM_ACK_STATE_LEGACY_UNVERIFIED);
     assert(row.ack_dispatch_count == 0U);
     assert(d1l_dm_store_flush() == ESP_OK);
-    assert(((const test_blob_v6_t *)s_nvs.data)->schema == TEST_SCHEMA_V6);
+    assert(((const test_blob_v7_t *)s_nvs.data)->schema == TEST_SCHEMA_V7);
+}
+
+static void test_literal_v4_full_ring_migrates_without_data_loss(void)
+{
+    reset_backend();
+    s_sd_enabled = true;
+    s_backend_generation = 1U;
+    test_blob_v4_t legacy = {
+        .schema = TEST_SCHEMA_V4,
+        .next_seq = D1L_DM_STORE_CAPACITY + 1U,
+        .total_written = D1L_DM_STORE_CAPACITY,
+        .head = 0U,
+        .count = D1L_DM_STORE_CAPACITY,
+        .epoch = 7U,
+        .content_revision = 19U,
+        .clear_lineage = UINT64_C(0x1122334455667788),
+    };
+    for (uint32_t i = 0U; i < D1L_DM_STORE_CAPACITY; ++i) {
+        char text[32];
+        (void)snprintf(text, sizeof(text), "literal-v4-row-%02lu",
+                       (unsigned long)(i + 1U));
+        legacy.entries[i] = make_legacy_entry(
+            i + 1U, text, i % 2U == 0U ? "rx" : "tx", 0x4100U + i);
+        (void)snprintf(legacy.entries[i].contact_alias,
+                       sizeof(legacy.entries[i].contact_alias),
+                       "12345678901234567890123");
+    }
+    assert(blob_write(&s_nvs, &legacy, sizeof(legacy)) == ESP_OK);
+    assert(blob_write(&s_sd, &legacy, sizeof(legacy)) == ESP_OK);
+
+    assert(d1l_dm_store_init() == ESP_OK);
+    const d1l_dm_store_stats_t stats = d1l_dm_store_stats();
+    assert(stats.loaded);
+    assert(stats.count == D1L_DM_STORE_CAPACITY);
+    assert(stats.epoch == legacy.epoch);
+    assert(stats.content_revision == legacy.content_revision);
+    assert(stats.clear_lineage == legacy.clear_lineage);
+    d1l_dm_entry_t rows[D1L_DM_STORE_CAPACITY] = {0};
+    assert(d1l_dm_store_copy_recent(rows, D1L_DM_STORE_CAPACITY) ==
+           D1L_DM_STORE_CAPACITY);
+    for (uint32_t i = 0U; i < D1L_DM_STORE_CAPACITY; ++i) {
+        assert(rows[i].seq == i + 1U);
+        assert(strcmp(rows[i].contact_alias,
+                      "12345678901234567890123") == 0);
+        assert(rows[i].delivery_revision ==
+               (strcmp(rows[i].direction, "tx") == 0 ? 1U : 0U));
+    }
+    assert(d1l_dm_store_flush() == ESP_OK);
+    assert(((const test_blob_v7_t *)s_nvs.data)->schema == TEST_SCHEMA_V7);
+    assert(((const test_blob_v7_t *)s_sd.data)->schema == TEST_SCHEMA_V7);
+    assert(s_nvs.len == sizeof(test_blob_v7_t));
+    assert(s_sd.len == sizeof(test_blob_v7_t));
+}
+
+static void test_schema_v6_narrow_preserves_all_metadata(void)
+{
+    reset_backend();
+    assert(sizeof(test_entry_v6_narrow_t) < sizeof(d1l_dm_entry_t));
+    assert(sizeof(test_blob_v6_narrow_t) < sizeof(test_blob_v6_wide_t));
+    test_blob_v6_narrow_t legacy = {
+        .schema = TEST_SCHEMA_V6,
+        .next_seq = 3U,
+        .total_written = 14U,
+        .dropped_oldest = 12U,
+        .head = 2U,
+        .count = 2U,
+        .epoch = 23U,
+        .content_revision = 29U,
+        .clear_lineage = UINT64_C(0x8877665544332211),
+    };
+    d1l_dm_entry_t rx = make_entry(1U, "schema6-narrow-rx", "rx", 0x6161U);
+    (void)snprintf(rx.contact_alias, sizeof(rx.contact_alias),
+                   "12345678901234567890123");
+    set_ack_metadata(&rx, 0x61U, D1L_DM_ACK_STATE_SENT, 1U, 2U, ESP_OK);
+    d1l_dm_entry_t tx = make_entry(2U, "schema6-narrow-tx", "tx", 0x6262U);
+    tx.attempt = 2U;
+    tx.delivery_state = D1L_DM_DELIVERY_FAILED_RADIO;
+    tx.delivery_reason = D1L_DM_DELIVERY_REASON_RADIO_ERROR;
+    tx.delivery_last_error = ESP_FAIL;
+    tx.delivery_retry_count = 1U;
+    tx.delivery_revision = 9U;
+    legacy.entries[0] = make_v6_narrow_entry(&rx);
+    legacy.entries[1] = make_v6_narrow_entry(&tx);
+    assert(blob_write(&s_nvs, &legacy, sizeof(legacy)) == ESP_OK);
+
+    assert(d1l_dm_store_init() == ESP_OK);
+    const d1l_dm_store_stats_t stats = d1l_dm_store_stats();
+    assert(stats.loaded && stats.count == 2U);
+    assert(stats.epoch == legacy.epoch);
+    assert(stats.content_revision == legacy.content_revision);
+    assert(stats.clear_lineage == legacy.clear_lineage);
+    d1l_dm_entry_t rows[2] = {0};
+    assert(d1l_dm_store_copy_recent(rows, 2U) == 2U);
+    assert(rows[0].seq == 1U);
+    assert(strcmp(rows[0].contact_alias,
+                  "12345678901234567890123") == 0);
+    assert(rows[0].identity_digest_valid);
+    assert(memcmp(rows[0].identity_digest, rx.identity_digest,
+                  sizeof(rx.identity_digest)) == 0);
+    assert(rows[0].ack_dispatch_count == 1U);
+    assert(rows[0].ack_dispatch_kind == 2U);
+    assert(rows[0].ack_state == D1L_DM_ACK_STATE_SENT);
+    assert(rows[0].ack_last_error == ESP_OK);
+    assert(rows[1].seq == 2U);
+    assert(rows[1].delivery_session_id == tx.delivery_session_id);
+    assert(rows[1].delivery_state == D1L_DM_DELIVERY_FAILED_RADIO);
+    assert(rows[1].delivery_reason == D1L_DM_DELIVERY_REASON_RADIO_ERROR);
+    assert(rows[1].delivery_last_error == ESP_FAIL);
+    assert(rows[1].delivery_retry_count == 1U);
+    assert(rows[1].delivery_revision == 9U);
+    assert(d1l_dm_store_flush() == ESP_OK);
+    const test_blob_v7_t *rewritten = (const test_blob_v7_t *)s_nvs.data;
+    assert(s_nvs.len == sizeof(*rewritten));
+    assert(rewritten->schema == TEST_SCHEMA_V7);
+    assert(rewritten->epoch == legacy.epoch);
+    assert(rewritten->content_revision == legacy.content_revision);
+    assert(rewritten->clear_lineage == legacy.clear_lineage);
+}
+
+static void test_schema_v6_wide_preserves_utf8_and_rewrites_sd(void)
+{
+    reset_backend();
+    s_sd_enabled = true;
+    s_backend_generation = 1U;
+    test_blob_v6_wide_t legacy = make_v3(31U, 37U, "wide-placeholder");
+    legacy.schema = TEST_SCHEMA_V6;
+    legacy.clear_lineage = UINT64_C(0xaabbccddeeff0011);
+    const char utf8_text[] = "schema6-wide-caf\xc3\xa9";
+    memcpy(legacy.entries[0].text, utf8_text, sizeof(utf8_text));
+    set_ack_metadata(&legacy.entries[0], 0x71U, D1L_DM_ACK_STATE_SENT,
+                     1U, 3U, ESP_OK);
+    assert(blob_write(&s_sd, &legacy, sizeof(legacy)) == ESP_OK);
+
+    assert(d1l_dm_store_init() == ESP_OK);
+    d1l_dm_entry_t row = {0};
+    assert(d1l_dm_store_copy_recent(&row, 1U) == 1U);
+    assert(memcmp(row.text, utf8_text, sizeof(utf8_text)) == 0);
+    assert(row.ack_dispatch_count == 1U);
+    assert(row.ack_dispatch_kind == 3U);
+    assert(row.ack_state == D1L_DM_ACK_STATE_SENT);
+    assert(d1l_dm_store_stats().epoch == legacy.epoch);
+    assert(d1l_dm_store_stats().content_revision == legacy.content_revision);
+    assert(d1l_dm_store_stats().clear_lineage == legacy.clear_lineage);
+    assert(d1l_dm_store_flush() == ESP_OK);
+    assert(s_sd.len == sizeof(test_blob_v7_t));
+    assert(s_nvs.len == sizeof(test_blob_v7_t));
+    assert(((const test_blob_v7_t *)s_sd.data)->schema == TEST_SCHEMA_V7);
+    assert(((const test_blob_v7_t *)s_nvs.data)->schema == TEST_SCHEMA_V7);
+}
+
+static void assert_invalid_nvs_blob_is_not_mutated(void)
+{
+    const mock_blob_t before = s_nvs;
+    const esp_err_t ret = d1l_dm_store_init();
+    assert(ret == ESP_ERR_INVALID_STATE || ret == ESP_ERR_INVALID_SIZE);
+    assert(!d1l_dm_store_stats().loaded);
+    assert(s_nvs_write_count == 0U);
+    assert(s_sd_write_count == 0U);
+    assert(memcmp(&s_nvs, &before, sizeof(s_nvs)) == 0);
+}
+
+static void test_schema_v6_unknown_lengths_fail_closed_without_mutation(void)
+{
+    test_blob_v6_narrow_t narrow = {
+        .schema = TEST_SCHEMA_V6,
+        .next_seq = 1U,
+        .head = 0U,
+        .count = 0U,
+        .epoch = 1U,
+        .content_revision = 1U,
+    };
+    test_blob_v6_wide_t wide = make_v3(1U, 1U, NULL);
+    wide.schema = TEST_SCHEMA_V6;
+
+    reset_backend();
+    assert(blob_write(&s_nvs, &narrow, sizeof(narrow)) == ESP_OK);
+    s_nvs.len--;
+    assert_invalid_nvs_blob_is_not_mutated();
+
+    reset_backend();
+    assert(blob_write(&s_nvs, &narrow, sizeof(narrow)) == ESP_OK);
+    s_nvs.data[s_nvs.len++] = 0xa5U;
+    assert_invalid_nvs_blob_is_not_mutated();
+
+    reset_backend();
+    assert(blob_write(&s_nvs, &wide, sizeof(wide)) == ESP_OK);
+    s_nvs.len--;
+    assert_invalid_nvs_blob_is_not_mutated();
+
+    reset_backend();
+    assert(blob_write(&s_nvs, &wide, sizeof(wide)) == ESP_OK);
+    s_nvs.data[s_nvs.len++] = 0x5aU;
+    assert_invalid_nvs_blob_is_not_mutated();
 }
 
 static void test_malformed_v5_ack_metadata_fails_closed(void)
@@ -1196,7 +1474,7 @@ static void test_malformed_v5_ack_metadata_fails_closed(void)
 
     reset_backend();
     malformed = (test_blob_v6_t) {
-        .schema = TEST_SCHEMA_V6,
+        .schema = TEST_SCHEMA_V7,
         .next_seq = 3U,
         .total_written = 2U,
         .head = 2U,
@@ -1485,7 +1763,7 @@ static void test_reconcile_same_digest_at_different_sequences_keeps_one_budget(v
     s_sd_enabled = true;
     s_backend_generation = 1U;
     test_blob_v6_t nvs = {
-        .schema = TEST_SCHEMA_V6,
+        .schema = TEST_SCHEMA_V7,
         .next_seq = 3U,
         .total_written = 2U,
         .head = 2U,
@@ -1501,7 +1779,7 @@ static void test_reconcile_same_digest_at_different_sequences_keeps_one_budget(v
                      D1L_DM_ACK_STATE_SENT, 1U, 2U, ESP_OK);
 
     test_blob_v6_t sd = {
-        .schema = TEST_SCHEMA_V6,
+        .schema = TEST_SCHEMA_V7,
         .next_seq = 2U,
         .total_written = 1U,
         .head = 1U,
@@ -1655,7 +1933,7 @@ static void test_v5_migration_never_invents_delivery_success(void)
     assert(rows[1].delivery_revision == 1U);
     assert(rows[1].acked && rows[1].delivered);
     assert(d1l_dm_store_flush() == ESP_OK);
-    assert(((const test_blob_v6_t *)s_nvs.data)->schema == TEST_SCHEMA_V6);
+    assert(((const test_blob_v7_t *)s_nvs.data)->schema == TEST_SCHEMA_V7);
 }
 
 static d1l_dm_store_append_outcome_t append_awaiting_ack(
@@ -2048,8 +2326,8 @@ static void test_v5_dual_backend_migration_session_id_is_deterministic(void)
     assert(d1l_dm_store_flush() == ESP_OK);
     const test_blob_v6_t *nvs_v6 = (const test_blob_v6_t *)s_nvs.data;
     const test_blob_v6_t *sd_v6 = (const test_blob_v6_t *)s_sd.data;
-    assert(nvs_v6->schema == TEST_SCHEMA_V6);
-    assert(sd_v6->schema == TEST_SCHEMA_V6);
+    assert(nvs_v6->schema == TEST_SCHEMA_V7);
+    assert(sd_v6->schema == TEST_SCHEMA_V7);
     assert(nvs_v6->entries[0].delivery_session_id == row.delivery_session_id);
     assert(sd_v6->entries[0].delivery_session_id == row.delivery_session_id);
 }
@@ -2560,6 +2838,10 @@ int main(void)
     test_higher_epoch_replay_exhaustion_preserves_both_copies();
     test_total_counter_exhaustion_rejects_append_without_writes();
     test_v4_migration_preserves_rows_as_legacy_unverified();
+    test_literal_v4_full_ring_migrates_without_data_loss();
+    test_schema_v6_narrow_preserves_all_metadata();
+    test_schema_v6_wide_preserves_utf8_and_rewrites_sd();
+    test_schema_v6_unknown_lengths_fail_closed_without_mutation();
     test_malformed_v5_ack_metadata_fails_closed();
     test_malformed_v6_delivery_metadata_fails_closed();
     test_append_failure_retains_one_identity_row_until_flush();

@@ -12,6 +12,7 @@
 
 #define D1L_DM_STORE_CAPACITY 16U
 #define D1L_DM_DIRECTION_LEN 4U
+#define D1L_DM_CONTACT_ALIAS_LEN 32U
 #define D1L_DM_STORE_PERSIST_RETRY_INTERVAL_MS 5000U
 #define D1L_DM_IDENTITY_DIGEST_BYTES 32U
 #define D1L_DM_ACK_DISPATCH_MAX 2U
@@ -32,7 +33,7 @@ typedef struct {
     uint64_t delivery_session_id;
     uint32_t uptime_ms;
     char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
-    char contact_alias[D1L_CONTACT_ALIAS_LEN];
+    char contact_alias[D1L_DM_CONTACT_ALIAS_LEN];
     char direction[D1L_DM_DIRECTION_LEN];
     char text[D1L_MESSAGE_TEXT_LEN];
     int rssi_dbm;
