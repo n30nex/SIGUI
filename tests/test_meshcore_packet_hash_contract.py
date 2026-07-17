@@ -69,9 +69,11 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
     channel = receiver(
         service, "static void parse_rx_channel_packet", "static bool parse_rx_dm_packet"
     )
-    assert channel.index("d1l_channel_store_find_unique_hash(") < channel.index(
+    assert channel.index("d1l_channel_store_copy_hash_matches(") < channel.index(
         "meshcore_decrypt_after_mac("
-    ) < channel.index("d1l_meshcore_text_plaintext_view(") < channel.index(
+    ) < channel.index("d1l_meshcore_channel_dispatch_finish(") < channel.index(
+        "d1l_meshcore_text_plaintext_view("
+    ) < channel.index(
         "channel_metadata("
     ) < channel.index("d1l_meshcore_packet_hash_cache_contains(")
     assert channel.index("append_channel_message_store_rx(") < channel.index(
@@ -79,6 +81,7 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
     ) < channel.index("d1l_route_store_upsert_observation(")
     assert "message_result.admitted" in channel
     assert "append_packet_log_deferred(" in channel
+    assert "d1l_channel_store_find_unique_hash(" not in channel
 
     dm = receiver(
         service, "static bool parse_rx_dm_packet", "typedef enum {\n    D1L_RX_ACK_UNMATCHED"
@@ -99,6 +102,9 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
         "store_outcome.inserted"
     ) < dm.rindex("d1l_meshcore_packet_hash_cache_remember(")
     assert "append_packet_log_deferred(" in dm
+    assert dm.index("d1l_meshcore_peer_dispatch_classify(") < dm.index(
+        "derive_local_identity_shared_secret("
+    )
 
     ack = receiver(
         service, "typedef enum {\n    D1L_RX_ACK_UNMATCHED", "static d1l_meshcore_path_response_result_t"

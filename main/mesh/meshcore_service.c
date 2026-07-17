@@ -31,6 +31,7 @@
 #include "mesh/meshcore_identity_exchange.h"
 #include "mesh/meshcore_path_dispatch.h"
 #include "mesh/meshcore_radio_profile.h"
+#include "mesh/meshcore_rx_admission.h"
 #include "mesh/meshcore_runtime_guard.h"
 #include "mesh/meshcore_route_selection.h"
 #include "mesh/meshcore_text_plaintext.h"
@@ -82,6 +83,9 @@ _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ bytes");
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
                "MeshCore plaintext buffer must fit the user text limit");
+_Static_assert(D1L_CHANNEL_STORE_CAPACITY ==
+                   D1L_MESHCORE_CHANNEL_CANDIDATE_CAPACITY,
+               "channel RX must execute every configured candidate");
 _Static_assert(D1L_MESHCORE_PUB_KEY_SIZE == D1L_MESHCORE_DM_IDENTITY_SENDER_BYTES,
                "DM identity sender size must match the MeshCore public key");
 _Static_assert(D1L_MESHCORE_DM_ACK_DEDUPE_DIGEST_BYTES ==
@@ -116,6 +120,9 @@ static bool s_pending_channel_tx;
 static uint64_t s_pending_channel_id;
 static uint64_t s_pending_channel_operation_id;
 static char s_pending_channel_text[D1L_MESSAGE_TEXT_LEN];
+static uint8_t
+    s_pending_channel_packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES];
+static bool s_pending_channel_packet_hash_ready;
 static uint32_t s_channel_send_admission;
 static uint32_t s_last_path_probe_ms;
 static char s_last_path_probe_fingerprint[D1L_NODE_FINGERPRINT_LEN];
@@ -1095,6 +1102,17 @@ static void secure_zero_channel_key(d1l_channel_protocol_key_t *key)
     secure_zero_bytes(key, key ? sizeof(*key) : 0U);
 }
 
+static bool channel_protocol_keys_equal(
+    const d1l_channel_protocol_key_t *lhs,
+    const d1l_channel_protocol_key_t *rhs)
+{
+    return lhs && rhs && lhs->channel_id == rhs->channel_id &&
+        lhs->channel_hash == rhs->channel_hash &&
+        lhs->secret_len == rhs->secret_len &&
+        lhs->secret_len <= sizeof(lhs->secret) &&
+        secure_bytes_equal(lhs->secret, rhs->secret, lhs->secret_len);
+}
+
 static esp_err_t derive_local_identity_shared_secret(
     const uint8_t peer_public_key[D1L_MESHCORE_PUB_KEY_SIZE],
     const uint8_t expected_public_key[D1L_MESHCORE_PUB_KEY_SIZE],
@@ -1655,24 +1673,32 @@ static void clear_pending_channel_tx(void)
     s_pending_channel_tx = false;
     s_pending_channel_id = 0U;
     s_pending_channel_operation_id = 0U;
-    s_pending_channel_text[0] = '\0';
+    secure_zero_bytes(s_pending_channel_text, sizeof(s_pending_channel_text));
+    secure_zero_bytes(s_pending_channel_packet_hash,
+                      sizeof(s_pending_channel_packet_hash));
+    s_pending_channel_packet_hash_ready = false;
 }
 
 static esp_err_t remember_pending_channel_tx(uint64_t channel_id,
-                                             const char *message)
+                                             const char *message,
+                                             const uint8_t packet_hash[
+                                                 D1L_MESHCORE_PACKET_HASH_BYTES])
 {
-    if (channel_id == 0U) {
+    if (channel_id == 0U || !packet_hash) {
         return ESP_ERR_INVALID_ARG;
     }
     const d1l_user_text_result_t result = d1l_user_text_copy(
         s_pending_channel_text, sizeof(s_pending_channel_text), message);
-    s_pending_channel_tx = result == D1L_USER_TEXT_OK;
-    if (!s_pending_channel_tx) {
+    if (result != D1L_USER_TEXT_OK) {
         clear_pending_channel_tx();
         return result == D1L_USER_TEXT_TOO_LONG ?
             ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_ARG;
     }
+    memcpy(s_pending_channel_packet_hash, packet_hash,
+           sizeof(s_pending_channel_packet_hash));
+    s_pending_channel_packet_hash_ready = true;
     s_pending_channel_id = channel_id;
+    s_pending_channel_tx = true;
     return ESP_OK;
 }
 
@@ -1681,10 +1707,15 @@ static void flush_pending_channel_tx(
 {
     if (!operation || operation->kind != D1L_MESH_TX_OPERATION_PUBLIC ||
         !s_pending_channel_tx || s_pending_channel_id == 0U ||
+        !s_pending_channel_packet_hash_ready ||
         s_pending_channel_operation_id == 0U ||
         operation->operation_id != s_pending_channel_operation_id) {
         return;
     }
+    /* Match pinned MeshCore's seen-table behavior: an outgoing group packet
+     * becomes self-suppressing only at successful terminal TX. */
+    (void)d1l_meshcore_packet_hash_cache_remember(
+        &s_rx_packet_hash_cache, s_pending_channel_packet_hash);
     append_channel_message_store_tx(s_pending_channel_id,
                                     s_pending_channel_text);
     clear_pending_channel_tx();
@@ -2949,45 +2980,92 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
         packet.payload_len < 3U) {
         return;
     }
-    if (!channel_message_generation_ready()) {
-        s_status.channel_rx_reconcile_blocked++;
-        return;
-    }
-
-    d1l_channel_protocol_key_t channel_key = {0};
-    const esp_err_t resolve_ret = d1l_channel_store_find_unique_hash(
-        packet.payload[0], &channel_key);
-    if (resolve_ret != ESP_OK) {
-        if (resolve_ret == ESP_ERR_NOT_FOUND) {
-            s_status.channel_rx_unknown_hash++;
-        } else if (resolve_ret == ESP_ERR_INVALID_STATE) {
-            /* A one-byte hash is routing metadata, never identity. Any
-             * collision must be rejected before trying either secret. */
-            s_status.channel_rx_hash_collision++;
-        }
-        secure_zero_channel_key(&channel_key);
+    d1l_channel_protocol_key_t
+        candidates[D1L_CHANNEL_STORE_CAPACITY] = {0};
+    const size_t candidate_count = d1l_channel_store_copy_hash_matches(
+        packet.payload[0], candidates, D1L_CHANNEL_STORE_CAPACITY);
+    d1l_meshcore_channel_dispatch_t dispatch = {0};
+    if (!d1l_meshcore_channel_dispatch_begin(&dispatch, candidate_count)) {
+        secure_zero_bytes(candidates, sizeof(candidates));
+        s_status.channel_rx_hash_collision++;
         return;
     }
 
     uint8_t plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
-    const size_t plain_len = meshcore_decrypt_after_mac(
-        channel_key.secret, plain, sizeof(plain) - 1U, &packet.payload[1],
-        packet.payload_len - 1U);
-    const uint64_t channel_id = channel_key.channel_id;
-    secure_zero_channel_key(&channel_key);
+    uint8_t candidate_plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
+    size_t plain_len = 0U;
+    d1l_channel_protocol_key_t selected_key = {0};
+    for (size_t index = 0U; index < candidate_count; ++index) {
+        const size_t candidate_plain_len = meshcore_decrypt_after_mac(
+            candidates[index].secret, candidate_plain,
+            sizeof(candidate_plain) - 1U, &packet.payload[1],
+            packet.payload_len - 1U);
+        const bool authenticated = candidate_plain_len > 0U;
+        if (authenticated && dispatch.authenticated_count == 0U) {
+            plain_len = candidate_plain_len;
+            memcpy(plain, candidate_plain, candidate_plain_len);
+            selected_key = candidates[index];
+        }
+        secure_zero_bytes(candidate_plain, sizeof(candidate_plain));
+        if (!d1l_meshcore_channel_dispatch_observe(
+                &dispatch, index, authenticated)) {
+            secure_zero_bytes(candidates, sizeof(candidates));
+            secure_zero_bytes(plain, sizeof(plain));
+            secure_zero_channel_key(&selected_key);
+            s_status.channel_rx_hash_collision++;
+            return;
+        }
+    }
+    secure_zero_bytes(candidates, sizeof(candidates));
+
+    size_t selected_index = 0U;
+    const d1l_meshcore_channel_dispatch_outcome_t dispatch_outcome =
+        d1l_meshcore_channel_dispatch_finish(&dispatch, &selected_index);
+    (void)selected_index;
+    if (dispatch_outcome != D1L_MESHCORE_CHANNEL_DISPATCH_ACCEPTED) {
+        secure_zero_bytes(plain, sizeof(plain));
+        secure_zero_channel_key(&selected_key);
+        if (dispatch_outcome == D1L_MESHCORE_CHANNEL_DISPATCH_UNKNOWN) {
+            s_status.channel_rx_unknown_hash++;
+        } else if (dispatch_outcome ==
+                   D1L_MESHCORE_CHANNEL_DISPATCH_AUTH_FAILED) {
+            s_status.channel_rx_decrypt_failed++;
+        } else {
+            s_status.channel_rx_hash_collision++;
+        }
+        return;
+    }
+
+    d1l_channel_protocol_key_t current_key = {0};
+    const esp_err_t current_ret = d1l_channel_store_copy_protocol_key(
+        selected_key.channel_id, &current_key);
+    const bool selected_current = current_ret == ESP_OK &&
+        current_key.channel_hash == packet.payload[0] &&
+        channel_protocol_keys_equal(&selected_key, &current_key);
+    const uint64_t channel_id = selected_key.channel_id;
+    secure_zero_channel_key(&current_key);
+    secure_zero_channel_key(&selected_key);
+    if (!selected_current) {
+        secure_zero_bytes(plain, sizeof(plain));
+        s_status.channel_rx_decrypt_failed++;
+        return;
+    }
     if (plain_len < 6U || (plain[4] >> 2) != 0) {
+        secure_zero_bytes(plain, sizeof(plain));
         s_status.channel_rx_decrypt_failed++;
         return;
     }
     d1l_meshcore_text_plaintext_view_t text_view = {0};
     if (!d1l_meshcore_text_plaintext_view(
             &plain[5], plain_len - 5U, false, 0U, &text_view)) {
+        secure_zero_bytes(plain, sizeof(plain));
         return;
     }
     plain[5U + text_view.text_length] = '\0';
     const char *message = (const char *)text_view.text;
     d1l_channel_info_t channel = {0};
     if (!channel_metadata(channel_id, &channel)) {
+        secure_zero_bytes(plain, sizeof(plain));
         return;
     }
     uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
@@ -2995,6 +3073,12 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
         d1l_meshcore_packet_hash_calculate(&packet, packet_hash) == ESP_OK;
     if (packet_hash_ready && d1l_meshcore_packet_hash_cache_contains(
                                  &s_rx_packet_hash_cache, packet_hash)) {
+        secure_zero_bytes(plain, sizeof(plain));
+        return;
+    }
+    if (!channel_message_generation_ready()) {
+        secure_zero_bytes(plain, sizeof(plain));
+        s_status.channel_rx_reconcile_blocked++;
         return;
     }
     char route_target[17] = {0};
@@ -3005,6 +3089,7 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
             channel_id, channel.name, message, rssi, snr,
             packet.path_hash_bytes, packet.path_hops);
     if (!message_result.admitted) {
+        secure_zero_bytes(plain, sizeof(plain));
         return;
     }
     if (packet_hash_ready) {
@@ -3026,6 +3111,7 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     if (!packet_retained || message_result.error != ESP_OK) {
         ESP_LOGW(TAG, "channel RX admitted with retained reconciliation pending");
     }
+    secure_zero_bytes(plain, sizeof(plain));
 }
 
 static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
@@ -3052,6 +3138,13 @@ static bool parse_rx_dm_packet(const uint8_t *payload, uint16_t size,
         if (contact->public_key_hex[0] == '\0' ||
             !hex_to_bytes(sender_pub, sizeof(sender_pub), contact->public_key_hex) ||
             sender_pub[0] != packet.payload[1]) {
+            continue;
+        }
+        const d1l_meshcore_peer_dispatch_outcome_t peer_outcome =
+            d1l_meshcore_peer_dispatch_classify(
+                settings->identity_public_key, sender_pub,
+                d1l_contact_store_can_dm(contact));
+        if (peer_outcome != D1L_MESHCORE_PEER_AUTHORIZED) {
             continue;
         }
 
@@ -4542,7 +4635,8 @@ static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd
         return ESP_ERR_INVALID_STATE;
     }
     if (operation_kind == D1L_MESH_TX_OPERATION_PUBLIC) {
-        if (!s_pending_channel_tx || s_pending_channel_id == 0U) {
+        if (!s_pending_channel_tx || s_pending_channel_id == 0U ||
+            !s_pending_channel_packet_hash_ready) {
             meshcore_radio_tx_operation_clear();
             return ESP_ERR_INVALID_STATE;
         }
@@ -6335,20 +6429,6 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         s_status.rejected_commands++;
         return ESP_ERR_INVALID_STATE;
     }
-    d1l_channel_protocol_key_t unique_key = {0};
-    ret = d1l_channel_store_find_unique_hash(channel_key.channel_hash,
-                                             &unique_key);
-    const bool unique_exact = ret == ESP_OK &&
-        unique_key.channel_id == channel_key.channel_id &&
-        unique_key.secret_len == channel_key.secret_len &&
-        memcmp(unique_key.secret, channel_key.secret,
-               sizeof(unique_key.secret)) == 0;
-    secure_zero_channel_key(&unique_key);
-    if (!unique_exact) {
-        secure_zero_channel_key(&channel_key);
-        s_status.rejected_commands++;
-        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
-    }
     ret = d1l_time_service_preflight_protocol_timestamp();
     if (ret != ESP_OK) {
         secure_zero_channel_key(&channel_key);
@@ -6391,8 +6471,18 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         return ret;
     }
 
-    ret = remember_pending_channel_tx(channel_id, text);
+    d1l_meshcore_wire_packet_t packet = {0};
+    uint8_t packet_hash[D1L_MESHCORE_PACKET_HASH_BYTES] = {0};
+    if (!d1l_meshcore_wire_decode_v1(raw, raw_len, &packet) ||
+        d1l_meshcore_packet_hash_calculate(&packet, packet_hash) != ESP_OK) {
+        secure_zero_bytes(raw, sizeof(raw));
+        s_status.rejected_commands++;
+        return ESP_FAIL;
+    }
+    ret = remember_pending_channel_tx(channel_id, text, packet_hash);
+    secure_zero_bytes(packet_hash, sizeof(packet_hash));
     if (ret != ESP_OK) {
+        secure_zero_bytes(raw, sizeof(raw));
         s_status.rejected_commands++;
         return ret;
     }
@@ -6401,6 +6491,7 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
         D1L_MESH_TX_OPERATION_PUBLIC);
     if (ret != ESP_OK) {
         clear_pending_channel_tx();
+        secure_zero_bytes(raw, sizeof(raw));
         s_status.rejected_commands++;
         return ret;
     }
@@ -6417,6 +6508,7 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
     }
     append_packet_log("tx", packet_kind, 0, 0, settings->path_hash_bytes, 0, raw_len,
                       raw, raw_len, text);
+    secure_zero_bytes(raw, sizeof(raw));
     return ESP_OK;
 }
 

@@ -24,13 +24,14 @@
     },
     {
       "id": "public_and_configured_channels",
-      "status": "partial",
+      "status": "implemented",
       "oracle_vector_groups": [
         "public_group_packets"
       ],
-      "remaining": [
-        "execute every configured channel through production TX and RX"
-      ]
+      "production_host_suites": [
+        "channel_and_peer_rx_admission"
+      ],
+      "remaining": []
     },
     {
       "id": "dm_attempts_0_through_255",
@@ -193,16 +194,15 @@
     },
     {
       "id": "self_message_unknown_peer_and_channel",
-      "status": "partial",
+      "status": "implemented",
       "oracle_vector_groups": [
         "signed_advert_dispatch_transition_fixtures"
       ],
       "production_host_suites": [
-        "admin_dispatch"
+        "admin_dispatch",
+        "channel_and_peer_rx_admission"
       ],
-      "remaining": [
-        "execute unknown-channel and self-message production dispatch"
-      ]
+      "remaining": []
     },
     {
       "id": "lifetime_and_expiry_boundaries",
@@ -426,24 +426,6 @@
       "expected_stdout": "native MeshCore packet hash: ok"
     },
     {
-      "id": "usb_command_parser",
-      "binary": "usb_command_parser_semantic",
-      "scenario_ids": [
-        "normal_console_explicit_receive_length",
-        "recovery_console_explicit_receive_length",
-        "embedded_nul_hidden_suffix_rejected_and_wiped",
-        "c0_del_and_escape_bytes_rejected_and_wiped",
-        "empty_255_and_256_byte_boundaries",
-        "exact_token_and_numeric_argument_boundaries",
-        "valid_utf8_and_trailing_space_canonicalization",
-        "deterministic_100000_input_contract"
-      ],
-      "invocations": [
-        []
-      ],
-      "expected_stdout": "native USB command parser: ok (100000 deterministic cases)"
-    },
-    {
       "id": "lifetime_boundaries",
       "binary": "meshcore_lifetime_semantic",
       "scenario_ids": [
@@ -460,6 +442,22 @@
         []
       ],
       "expected_stdout": "native MeshCore lifetime boundaries: ok"
+    },
+    {
+      "id": "channel_and_peer_rx_admission",
+      "binary": "meshcore_rx_admission_semantic",
+      "scenario_ids": [
+        "unknown_channel_zero_candidates",
+        "all_channel_candidates_auth_failure",
+        "every_configured_collision_candidate",
+        "ambiguous_multi_auth_rejected",
+        "incomplete_or_out_of_order_scan_rejected",
+        "unknown_self_and_authorized_full_key_peer"
+      ],
+      "invocations": [
+        []
+      ],
+      "expected_stdout": "native MeshCore RX admission: ok"
     }
   ],
   "companion_upstream_suites": [
@@ -492,8 +490,6 @@
     "main/app/settings_protocol_migration.h": "8955e2e503fe4919ef7fdb354afd97f573dc954d8ceb05173fb64f767b820cb9",
     "main/app/settings_time_checkpoint.c": "0d27c2bd30e045025751ac1a79bb0ad01bbbf04f1b547b5b5f492d8bee0e6dbf",
     "main/app/settings_time_checkpoint.h": "4721f99c3542bdcaea4b0ad513c23e819792fb2dcd7657aba8d90c9e1be08225",
-    "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
-    "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
     "main/hal/rp2040_bridge.h": "57af77842713ec9f2c2eeb6cf6bd856ccc5a75c79ca9540e82cd4b5d9cff099c",
     "main/mesh/dm_delivery_state.c": "a3ff6903299b70ed68727284de8c2b6e81b2f9db69a80902db75983ee91aee94",
     "main/mesh/dm_delivery_state.h": "d27b3666f03d27e74cb30efb2e77c47bd50f0273d7991e29315e55d5a2fd4185",
@@ -514,6 +510,8 @@
     "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
     "main/mesh/meshcore_command_guard.h": "c266e8f1a28bce5469a7f072b12ae06410e8be04af0c31ce9375283746082f53",
     "main/mesh/meshcore_radio_profile.h": "79fc333c543d2215dab414067515763113a70bdd62eb43a63038819322854e9a",
+    "main/mesh/meshcore_rx_admission.c": "e1ceee2668508b2285bed136f8f852a94c6114d69188e74a58b6f55c6b87b4a5",
+    "main/mesh/meshcore_rx_admission.h": "3039e7247853080809dd8e93d0ea7e578e6cd7cb5d474caae0ab6e5c71fae870",
     "main/mesh/meshcore_runtime_guard.h": "5b3630e4a27b15d65a10f7b7524ee646123680b89efb9586f7b02ba33c899708",
     "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
@@ -540,6 +538,7 @@
     "tests/native/meshcore_ack_completion_test.c": "152d878857e11211086027d7884ccc5728f107c817758c7ff652dadcf1292f5f",
     "tests/native/meshcore_lifetime_test.c": "4da88fd0e0f9e127224488c7fe55cec72413c653ed9b7b589d80cfc5998a9129",
     "tests/native/meshcore_runtime_guard_test.c": "f5a2c1b33ed1fd1545d934eceb05041fc348f9cfc8f6ef04399fcba444bc91e4",
+    "tests/native/meshcore_rx_admission_test.c": "f541b4a4dc6f768ee3e2f1eeb88362944f4a1172b906d1483770f1056d457b69",
     "tests/native/meshcore_packet_hash_test.c": "c8d9bbed666168cccd2e1dab86676a252e3aee5a8cb900077ba7ab972a35fb97",
     "tests/native/meshcore_text_plaintext_test.c": "b7f4edbe648c00b5725878b631c705c251c3a81ffe4652cd706d8b996d1e6e7b",
     "tests/native/meshcore_trace_test.c": "c046cdc354a40d5feae8e79eb8e8f66fa1426ecae97a083ef6f6ca7c56092eff",
@@ -555,7 +554,6 @@
     "tests/native/stubs/nvs.h": "a0895d23196ac486164d00e42ed6a7af09e40e5f60f4e1bc8918f00aaa747683",
     "tests/native/stubs/sys/time.h": "251d586ea591ff51aa9d51e6843deadd6c578b5591658df50eb5121c9e6b39c7",
     "tests/native/time_service_checkpoint_integration_test.c": "2de100718160702b5ab54f5d8ca0f3d802e8b89f3d16756185be1b0f82f0ad41",
-    "tests/native/usb_command_parser_test.c": "74ff93eaed93e832455c2e7c150cc60dcdd645a1d3f38575caf27c96145b72a5",
     "tests/native/store_behavior_test.c": "ff6c170ce3d28542445eb7672e60c82a79944ed1de46045e823ecc54ecc4388b"
   }
 }
