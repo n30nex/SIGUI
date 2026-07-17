@@ -233,7 +233,7 @@
     },
     {
       "id": "decrypt_auth_path",
-      "status": "missing"
+      "status": "implemented"
     },
     {
       "id": "advert_parser",
@@ -241,15 +241,15 @@
     },
     {
       "id": "dm_session_transition_input",
-      "status": "missing"
+      "status": "implemented"
     },
     {
       "id": "retained_envelope_decoder",
-      "status": "missing"
+      "status": "implemented"
     },
     {
       "id": "route_path_parser",
-      "status": "partial"
+      "status": "implemented"
     },
     {
       "id": "usb_protocol_command_parser",

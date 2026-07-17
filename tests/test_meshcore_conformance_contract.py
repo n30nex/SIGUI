@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from scripts import meshcore_conformance_d1l as conformance
+from scripts import meshcore_remaining_fuzz_d1l as remaining_fuzz
 from tests.meshcore_conformance_fixture import (
     completed_report,
     completed_signed_advert_runtime_report,
@@ -165,7 +166,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         summary["implemented_fuzz_target_count"],
         summary["partial_fuzz_target_count"],
         summary["missing_fuzz_target_count"],
-    ) == (4, 1, 3)
+    ) == (8, 0, 0)
     assert summary["oracle_semantic_vectors"] == 915
     assert summary["unique_referenced_oracle_semantic_vectors"] == 890
     assert summary["production_suite_count"] == 11
@@ -288,6 +289,51 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
             for item in dependency
             if item.endswith(".c")
         }
+
+
+def test_remaining_wp05_fuzz_targets_are_pinned_and_fail_closed(tmp_path):
+    manifest, seeds, source_pins = remaining_fuzz.load_inputs()
+
+    assert [item["id"] for item in manifest["targets"]] == list(
+        remaining_fuzz.TARGET_IDS
+    )
+    assert all(item["status"] == "implemented" for item in manifest["targets"])
+    assert manifest["runs_per_target"] == 100000
+    assert manifest["total_runs"] == 400000
+    assert manifest["wp05_closure_ready"] is False
+    assert manifest["full_semantic_matrix_covered"] is False
+    assert manifest["release_closure_ready"] is False
+    assert {target: len(target_seeds) for target, target_seeds in seeds.items()} == (
+        remaining_fuzz.EXPECTED_SEED_COUNTS
+    )
+    assert source_pins["main/mesh/meshcore_crypto.c"] == canonical_lf_sha256(
+        ROOT / "main/mesh/meshcore_crypto.c"
+    )
+
+    native_crypto = read("tests/native/meshcore_crypto_test.c")
+    assert "0x44U, 0xe4U, 0x29U, 0x8fU" in native_crypto
+    assert "auth before decrypt" not in native_crypto.lower()
+    decrypt_fuzz = read("tests/fuzz/meshcore_decrypt_auth_fuzz.c")
+    assert "tampered[0] ^= 0x01U" in decrypt_fuzz
+    assert "decrypted[index] == 0x3cU" in decrypt_fuzz
+
+    workflow = read(".github/workflows/d1l-ci.yml")
+    assert "Run remaining production WP-05 fuzz targets" in workflow
+    assert "python ./scripts/meshcore_remaining_fuzz_d1l.py" in workflow
+    assert "--cc clang-18" in workflow
+    assert "--cxx clang++-18" in workflow
+    assert "--runs 100000" in workflow
+
+    args = remaining_fuzz.parse_args(
+        ["--dry-run", "--out", str(tmp_path / "remaining.json")]
+    )
+    status, report = remaining_fuzz.execute(args)
+    assert status == 0
+    assert report["status"] == "dry_run"
+    assert report["source_verification"]["verified"] is True
+    assert report["wp05_closure_ready"] is False
+    assert report["full_semantic_matrix_covered"] is False
+    assert report["release_closure_ready"] is False
 
 
 def test_signed_advert_runtime_binding_is_exact_commit_and_canonical():
