@@ -1,17 +1,17 @@
 schema_version: 1
-generated_at: '2026-07-16'
+generated_at: '2026-07-17'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: f95b2fc73a29cb3292036786c846308a2bf76080
-  integrated_candidate: f95b2fc73a29cb3292036786c846308a2bf76080
-  live_main_actions_run: 29545499539
+  merged_baseline: de0bb75bd91146f0dc9896540d12c71889d7766b
+  integrated_candidate: de0bb75bd91146f0dc9896540d12c71889d7766b
+  live_main_actions_run: 29548300732
   live_main_actions_status: success
   exact_main_gate_pending: false
   exact_main_evidence_bank_pending: false
-  last_strict_verified_main: f95b2fc73a29cb3292036786c846308a2bf76080
+  last_strict_verified_main: de0bb75bd91146f0dc9896540d12c71889d7766b
   successor_evidence_in_this_slice: true
-  observed_successor_note: PR 180 is strict-banked at exact main f95b2fc. Exact-main Actions 29545499539 pass 1,256 host and 33 checksum tests, full existing conformance/fuzz including 200,000 USB-parser cases, and five downloaded ZIPs with 46 entries across 340 files. PRs 177-180 advance the truthful WP-05 matrix to 11 implemented / 5 partial / 0 missing semantic requirements and 3 implemented / 1 partial / 4 missing fuzz targets; full WP-05, official-peer RF, physical acceptance, and release closure remain open.
+  observed_successor_note: PR 182 is merged and strict-banked at exact main de0bb75. Canonical PR Actions 29547584817 and exact-main Actions 29548300732 pass 1,263 host and 33 checksum tests, 1,008 wire vectors, 931 oracle checks, 100,000 native plus 100,000 Clang 18 semantic-packet cases with zero findings, and five downloaded ZIPs / 46 entries / 341 files / 27,208,527 bytes. The truthful WP-05 matrix is 13 implemented / 3 partial / 0 missing semantic requirements and 4 implemented / 1 partial / 3 missing fuzz targets. A non-erasing exact COM12 flash passed, but retained predecessor DM data needs a compatibility or migration correction before reboot persistence can pass; storage/media health stayed green. WP-06 PR171/PR173 foundations are merged, but full WP-05, WP-06, RF, physical acceptance, and release closure remain open.
   completion_reporting_integrity:
     pull_request: 161
     head: 4a7b8f9cd8a157ae606bfab9ff060a4cc1ceefe2
@@ -191,38 +191,63 @@ project:
     physical_rf_evidence: false
     wp05_closure: false
   wp05_latest_checkpoint:
-    pull_request: 180
-    base: cbdc924745fb2fb19cd735e1a856446e9b2aa196
-    head: 120575cec6d84edd75b6bb1e23a47d782b90f9f8
-    synthetic_merge: 2c6b09d1a46ba28f4f01014e3d0d2d9d3b5c33fb
-    merge_commit: f95b2fc73a29cb3292036786c846308a2bf76080
-    shared_tree: 4c5dce62847bac1029cfa4c0207012666aef7d1c
-    reviewed_patch_id: 9176e228466589583f75dfde6603770dc963e21a
-    pr_actions_run: 29544947130
-    exact_main_actions_run: 29545499539
-    pr_gate_receipt_sha256: 2ed3888eeb96a7025a6fc6ff8436f7d15223fcf2ac9fb3051623bf9c77b8ab50
-    pr_gate_manifest_sha256: c7747fab2a6c37dde57c18cea328f76cc2605cd75e82096e4664da261c45e4ef
-    exact_main_gate_receipt_sha256: 3fca0071ca10845f0aa37eb9124a7d3a147261ed9ff158c1659b4164ad0b6d8e
-    exact_main_gate_manifest_sha256: 1bcc28bcf09bbee43ee772873c6568a828d38480f828766316492a96f8c3d4a1
-    portable_aggregate_path: docs/completion/evidence/wp05/ack_completion_lifetimes_f95b2fc73a29cb3292036786c846308a2bf76080.json
-    portable_aggregate_sha256: 32cd78c1950361c38245fe2f38e944a33917ddaf69006fd42edfa68f5db3fc3a
-    focused_ack_lifetime_tests_passed: 79
-    focused_ack_lifetime_tests_skipped: 1
+    pull_request: 182
+    base: bf9e6f31a1dc65d49126ac2df7f56557738e7dc0
+    head: f00486282b3b3d0ec1d6e1b25b3985a8e8485a47
+    synthetic_merge: a0569cf233eb7f7b53e81c11b3fca24be98e6a1b
+    merge_commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+    shared_tree: efc7ce1acbdd2ab7a9c963ec9477a71eda991823
+    reviewed_patch_id: c4512479562ecf85dd080ddb867210ec11e57cdb
+    pr_actions_run: 29547584817
+    exact_main_actions_run: 29548300732
+    pr_gate_receipt_sha256: ba1c774004c80381e5569a55abaf262fa7748b4799c35c8316670e86deb73781
+    pr_gate_manifest_sha256: a530bc01881b6a5c02fed7cf1c5c80e1287096964e29d0fa975a6aff5b990ddd
+    exact_main_gate_receipt_sha256: 8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9
+    exact_main_gate_manifest_sha256: 11c349cf8ad118463db411d7cf83366cdf86b5b67cbcc20034be845693c03ede
+    portable_aggregate_path: docs/completion/evidence/wp05/semantic_packet_fuzz_de0bb75bd91146f0dc9896540d12c71889d7766b.json
+    portable_aggregate_sha256: ec9c696f2a6b7e063ab1535ce4632fcefbb300f5a14a9e210cd74bde33cde852
+    focused_tests_passed: 74
+    focused_tests_skipped: 1
     requirement_count: 16
-    implemented_requirement_count: 11
-    partial_requirement_count: 5
+    implemented_requirement_count: 13
+    partial_requirement_count: 3
     missing_requirement_count: 0
     fuzz_target_count: 8
-    implemented_fuzz_target_count: 3
+    implemented_fuzz_target_count: 4
     partial_fuzz_target_count: 1
-    missing_fuzz_target_count: 4
+    missing_fuzz_target_count: 3
     production_suite_count: 11
-    production_scenario_count: 77
-    compiler_derived_dependency_count: 73
-    dependency_scan_translation_unit_count: 38
+    production_scenario_count: 75
+    source_pin_count: 15
+    semantic_native_cases: 100000
+    semantic_libfuzzer_runs_completed: 100000
+    semantic_fuzz_findings: 0
     full_semantic_matrix_covered: false
     physical_rf_evidence: false
     wp05_closure: false
+  retained_dm_migration_blocker:
+    id: BLK-WP11-RETAINED-DM-MIGRATION-DE0BB75-20260716
+    source_commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+    actions_run: 29548300732
+    port: COM12
+    portable_receipt_path: docs/completion/evidence/wp11/retained_dm_migration_blocker_de0bb75bd91146f0dc9896540d12c71889d7766b_COM12.json
+    portable_receipt_sha256: 734266054fd2c3da6320445f8f8bd7c20c6c5bffc09dd2653683286ef01f0074
+    flash_report_sha256: d7098f4412a15c82f2df2fa93f7390e631a57523ef80abe1f68b7b7e5b1760bf
+    autonomous_report_sha256: 5d9b4b24f44ac61ad26f706a39cc2dca1314bbef2930b20db9bc33dacae43d43
+    predecessor_smoke_sha256: 030b2369b2de80188043d62be6f3b0f06fb6be5ba001d8e2766d09a8707baa1b
+    non_erasing_flash_passed: true
+    persistence_smoke_attempts: 2
+    retained_dm_flush_error: ESP_ERR_INVALID_STATE
+    reboot_correctly_cancelled: true
+    final_storage_state: READY_SD
+    filesystem: fat32
+    mounted: true
+    data_root_ready: true
+    sd_or_nvs_mirror_io_failures: 0
+    retained_user_data_preserved: true
+    hardware_or_media_failure: false
+    time_migration_confirmation: separately_open
+    status: open_data_preserving_compatibility_or_migration_root_cause_work_in_progress
   admin_command_owner:
     pull_request: 171
     base: 6659ff2605747d8ad4e5eb0ef389ade12cf0ac6f
@@ -1509,24 +1534,28 @@ project:
     idf_version_portable_aggregate_sha256: f21abb17403f432c17bf19cc052cd185b05a39c705a3a984e73f5fcb6a547fa5
     full_ubsan_clean: true
     sanitizer_exception_count: 0
-    exact_main_gate_receipt_sha256: 3fca0071ca10845f0aa37eb9124a7d3a147261ed9ff158c1659b4164ad0b6d8e
-    exact_main_gate_manifest_sha256: 1bcc28bcf09bbee43ee772873c6568a828d38480f828766316492a96f8c3d4a1
-    canonical_exact_main_gate_directory: F:/SIGUI-artifact-gates/main-f95b2fc
-    note: "Exact main f95b2fc through PR #180 is strict-banked from canonical directory main-f95b2fc: Actions 29545499539, 1,256 host plus 33 checksum tests, five downloaded ZIPs / 46 entries across 340 files, receipt SHA-256 3fca0071ca10845f0aa37eb9124a7d3a147261ed9ff158c1659b4164ad0b6d8e, and gate-manifest SHA-256 1bcc28bcf09bbee43ee772873c6568a828d38480f828766316492a96f8c3d4a1. PRs #177-#180 bank replay parity, packet-hash authority, USB parser fuzzing, exact-owner ACK completion, and boot-local lifetime truth. Full WP-05, official-peer RF, physical UI/RF/SD/update/soak, and release closure remain open. Provenance is valid but unauthenticated and no SLSA level is claimed."
+    wp05_semantic_packet_fuzz_portable_aggregate_path: docs/completion/evidence/wp05/semantic_packet_fuzz_de0bb75bd91146f0dc9896540d12c71889d7766b.json
+    wp05_semantic_packet_fuzz_portable_aggregate_sha256: ec9c696f2a6b7e063ab1535ce4632fcefbb300f5a14a9e210cd74bde33cde852
+    wp11_retained_dm_migration_blocker_path: docs/completion/evidence/wp11/retained_dm_migration_blocker_de0bb75bd91146f0dc9896540d12c71889d7766b_COM12.json
+    wp11_retained_dm_migration_blocker_sha256: 734266054fd2c3da6320445f8f8bd7c20c6c5bffc09dd2653683286ef01f0074
+    exact_main_gate_receipt_sha256: 8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9
+    exact_main_gate_manifest_sha256: 11c349cf8ad118463db411d7cf83366cdf86b5b67cbcc20034be845693c03ede
+    canonical_exact_main_gate_directory: F:/SIGUI-artifact-gates/main-de0bb75
+    note: "Exact main de0bb75 through PR #182 is strict-banked from canonical directory main-de0bb75: Actions 29548300732, 1,263 host plus 33 checksum tests, 100,000 native plus 100,000 Clang 18 semantic-packet cases with zero findings, and five downloaded ZIPs / 46 entries across 341 files totaling 27,208,527 bytes. Receipt SHA-256 is 8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9 and gate-manifest SHA-256 is 11c349cf8ad118463db411d7cf83366cdf86b5b67cbcc20034be845693c03ede. WP-05 is 13/3/0 semantics and 4/1/3 fuzz; full WP-05, WP-06, official-peer RF, physical UI/RF/SD/update/soak, and release closure remain open. The exact COM12 retained-DM migration blocker is data-preserving and does not indicate hardware/media failure."
     last_strict_verified_main:
-      commit: f95b2fc73a29cb3292036786c846308a2bf76080
-      run: 29545499539
-      host_tests_passed: 1256
+      commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+      run: 29548300732
+      host_tests_passed: 1263
       checksum_contract_tests_passed: 33
-      focused_tests_passed: 79
+      focused_tests_passed: 74
       checksum_entries_verified: 46
-      downloaded_tree_file_count: 340
-      downloaded_tree_total_bytes: 81445758
-      downloaded_tree_sha256: 35bd8fc2c71e4c7440836a6c156a6baf957e0a1113398bde24971475f62cf015
-      provenance_sha256: f06c204ea9090b2c853161a18f92f2c8bddeec24bda50fd20f03abceabf27408
-      sbom_sha256: cb5ec1d2945ea87be6f7256aa44dc291183386da6f6c7c6b97b38412cd744d0b
-      exact_main_gate_receipt_sha256: 3fca0071ca10845f0aa37eb9124a7d3a147261ed9ff158c1659b4164ad0b6d8e
-      exact_main_gate_manifest_sha256: 1bcc28bcf09bbee43ee772873c6568a828d38480f828766316492a96f8c3d4a1
+      downloaded_tree_file_count: 341
+      downloaded_tree_total_bytes: 81502761
+      downloaded_tree_sha256: f44e0970a57686c8bfaa5b0aa3307b30f196081ed1220359e687bf901dfabe39
+      provenance_sha256: d9247fa1c2576eedf62fa0f01a966b3de6789aee6977c194f6ff8d2b3a79644b
+      sbom_sha256: 434166cc203ede00641737c41bdd8ded475a833e8211446aac69fdab9dc0e4d2
+      exact_main_gate_receipt_sha256: 8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9
+      exact_main_gate_manifest_sha256: 11c349cf8ad118463db411d7cf83366cdf86b5b67cbcc20034be845693c03ede
     excluded_main_2a5cb98_partial_operator_attempt:
       path: F:/SIGUI-artifact-gates/main-2a5cb98
       commit: 2a5cb982c967cb1185cd047838b4213ca7ba61bc
@@ -1573,25 +1602,17 @@ project:
     checksum_entries_verified: 78
   release_audit:
     ready_for_public_release: false
-    exact_main_run: 29545499539
-    scope_commit: f95b2fc73a29cb3292036786c846308a2bf76080
-    receipt_sha256: 67c31ce63b123e21b29a9de1de769878e557a86a9406f260d2aec560ae255dfd
+    exact_main_run: 29548300732
+    scope_commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+    receipt_sha256: 42fce2a53c4c08e3ddeb4aa1d34456c875632cc2df2e776a05bfc84f97f85613
     status: fail_closed
-    last_strict_verified_main_run: 29545499539
-    last_strict_verified_scope_commit: f95b2fc73a29cb3292036786c846308a2bf76080
-    last_strict_verified_release_audit_sha256: 67c31ce63b123e21b29a9de1de769878e557a86a9406f260d2aec560ae255dfd
-    last_strict_verified_receipt_sha256: 3fca0071ca10845f0aa37eb9124a7d3a147261ed9ff158c1659b4164ad0b6d8e
+    last_strict_verified_main_run: 29548300732
+    last_strict_verified_scope_commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+    last_strict_verified_release_audit_sha256: 42fce2a53c4c08e3ddeb4aa1d34456c875632cc2df2e776a05bfc84f97f85613
+    last_strict_verified_receipt_sha256: 8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9
     remaining_p0_failures: 33
     failures_overall_including_p1: 35
-  active_pull_requests:
-  - pull_request: 181
-    head: 851cf082269695aa41adfe14bd1d5fd291371aa5
-    base: f95b2fc73a29cb3292036786c846308a2bf76080
-    status: corrected_review_and_canonical_actions_in_progress_not_admitted
-  - pull_request: 182
-    head: 86f24ecd0c43c6e3cfee137c331e1890d8a64c38
-    base: f95b2fc73a29cb3292036786c846308a2bf76080
-    status: host_source_contract_correction_in_progress_not_admitted
+  active_pull_requests: []
   local_unpublished_candidates: []
   local_merge_rehearsals:
     pr62:
@@ -2445,8 +2466,8 @@ work_packages:
   tracks:
   - 65
   status: in_progress
-  implementation_commit: f95b2fc73a29cb3292036786c846308a2bf76080
-  evidence_commit: f95b2fc73a29cb3292036786c846308a2bf76080
+  implementation_commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+  evidence_commit: de0bb75bd91146f0dc9896540d12c71889d7766b
   implementation_merged: true
   partial_implementation_merged: true
   merged_slices:
@@ -2619,9 +2640,54 @@ work_packages:
     full_semantic_matrix_covered: false
     wp05_closure: false
     physical_rf_evidence: false
+  - pull_request: 182
+    base: bf9e6f31a1dc65d49126ac2df7f56557738e7dc0
+    head: f00486282b3b3d0ec1d6e1b25b3985a8e8485a47
+    synthetic_merge: a0569cf233eb7f7b53e81c11b3fca24be98e6a1b
+    merge_commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+    shared_tree: efc7ce1acbdd2ab7a9c963ec9477a71eda991823
+    reviewed_patch_id: c4512479562ecf85dd080ddb867210ec11e57cdb
+    actions_pr_run: 29547584817
+    exact_main_actions_run: 29548300732
+    exact_main_host_tests_passed: 1263
+    exact_main_checksum_contract_tests_passed: 33
+    focused_tests_passed: 74
+    focused_tests_skipped: 1
+    exact_main_wire_vectors: 1008
+    exact_main_oracle_checks: 931
+    semantic_native_cases: 100000
+    semantic_libfuzzer_runs_completed: 100000
+    semantic_fuzz_findings: 0
+    exact_main_artifact_archives_verified: 5
+    exact_main_artifact_archive_total_bytes: 27208527
+    exact_main_downloaded_tree_file_count: 341
+    exact_main_checksum_entries_verified: 46
+    pr_gate_receipt_sha256: ba1c774004c80381e5569a55abaf262fa7748b4799c35c8316670e86deb73781
+    pr_gate_manifest_sha256: a530bc01881b6a5c02fed7cf1c5c80e1287096964e29d0fa975a6aff5b990ddd
+    exact_main_gate_receipt_sha256: 8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9
+    exact_main_gate_manifest_sha256: 11c349cf8ad118463db411d7cf83366cdf86b5b67cbcc20034be845693c03ede
+    semantic_receipt_sha256: 32092d3e1150e8a376f747884878d1e05d889af75ce9375ff0ea12b214b1246f
+    provenance_sha256: d9247fa1c2576eedf62fa0f01a966b3de6789aee6977c194f6ff8d2b3a79644b
+    sbom_sha256: 434166cc203ede00641737c41bdd8ded475a833e8211446aac69fdab9dc0e4d2
+    release_manifest_sha256: 83b4238ac7cf8ec3ab3d004c6d044d4d0453f9cdfdbe828d49bb6ebc2d5c5f9d
+    portable_aggregate_path: docs/completion/evidence/wp05/semantic_packet_fuzz_de0bb75bd91146f0dc9896540d12c71889d7766b.json
+    portable_aggregate_sha256: ec9c696f2a6b7e063ab1535ce4632fcefbb300f5a14a9e210cd74bde33cde852
+    requirement_count: 16
+    implemented_requirement_count: 13
+    partial_requirement_count: 3
+    missing_requirement_count: 0
+    fuzz_target_count: 8
+    implemented_fuzz_target_count: 4
+    partial_fuzz_target_count: 1
+    missing_fuzz_target_count: 3
+    production_suite_count: 11
+    production_scenario_count: 75
+    full_semantic_matrix_covered: false
+    wp05_closure: false
+    physical_rf_evidence: false
   residual_capabilities:
-  - complete_five_partial_semantic_requirement_classes
-  - implement_four_missing_and_complete_one_partial_fuzz_target_class
+  - complete_three_partial_semantic_requirement_classes
+  - implement_three_missing_and_complete_one_partial_fuzz_target_class
   - exact_candidate_official_peer_rf_qualification
   required_artifacts:
   - meshcore_conformance_<sha>.json
@@ -3287,6 +3353,30 @@ work_packages:
     physical_card_durability_complete: false
     physical_endurance_complete: false
     wp11_closure: false
+  - filename: retained_dm_migration_blocker_de0bb75bd91146f0dc9896540d12c71889d7766b_COM12.json
+    kind: exact_main_retained_dm_data_preserving_migration_blocker
+    commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+    workflow_run: 29548300732
+    valid: true
+    closure_required: false
+    scope: non_erasing_exact_COM12_flash_with_retained_predecessor_DM_compatibility_or_migration_blocking_reboot_persistence
+    sha256: 734266054fd2c3da6320445f8f8bd7c20c6c5bffc09dd2653683286ef01f0074
+    portable_receipt_path: docs/completion/evidence/wp11/retained_dm_migration_blocker_de0bb75bd91146f0dc9896540d12c71889d7766b_COM12.json
+    flash_report_sha256: d7098f4412a15c82f2df2fa93f7390e631a57523ef80abe1f68b7b7e5b1760bf
+    autonomous_report_sha256: 5d9b4b24f44ac61ad26f706a39cc2dca1314bbef2930b20db9bc33dacae43d43
+    predecessor_smoke_sha256: 030b2369b2de80188043d62be6f3b0f06fb6be5ba001d8e2766d09a8707baa1b
+    non_erasing_flash_passed: true
+    persistence_smoke_attempts: 2
+    retained_dm_flush_error: ESP_ERR_INVALID_STATE
+    reboot_correctly_cancelled: true
+    final_storage_state: READY_SD
+    filesystem: fat32
+    mounted: true
+    data_root_ready: true
+    sd_or_nvs_mirror_io_failures: 0
+    retained_user_data_preserved: true
+    hardware_or_media_failure: false
+    physical_closure_ready: false
   latest_valid_receipt:
     filename: factory_reset_9686c3d7fa52bb1b3c236b930a8c7383527125ac.json
     commit: 9686c3d7fa52bb1b3c236b930a8c7383527125ac
@@ -3333,14 +3423,22 @@ work_packages:
     bounded_interruption_safe_factory_reset: true
     factory_reset_owned_paths_only: true
     factory_reset_formats_sd: false
+    retained_dm_migration_source_commit: de0bb75bd91146f0dc9896540d12c71889d7766b
+    retained_dm_migration_actions_run: 29548300732
+    retained_dm_migration_blocker_sha256: 734266054fd2c3da6320445f8f8bd7c20c6c5bffc09dd2653683286ef01f0074
+    retained_dm_data_preserved: true
+    retained_dm_hardware_or_media_failure: false
     wp11_closure: false
     physical_evidence: false
   residual_capabilities:
+  - data_preserving_retained_predecessor_DM_compatibility_or_migration_and_exact_successor_reboot_persistence
   - exact_candidate_interrupted_write_and_repeated_power_loss_acceptance
   - physical_four_store_sd_lineage_absent_insert_swap_remove_reinsert_reboot_acceptance
   - bridge_inside_one_delete_card_replacement_window_acceptance
   - named_workload_nvs_write_amplification_and_endurance_evidence
   - exact_candidate_physical_recovery_console_and_durability_qualification
+  blockers:
+  - BLK-WP11-RETAINED-DM-MIGRATION-DE0BB75-20260716
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-12
   title: Truthful time service

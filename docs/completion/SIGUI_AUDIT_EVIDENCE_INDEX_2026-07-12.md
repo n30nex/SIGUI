@@ -1,6 +1,6 @@
 # SIGUI Audit Evidence Index
 
-**Audit date:** 2026-07-12; live reconciliation refreshed 2026-07-16
+**Audit date:** 2026-07-12; live reconciliation refreshed 2026-07-17
 **Repository:** `n30nex/SIGUI`  
 **Purpose:** make the master roadmap traceable to the exact repository state inspected.
 
@@ -8,19 +8,20 @@
 
 | Item | Value |
 |---|---|
-| Live merged main | `f95b2fc73a29cb3292036786c846308a2bf76080` through PR #180; exact-main Actions `29545499539` strict-pass and are admitted |
-| Last strict-verified merged checkpoint included in this pack | `f95b2fc73a29cb3292036786c846308a2bf76080` / Actions `29545499539` / receipt `3fca0071ca10845f0aa37eb9124a7d3a147261ed9ff158c1659b4164ad0b6d8e` / gate manifest `1bcc28bcf09bbee43ee772873c6568a828d38480f828766316492a96f8c3d4a1` |
+| Live merged main | `de0bb75bd91146f0dc9896540d12c71889d7766b` through PR #182; exact-main Actions `29548300732` strict-pass and are admitted |
+| Last strict-verified merged checkpoint included in this pack | `de0bb75bd91146f0dc9896540d12c71889d7766b` / Actions `29548300732` / receipt `8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9` / gate manifest `11c349cf8ad118463db411d7cf83366cdf86b5b67cbcc20034be845693c03ede` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
-| Open pull requests | PR #181 corrected head `851cf082269695aa41adfe14bd1d5fd291371aa5` and PR #182 head `86f24ecd0c43c6e3cfee137c331e1890d8a64c38` are active implementation slices and are not admitted as merged evidence. `codex/post-wp05-ledger-main` is the local evidence-reconciliation branch |
-| Merged completion slices | PRs #152-#168 and #170-#180 remain banked. PRs #177-#180 add replay parity, packet-hash authority, USB parser fuzzing, ACK completion, and lifetime truth while preserving earlier reset, Map, runtime, and protocol banks. Full WP-05, RF/physical/release closure remain open |
-| Candidate integration state | PR #180 head `120575cec6d84edd75b6bb1e23a47d782b90f9f8`, retained synthetic merge `2c6b09d1a46ba28f4f01014e3d0d2d9d3b5c33fb`, and exact main `f95b2fc73a29cb3292036786c846308a2bf76080` share tree `4c5dce62847bac1029cfa4c0207012666aef7d1c`. PR/exact-main Actions `29544947130` / `29545499539` pass; exact main records 1,256 host, 33 checksum, full existing conformance/fuzz, and five ZIPs / 46 entries across 340 files, while the PR gate records 79 focused ACK/lifetime tests plus one expected Windows-only skip and independent review is clean |
+| Open pull requests | No open PR is admitted by this checkpoint; later draft work is intentionally excluded until corrected, merged, and exact-main banked |
+| Merged completion slices | PRs #152-#168 and #170-#182 remain banked. PR #182 adds the semantic packet parser/fuzz target while preserving earlier reset, Map, runtime, and protocol banks. Full WP-05/WP-06 and RF/physical/release closure remain open |
+| Candidate integration state | PR #182 head `f00486282b3b3d0ec1d6e1b25b3985a8e8485a47`, synthetic merge `a0569cf233eb7f7b53e81c11b3fca24be98e6a1b`, and exact main `de0bb75bd91146f0dc9896540d12c71889d7766b` share tree `efc7ce1acbdd2ab7a9c963ec9477a71eda991823`. PR/exact-main Actions `29547584817` / `29548300732` pass; exact main records 1,263 host, 33 checksum, 100,000 native plus 100,000 Clang 18 semantic cases, and five ZIPs / 46 entries / 341 files / 27,208,527 archive bytes |
 | Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
 | SDK | ESP-IDF 5.5.4 |
-| Last banked host suite | Exact-main Actions `29545499539` passed 1,256 host and 33 checksum-contract tests, 1,008 wire vectors, 931 oracle checks, 100,000 wire plus 100,000 advert and 200,000 USB-parser fuzz inputs with zero findings; canonical PR Actions `29544947130` passed 79 focused ACK/lifetime tests plus one expected skip |
-| Last banked candidate CI | At exact main `f95b2fc`, five ZIPs / 46 entries strict-verified across 340 files / 81,445,758 bytes with exact-source provenance and SPDX 2.3; strict receipt SHA-256 `3fca0071ca10845f0aa37eb9124a7d3a147261ed9ff158c1659b4164ad0b6d8e`. Provenance is valid but unauthenticated and no SLSA level is claimed |
-| Conformance closure | false overall; this pack admits PRs #177-#180, but 5 semantic classes remain partial and 4 fuzz targets remain missing plus 1 partial. Pinned official-client RF, exact-candidate reboot/reset/recovery and physical acceptance, required artifacts, downstream work packages, and final release closure remain open |
-| Release status | not ready to tag; exact main `f95b2fc` audit SHA-256 `67c31ce63b123e21b29a9de1de769878e557a86a9406f260d2aec560ae255dfd` is fail-closed with 33 P0 / 35 overall; the reproducible reporting estimate remains 80% capability implementation / 74% weighted progress, not a gate waiver |
+| Last banked host suite | Exact-main Actions `29548300732` passed 1,263 host and 33 checksum-contract tests, 1,008 wire vectors, 931 oracle checks, and 100,000 native plus 100,000 Clang 18 semantic-packet cases with zero findings |
+| Last banked candidate CI | At exact main `de0bb75`, five ZIPs / 46 entries strict-verified across 341 files / 27,208,527 archive bytes with exact-source provenance and SPDX 2.3; strict receipt SHA-256 `8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9`. Provenance is valid but unauthenticated and no SLSA level is claimed |
+| Conformance closure | false overall; this pack admits PR #182 and reports 3 semantic classes partial plus 3 fuzz targets missing and 1 partial. Pinned official-client RF, exact-candidate reboot/reset/recovery and physical acceptance, required artifacts, downstream work packages, and final release closure remain open |
+| Exact-main hardware blocker | Non-erasing COM12 flash passed; `docs/completion/evidence/wp11/retained_dm_migration_blocker_de0bb75bd91146f0dc9896540d12c71889d7766b_COM12.json` (SHA-256 `734266054fd2c3da6320445f8f8bd7c20c6c5bffc09dd2653683286ef01f0074`) records a data-preserving retained-DM compatibility/migration blocker, not hardware/media failure or closure |
+| Release status | not ready to tag; exact main `de0bb75` audit SHA-256 `42fce2a53c4c08e3ddeb4aa1d34456c875632cc2df2e776a05bfc84f97f85613` is fail-closed with 33 P0 / 35 overall; the reproducible reporting estimate remains 80% capability implementation / 74% weighted progress, not a gate waiver |
 
 ## Live post-audit reconciliation
 

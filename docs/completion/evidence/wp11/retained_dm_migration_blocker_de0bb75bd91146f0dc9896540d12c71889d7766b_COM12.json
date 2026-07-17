@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "evidence_type": "exact_main_retained_dm_data_preserving_migration_blocker",
+  "generated_utc": "2026-07-17T02:10:25Z",
+  "status": "open_root_cause_and_data_preserving_migration_work_in_progress",
+  "claim_scope": "Portable exact-main COM12 blocker receipt for a non-erasing flash and two persistence-smoke attempts against de0bb75 / Actions 29548300732. The exact firmware identity and downloaded artifact hashes were verified and the flash succeeded. Both smoke attempts reached the persistence mutation and failed only when the retained scheduler could not flush the retained DM store, so firmware correctly returned ESP_ERR_INVALID_STATE and cancelled reboot. The final attempt reports READY_SD, FAT32, mounted, data-root-ready, and zero SD or NVS-mirror I/O failures. This is a retained-data compatibility or migration root-cause receipt, not an SD-card, bridge, hardware, or media failure and not physical closure.",
+  "exact_pair": {
+    "source_commit": "de0bb75bd91146f0dc9896540d12c71889d7766b",
+    "actions_run": 29548300732,
+    "actions_gate_receipt_path": "F:/SIGUI-artifact-gates/main-de0bb75/gate-receipt.json",
+    "actions_gate_receipt_sha256": "8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9",
+    "firmware_manifest_sha256": "1a3490b7a867678b4e84b5a36524ca9e3038898f3f3da20d4232045f49eeb2e2",
+    "application_sha256": "3b330e4765d0912fc801084d7285e691cadd93385f16ca987140f17b7b8adc05",
+    "full_flash_sha256": "1ace2ad9f215b03e780a097541cd976df970fb2979dfcf3b2fc41cac0d7f8a10",
+    "d1l_port": "COM12"
+  },
+  "canonical_raw_evidence": {
+    "flash_report": {
+      "path": "F:/SIGUI-worktrees/exact-de0bb75/artifacts/hardware/com12/esp32_flash_de0bb75_actions_29548300732_COM12.json",
+      "sha256": "d7098f4412a15c82f2df2fa93f7390e631a57523ef80abe1f68b7b7e5b1760bf"
+    },
+    "autonomous_report": {
+      "path": "F:/SIGUI-worktrees/exact-de0bb75/artifacts/hardware/com12/d1l-autonomous-hardware-validation-de0bb75-actions29548300732.json",
+      "sha256": "5d9b4b24f44ac61ad26f706a39cc2dca1314bbef2930b20db9bc33dacae43d43"
+    },
+    "persistence_smoke_attempt_1": {
+      "path": "F:/SIGUI-worktrees/exact-de0bb75/artifacts/hardware/com12/smoke_de0bb75_actions_29548300732_COM12_attempt1.json",
+      "sha256": "7fd474a46cc154b8d3be701ff790a74650575fdef14077abe858583d6de47805"
+    },
+    "persistence_smoke_attempt_2": {
+      "path": "F:/SIGUI-worktrees/exact-de0bb75/artifacts/hardware/com12/smoke_de0bb75_actions_29548300732_COM12.json",
+      "sha256": "ee6e906b7f0e644de5cebe68d9fd4457773502ffb10476f589b9539865a6ee0f"
+    },
+    "predecessor_retained_data_smoke": {
+      "path": "F:/SIGUI-worktrees/wp01-07322ed-clean/artifacts/hardware/com12/smoke_092293f_actions_29272708844_COM12.json",
+      "sha256": "030b2369b2de80188043d62be6f3b0f06fb6be5ba001d8e2766d09a8707baa1b",
+      "source_commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+      "actions_run": 29272708844
+    }
+  },
+  "flash": {
+    "artifact_verification_ok": true,
+    "write_flash_returncode": 0,
+    "hash_of_written_data_verified": true,
+    "non_erasing": true,
+    "nvs_erased": false,
+    "sd_formatted": false,
+    "rp2040_flashed": false,
+    "public_rf_tx": false
+  },
+  "persistence_smoke": {
+    "attempt_count": 2,
+    "firmware_identity_ok_both": true,
+    "settings_snapshot_valid_both": true,
+    "mutation_commands_ok_both": true,
+    "mutation_verified_both": true,
+    "reboot_attempted_both": true,
+    "reboot_command_passed_both": false,
+    "reboot_error_both": "ESP_ERR_INVALID_STATE",
+    "reboot_hint_both": "retained storage flush failed; reboot cancelled",
+    "retained_store": "direct_messages",
+    "retained_store_result": "ESP_ERR_INVALID_STATE",
+    "retained_store_dirty": true,
+    "retained_store_reconcile_pending": true,
+    "cancelled_reboot_cleanup_ok_both": true,
+    "retained_user_settings_restored": true
+  },
+  "storage_health_final_attempt": {
+    "manager_state": "READY_SD",
+    "sd_state": "ready",
+    "interface": "rp2040",
+    "filesystem": "fat32",
+    "present": true,
+    "mounted": true,
+    "data_root_ready": true,
+    "data_root": "/sdcard/deskos",
+    "setup_required": false,
+    "retained_sd_degraded": false,
+    "retained_sd_backup_degraded": false,
+    "messages_sd_read_fail_count": 0,
+    "messages_sd_write_fail_count": 0,
+    "messages_nvs_mirror_fail_count": 0,
+    "dm_sd_read_fail_count": 0,
+    "dm_sd_write_fail_count": 0,
+    "dm_nvs_mirror_fail_count": 0,
+    "routes_sd_read_fail_count": 0,
+    "routes_sd_write_fail_count": 0,
+    "routes_nvs_mirror_fail_count": 0,
+    "packets_sd_read_fail_count": 0,
+    "packets_sd_write_fail_count": 0,
+    "packets_nvs_mirror_fail_count": 0
+  },
+  "retained_data_predecessor_proof": {
+    "source_commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+    "actions_run": 29272708844,
+    "dm_store_loaded": true,
+    "dm_count": 16,
+    "dm_capacity": 16,
+    "dm_total_written": 468,
+    "dm_content_revision": 469,
+    "dm_store_failures": 0,
+    "dm_sd_last_error": "ESP_OK",
+    "dm_nvs_last_error": "ESP_OK",
+    "interpretation": "The retained DM dataset existed and was readable on the predecessor exact firmware; it must be preserved while migration/root cause is corrected. Predecessor evidence does not close the exact-main gate."
+  },
+  "blocker": {
+    "id": "BLK-WP11-RETAINED-DM-MIGRATION-DE0BB75-20260716",
+    "kind": "exact_main_data_preserving_retained_dm_migration_required",
+    "blocks_release": true,
+    "blocks_execution": false,
+    "hardware_or_media_failure": false,
+    "physical_closure_claimed": false,
+    "missing_input": "A source-level compatibility or data-preserving migration correction that loads and flushes the retained predecessor DM store on the exact successor without erase or format, followed by a checksum-verified exact-successor reboot persistence receipt.",
+    "operator_action": "No erase, SD format, RP2040 flash, public RF transmission, or additional hardware action is requested. Continue source-level root-cause and migration work, then repeat only the narrow non-erasing COM12 persistence smoke on a new exact Actions artifact.",
+    "time_migration_confirmation": "separately_open"
+  },
+  "claims": {
+    "exact_main_firmware_flashed": true,
+    "exact_main_general_persistence_smoke_passed": false,
+    "retained_data_preserved": true,
+    "sd_media_failure_observed": false,
+    "rp2040_failure_observed": false,
+    "release_gate_closed": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
