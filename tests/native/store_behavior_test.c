@@ -7,6 +7,7 @@
 
 #include "mesh/contact_store.h"
 #include "mesh/meshcore_advert_admission.h"
+#include "mesh/meshcore_lifetime.h"
 #include "mesh/meshcore_packet_hash.h"
 #include "mesh/node_store.h"
 #include "mock_esp_nvs.h"
@@ -985,6 +986,59 @@ static esp_err_t upsert_node(uint32_t advert_timestamp, const char *name,
     return d1l_node_store_upsert_advert(
         "abcdef0123456789", KEY_HEX, name, 'C', -72, 45, 1U, 2U,
         advert_timestamp, location_valid, lat_e6, lon_e6, out_stale);
+}
+
+static void test_node_reachability_is_boot_local_and_wrap_safe(void)
+{
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_node_store_init() == ESP_OK);
+
+    /* Uptime zero is a valid fresh observation when validity is explicit. */
+    mock_timer_set_us(0);
+    bool stale = true;
+    assert(upsert_node(1U, "Fresh Zero", false, 0, 0, &stale) == ESP_OK);
+    assert(!stale);
+    d1l_node_query_t query = {
+        .filter = D1L_NODE_FILTER_ALL,
+        .sort = D1L_NODE_SORT_LAST_HEARD,
+    };
+    d1l_node_view_t view = {0};
+    assert(d1l_node_store_query(&query, &view, 1U) == 1U);
+    assert(view.reachable);
+    assert(view.node.last_heard_ms == 0U);
+
+    /* Reload models a new boot: history remains visible, but prior uptime is
+     * not allowed to make the node live in the new monotonic epoch. */
+    assert(d1l_node_store_init() == ESP_OK);
+    memset(&view, 0, sizeof(view));
+    assert(d1l_node_store_query(&query, &view, 1U) == 1U);
+    assert(!view.reachable);
+    assert(view.node.last_heard_ms == 0U);
+    query.reachable_only = true;
+    assert(d1l_node_store_query(&query, &view, 1U) == 0U);
+
+    /* A current-boot observation remains reachable across uint32 wrap, then
+     * expires at max_age + 1 without consulting persisted boot history. */
+    const uint32_t wrapped_heard_ms = UINT32_MAX - 10U;
+    mock_timer_set_us((int64_t)wrapped_heard_ms * 1000LL);
+    stale = true;
+    assert(upsert_node(2U, "Fresh Wrap", false, 0, 0, &stale) == ESP_OK);
+    assert(!stale);
+    mock_timer_set_us(9LL * 1000LL);
+    query.reachable_only = false;
+    memset(&view, 0, sizeof(view));
+    assert(d1l_node_store_query(&query, &view, 1U) == 1U);
+    assert(view.reachable);
+    assert(view.node.last_heard_ms == wrapped_heard_ms);
+
+    const uint32_t expired_ms = wrapped_heard_ms +
+        D1L_MESHCORE_CONTACT_REACHABLE_MAX_AGE_MS + 1U;
+    mock_timer_set_us((int64_t)expired_ms * 1000LL);
+    memset(&view, 0, sizeof(view));
+    assert(d1l_node_store_query(&query, &view, 1U) == 1U);
+    assert(!view.reachable);
+    assert(view.node.last_heard_ms == wrapped_heard_ms);
 }
 
 static void test_stale_advert_and_location_preservation(void)
@@ -2137,6 +2191,7 @@ int main(void)
     test_current_path_record_corruption_is_preserved_fail_closed();
     test_same_size_future_contact_schema_is_preserved_fail_closed();
     test_oversized_future_contact_schema_is_preserved_fail_closed();
+    test_node_reachability_is_boot_local_and_wrap_safe();
     test_stale_advert_and_location_preservation();
     test_node_nvs_failure_rolls_back_and_retry_succeeds();
     test_d1l_first_zero_timestamp_accepted();

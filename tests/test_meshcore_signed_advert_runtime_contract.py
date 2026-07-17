@@ -89,7 +89,7 @@ def test_signed_advert_runtime_repository_sources_match_exact_pins():
     assert receipt["upstream_commit"] == manifest["upstream"]["commit"]
     assert receipt["gitlink_commit"] == manifest["upstream"]["commit"]
     assert receipt["source_hash_mode"] == "canonical_lf_text_sha256"
-    assert len(receipt["files"]) == 44
+    assert len(receipt["files"]) == 45
     assert all(item["matched"] for item in receipt["files"].values())
 
 

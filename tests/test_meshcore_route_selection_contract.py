@@ -123,6 +123,9 @@ def test_direct_results_mutate_retained_path_only_in_runtime_owner():
     ack = service.split("static d1l_rx_ack_result_t record_dm_ack", 1)[1].split(
         "static void parse_rx_ack_packet", 1
     )[0]
+    ack_finalize = service.split(
+        "static bool finalize_pending_dm_ack_completion(void)\n{", 1
+    )[1].split("static void clear_pending_ack_tx", 1)[0]
     callback = service.split("static void on_tx_done", 1)[1].split(
         "static void on_tx_timeout", 1
     )[0]
@@ -138,7 +141,11 @@ def test_direct_results_mutate_retained_path_only_in_runtime_owner():
     )[0]
     assert "record_pending_direct_path_result(false);" not in timeout
     assert "record_pending_direct_path_result(false);" in retry
-    assert "record_pending_direct_path_result(true);" in ack
+    assert "record_pending_direct_path_result(true);" not in ack
+    assert "record_pending_direct_path_result(true);" in ack_finalize
+    assert ack_finalize.index(
+        "d1l_meshcore_ack_completion_take_terminal_effects("
+    ) < ack_finalize.index("record_pending_direct_path_result(true);")
     assert "d1l_contact_store_note_path_result(" not in callback
     assert "retained worker owns all serialization and NVS I/O" in service
 

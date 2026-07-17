@@ -5,6 +5,8 @@
 
 #include "mbedtls/md.h"
 
+#include "mesh/meshcore_lifetime.h"
+
 static bool cache_slot_occupied(const d1l_meshcore_packet_hash_cache_t *cache,
                                 uint16_t index)
 {
@@ -91,8 +93,16 @@ bool d1l_meshcore_packet_hash_cache_remember(
     memcpy(cache->hashes[cache->next_index], hash,
            D1L_MESHCORE_PACKET_HASH_BYTES);
     cache_slot_set_occupied(cache, cache->next_index, true);
-    cache->next_index = (uint16_t)(
-        (cache->next_index + 1U) % D1L_MESHCORE_PACKET_HASH_CACHE_CAPACITY);
+    uint16_t next_index = 0U;
+    if (!d1l_meshcore_lifetime_packet_fifo_next(
+            cache->next_index, D1L_MESHCORE_PACKET_HASH_CACHE_CAPACITY,
+            &next_index)) {
+        cache_slot_set_occupied(cache, cache->next_index, false);
+        memset(cache->hashes[cache->next_index], 0,
+               D1L_MESHCORE_PACKET_HASH_BYTES);
+        return false;
+    }
+    cache->next_index = next_index;
     return true;
 }
 

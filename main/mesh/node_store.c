@@ -9,6 +9,7 @@
 #include "nvs.h"
 
 #include "mesh/contact_store.h"
+#include "mesh/meshcore_lifetime.h"
 #include "mesh/store_lock.h"
 
 #define D1L_NODE_STORE_NAMESPACE "d1l_nodes"
@@ -98,6 +99,11 @@ typedef struct {
 } d1l_node_store_blob_t;
 
 static d1l_node_entry_t s_entries[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
+/* Monotonic uptime is meaningful only within one boot.  Retain the historical
+ * entry timestamps for display/audit, but derive live reachability solely from
+ * this boot-local observation set. */
+static uint32_t s_live_last_heard_ms[D1L_NODE_STORE_CAPACITY];
+static bool s_live_heard_valid[D1L_NODE_STORE_CAPACITY];
 static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
@@ -185,6 +191,8 @@ static const char *type_name(char type_code)
 static void clear_ram(void)
 {
     memset(s_entries, 0, sizeof(s_entries));
+    memset(s_live_last_heard_ms, 0, sizeof(s_live_last_heard_ms));
+    memset(s_live_heard_valid, 0, sizeof(s_live_heard_valid));
     s_count = 0;
     s_next_seq = 1;
     s_total_written = 0;
@@ -475,9 +483,10 @@ static uint8_t node_role_order(const char *role)
     return 4U;
 }
 
-static void build_node_view(const d1l_node_entry_t *node, d1l_node_view_t *view)
+static void build_node_view(size_t index, const d1l_node_entry_t *node,
+                            d1l_node_view_t *view, uint32_t now_ms)
 {
-    if (!node || !view) {
+    if (index >= s_count || !node || !view) {
         return;
     }
     memset(view, 0, sizeof(*view));
@@ -489,7 +498,10 @@ static void build_node_view(const d1l_node_entry_t *node, d1l_node_view_t *view)
     view->favorite = has_contact && contact.favorite;
     view->muted = has_contact && contact.muted;
     view->keyed = node_has_key(node, has_contact ? &contact : NULL);
-    view->reachable = node->last_heard_ms != 0;
+    view->reachable = s_live_heard_valid[index] &&
+        d1l_meshcore_lifetime_age_current_u32(
+            s_live_last_heard_ms[index], now_ms,
+            D1L_MESHCORE_CONTACT_REACHABLE_MAX_AGE_MS);
     sanitize_ascii(view->role, sizeof(view->role), node_role_name(node));
     if (has_contact && contact.alias[0] != '\0') {
         sanitize_ascii(view->display_name, sizeof(view->display_name), contact.alias);
@@ -718,7 +730,9 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
         d1l_store_lock_give(&s_store_lock);
         return ESP_ERR_INVALID_STATE;
     }
-    if (existing >= 0 && advert_timestamp <= s_entries[existing].advert_timestamp) {
+    if (existing >= 0 &&
+        !d1l_meshcore_lifetime_advert_is_strictly_newer(
+            true, s_entries[existing].advert_timestamp, advert_timestamp)) {
         d1l_store_lock_give(&s_store_lock);
         *out_stale = true;
         return ESP_OK;
@@ -738,6 +752,8 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
 
     d1l_node_entry_t *entry = &s_entries[index];
     const d1l_node_entry_t entry_before = *entry;
+    const uint32_t live_last_heard_before = s_live_last_heard_ms[index];
+    const bool live_heard_valid_before = s_live_heard_valid[index];
     const d1l_node_entry_t marker_before =
         (!is_new || replacing_oldest) ? entry_before : (d1l_node_entry_t){0};
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -748,6 +764,8 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
     }
     entry->seq = s_next_seq++;
     entry->last_heard_ms = now_ms;
+    s_live_last_heard_ms[index] = now_ms;
+    s_live_heard_valid[index] = true;
     entry->advert_timestamp = advert_timestamp;
     entry->heard_count++;
     entry->rssi_dbm = rssi_dbm;
@@ -779,6 +797,8 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
     esp_err_t ret = persist_store();
     if (ret != ESP_OK) {
         *entry = entry_before;
+        s_live_last_heard_ms[index] = live_last_heard_before;
+        s_live_heard_valid[index] = live_heard_valid_before;
         s_count = count_before;
         s_next_seq = next_seq_before;
         s_total_written = total_written_before;
@@ -859,9 +879,10 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
     if (!s_loaded && d1l_node_store_init() != ESP_OK) {
         return 0;
     }
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     d1l_store_lock_take(&s_store_lock);
     for (size_t i = 0; i < s_count; ++i) {
-        build_node_view(&s_entries[i], &s_query_scratch[i]);
+        build_node_view(i, &s_entries[i], &s_query_scratch[i], now_ms);
     }
 
     const d1l_node_sort_t sort = query ? query->sort : D1L_NODE_SORT_LAST_HEARD;

@@ -57,7 +57,8 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   oracle for packet, advert, group, DM, ACK, PATH, TRACE, identity, and login
   boundaries, while retaining the separate 100,000-input wire-envelope fuzz
   gate. Receipts are bound to the exact ordered 22-command build plan and keep
-  `closure_ready=false`. Real ACK delivery/correlation, route forwarding,
+  `closure_ready=false`. End-to-end compatible-peer ACK delivery, retained
+  fault/power-loss recovery, route forwarding,
   generic contact/multi-hop TRACE, admin sessions, retained-state recovery,
   official-peer RF, and hardware remain outside this foundation. PR #93 is now merged and proves
   the first real signed-advert Identity/Mesh/Dispatcher/BaseChatMesh runtime
@@ -104,16 +105,25 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   authorities; hash calculation errors fail open to their semantic paths.
   The WP-05 conformance receipt validates the sanitized exact-commit runtime
   receipt and binds its canonical SHA-256, all five timestamp outcomes, all five
-  packet-hash outcomes, and the exact table receipt. The declared matrix is 9
-  implemented / 7 partial / 0 missing requirements, 9 production suites / 61
-  scenarios / 35 translation units / 66 source pins, plus 1 companion suite /
-  10 cases. Actions and downstream package/audit consumers recompute and compare
-  the binding from the supplied receipt rather than accepting any shaped digest;
-  the matrix remains `closure_ready=false`. The cache is deliberately
-  boot-local, while DM/ACK/PATH/TRACE durability and correlation remain owned by
-  their existing retained state. This does not prove persisted keypair
-  consistency, retained-contact recovery, peer/RF interoperability, ACK
-  delivery, trace, admin sessions, or hardware.
+  packet-hash outcomes, and the exact table receipt. Actions and downstream
+  package/audit consumers recompute and compare the binding from the supplied
+  receipt rather than accepting any shaped digest; the matrix remains
+  `closure_ready=false`. The declared matrix is now 11
+  implemented / 5 partial / 0 missing requirements, 11 production suites / 77
+  scenarios / 38 translation units / 73 source pins, plus 1 companion suite /
+  10 cases. The exact-owner ACK coordinator admits only the active
+  `AWAITING_ACK` revision and defers deadline clear, route credit, durable ACK
+  log, and hash admission until that retained transition is durable; those
+  effects are take-once across persistence reconciliation; each RF receipt is
+  also bound to that exact session, base revision, and ACK hash, so a failed
+  direct receipt cannot be credited to a later flood retry. Contact reachability
+  and direct routes share an executable 30-minute boundary. Reachability uses
+  only current-boot observations; retained `last_heard_ms` stays available as
+  historical display data but is explicitly non-live after reload. Packet
+  history keeps the exact 160-entry cyclic window, advert timestamps never wrap,
+  and the cache remains boot-local. This does not prove retained-fault/power-loss recovery,
+  persisted keypair consistency, retained-contact recovery, compatible-peer RF,
+  remaining trace/admin semantics, or hardware.
   The bounded USB command-admission slice advances the fuzz-target summary only
   from 2 implemented / 1 partial / 5 missing to 3 implemented / 1 partial / 4
   missing. Normal and factory-reset recovery input now rejects embedded NUL and

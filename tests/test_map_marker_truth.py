@@ -84,6 +84,7 @@ def test_semantic_runtime_chain_has_exact_canonical_source_pins():
         "main/map/map_viewport_truth_transition.c",
         "main/map/map_viewport_truth_transition.h",
         "main/mesh/advert_data.c",
+        "main/mesh/meshcore_lifetime.h",
         "main/mesh/meshcore_service.c",
         "main/mesh/node_store.c",
         "main/mesh/node_store.h",

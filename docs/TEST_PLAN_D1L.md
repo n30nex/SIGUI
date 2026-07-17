@@ -52,9 +52,9 @@ Coverage:
   Actions, release packaging, reproducibility comparison, and release audit
   must recompute that canonical digest from the supplied exact-commit
   signed-runtime receipt and reject any substituted binding. The declared WP-05
-  host matrix is currently 9 production suites / 61 scenarios / 35 translation
-  units / 66 source pins, plus 1 pinned-upstream companion suite / 10 cases.
-  The ninth suite executes the production USB command-admission module for
+  host matrix is currently 11 production suites / 77 scenarios / 38 translation
+  units / 73 source pins, plus 1 pinned-upstream companion suite / 10 cases.
+  The USB suite executes the production USB command-admission module for
   100,000 deterministic inputs. The separate pinned-Clang gate must also run
   `scripts/usb_command_parser_fuzz_d1l.py` for exactly 100,000 libFuzzer inputs,
   upload `usb_command_parser_fuzz_<full-commit>.json`, and prove that both the
@@ -68,10 +68,18 @@ Coverage:
   terminal-only admission. Production source contracts must prove authentication
   and semantic authority before probing; one visible channel/DM row; bounded DM
   re-ACK; exact-owner ACK persistence/reconciliation across simple, multipart,
-  and PATH encodings; one-shot authenticated PATH effects with ACK-only retry;
+  and PATH encodings, with the coordinator armed from the actual
+  `AWAITING_ACK` revision, the retained RF receipt bound to that same session,
+  base revision, and ACK hash, and deadline/route/hash effects authorized once
+  only after durable publication; one-shot authenticated PATH effects with ACK-only retry;
   pending-first TRACE correlation with partial-retention retry; and terminal
-  advert receipts. These bounded checks do not prove persisted generic cache,
-  retained-state recovery, hardware, real-peer RF, complete-surface, or issue
+  advert receipts. Executable lifetime checks require an inclusive 30-minute
+  contact/route boundary, unsigned monotonic-clock wrap behavior, explicit
+  node-reachability invalidation on reload while historical `last_heard_ms`
+  remains intact, exact 160-entry packet FIFO rollover, and terminal
+  `UINT32_MAX` advert timestamps.
+  These bounded checks do not prove persisted generic cache, retained-state
+  fault/power-loss recovery, hardware, real-peer RF, complete-surface, or issue
   #65 closure. See
   [MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).
 - Full MeshCore conformance release contract: the passing wire-envelope package

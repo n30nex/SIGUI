@@ -107,16 +107,22 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
         "static void parse_rx_ack_packet", 1
     )[0]
     assert record.index("d1l_dm_delivery_owner_ack_matches(") < record.index(
-        "transition_pending_dm_tx("
-    ) < record.index("record_pending_direct_path_result(true)")
-    assert "s_pending_dm_tx.ack_persistence_pending" in record
+        "transition_pending_dm_ack("
+    ) < record.index("finalize_pending_dm_ack_completion()")
+    finalizer = service.split(
+        "static bool finalize_pending_dm_ack_completion(void)", 2
+    )[-1].split("static void clear_pending_ack_tx", 1)[0]
+    assert finalizer.index("d1l_meshcore_ack_completion_take_terminal_effects(") < finalizer.index(
+        "record_pending_direct_path_result(true)"
+    )
+    assert "d1l_meshcore_ack_completion_suppresses_rf_retry(" in record
     assert "D1L_RX_ACK_ALREADY_ACCEPTED" in record
     parser = ack.split("static void parse_rx_ack_packet", 1)[1]
     assert "hash_packet.payload = &packet.payload[1]" in parser
     assert "owner_needs_packet_retry" in parser
     assert "record_dm_ack(" in parser
     assert "bank_pending_dm_ack_packet_hash(packet_hash)" in record
-    assert record.index("transition_pending_dm_tx(") < record.index(
+    assert finalizer.index("d1l_meshcore_ack_completion_take_terminal_effects(") < finalizer.index(
         "remember_pending_dm_ack_packet_hashes()"
     )
 

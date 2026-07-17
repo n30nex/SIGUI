@@ -130,7 +130,7 @@ def test_heard_node_rejects_full_key_prefix_collision_before_replay_or_mutation(
     )[0]
 
     collision = upsert.index("!public_keys_equal")
-    replay = upsert.index("advert_timestamp <=")
+    replay = upsert.index("d1l_meshcore_lifetime_advert_is_strictly_newer(")
     mutation = upsert.index("entry->seq =")
     assert collision < replay < mutation
     assert "return ESP_ERR_INVALID_STATE;" in upsert[collision:replay]

@@ -145,17 +145,21 @@ selected the overlay in production/oracle/runtime/package with zero exceptions;
 PR #98 merged durable ACK dispatch; and PR #99 merged freshness-gated learned
 route selection. The current receipt remains `closure_ready=false`: canonical
 TRACE, admin, retained-state, real-peer RF, and physical proof are still open.
-The current dependent advert-replay/packet-hash source slice closes the bounded
-WP-05 timestamp and duplicate/hash requirements with 12 advert-admission and 7
-packet-hash production host scenarios. The pinned companion runtime binds five
-validly signed timestamp cases plus five D1L/upstream packet-hash and real
-`SimpleMeshTables` cases, including exact/path/transport duplicate suppression.
-The declared matrix is now 9 implemented / 7 partial / 0 missing requirements,
-8 production suites / 53 scenarios / 33 translation units / 63 pins, plus 1
-companion suite / 10 cases. Production now has the exact eight-byte upstream
-hash algorithm, a 160-entry boot-local cyclic cache, and terminal-only cache
-admission on the signed-advert service path. Broader Public/DM/ACK/PATH/TRACE
-dispatch integration, persistent duplicate state, retained recovery, RF,
+The current dependent source stack closes the bounded WP-05 ACK-correlation and
+lifetime requirements in addition to the advert-replay and packet-hash slices.
+Eight ACK cases bind simple, multipart, and ACK+PATH input to the exact active
+`AWAITING_ACK` owner revision, retained compare-and-swap admission, durable
+publication, persistence reconciliation, take-once deadline/route/hash effects,
+and exact receipt session/revision/hash binding across direct-to-flood retry.
+Eight lifetime cases plus the production node-store suite execute current-boot
+30-minute contact reachability, reboot invalidation without erasing historical
+display timestamps, direct-route boundaries, unsigned clock wrap, the exact
+160-entry packet FIFO, and non-wrapping advert timestamps. The declared matrix is now 11 implemented /
+5 partial / 0 missing requirements, 11 production suites / 77 scenarios / 38
+translation units / 73 pins, plus 1 companion suite / 10 cases. Production also
+retains the exact eight-byte upstream hash algorithm and terminal-only semantic
+cache admission. Complete retained-fault/power-loss recovery, persistent generic
+duplicate state, remaining protocol/admin/TRACE semantics, compatible-peer RF,
 hardware, issue #65, and the release gate remain open.
 See
 [MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).

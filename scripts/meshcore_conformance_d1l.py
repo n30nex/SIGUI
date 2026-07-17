@@ -250,7 +250,7 @@ EXPECTED_WP05_REQUIREMENT_STATUSES = {
     "shared_secret_derivation": "implemented",
     "mac_authentication_failure": "implemented",
     "direct_flood_transport_codes": "implemented",
-    "ack_multi_ack_and_flood_ack_path": "partial",
+    "ack_multi_ack_and_flood_ack_path": "implemented",
     "path_hash_sizes_counts_and_maximums": "implemented",
     "request_response_login_keepalive_status": "partial",
     "trace_and_path_discovery": "partial",
@@ -259,7 +259,7 @@ EXPECTED_WP05_REQUIREMENT_STATUSES = {
     "truncated_oversize_and_empty_payload": "implemented",
     "malformed_utf8_and_embedded_nul": "implemented",
     "self_message_unknown_peer_and_channel": "partial",
-    "lifetime_and_expiry_boundaries": "partial",
+    "lifetime_and_expiry_boundaries": "implemented",
 }
 EXPECTED_WP05_FUZZ_TARGET_STATUSES = {
     "raw_wire_decoder": "implemented",
@@ -308,6 +308,12 @@ EXPECTED_WP05_PRODUCTION_SUITES = {
         "invocation_count": 1,
         "expected_stdout": "native MeshCore text plaintext: ok",
     },
+    "ack_delivery_correlation": {
+        "binary": "meshcore_ack_completion_semantic",
+        "scenario_count": 8,
+        "invocation_count": 1,
+        "expected_stdout": "native MeshCore ACK completion: ok",
+    },
     "advert_replay_admission": {
         "binary": "meshcore_advert_admission_semantic",
         "scenario_count": 12,
@@ -327,6 +333,12 @@ EXPECTED_WP05_PRODUCTION_SUITES = {
         "expected_stdout": (
             "native USB command parser: ok (100000 deterministic cases)"
         ),
+    },
+    "lifetime_boundaries": {
+        "binary": "meshcore_lifetime_semantic",
+        "scenario_count": 8,
+        "invocation_count": 1,
+        "expected_stdout": "native MeshCore lifetime boundaries: ok",
     },
 }
 EXPECTED_WP05_COMPANION_UPSTREAM_SUITES = {
@@ -363,15 +375,20 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/hal/rp2040_bridge.h",
     "main/mesh/meshcore_admin_dispatch.c",
     "main/mesh/meshcore_admin_dispatch.h",
+    "main/mesh/dm_delivery_state.c",
+    "main/mesh/dm_delivery_state.h",
     "main/mesh/contact_store.c",
     "main/mesh/contact_store.h",
     "main/mesh/contact_uri.c",
     "main/mesh/contact_uri.h",
     "main/mesh/meshcore_command_guard.h",
+    "main/mesh/meshcore_ack_completion.h",
     "main/mesh/meshcore_advert_admission.c",
     "main/mesh/meshcore_advert_admission.h",
     "main/mesh/meshcore_packet_hash.c",
     "main/mesh/meshcore_packet_hash.h",
+    "main/mesh/meshcore_lifetime.h",
+    "main/mesh/meshcore_dm_retry.h",
     "main/mesh/meshcore_path_state.c",
     "main/mesh/meshcore_path_state.h",
     "main/mesh/meshcore_radio_profile.h",
@@ -398,6 +415,8 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "tests/native/esp_nvs_stubs.c",
     "tests/native/mbedtls_md_stub.c",
     "tests/native/meshcore_admin_dispatch_test.c",
+    "tests/native/meshcore_ack_completion_test.c",
+    "tests/native/meshcore_lifetime_test.c",
     "tests/native/meshcore_runtime_guard_test.c",
     "tests/native/meshcore_packet_hash_test.c",
     "tests/native/meshcore_trace_test.c",
@@ -638,11 +657,30 @@ EXPECTED_ORACLE_CAPABILITIES = [
     },
     {
         "id": "ack_dispatch_correlation_and_delivery",
-        "status": "pending",
-        "owner": "unassigned",
-        "blocked_by": (
-            "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
+        "status": "implemented",
+        "owner": "d1l_production_exact_owner_ack_completion",
+        "semantic": True,
+        "scope": (
+            "simple_multipart_and_ack_path_exact_active_owner_hash_and_"
+            "awaiting_revision_retained_cas_durable_publish_persistence_"
+            "reconcile_take_once_deadline_route_and_hash_effects_no_rf_"
+            "hardware_or_release_closure"
         ),
+        "implementation_receipt": {
+            "id": "RCPT-WP05-ACK-COMPLETION-20260716",
+            "status": "implemented_host_only_pending_rf_and_retained_fault_evidence",
+            "observed_at": "2026-07-16",
+            "pinned_sources": [
+                "main/mesh/dm_delivery_state.c",
+                "main/mesh/dm_delivery_state.h",
+                "main/mesh/meshcore_ack_completion.h",
+                "main/mesh/meshcore_service.c",
+                "tests/native/meshcore_ack_completion_test.c",
+            ],
+            "host_suite": "ack_delivery_correlation",
+            "scenario_count": 8,
+            "closure_ready": False,
+        },
     },
     {
         "id": "route_selection_and_forwarding",
@@ -1203,7 +1241,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
 ]
 EXPECTED_ORACLE_CROSS_CUTTING_CAPABILITIES = [
     {"id": "packet_envelope", "status": "implemented"},
-    {"id": "ack_dispatch_correlation_and_delivery", "status": "blocked"},
+    {"id": "ack_dispatch_correlation_and_delivery", "status": "implemented"},
     {"id": "route_selection_and_forwarding", "status": "blocked"},
 ]
 EXPECTED_ORACLE_PACKET_TYPES = [
@@ -1326,6 +1364,8 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/advert_data.h",
     "main/mesh/contact_store.c",
     "main/mesh/contact_store.h",
+    "main/mesh/dm_delivery_state.c",
+    "main/mesh/dm_delivery_state.h",
     "main/mesh/dm_store.c",
     "main/mesh/dm_store.h",
     "main/mesh/ed25519_canonical.h",
@@ -1333,10 +1373,14 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/meshcore_admin_dispatch.h",
     "main/mesh/meshcore_admin_runtime.c",
     "main/mesh/meshcore_admin_runtime.h",
+    "main/mesh/meshcore_ack_completion.h",
     "main/mesh/meshcore_command_guard.h",
     "main/mesh/meshcore_identity_exchange.c",
     "main/mesh/meshcore_identity_exchange.h",
     "main/mesh/meshcore_dm_retry.h",
+    "main/mesh/meshcore_lifetime.h",
+    "main/mesh/meshcore_packet_hash.c",
+    "main/mesh/meshcore_packet_hash.h",
     "main/mesh/meshcore_path_dispatch.h",
     "main/mesh/meshcore_path_state.c",
     "main/mesh/meshcore_path_state.h",
@@ -1348,6 +1392,8 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/meshcore_text_plaintext.h",
     "main/mesh/meshcore_trace.h",
     "main/mesh/meshcore_wire.h",
+    "main/mesh/node_store.c",
+    "main/mesh/node_store.h",
     "main/mesh/user_text.c",
     "main/mesh/user_text.h",
     "overlays/meshcore_ed25519_defined/fe.c",
@@ -3050,6 +3096,16 @@ def production_semantic_suite_specs(
             ],
         },
         {
+            "id": "ack_delivery_correlation",
+            "binary": Path(build_dir) / "meshcore_ack_completion_semantic",
+            "flags": [],
+            "include_dirs": [ROOT / "main"],
+            "sources": [
+                ROOT / "main" / "mesh" / "dm_delivery_state.c",
+                native / "meshcore_ack_completion_test.c",
+            ],
+        },
+        {
             "id": "advert_replay_admission",
             "binary": Path(build_dir) / "meshcore_advert_admission_semantic",
             "flags": ["-DD1L_CONTACT_STORE_TEST_HOOKS"],
@@ -3086,6 +3142,15 @@ def production_semantic_suite_specs(
             "sources": [
                 ROOT / "main" / "comms" / "usb_command_parser.c",
                 native / "usb_command_parser_test.c",
+            ],
+        },
+        {
+            "id": "lifetime_boundaries",
+            "binary": Path(build_dir) / "meshcore_lifetime_semantic",
+            "flags": [],
+            "include_dirs": [ROOT / "main"],
+            "sources": [
+                native / "meshcore_lifetime_test.c",
             ],
         },
     ]
@@ -4415,8 +4480,8 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("closure_ready") is False
         and value.get("full_semantic_matrix_covered") is False
         and value.get("requirement_count") == 16
-        and value.get("implemented_requirement_count") == 9
-        and value.get("partial_requirement_count") == 7
+        and value.get("implemented_requirement_count") == 11
+        and value.get("partial_requirement_count") == 5
         and value.get("missing_requirement_count") == 0
         and value.get("fuzz_target_count") == 8
         and value.get("implemented_fuzz_target_count") == 3
