@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp16_signed_location_map_exact_main_aggregate",
+  "generated_utc": "2026-07-16T20:57:23.516Z",
+  "claim_scope": "Portable exact-pair software and artifact evidence for the bounded WP-16 signed-location Map-pin slice merged by PR #175. The slice renders bounded pins only from signed-advert coordinates with explicit provenance, verified age, truthful role and unknown-accuracy labeling; gates every tile-acquisition path on explicit center provenance; and invalidates retained view state on trust loss or backward-time correction. It does not close the Map provider, physical UI, RF, complete Nodes/network actions, the required network_map_nodes_<sha>_<d1l>.json acceptance artifact, WP-16, or release gates.",
+  "exact_pair": {
+    "pull_request": 175,
+    "pull_request_url": "https://github.com/n30nex/SIGUI/pull/175",
+    "base_sha": "afd3c03e7f5f6358f1f08f7c1cd19b9aef22f929",
+    "head_sha": "6ae3726a1c740eb72e14320b51c313c84ed6249d",
+    "synthetic_merge_sha": "d4f4827528ae8b3b5110db97fdcf2eef5858e225",
+    "merged_main_sha": "2a5cb982c967cb1185cd047838b4213ca7ba61bc",
+    "head_synthetic_and_main_tree_sha": "67e2b2eaac67820d9b767b099ac0f829b13af00d",
+    "reviewed_patch_id": "461ec3b7c7174dc34e0d6fc2dfb251d1df8b03b8",
+    "tree_identity": {
+      "head_matches_synthetic_merge": true,
+      "head_matches_merged_main": true
+    }
+  },
+  "premerge_gate": {
+    "actions_run": 29532389607,
+    "actions_event": "pull_request",
+    "checkout_sha": "d4f4827528ae8b3b5110db97fdcf2eef5858e225",
+    "conclusion": "success",
+    "host_tests_passed": 1227,
+    "checksum_contract_tests_passed": 32,
+    "focused_signed_map_tests_passed": 23,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "api_zip_digest_matches": 5,
+    "api_zip_count": 5,
+    "api_zip_total_bytes": 26880227,
+    "checksum_manifest_count": 3,
+    "checksum_manifest_entries_verified": 46,
+    "gate_manifest_entries_verified": 25,
+    "extracted_file_count": 339,
+    "extracted_total_bytes": 80593617,
+    "downloaded_tree_sha256": "438cfecc417a223618e6ea3efb8e22b9dda872b013bbf19ba8d20031a3b5f267",
+    "review_thread_count": 0,
+    "unresolved_review_thread_count": 0,
+    "independent_review": "clean_no_findings",
+    "provenance_valid": true,
+    "provenance_authenticated": false,
+    "slsa_build_level": "not-claimed",
+    "spdx_version": "SPDX-2.3",
+    "strict_receipt_path": "F:/SIGUI-artifact-gates/pr175-6ae3726/gate-receipt.json",
+    "strict_receipt_sha256": "f1e047b1ea86041a490930fb7940294f498596618026468a2ff0b75da785cc4d",
+    "gate_manifest_path": "F:/SIGUI-artifact-gates/pr175-6ae3726/GATE_SHA256SUMS.txt",
+    "gate_manifest_sha256": "b7371d3353fa135748686bcd6312597d686b7d9255714558884e40c7b27f1411",
+    "excluded_duplicate_push_run": {
+      "actions_run": 29532387196,
+      "conclusion": "cancelled",
+      "admitted": false
+    }
+  },
+  "premerge_artifact_verification": {
+    "artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "bdf0dfbc1249920b67b7f3ba1bbbe83ba84db99049b861460e2fae9498b811db",
+      "d1l-host-artifacts": "a73e3786b2cf562aaa40592fd5dd3b96a1006e31a8da22e603c94e67d5b8391c",
+      "d1l-idf55-migration-state": "cc8fcab226008e0e8aeb168428d1eb5a2c5ec90893090eb6a1c5234497d4ad6f",
+      "d1l-meshcore-wire-conformance": "229db48c4cb8f6b94b0f389d4512edbb791a4fc74b4536470238af4c83e8e8e2",
+      "d1l-release-package": "3ab2dd9ed6c21ea48d415d93953c276d7558b8a5aef10c2a7afa81231e0bee31"
+    },
+    "nested_manifests_sha256": {
+      "firmware": "59213571b9febe658b41e65ffeef5854d5e3b537035972f0d7c68e5b2cacd088",
+      "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release": "a6eda7fbbd0a81d0c0f1ffaabfb1174a50fb045618d110994062a90af9434b83"
+    },
+    "payload_sha256": {
+      "application": "abe61a3af8e2e69cfd7e242471d57b564540356b0ace8567f47aba3ad8eb0bfc",
+      "full_flash": "25cfeb24a61f3aaf581340824cf9ddcf00e2f8c10cdc67f7e29cd7d3388cc391",
+      "host_success_marker": "e6b511e27ad6abdef8effa76ce9a276f1dcbb26eaaffbef2c89518ed5263b595",
+      "meshcore_conformance_receipt": "9115e0c9b5488c07f28d837196852886a5083f27de74ffc91504ff8df2d08538",
+      "meshcore_signed_runtime_receipt": "8258a10e3b49788659feff8d3906ce2d2fbf8327f954a30a8b6fb22598036728",
+      "release_audit": "0f06323cc934da36da36f945b9bb5ce1fc75008e989d7f80e3657d30ca2629ad",
+      "release_package_manifest_json": "1f3b9e6bef2f3920f77d0e68f0d349034ec06e530216b3d564024c1322869658",
+      "completion_ledger_validation": "70a7c1958e1a9f26835ecfc759bc87553e7673c6d38198c746d09c49ba8accff"
+    },
+    "provenance_sha256": "99930bd72334034727ab0ee4db7e7c2f7ce9fbf431aa4244ae40fce70e1217ad",
+    "sbom_sha256": "a277fd4eae73fe83d705fca7a02be08948c0df857872cc4469f26f24b70f25bb"
+  },
+  "exact_main_gate": {
+    "actions_run": 29533095157,
+    "validated_main_sha": "2a5cb982c967cb1185cd047838b4213ca7ba61bc",
+    "validated_tree_sha": "67e2b2eaac67820d9b767b099ac0f829b13af00d",
+    "status_at_checkpoint": "completed_success",
+    "host_tests_passed": 1227,
+    "checksum_contract_tests_passed": 32,
+    "wire_vectors": 1008,
+    "oracle_checks": 931,
+    "wire_fuzz_runs_completed": 100000,
+    "advert_fuzz_runs_completed": 100000,
+    "fuzz_findings": 0,
+    "artifact_archives_verified": 5,
+    "artifact_archive_total_bytes": 26880241,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "gate_manifest_entries_verified": 17,
+    "extracted_file_count": 339,
+    "extracted_total_bytes": 80593623,
+    "downloaded_tree_sha256": "2fc4aef205a0ee7ce0a8b7743ff28c79f9ece8dfbb74dd1ac46b2ee773f76f24",
+    "artifact_zip_sha256": {
+      "d1l-firmware-artifacts": "f2da4fbd6579b544151501adf38ffcde091d42a3f5d0670f02631f6c0ea2cef7",
+      "d1l-host-artifacts": "40549ce21e2f369e879db0507c81579bbb3fa6750582960c7d4223a2d31669a4",
+      "d1l-idf55-migration-state": "dcc8cd315200f68a1b8deb13e924f703806d7a6303bc707adb357a93b27d34a0",
+      "d1l-meshcore-wire-conformance": "c79558cd8f36bec24d9ca96532710eccdeb4be55aa3ceae33940ce8ed404497a",
+      "d1l-release-package": "884b8e5621dd2894a73982566560779b9bd0733c46e7a447630675ae154d5cd0"
+    },
+    "nested_manifests_sha256": {
+      "firmware": "472398486af9e6d1eaed4ca572540b4d8941cc811f7ee7737ce7e279f3f0a714",
+      "build_inputs": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release": "06221ef3e622a9ac19d9b629d335ed694043763965114502b4810d9dab707234"
+    },
+    "payload_sha256": {
+      "application": "e5a7feb80ba68277964be9040ec5f1f375d0a18d016fab21cfddbdb035397ff5",
+      "full_flash": "ee1fc7240aae12d4b019a3d38ff63c4dc06befe8a5e71ad023cda3c3f4d0fde4",
+      "host_success_marker": "6108da2fe885857f10c780565232a6d2b6b0db5c55536b084874d0e7abfa6fa4",
+      "meshcore_conformance_receipt": "f7ddb26129702ed44d55d087a36ba2174513cab0cc099d2d0409c5e16e23d8c1",
+      "meshcore_signed_runtime_receipt": "867077fc9218ffc23e4d5456705c7e8f95b404417b9fe320f066a6915729fcb0",
+      "release_audit": "9c865612ffb797e2ddc2e4e633e8094b5ac7412e90e2c443ee3de3f605c3a602",
+      "release_package_manifest_json": "37ffe42c9b6699183407da4f78203fb1582012994d349b513afdfe82bd11e4a2",
+      "completion_ledger_validation": "abf284202025979808dccd7d0cafd5fa4e71c1e48b888ac2e4f4f7799b6fe7f6"
+    },
+    "provenance_sha256": "87def84cdb75527e9a50e4b31aef33d472b8b78b6d70ca42f25beb5cee4e2394",
+    "provenance_valid": true,
+    "provenance_authenticated": false,
+    "slsa_build_level": "not-claimed",
+    "sbom_sha256": "a8032a745139f9cc2e7a52531d76808eb6179a1c6be37a0aeb427cae565c262e",
+    "sbom_valid": true,
+    "spdx_version": "SPDX-2.3",
+    "receipt_path": "F:/SIGUI-artifact-gates/main-2a5cb98-v2/gate-receipt.json",
+    "receipt_sha256": "8ce5749a162c591739b8494a9ddfbf28d1dbb5c947ac658d5278ac878d26c75c",
+    "gate_manifest_path": "F:/SIGUI-artifact-gates/main-2a5cb98-v2/GATE_SHA256SUMS.txt",
+    "gate_manifest_sha256": "1eaac093f82896cc86b2d25cfccfef8acbf5217f0395fd7734245f67bec66f90",
+    "verdict": "exact_main_software_and_artifact_gate_banked"
+  },
+  "excluded_main_attempt": {
+    "path": "F:/SIGUI-artifact-gates/main-2a5cb98",
+    "classification": "partial_operator_timeout_attempt",
+    "receipt_sha256": "36abe78af084472a7397e1be0c76dda37a795fc319d6162863cbbe98cf1506ef",
+    "gate_manifest_sha256": "96bfa58c65bb733072284002d5b020212872e74aad2284570e7a0da37496ddd3",
+    "canonical": false,
+    "admitted_as_green": false,
+    "closure_eligible": false,
+    "superseded_by": "F:/SIGUI-artifact-gates/main-2a5cb98-v2/gate-receipt.json"
+  },
+  "implementation_boundary": {
+    "marker_query_limit": 32,
+    "marker_display_limit": 8,
+    "accepted_location_provenance": "signed_advert",
+    "coordinate_precision": "signed_advert_e6_accuracy_unknown",
+    "age_reference_must_be_verified": true,
+    "missing_or_future_timestamp_rejected": true,
+    "old_signed_advert_age_reported_without_invented_expiry": true,
+    "role_labels": [
+      "Companion",
+      "Repeater",
+      "Room Server",
+      "Sensor",
+      "Unknown role"
+    ],
+    "center_provenance_must_be_explicit": true,
+    "trusted_center_sources": [
+      "manual",
+      "authenticated_companion"
+    ],
+    "initial_interactive_and_reacquire_paths_fail_closed": true,
+    "trust_loss_invalidates_retained_view": true,
+    "trust_loss_releases_retained_lease": true,
+    "backward_time_correction_rechecks_future_pins": true,
+    "marker_overlay_refresh_rebuilds_tiles": false,
+    "pin_selection_opens_node_detail_without_rf": true,
+    "physical_ui_acceptance_included": false,
+    "rf_acceptance_included": false
+  },
+  "source_bindings": {
+    "semantic_manifest_path": "tests/map_marker_truth/manifest.json",
+    "semantic_manifest_sha256": "d0c15bf351d7070c8899d77fc732638b65fe559373652cb14227afd8d9b53020",
+    "semantic_binding_count": 20,
+    "production_source_pin_count": 28,
+    "key_sha256": {
+      "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
+      "main/map/map_marker_truth.h": "0aa1723d730016c870e1f6cb93e892803ab6bda589672e4bb99b3abe518466cc",
+      "main/map/map_viewport_truth_transition.c": "99d0b57a4902a4e3a78c4f9a096eb7627e2aaaf102b9a552944aa70fa862ec60",
+      "main/map/map_viewport_truth_transition.h": "4de9fd54634d0f3481a5069895e72357bee55593ead88d44db526c98f37bc66e",
+      "main/mesh/node_store.c": "d6bde04c212d39417b93ab3f89e2ffcc7a06bc5812a83285a511680085c4b2b0",
+      "main/mesh/node_store.h": "6f9ebf9b92bcca3d405df25483454192011a372c7eaedee2a5625badd22daa23",
+      "main/ui/ui_map.c": "59eb333a957449392e8cef31e9a018f53268c2e7643e2873349a152dd8919ca7",
+      "main/ui/ui_phase1.c": "8999f5fd3721220be06e8ceb18eb423c19c0223acb1fa41020531eb78f8fdd1f",
+      "tests/native/map_marker_truth_test.c": "8f600fe9f47bfbc54e4f8f56c45525c5507be6c451daae3dc74af95efa73ebba",
+      "tests/native/map_viewport_truth_transition_test.c": "66a67013c6abecd782ccc6087a1d9abf70920bdc12b7edada2aed735602bcf7f",
+      "tests/test_map_marker_truth.py": "7e8db099019d7f84ee036a86e97e5ba3468a93e23b8ace20373f20fa5906a600",
+      "tools/ui_simulator.py": "8b5bdc00b1e783b9e57befa431e983a3c7842984d7b9e375710d49e8d4e87785"
+    }
+  },
+  "release_audit": {
+    "ready_for_public_release": false,
+    "p0_failed_count": 33,
+    "failed_count": 35,
+    "scope": "dry_run_only_not_release_closure"
+  },
+  "residual_wp16_gates": {
+    "closed": false,
+    "remaining": [
+      "Complete remaining Nodes capability and administration actions.",
+      "Complete real trace and defined network tools with cooldown and explicit no-response behavior.",
+      "Prove maximum-record live-update responsiveness.",
+      "Qualify the Map provider and exact-candidate physical pin pan, zoom, selection, trust-loss, and rollback behavior.",
+      "Produce network_map_nodes_<sha>_<d1l>.json and close WP-16 dependencies and acceptance."
+    ]
+  },
+  "release_truth": {
+    "capability_implementation_raw_percent": 80.3703703704,
+    "capability_implementation_reported_percent": 80,
+    "weighted_full_release_progress_raw_percent": 74.2962962963,
+    "weighted_full_release_progress_reported_percent": 74,
+    "final_release_gates_green": 0,
+    "final_release_gates_total": 11,
+    "ready_for_public_release": false,
+    "physical_closure_claimed": false,
+    "rf_closure_claimed": false,
+    "wp16_closure_claimed": false,
+    "exact_main_gate_banked": true
+  },
+  "claims": {
+    "signed_location_map_slice_merged": true,
+    "premerge_software_gate_green": true,
+    "exact_merged_main_software_gate_banked": true,
+    "noncanonical_timeout_attempt_excluded": true,
+    "wp16_closure_eligible": false,
+    "release_ready": false,
+    "valid": true,
+    "invalid_reason": null
+  }
+}
