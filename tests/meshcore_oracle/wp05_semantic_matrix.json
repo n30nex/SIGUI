@@ -229,7 +229,7 @@
     },
     {
       "id": "semantic_packet_parser",
-      "status": "missing"
+      "status": "implemented"
     },
     {
       "id": "decrypt_auth_path",

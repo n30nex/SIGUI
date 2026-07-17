@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "encoding": "hex",
+  "coverage_boundary": "production_meshcore_semantic_packet_admission",
+  "seeds": [
+    {
+      "name": "admin_min",
+      "hex": "06000000000000",
+      "sha256": "1d2bda444b6f706f9dada708db0241a42f1d067384fefa25028b10e52fdd62c7"
+    },
+    {
+      "name": "channel_min",
+      "hex": "1600000000",
+      "sha256": "4e77bf21a745459819e74807cb5a48a3fc69946ecd2b80cdb3f3bb3b9f3349e3"
+    },
+    {
+      "name": "dm_min",
+      "hex": "0a000000000000",
+      "sha256": "4a11975767396f39707a5c0a34d2f96f1369ca8fc8ffb6ea9e7376e6f4a8fb95"
+    },
+    {
+      "name": "ack_min",
+      "hex": "0e0000000000",
+      "sha256": "e02f38cd9ab95ccf5b7fc8486c56b6dbc5244896c08f9a1d6f9ca0cb89124ef9"
+    },
+    {
+      "name": "multipart_ack_min",
+      "hex": "2a00f300000000",
+      "sha256": "ca30e76cff7bafa95710d3b62724edb2bf6ee587d422133c0b20faeb22373d7a"
+    },
+    {
+      "name": "path_min",
+      "hex": "22000000000000",
+      "sha256": "7b355f1846083302f47d84a8d34b1afc9da50dc2d8b6f2200269f752a3888bdc"
+    },
+    {
+      "name": "trace_source_min",
+      "hex": "260000000000000000000000",
+      "sha256": "ed504cce7a8f9e5bd91244afd7b1bf18fcebab76149738ba88cd5d1b1f29a223"
+    },
+    {
+      "name": "advert_min",
+      "hex": "120000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "e4d90d88a7391594eb89fc3b5a4d1a3c6d746ee320ce7ec2095c51652dc2a260"
+    },
+    {
+      "name": "future_version",
+      "hex": "4e0000000000",
+      "sha256": "d92ec9a82d1c4c5e9b2ae7b7b64fc3f3319c265d8e559a70231c4b1b9de17daf"
+    },
+    {
+      "name": "truncated_transport",
+      "hex": "0f00000000",
+      "sha256": "b7be624dcb1dfdacd784f4a79698ee22c0422a166367f2c5c927f01b37a2d93e"
+    },
+    {
+      "name": "invalid_path_len",
+      "hex": "0eff00",
+      "sha256": "33d0637684f63980fdcbe627ba08ac38888cf622b10742287ce18c7a97b46ec2"
+    },
+    {
+      "name": "unknown_type",
+      "hex": "1a0000",
+      "sha256": "e266d8b70b077393240c394557156532ba21676014d72d3918d8c51a912d4db9"
+    },
+    {
+      "name": "advert_oversize",
+      "hex": "120000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "4874ddfe332cba2ebd6d7def252a9d580977690108e54616fb309b41f2fd65eb"
+    },
+    {
+      "name": "multipart_wrong_subtype",
+      "hex": "2a001200000000",
+      "sha256": "3e54a012bbaf33ed90c368823b38435774a7cfbae348e9e6e5d1c281e6da2de0"
+    }
+  ]
+}

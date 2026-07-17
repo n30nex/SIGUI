@@ -263,7 +263,7 @@ EXPECTED_WP05_REQUIREMENT_STATUSES = {
 }
 EXPECTED_WP05_FUZZ_TARGET_STATUSES = {
     "raw_wire_decoder": "implemented",
-    "semantic_packet_parser": "missing",
+    "semantic_packet_parser": "implemented",
     "decrypt_auth_path": "missing",
     "advert_parser": "implemented",
     "dm_session_transition_input": "missing",
@@ -1382,6 +1382,8 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/meshcore_path_dispatch.h",
     "main/mesh/meshcore_path_state.c",
     "main/mesh/meshcore_path_state.h",
+    "main/mesh/meshcore_packet_semantics.c",
+    "main/mesh/meshcore_packet_semantics.h",
     "main/mesh/meshcore_route_selection.h",
     "main/mesh/meshcore_runtime_guard.h",
     "main/mesh/meshcore_service.c",
@@ -4482,9 +4484,9 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("partial_requirement_count") == 3
         and value.get("missing_requirement_count") == 0
         and value.get("fuzz_target_count") == 8
-        and value.get("implemented_fuzz_target_count") == 3
+        and value.get("implemented_fuzz_target_count") == 4
         and value.get("partial_fuzz_target_count") == 1
-        and value.get("missing_fuzz_target_count") == 4
+        and value.get("missing_fuzz_target_count") == 3
         and value.get("oracle_semantic_vectors") == 915
         and isinstance(value.get("unique_referenced_oracle_semantic_vectors"), int)
         and 0 < value["unique_referenced_oracle_semantic_vectors"] <= 915

@@ -277,6 +277,20 @@ jobs:
             --runs 100000 \
             --out "artifacts/meshcore-conformance/usb_command_parser_fuzz_${GITHUB_SHA}.json"
 
+      - name: Run production MeshCore semantic packet parser fuzz gate
+        shell: bash
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          python ./scripts/meshcore_semantic_packet_fuzz_d1l.py \
+            --cc clang-18 \
+            --commit "$GITHUB_SHA" \
+            --seed 13746277 \
+            --runs 100000 \
+            --out "artifacts/meshcore-conformance/meshcore_semantic_packet_fuzz_${GITHUB_SHA}.json"
+
       - name: Run MeshCore wire-envelope conformance and RX fuzzing
         shell: bash
         env:

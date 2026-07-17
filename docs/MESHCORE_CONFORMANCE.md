@@ -499,9 +499,10 @@ pretending to be the Dispatcher. The separate
 `d1l_meshcore_wire_decode_v1()` boundary accepts only value zero
 (`PAYLOAD_VER_1`) and leaves its output unchanged for malformed or future
 versions. The fixed harness and local-parser fuzz target exercise both
-properties. All five production receive handlers call the v1 boundary before
-crypto or retained-store mutation. This closes version gating only; the
-artifact must not claim the remaining Dispatcher semantics are covered.
+properties. The production receive dispatcher applies the v1 semantic boundary
+before selecting any crypto or retained-store handler. This closes structural
+version/type/length gating only; the artifact must not claim the remaining
+Dispatcher semantics are covered.
 
 Release packaging, the reproducibility comparator, and the release audit all
 reuse the same completed-report validator. A report with green top-level flags
@@ -530,6 +531,22 @@ libFuzzer target executes another 100,000 inputs with the hash-bound corpus in
 `usb_command_parser_fuzz_<full-commit>.json`. This implements only the declared
 `usb_protocol_command_parser` fuzz target; it does not close the remaining
 WP-05 semantic/fuzz targets, physical USB behavior, hardware, RF, or release.
+
+The pinned-Clang job also runs the production
+`d1l_meshcore_packet_semantic_parse()` boundary. The receive dispatcher uses its
+explicit raw byte count to select exactly one supported structural family:
+Admin RESPONSE, configured-channel TEXT, direct TEXT, simple/multipart ACK,
+PATH, TRACE, or signed ADVERT. Truncated frames, future versions, unsupported
+types, invalid multipart descriptors, and family-specific length violations
+reject with a fully zeroed output view before a handler can mutate state. The
+hash-bound 14-seed corpus covers every accepted family plus malformed,
+truncated, future-version, invalid-path, unknown-type, multipart-subtype, and
+oversized-advert boundaries. Its native suite and ASan/UBSan libFuzzer target
+each execute exactly 100,000 cases, and Actions uploads
+`meshcore_semantic_packet_fuzz_<full-commit>.json`. This advances only the
+declared `semantic_packet_parser` target, making the fuzz summary 4 implemented
+/ 1 partial / 3 missing. Decryption, MAC/signature authentication, replay/state
+transitions, RF, physical behavior, WP-05 closure, and release remain open.
 
 The pinned upstream Ed25519 ref10 arithmetic sources `fe.c`, `ge.c`, and
 `sc.c` contain negative signed left shifts that Clang UBSan correctly reports
