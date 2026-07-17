@@ -105,8 +105,8 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   The WP-05 conformance receipt validates the sanitized exact-commit runtime
   receipt and binds its canonical SHA-256, all five timestamp outcomes, all five
   packet-hash outcomes, and the exact table receipt. The declared matrix is 9
-  implemented / 7 partial / 0 missing requirements, 8 production suites / 53
-  scenarios / 33 translation units / 63 source pins, plus 1 companion suite /
+  implemented / 7 partial / 0 missing requirements, 9 production suites / 61
+  scenarios / 35 translation units / 66 source pins, plus 1 companion suite /
   10 cases. Actions and downstream package/audit consumers recompute and compare
   the binding from the supplied receipt rather than accepting any shaped digest;
   the matrix remains `closure_ready=false`. The cache is deliberately
@@ -114,6 +114,13 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   their existing retained state. This does not prove persisted keypair
   consistency, retained-contact recovery, peer/RF interoperability, ACK
   delivery, trace, admin sessions, or hardware.
+  The bounded USB command-admission slice advances the fuzz-target summary only
+  from 2 implemented / 1 partial / 5 missing to 3 implemented / 1 partial / 4
+  missing. Normal and factory-reset recovery input now rejects embedded NUL and
+  invisible trailing bytes using the real received length before any handler can
+  run, and the exact-commit Actions job executes a 100,000-run libFuzzer gate.
+  The other missing/partial targets remain open; this is software/Actions proof
+  only and does not claim physical USB, WP-05, firmware, or release closure.
   The pinned `BaseChatMesh` callback reports
   `is_new=false` for the tested newly auto-added contact; integration must not
   rely on that flag as a truthful new-contact indicator until upstream behavior

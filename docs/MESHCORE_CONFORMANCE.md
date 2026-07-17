@@ -519,6 +519,18 @@ unchanged. Any libFuzzer crash/timeout input is written beside the JSON under
 the uploaded `artifacts/meshcore-conformance` tree rather than discarded with
 the temporary build directory.
 
+The same pinned-Clang job independently runs the production USB command parser
+gate. `d1l_usb_command_admit_in_place()` receives the actual delimiter-free byte
+count from both the normal console and the factory-reset recovery console; it
+rejects embedded NUL, invisible C0/DEL bytes, empty canonical commands, and
+over-255-byte lines before dispatch, and wipes the full caller-owned buffer on
+every rejection. Its native suite executes 100,000 deterministic cases and its
+libFuzzer target executes another 100,000 inputs with the hash-bound corpus in
+`tests/usb_command_parser/corpus.json`. The exact-commit receipt is uploaded as
+`usb_command_parser_fuzz_<full-commit>.json`. This implements only the declared
+`usb_protocol_command_parser` fuzz target; it does not close the remaining
+WP-05 semantic/fuzz targets, physical USB behavior, hardware, RF, or release.
+
 The pinned upstream Ed25519 ref10 arithmetic sources `fe.c`, `ge.c`, and
 `sc.c` contain negative signed left shifts that Clang UBSan correctly reports
 as `shift-base` undefined behavior. Production and both host gates now select

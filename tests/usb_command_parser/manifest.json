@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "target": "usb_protocol_command_parser",
+  "status": "implemented",
+  "coverage_boundary": "production_usb_command_admission",
+  "engine": "libFuzzer",
+  "runs": 100000,
+  "seed": 13746277,
+  "max_input_bytes": 320,
+  "sanitizers": [
+    "address",
+    "undefined"
+  ],
+  "corpus": {
+    "path": "tests/usb_command_parser/corpus.json",
+    "seed_count": 7,
+    "sha256": "48a4755314ea1e2d24aa26316e72f7dbab959d7419626d4574e3e3fb41b9669a"
+  },
+  "production_integration": [
+    "main/CMakeLists.txt",
+    "main/comms/usb_console.c",
+    "main/comms/usb_command_parser.c",
+    "main/comms/usb_command_parser.h"
+  ],
+  "source_pins": {
+    ".github/workflows/d1l-ci.yml": "6aa2455918c8255c409a4c32cd382c569887e4f63409233e8ac81321e18cfbde",
+    "main/CMakeLists.txt": "af2b44cdc80cb2f613ff4c588ae7ce55bb15ca7b333c6983adb6249aac3542e6",
+    "main/comms/usb_console.c": "a43576f1bc6511db32b609daa65edc2ff412298cb353144b411ffa0d898c33d6",
+    "main/comms/usb_command_parser.c": "a6f15df848e3dbf3b9a68fad0f74796f04f4addedacd1a38a4be30c3b1141578",
+    "main/comms/usb_command_parser.h": "6aec4cc3e92d0990b43d0844f4255ca05145ec93441b5e0cad71bada21e2d3e3",
+    "scripts/usb_command_parser_fuzz_d1l.py": "0c138efd789d8e73ad126624f4491bfcd5924ec01c0fa18f1ff2c88197dfe85a",
+    "tests/fuzz/usb_command_parser_fuzz.c": "f90b5deb72ce0f723995d1a8b0a6fc947bad468baf337161d3fd976148ac698f",
+    "tests/native/usb_command_parser_test.c": "74ff93eaed93e832455c2e7c150cc60dcdd645a1d3f38575caf27c96145b72a5"
+  },
+  "rejection_contract": [
+    "embedded_nul",
+    "hidden_suffix_after_nul",
+    "c0_control_bytes",
+    "del_control_byte",
+    "line_over_255_bytes",
+    "empty_after_canonicalization",
+    "truncated_argument_boundary",
+    "token_suffix_smuggling",
+    "numeric_suffix_smuggling"
+  ],
+  "valid_contract": [
+    "exact_literal",
+    "required_argument",
+    "optional_token_argument",
+    "utf8_argument_bytes",
+    "legacy_trailing_ascii_spaces",
+    "255_byte_command"
+  ],
+  "normal_console_bound": true,
+  "factory_reset_recovery_console_bound": true,
+  "full_buffer_wipe_on_reject": true,
+  "host_only": true,
+  "hardware_closure_eligible": false,
+  "rf_closure_eligible": false,
+  "wp05_closure_ready": false,
+  "release_closure_ready": false
+}

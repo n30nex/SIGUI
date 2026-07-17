@@ -86,6 +86,11 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         "tests/native/stubs/esp_err.h",
         "tests/native/stubs/mbedtls/md.h",
     }
+    usb_command_parser = {
+        "main/comms/usb_command_parser.c",
+        "main/comms/usb_command_parser.h",
+        "tests/native/usb_command_parser_test.c",
+    }
     time_service = {
         "main/app/identity_state.h",
         "main/app/settings_envelope.c",
@@ -128,6 +133,7 @@ def semantic_dependency_receipt(matrix: dict, cc: str) -> dict:
         text_admission,
         advert_admission,
         packet_hash,
+        usb_command_parser,
     ]
     suite_specs = conformance.production_semantic_suite_specs()
     commands = [

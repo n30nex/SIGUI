@@ -47,9 +47,17 @@ def test_usb_status_is_fail_closed_and_does_not_log_supplied_confirmation():
     assert '\\"settings_reset_preserves_protocol_migration\\":true' in console
     assert '\\"factory_reset_supported\\":true' in console
     assert "wipe_console_bytes(line, sizeof(line));" in console
-    assert console.index("handle_line(line);") < console.index(
-        "wipe_console_bytes(line, sizeof(line));", console.index("handle_line(line);")
+    normal_console = console.split("void d1l_usb_console_run(void)", 1)[1].split(
+        "static void factory_reset_recovery_status", 1
+    )[0]
+    admission = normal_console.index("d1l_usb_command_admit_in_place(")
+    dispatch = normal_console.index("handle_line(&command);")
+    wipe = normal_console.index(
+        "wipe_console_bytes(line, sizeof(line));", dispatch
     )
+    assert "const size_t received_length = used;" in normal_console
+    assert "line, received_length, sizeof(line), &command" in normal_console
+    assert admission < dispatch < wipe
     assert "wall_time_inferred" in console
     assert "mesh_ts is only a predecessor lower bound" in service
     assert "d1l_time_protocol_migration_inspect" in service

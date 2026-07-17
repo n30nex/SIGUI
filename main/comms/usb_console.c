@@ -21,6 +21,7 @@
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
 #include "comms/companion_3byte.h"
+#include "comms/usb_command_parser.h"
 #include "diagnostics/crash_log.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/backlight.h"
@@ -75,6 +76,16 @@ static void wipe_console_bytes(void *data, size_t length)
     }
 }
 
+/* Internal generated-text helper.  Raw USB input is canonicalized by
+ * d1l_usb_command_admit_in_place() with its explicit receive length instead. */
+static void trim_line(char *line)
+{
+    size_t n = strlen(line);
+    while (n > 0U && isspace((unsigned char)line[n - 1U])) {
+        line[--n] = '\0';
+    }
+}
+
 static uint32_t deadline_remaining_ms(int64_t started_us, uint32_t timeout_ms)
 {
     const int64_t elapsed_us = esp_timer_get_time() - started_us;
@@ -88,14 +99,6 @@ static uint32_t deadline_remaining_ms(int64_t started_us, uint32_t timeout_ms)
 static uint32_t reboot_deadline_remaining_ms(int64_t started_us)
 {
     return deadline_remaining_ms(started_us, D1L_REBOOT_QUIESCE_TIMEOUT_MS);
-}
-
-static void trim_line(char *line)
-{
-    size_t n = strlen(line);
-    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r' || isspace((unsigned char)line[n - 1]))) {
-        line[--n] = '\0';
-    }
 }
 
 static void ok_begin(const char *cmd)
@@ -925,8 +928,10 @@ static void cmd_settings_set_name(const char *line)
 
 static void cmd_settings_set_pathhash(const char *line)
 {
-    int value = atoi(line + strlen("settings set pathhash "));
-    if (value < 1 || value > 3) {
+    int value = 0;
+    if (!d1l_usb_command_parse_int_exact(
+            line + strlen("settings set pathhash "), &value) ||
+        value < 1 || value > 3) {
         err_result("settings set pathhash", "INVALID_PATH_HASH_BYTES", "usage: settings set pathhash <1|2|3>");
         return;
     }
@@ -1468,7 +1473,11 @@ static void cmd_backlight(const char *line)
     while (*arg == ' ') {
         arg++;
     }
-    int percent = atoi(arg);
+    int percent = 0;
+    if (!d1l_usb_command_parse_int_exact(arg, &percent)) {
+        err_result("backlight", "INVALID_ARGUMENT", "usage: backlight <0-100>");
+        return;
+    }
     esp_err_t ret = d1l_backlight_set_percent(percent);
     if (ret != ESP_OK) {
         err_result("backlight", esp_err_to_name(ret), "usage: backlight <0-100>");
@@ -1533,8 +1542,10 @@ static void cmd_radio_set_preset_uscan(void)
 
 static void cmd_radio_set_freq(const char *line)
 {
-    double mhz = atof(line + strlen("radio set freq "));
-    if (mhz < 902.0 || mhz > 928.0) {
+    double mhz = 0.0;
+    if (!d1l_usb_command_parse_double_exact(
+            line + strlen("radio set freq "), &mhz) ||
+        mhz < 902.0 || mhz > 928.0) {
         err_result("radio set freq", "INVALID_FREQ", "Canada/USA D1L range is 902.000-928.000 MHz");
         return;
     }
@@ -1551,8 +1562,10 @@ static void cmd_radio_set_freq(const char *line)
 
 static void cmd_radio_set_bw(const char *line)
 {
-    double khz = atof(line + strlen("radio set bw "));
-    if (khz < 7.8 || khz > 500.0) {
+    double khz = 0.0;
+    if (!d1l_usb_command_parse_double_exact(
+            line + strlen("radio set bw "), &khz) ||
+        khz < 7.8 || khz > 500.0) {
         err_result("radio set bw", "INVALID_BW", "usage: radio set bw <7.8-500.0>");
         return;
     }
@@ -1569,8 +1582,10 @@ static void cmd_radio_set_bw(const char *line)
 
 static void cmd_radio_set_sf(const char *line)
 {
-    int sf = atoi(line + strlen("radio set sf "));
-    if (sf < 5 || sf > 12) {
+    int sf = 0;
+    if (!d1l_usb_command_parse_int_exact(
+            line + strlen("radio set sf "), &sf) ||
+        sf < 5 || sf > 12) {
         err_result("radio set sf", "INVALID_SF", "usage: radio set sf <5-12>");
         return;
     }
@@ -1587,8 +1602,10 @@ static void cmd_radio_set_sf(const char *line)
 
 static void cmd_radio_set_cr(const char *line)
 {
-    int cr = atoi(line + strlen("radio set cr "));
-    if (cr < 5 || cr > 8) {
+    int cr = 0;
+    if (!d1l_usb_command_parse_int_exact(
+            line + strlen("radio set cr "), &cr) ||
+        cr < 5 || cr > 8) {
         err_result("radio set cr", "INVALID_CR", "usage: radio set cr <5-8>");
         return;
     }
@@ -1605,8 +1622,10 @@ static void cmd_radio_set_cr(const char *line)
 
 static void cmd_radio_set_txpower(const char *line)
 {
-    int tx_power = atoi(line + strlen("radio set txpower "));
-    if (tx_power < -9 || tx_power > D1L_RADIO_TX_POWER_DBM) {
+    int tx_power = 0;
+    if (!d1l_usb_command_parse_int_exact(
+            line + strlen("radio set txpower "), &tx_power) ||
+        tx_power < -9 || tx_power > D1L_RADIO_TX_POWER_DBM) {
         err_result("radio set txpower", "INVALID_TX_POWER", "usage: radio set txpower <-9-20>");
         return;
     }
@@ -6187,8 +6206,14 @@ static void cmd_factory_reset_confirm(void)
     restart_with_factory_reset_quiesces();
 }
 
-static void handle_line(const char *line)
+static void handle_line(const d1l_usb_command_view_t *command)
 {
+    if (!command || !command->text || command->length == 0U) {
+        err_result("console", "INVALID_COMMAND_BYTES",
+                   "command admission did not produce a canonical view");
+        return;
+    }
+    const char *line = command->text;
     if (strcmp(line, "help") == 0) {
         cmd_help();
     } else if (strcmp(line, "version") == 0) {
@@ -6556,16 +6581,27 @@ void d1l_usb_console_run(void)
             if (used == 0U) {
                 continue;
             }
-            line[used] = '\0';
+            const size_t received_length = used;
             used = 0;
-            trim_line(line);
-            if (line[0] == '\0') {
+            d1l_usb_command_view_t command = {0};
+            const d1l_usb_command_admit_status_t admission =
+                d1l_usb_command_admit_in_place(
+                    line, received_length, sizeof(line), &command);
+            if (admission == D1L_USB_COMMAND_ADMIT_EMPTY) {
                 wipe_console_bytes(line, sizeof(line));
                 prompt_pending = true;
                 continue;
             }
             printf("\n");
-            handle_line(line);
+            if (admission != D1L_USB_COMMAND_ADMIT_OK) {
+                err_result("console",
+                           d1l_usb_command_admit_status_code(admission),
+                           "command contains invalid or hidden bytes");
+                wipe_console_bytes(line, sizeof(line));
+                prompt_pending = true;
+                continue;
+            }
+            handle_line(&command);
             wipe_console_bytes(line, sizeof(line));
             prompt_pending = true;
             continue;
@@ -6711,22 +6747,47 @@ void d1l_usb_console_run_factory_reset_recovery(
         if (used == 0U) {
             continue;
         }
-        line[used] = '\0';
+        const size_t received_length = used;
         used = 0U;
-        trim_line(line);
+        d1l_usb_command_view_t command = {0};
+        const d1l_usb_command_admit_status_t admission =
+            d1l_usb_command_admit_in_place(
+                line, received_length, sizeof(line), &command);
         printf("\n");
 
-        if (strcmp(line, "help") == 0) {
+        if (admission == D1L_USB_COMMAND_ADMIT_EMPTY) {
+            wipe_console_bytes(line, sizeof(line));
+            prompt_pending = true;
+            continue;
+        }
+        if (admission != D1L_USB_COMMAND_ADMIT_OK) {
+            err_result("factory-reset-recovery",
+                       d1l_usb_command_admit_status_code(admission),
+                       "recovery command contains invalid or hidden bytes");
+            wipe_console_bytes(line, sizeof(line));
+            prompt_pending = true;
+            continue;
+        }
+        const char *canonical_line = command.text;
+
+        if (d1l_usb_command_equals(
+                &command, "help", sizeof("help") - 1U)) {
             printf("{\"schema\":%d,\"ok\":true,\"cmd\":\"help\","
                    "\"recovery_only\":true,"
                    "\"repair_requires_two_confirmations\":true}\n",
                    D1L_CONSOLE_SCHEMA);
-        } else if (strcmp(line, "factory-reset-recovery-status") == 0) {
+        } else if (d1l_usb_command_equals(
+                       &command, "factory-reset-recovery-status",
+                       sizeof("factory-reset-recovery-status") - 1U)) {
             factory_reset_recovery_status(
                 "factory-reset-recovery-status");
-        } else if (strcmp(line, "factory-reset-recovery-export") == 0) {
+        } else if (d1l_usb_command_equals(
+                       &command, "factory-reset-recovery-export",
+                       sizeof("factory-reset-recovery-export") - 1U)) {
             factory_reset_recovery_export();
-        } else if (strcmp(line, "factory-reset-repair-arm") == 0) {
+        } else if (d1l_usb_command_equals(
+                       &command, "factory-reset-repair-arm",
+                       sizeof("factory-reset-repair-arm") - 1U)) {
             const uint32_t token = esp_random();
             (void)snprintf(repair_token, sizeof(repair_token), "%08" PRIx32,
                            token);
@@ -6738,13 +6799,14 @@ void d1l_usb_console_run_factory_reset_recovery(
                    "\"next\":\"factory-reset-repair-confirm %s "
                    "ERASE_ONBOARD_USER_STATE\"}\n",
                    D1L_CONSOLE_SCHEMA, repair_token, repair_token);
-        } else if (strncmp(line, "factory-reset-repair-confirm ",
-                           strlen("factory-reset-repair-confirm ")) == 0) {
+        } else if (d1l_usb_command_has_argument(
+                       &command, "factory-reset-repair-confirm ",
+                       sizeof("factory-reset-repair-confirm ") - 1U)) {
             char supplied_token[9] = {0};
             char phrase[32] = {0};
             char extra = '\0';
             const int fields = sscanf(
-                line + strlen("factory-reset-repair-confirm "),
+                canonical_line + sizeof("factory-reset-repair-confirm ") - 1U,
                 "%8s %31s %c", supplied_token, phrase, &extra);
             const bool armed = repair_token[0] != '\0' &&
                 repair_deadline_us > esp_timer_get_time();
