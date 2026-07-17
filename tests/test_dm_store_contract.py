@@ -253,6 +253,9 @@ def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
     dm_parse_body = source.split("static bool parse_rx_dm_packet", 1)[1].split(
         "static d1l_rx_ack_result_t record_dm_ack", 1
     )[0]
+    rx_done_body = source.split(
+        "static void meshcore_service_handle_radio_rx_done", 1
+    )[1].split("static void meshcore_service_handle_radio_rx_timeout", 1)[0]
 
     assert '#include "mesh/meshcore_ack_dispatch.h"' in source
     assert "D1L_MESHCORE_DM_ACK_WIRE_BYTES 6U" in planner
@@ -266,8 +269,16 @@ def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
     assert "xQueueSend(s_priority_command_queue, &cmd, 0)" in source
     assert ".ack_response = true" in source
     assert "vTaskDelay(pdMS_TO_TICKS(cmd->delay_ms))" in source
-    assert "const bool ack_queued = parse_rx_dm_packet" in source
-    assert "if (!ack_queued)" in source
+    assert "d1l_meshcore_packet_semantic_parse(payload, size, &packet)" in rx_done_body
+    assert "case D1L_MESHCORE_PACKET_SEMANTIC_DIRECT_MESSAGE:" in rx_done_body
+    assert (
+        rx_done_body.count(
+            "ack_queued = parse_rx_dm_packet(payload, size, rssi, snr);"
+        )
+        == 1
+    )
+    assert rx_done_body.count("parse_rx_dm_packet(") == 1
+    assert "if (!ack_queued)" in rx_done_body
     assert "complete_pending_ack_tx(true, ESP_OK)" in source
     assert "complete_pending_ack_tx(false, ESP_ERR_TIMEOUT)" in source
     assert (
