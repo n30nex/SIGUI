@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "mesh/meshcore_packet_semantics.h"
+#include "mesh/meshcore_trace.h"
 
 #define DETERMINISTIC_CASES 100000U
 #define TEST_BUFFER_BYTES 320U
@@ -147,7 +148,11 @@ static void test_boundaries(void)
                        D1L_MESHCORE_PACKET_SEMANTIC_INVALID);
     expect_type_length(D1L_MESHCORE_PAYLOAD_PATH, 5U, true,
                        D1L_MESHCORE_PACKET_SEMANTIC_PATH);
-    expect_type_length(D1L_MESHCORE_PAYLOAD_TRACE, 1U, true,
+    expect_type_length(D1L_MESHCORE_PAYLOAD_TRACE, 8U, false,
+                       D1L_MESHCORE_PACKET_SEMANTIC_INVALID);
+    expect_type_length(D1L_MESHCORE_PAYLOAD_TRACE, 9U, true,
+                       D1L_MESHCORE_PACKET_SEMANTIC_TRACE);
+    expect_type_length(D1L_MESHCORE_PAYLOAD_TRACE, 10U, true,
                        D1L_MESHCORE_PACKET_SEMANTIC_TRACE);
     expect_type_length(D1L_MESHCORE_PAYLOAD_ADVERT, 99U, false,
                        D1L_MESHCORE_PACKET_SEMANTIC_INVALID);
@@ -170,6 +175,13 @@ static void test_boundaries(void)
     raw_len = make_direct_frame(raw, D1L_MESHCORE_PAYLOAD_ACK,
                                 payload, sizeof(payload));
     raw[0] |= 0x40U;
+    assert(!parse_guarded(raw, raw_len, NULL));
+
+    uint8_t trace_payload[D1L_MESHCORE_TRACE_FIXED_BYTES + 1U] = {0};
+    raw_len = make_direct_frame(raw, D1L_MESHCORE_PAYLOAD_TRACE,
+                                trace_payload, sizeof(trace_payload));
+    raw[0] = (uint8_t)((D1L_MESHCORE_PAYLOAD_TRACE << 2U) |
+                       D1L_MESHCORE_ROUTE_FLOOD);
     assert(!parse_guarded(raw, raw_len, NULL));
 
     raw[0] = (uint8_t)((D1L_MESHCORE_PAYLOAD_ACK << 2U) |

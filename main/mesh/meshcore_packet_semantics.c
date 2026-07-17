@@ -3,12 +3,15 @@
 #include <string.h>
 
 #include "advert_data.h"
+#include "meshcore_trace.h"
 
 #define D1L_MESHCORE_ADMIN_RESPONSE_TYPE 0x01U
 #define D1L_MESHCORE_CIPHER_MAC_SIZE 2U
 #define D1L_MESHCORE_ADVERT_BASE_BYTES (32U + 4U + 64U)
 
-static bool classify(const d1l_meshcore_wire_packet_t *packet,
+static bool classify(const uint8_t *raw,
+                     size_t raw_len,
+                     const d1l_meshcore_wire_packet_t *packet,
                      d1l_meshcore_packet_semantic_view_t *view)
 {
     view->wire = *packet;
@@ -56,6 +59,10 @@ static bool classify(const d1l_meshcore_wire_packet_t *packet,
         view->kind = D1L_MESHCORE_PACKET_SEMANTIC_PATH;
         return true;
     case D1L_MESHCORE_PAYLOAD_TRACE:
+        if (d1l_meshcore_trace_classify(raw, raw_len, NULL) ==
+            D1L_MESHCORE_TRACE_FRAME_MALFORMED) {
+            return false;
+        }
         view->kind = D1L_MESHCORE_PACKET_SEMANTIC_TRACE;
         return true;
     case D1L_MESHCORE_PAYLOAD_ADVERT:
@@ -84,7 +91,7 @@ bool d1l_meshcore_packet_semantic_parse(
     d1l_meshcore_wire_packet_t packet = {0};
     d1l_meshcore_packet_semantic_view_t view = {0};
     if (!d1l_meshcore_wire_decode_v1(raw, raw_len, &packet) ||
-        !classify(&packet, &view)) {
+        !classify(raw, raw_len, &packet, &view)) {
         return false;
     }
 

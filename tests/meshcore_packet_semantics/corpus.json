@@ -34,9 +34,9 @@
       "sha256": "7b355f1846083302f47d84a8d34b1afc9da50dc2d8b6f2200269f752a3888bdc"
     },
     {
-      "name": "trace_min",
-      "hex": "260000",
-      "sha256": "05448c92c9ea93ee3d3c7562be1ea8a601b7c8e48a6b7f20b0225062610e457a"
+      "name": "trace_source_min",
+      "hex": "260000000000000000000000",
+      "sha256": "ed504cce7a8f9e5bd91244afd7b1bf18fcebab76149738ba88cd5d1b1f29a223"
     },
     {
       "name": "advert_min",
