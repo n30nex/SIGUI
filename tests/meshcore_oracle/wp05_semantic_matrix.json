@@ -213,6 +213,7 @@
       ],
       "production_host_suites": [
         "admin_dispatch",
+        "advert_replay_admission",
         "contact_trace",
         "legacy_protocol_timestamp_migration",
         "time_service_migration_integration",
@@ -504,7 +505,7 @@
     "main/mesh/contact_uri.h": "1a06f9d47c284f1c9990f71357434e3b5446a516331e37447ef1e3d7676662ef",
     "main/mesh/meshcore_advert_admission.c": "dc026a50d6283b0442fe7a046a3f606062385ec98c73d664e367629c065c1174",
     "main/mesh/meshcore_advert_admission.h": "9b56f20bdbe8adc011d3fc844e7a85e27d9849f1e071374aca6dccc57ace603c",
-    "main/mesh/meshcore_ack_completion.h": "c9ae71ca6c7d860d0a7431df86feb3ca10881ab4a6c3a692260a6a18c8b0e763",
+    "main/mesh/meshcore_ack_completion.h": "ae6166e86d7eaf50fe5502f01d1ff4f3e54b08c46dd99ab8f94fdbc2d19ff9ca",
     "main/mesh/meshcore_dm_retry.h": "cc7fe98b0c1ede5ba2bab15d3362c730b5755876eec7c28d124c9e10eb0b9238",
     "main/mesh/meshcore_lifetime.h": "b480f554ac3979e3caefdd1d815a334e0de47bddc8f21c7ac8305d4643fba535",
     "main/mesh/meshcore_packet_hash.c": "3078f26782b47c5d9a14cfad5119092c536c5bd2b4a5ea738628edf6f375cf6c",
@@ -519,7 +520,7 @@
     "main/mesh/meshcore_trace.h": "dcfd9d18f65555baa018412f1b7c9e6079a04b1b6ad89fda1452ec3943a6dc78",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
-    "main/mesh/node_store.c": "7516820d9b2e81904303ff9653356aabf5d3594abfab9faeb1d62d605300cde9",
+    "main/mesh/node_store.c": "e2fcfecd12aa8b22c203806f700086bb18daf7c0f983786e8a4294463ddb8db6",
     "main/mesh/node_store.h": "6f9ebf9b92bcca3d405df25483454192011a372c7eaedee2a5625badd22daa23",
     "main/mesh/store_lock.h": "1fae71b73b643c37452a8da8d7c0a3c4bd0e839014e3a490af25206b41d2d7fe",
     "main/mesh/user_text.c": "483bdcce4b6303acd7a0a82ab7607ed7655454f8e9096d46615aaebbb255bc6f",
@@ -536,7 +537,7 @@
     "tests/native/esp_nvs_stubs.c": "2ad701fb96d76e19518e193bcfafb7fada5d0e1a517a38406998fc386ad6b8ca",
     "tests/native/mbedtls_md_stub.c": "db5f82347ce2e70303a71a7b8dc0cae4c7de237e3a353605845763f6e61bda52",
     "tests/native/meshcore_admin_dispatch_test.c": "830b262f3f15f95c27d374e93ad60eab2e52647e478346df70d604125312bfda",
-    "tests/native/meshcore_ack_completion_test.c": "06dbf003dc81c1c177e3eabdf9112f459302515d6f2b2a87b482db72ada2848c",
+    "tests/native/meshcore_ack_completion_test.c": "152d878857e11211086027d7884ccc5728f107c817758c7ff652dadcf1292f5f",
     "tests/native/meshcore_lifetime_test.c": "4da88fd0e0f9e127224488c7fe55cec72413c653ed9b7b589d80cfc5998a9129",
     "tests/native/meshcore_runtime_guard_test.c": "f5a2c1b33ed1fd1545d934eceb05041fc348f9cfc8f6ef04399fcba444bc91e4",
     "tests/native/meshcore_packet_hash_test.c": "c8d9bbed666168cccd2e1dab86676a252e3aee5a8cb900077ba7ab972a35fb97",
@@ -555,6 +556,6 @@
     "tests/native/stubs/sys/time.h": "251d586ea591ff51aa9d51e6843deadd6c578b5591658df50eb5121c9e6b39c7",
     "tests/native/time_service_checkpoint_integration_test.c": "2de100718160702b5ab54f5d8ca0f3d802e8b89f3d16756185be1b0f82f0ad41",
     "tests/native/usb_command_parser_test.c": "74ff93eaed93e832455c2e7c150cc60dcdd645a1d3f38575caf27c96145b72a5",
-    "tests/native/store_behavior_test.c": "d76f11b94a5209d78138c7ac2590033563df70522eaab68c7ea6be010ab3b487"
+    "tests/native/store_behavior_test.c": "ff6c170ce3d28542445eb7672e60c82a79944ed1de46045e823ecc54ecc4388b"
   }
 }

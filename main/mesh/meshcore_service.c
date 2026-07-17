@@ -168,7 +168,7 @@ static d1l_callback_tx_snapshot_t
     s_callback_tx_history[D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN];
 
 typedef struct {
-    bool valid;
+    d1l_meshcore_ack_receipt_binding_t binding;
     char source[20U];
     uint8_t route;
     int16_t rssi;
@@ -1313,18 +1313,33 @@ static void remember_pending_dm_ack_packet_hashes(void)
 
 static bool retain_pending_dm_ack_receipt(
     const d1l_meshcore_wire_packet_t *packet, int16_t rssi, int8_t snr,
-    uint16_t size, const uint8_t *raw, size_t raw_len, const char *source)
+    uint16_t size, const uint8_t *raw, size_t raw_len, const char *source,
+    uint32_t ack_hash)
 {
     if (!packet || !raw || raw_len == 0U ||
         raw_len > sizeof(s_pending_dm_tx.ack_receipt.raw)) {
         return false;
     }
+    const d1l_dm_delivery_owner_t *owner = &s_pending_dm_tx.delivery;
+    const d1l_meshcore_ack_completion_t *completion =
+        &s_pending_dm_tx.ack_completion;
+    if (!owner->active || owner->state != D1L_DM_DELIVERY_AWAITING_ACK ||
+        !completion->active || completion->session_id != owner->session_id ||
+        completion->base_revision != owner->revision) {
+        return false;
+    }
     d1l_pending_dm_ack_receipt_t *receipt =
         &s_pending_dm_tx.ack_receipt;
-    if (receipt->valid) {
-        return true;
+    if (receipt->binding.valid) {
+        return d1l_meshcore_ack_receipt_binding_matches(
+            &receipt->binding, owner->session_id, owner->revision, ack_hash);
     }
     memset(receipt, 0, sizeof(*receipt));
+    if (!d1l_meshcore_ack_receipt_binding_begin(
+            &receipt->binding, owner->session_id, owner->revision,
+            ack_hash)) {
+        return false;
+    }
     snprintf(receipt->source, sizeof(receipt->source), "%s",
              source ? source : "ack");
     receipt->route = packet->route;
@@ -1335,7 +1350,6 @@ static bool retain_pending_dm_ack_receipt(
     receipt->wire_size = size;
     receipt->raw_len = (uint16_t)raw_len;
     memcpy(receipt->raw, raw, raw_len);
-    receipt->valid = true;
     return true;
 }
 
@@ -1434,6 +1448,8 @@ static esp_err_t transition_pending_dm_tx(
              * deadline, not the QUEUED revision that began the session. */
             memset(&s_pending_dm_tx.ack_completion, 0,
                    sizeof(s_pending_dm_tx.ack_completion));
+            memset(&s_pending_dm_tx.ack_receipt, 0,
+                   sizeof(s_pending_dm_tx.ack_receipt));
             if (!d1l_meshcore_ack_completion_begin(
                     &s_pending_dm_tx.ack_completion,
                     s_pending_dm_tx.delivery.session_id,
@@ -1451,6 +1467,8 @@ static esp_err_t transition_pending_dm_tx(
              * unadmitted revision.  The next AWAITING_ACK transition rearms. */
             memset(&s_pending_dm_tx.ack_completion, 0,
                    sizeof(s_pending_dm_tx.ack_completion));
+            memset(&s_pending_dm_tx.ack_receipt, 0,
+                   sizeof(s_pending_dm_tx.ack_receipt));
         }
         record_dm_delivery_status(
             s_pending_dm_tx.delivery.session_id,
@@ -1868,7 +1886,10 @@ static bool finalize_pending_dm_ack_completion(void)
     d1l_pending_dm_ack_receipt_t *receipt =
         &s_pending_dm_tx.ack_receipt;
     if (!owner->active || owner->state != D1L_DM_DELIVERY_ACKNOWLEDGED ||
-        !receipt->valid ||
+        !d1l_meshcore_ack_receipt_binding_matches(
+            &receipt->binding, s_pending_dm_tx.ack_completion.session_id,
+            s_pending_dm_tx.ack_completion.base_revision,
+            s_pending_dm_tx.ack_hash) ||
         !d1l_meshcore_ack_completion_take_terminal_effects(
             &s_pending_dm_tx.ack_completion, owner->session_id,
             owner->revision)) {
@@ -3253,7 +3274,7 @@ static d1l_rx_ack_result_t record_dm_ack(
     if (d1l_dm_delivery_owner_ack_matches(
             &s_pending_dm_tx.delivery, ack_hash)) {
         if (!retain_pending_dm_ack_receipt(
-                packet, rssi, snr, size, raw, raw_len, source)) {
+                packet, rssi, snr, size, raw, raw_len, source, ack_hash)) {
             ESP_LOGW(TAG, "DM ACK receipt retention failed");
             return D1L_RX_ACK_RETRYABLE;
         }
@@ -3261,6 +3282,10 @@ static d1l_rx_ack_result_t record_dm_ack(
         const d1l_pending_dm_ack_transition_result_t transition =
             transition_pending_dm_ack(&transition_error);
         if (transition == D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE) {
+            /* No retained CAS admitted this RF receipt.  Discard it so a
+             * later retry revision cannot inherit stale route/log evidence. */
+            memset(&s_pending_dm_tx.ack_receipt, 0,
+                   sizeof(s_pending_dm_tx.ack_receipt));
             snprintf(note, sizeof(note), "%s persistence %lu",
                      source ? source : "ack", (unsigned long)ack_hash);
             (void)append_packet_log_deferred(

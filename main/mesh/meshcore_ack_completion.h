@@ -22,6 +22,51 @@ typedef struct {
     bool terminal_effects_taken;
 } d1l_meshcore_ack_completion_t;
 
+/*
+ * The RF receipt used for route/log effects is separate from the retained
+ * delivery transition, so bind it explicitly to the exact AWAITING_ACK
+ * revision and hash that admitted it.  A receipt from an earlier direct
+ * attempt must never be reused when a later flood retry is acknowledged.
+ */
+typedef struct {
+    uint64_t session_id;
+    uint32_t base_revision;
+    uint32_t ack_hash;
+    bool valid;
+} d1l_meshcore_ack_receipt_binding_t;
+
+static inline bool d1l_meshcore_ack_receipt_binding_matches(
+    const d1l_meshcore_ack_receipt_binding_t *binding,
+    uint64_t session_id, uint32_t base_revision, uint32_t ack_hash)
+{
+    return binding && binding->valid && session_id != 0U &&
+           base_revision != 0U && base_revision != UINT32_MAX &&
+           binding->session_id == session_id &&
+           binding->base_revision == base_revision &&
+           binding->ack_hash == ack_hash;
+}
+
+static inline bool d1l_meshcore_ack_receipt_binding_begin(
+    d1l_meshcore_ack_receipt_binding_t *binding,
+    uint64_t session_id, uint32_t base_revision, uint32_t ack_hash)
+{
+    if (!binding || session_id == 0U || base_revision == 0U ||
+        base_revision == UINT32_MAX) {
+        return false;
+    }
+    if (binding->valid) {
+        return d1l_meshcore_ack_receipt_binding_matches(
+            binding, session_id, base_revision, ack_hash);
+    }
+    *binding = (d1l_meshcore_ack_receipt_binding_t) {
+        .session_id = session_id,
+        .base_revision = base_revision,
+        .ack_hash = ack_hash,
+        .valid = true,
+    };
+    return true;
+}
+
 typedef enum {
     D1L_MESHCORE_ACK_CAS_REJECTED = 0,
     D1L_MESHCORE_ACK_CAS_STALE,

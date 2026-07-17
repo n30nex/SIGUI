@@ -356,6 +356,45 @@ def test_only_the_expected_ack_closes_the_awaiting_owner_session():
     assert '"dm_ack_unmatched"' in ack
 
 
+def test_ack_receipt_is_bound_to_the_exact_retry_revision_and_hash():
+    source = read("main/mesh/meshcore_service.c")
+    header = read("main/mesh/meshcore_ack_completion.h")
+    retain = body(
+        source,
+        "static bool retain_pending_dm_ack_receipt",
+        "static void clear_pending_dm_tx",
+    )
+    transition = body(
+        source,
+        "static esp_err_t transition_pending_dm_tx",
+        "typedef enum {\n    D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE",
+    )
+    ack = source.rsplit("static d1l_rx_ack_result_t record_dm_ack", 1)[1].split(
+        "static void parse_rx_ack_packet", 1
+    )[0]
+    finalize = body(
+        source,
+        "static bool finalize_pending_dm_ack_completion",
+        "static void clear_pending_ack_tx",
+    )
+
+    assert "d1l_meshcore_ack_receipt_binding_t binding;" in source
+    assert "binding->base_revision == base_revision" in header
+    assert "binding->ack_hash == ack_hash" in header
+    assert "completion->base_revision != owner->revision" in retain
+    assert "d1l_meshcore_ack_receipt_binding_begin(" in retain
+    awaiting = transition.index("next_state == D1L_DM_DELIVERY_AWAITING_ACK")
+    rearm_clear = transition.index("memset(&s_pending_dm_tx.ack_receipt", awaiting)
+    completion_begin = transition.index("d1l_meshcore_ack_completion_begin(", awaiting)
+    assert rearm_clear < completion_begin
+    retryable = ack.index("D1L_PENDING_DM_ACK_TRANSITION_RETRYABLE")
+    receipt_clear = ack.index("memset(&s_pending_dm_tx.ack_receipt", retryable)
+    persistence_log = ack.index('"dm_ack_persistence_pending"', retryable)
+    assert retryable < receipt_clear < persistence_log
+    assert "s_pending_dm_tx.ack_completion.base_revision" in finalize
+    assert "s_pending_dm_tx.ack_hash" in finalize
+
+
 def test_ack_store_masks_failed_persistence_until_same_revision_retry_is_durable():
     store = read("main/mesh/dm_store.c")
     header = read("main/mesh/dm_store.h")

@@ -42,6 +42,35 @@ static void test_unmatched_and_stale_ack_are_non_mutating(void)
     assert(!d1l_meshcore_ack_completion_suppresses_rf_retry(&completion));
 }
 
+static void test_stale_receipt_binding_cannot_cross_retry_revision(void)
+{
+    d1l_meshcore_ack_receipt_binding_t receipt = {0};
+    const uint64_t session_id = 0x1101U;
+    const uint32_t direct_revision = 5U;
+    const uint32_t direct_ack_hash = 0x11112222U;
+    const uint32_t flood_revision = 10U;
+    const uint32_t flood_ack_hash = 0x33334444U;
+
+    assert(d1l_meshcore_ack_receipt_binding_begin(
+        &receipt, session_id, direct_revision, direct_ack_hash));
+    assert(d1l_meshcore_ack_receipt_binding_matches(
+        &receipt, session_id, direct_revision, direct_ack_hash));
+
+    /* A retained direct-attempt receipt is fail-closed at the later flood
+     * revision.  The runtime must explicitly clear it when rearming. */
+    assert(!d1l_meshcore_ack_receipt_binding_begin(
+        &receipt, session_id, flood_revision, flood_ack_hash));
+    assert(!d1l_meshcore_ack_receipt_binding_matches(
+        &receipt, session_id, flood_revision, flood_ack_hash));
+    receipt = (d1l_meshcore_ack_receipt_binding_t){0};
+    assert(d1l_meshcore_ack_receipt_binding_begin(
+        &receipt, session_id, flood_revision, flood_ack_hash));
+    assert(d1l_meshcore_ack_receipt_binding_matches(
+        &receipt, session_id, flood_revision, flood_ack_hash));
+    assert(!d1l_meshcore_ack_receipt_binding_matches(
+        &receipt, session_id, direct_revision, direct_ack_hash));
+}
+
 static void test_persistence_pending_retry_and_reconcile_are_take_once(void)
 {
     d1l_meshcore_ack_completion_t completion = {0};
@@ -132,6 +161,7 @@ static void test_deadline_clear_is_after_durable_publish_and_take_once(void)
 int main(void)
 {
     test_unmatched_and_stale_ack_are_non_mutating();
+    test_stale_receipt_binding_cannot_cross_retry_revision();
     test_persistence_pending_retry_and_reconcile_are_take_once();
     test_exact_owner_durable_cas_and_revision_overflow();
     test_deadline_clear_is_after_durable_publish_and_take_once();

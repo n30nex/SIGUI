@@ -71,7 +71,7 @@ Coverage:
   and PATH encodings, with the coordinator armed from the actual
   `AWAITING_ACK` revision, the retained RF receipt bound to that same session,
   base revision, and ACK hash, and deadline/route/hash effects authorized once
-  after durable publication; one-shot authenticated PATH effects with ACK-only retry;
+  only after durable publication; one-shot authenticated PATH effects with ACK-only retry;
   pending-first TRACE correlation with partial-retention retry; and terminal
   advert receipts. Executable lifetime checks require an inclusive 30-minute
   contact/route boundary, unsigned monotonic-clock wrap behavior, explicit

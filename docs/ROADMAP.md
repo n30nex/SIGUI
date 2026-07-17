@@ -149,12 +149,14 @@ The current dependent source stack closes the bounded WP-05 ACK-correlation and
 lifetime requirements in addition to the advert-replay and packet-hash slices.
 Eight ACK cases bind simple, multipart, and ACK+PATH input to the exact active
 `AWAITING_ACK` owner revision, retained compare-and-swap admission, durable
-publication, persistence reconciliation, and take-once deadline/route/hash
-effects. Eight lifetime cases execute the 30-minute contact-reachability and
-direct-route boundaries, unsigned clock wrap, the exact 160-entry packet FIFO,
-and non-wrapping advert timestamps. The declared matrix is now 11 implemented /
-5 partial / 0 missing requirements, 10 production suites / 69 scenarios / 36
-translation units / 70 pins, plus 1 companion suite / 10 cases. Production also
+publication, persistence reconciliation, take-once deadline/route/hash effects,
+and exact receipt session/revision/hash binding across direct-to-flood retry.
+Eight lifetime cases plus the production node-store suite execute current-boot
+30-minute contact reachability, reboot invalidation without erasing historical
+display timestamps, direct-route boundaries, unsigned clock wrap, the exact
+160-entry packet FIFO, and non-wrapping advert timestamps. The declared matrix is now 11 implemented /
+5 partial / 0 missing requirements, 11 production suites / 77 scenarios / 38
+translation units / 73 pins, plus 1 companion suite / 10 cases. Production also
 retains the exact eight-byte upstream hash algorithm and terminal-only semantic
 cache admission. Complete retained-fault/power-loss recovery, persistent generic
 duplicate state, remaining protocol/admin/TRACE semantics, compatible-peer RF,
