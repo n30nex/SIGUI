@@ -245,7 +245,7 @@ EXPECTED_ADVERT_FUZZ = {
 }
 EXPECTED_WP05_REQUIREMENT_STATUSES = {
     "signed_adverts_names_roles_location": "partial",
-    "public_and_configured_channels": "partial",
+    "public_and_configured_channels": "implemented",
     "dm_attempts_0_through_255": "implemented",
     "shared_secret_derivation": "implemented",
     "mac_authentication_failure": "implemented",
@@ -258,7 +258,7 @@ EXPECTED_WP05_REQUIREMENT_STATUSES = {
     "duplicate_packet_and_hash": "implemented",
     "truncated_oversize_and_empty_payload": "implemented",
     "malformed_utf8_and_embedded_nul": "implemented",
-    "self_message_unknown_peer_and_channel": "partial",
+    "self_message_unknown_peer_and_channel": "implemented",
     "lifetime_and_expiry_boundaries": "implemented",
 }
 EXPECTED_WP05_FUZZ_TARGET_STATUSES = {
@@ -326,19 +326,17 @@ EXPECTED_WP05_PRODUCTION_SUITES = {
         "invocation_count": 1,
         "expected_stdout": "native MeshCore packet hash: ok",
     },
-    "usb_command_parser": {
-        "binary": "usb_command_parser_semantic",
-        "scenario_count": 8,
-        "invocation_count": 1,
-        "expected_stdout": (
-            "native USB command parser: ok (100000 deterministic cases)"
-        ),
-    },
     "lifetime_boundaries": {
         "binary": "meshcore_lifetime_semantic",
         "scenario_count": 8,
         "invocation_count": 1,
         "expected_stdout": "native MeshCore lifetime boundaries: ok",
+    },
+    "channel_and_peer_rx_admission": {
+        "binary": "meshcore_rx_admission_semantic",
+        "scenario_count": 6,
+        "invocation_count": 1,
+        "expected_stdout": "native MeshCore RX admission: ok",
     },
 }
 EXPECTED_WP05_COMPANION_UPSTREAM_SUITES = {
@@ -370,8 +368,6 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/app/settings_protocol_migration.h",
     "main/app/settings_time_checkpoint.c",
     "main/app/settings_time_checkpoint.h",
-    "main/comms/usb_command_parser.c",
-    "main/comms/usb_command_parser.h",
     "main/hal/rp2040_bridge.h",
     "main/mesh/meshcore_admin_dispatch.c",
     "main/mesh/meshcore_admin_dispatch.h",
@@ -392,6 +388,8 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "main/mesh/meshcore_path_state.c",
     "main/mesh/meshcore_path_state.h",
     "main/mesh/meshcore_radio_profile.h",
+    "main/mesh/meshcore_rx_admission.c",
+    "main/mesh/meshcore_rx_admission.h",
     "main/mesh/meshcore_runtime_guard.h",
     "main/mesh/meshcore_trace.h",
     "main/mesh/meshcore_text_plaintext.c",
@@ -418,6 +416,7 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "tests/native/meshcore_ack_completion_test.c",
     "tests/native/meshcore_lifetime_test.c",
     "tests/native/meshcore_runtime_guard_test.c",
+    "tests/native/meshcore_rx_admission_test.c",
     "tests/native/meshcore_packet_hash_test.c",
     "tests/native/meshcore_trace_test.c",
     "tests/native/meshcore_text_plaintext_test.c",
@@ -433,7 +432,6 @@ EXPECTED_WP05_SOURCE_PATHS = {
     "tests/native/stubs/nvs.h",
     "tests/native/stubs/sys/time.h",
     "tests/native/time_service_checkpoint_integration_test.c",
-    "tests/native/usb_command_parser_test.c",
     "tests/native/store_behavior_test.c",
 }
 SIGNED_ADVERT_REPLAY_OUTCOME_KEYS = (
@@ -3135,22 +3133,22 @@ def production_semantic_suite_specs(
             ],
         },
         {
-            "id": "usb_command_parser",
-            "binary": Path(build_dir) / "usb_command_parser_semantic",
-            "flags": [],
-            "include_dirs": [ROOT / "main"],
-            "sources": [
-                ROOT / "main" / "comms" / "usb_command_parser.c",
-                native / "usb_command_parser_test.c",
-            ],
-        },
-        {
             "id": "lifetime_boundaries",
             "binary": Path(build_dir) / "meshcore_lifetime_semantic",
             "flags": [],
             "include_dirs": [ROOT / "main"],
             "sources": [
                 native / "meshcore_lifetime_test.c",
+            ],
+        },
+        {
+            "id": "channel_and_peer_rx_admission",
+            "binary": Path(build_dir) / "meshcore_rx_admission_semantic",
+            "flags": [],
+            "include_dirs": common_includes,
+            "sources": [
+                ROOT / "main" / "mesh" / "meshcore_rx_admission.c",
+                native / "meshcore_rx_admission_test.c",
             ],
         },
     ]
@@ -4480,8 +4478,8 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("closure_ready") is False
         and value.get("full_semantic_matrix_covered") is False
         and value.get("requirement_count") == 16
-        and value.get("implemented_requirement_count") == 11
-        and value.get("partial_requirement_count") == 5
+        and value.get("implemented_requirement_count") == 13
+        and value.get("partial_requirement_count") == 3
         and value.get("missing_requirement_count") == 0
         and value.get("fuzz_target_count") == 8
         and value.get("implemented_fuzz_target_count") == 3

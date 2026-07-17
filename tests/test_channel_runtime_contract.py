@@ -97,7 +97,7 @@ def test_reconciliation_is_owned_bounded_and_ui_snapshots_are_read_only():
     assert "d1l_channel_message_reconcile_if_due" in maintenance
 
 
-def test_tx_and_rx_use_exact_unique_channel_keys_before_side_effects():
+def test_tx_and_rx_authenticate_every_configured_channel_before_side_effects():
     service = read("main/mesh/meshcore_service.c")
     service_header = read("main/mesh/meshcore_service.h")
 
@@ -123,15 +123,14 @@ def test_tx_and_rx_use_exact_unique_channel_keys_before_side_effects():
     )
     ready_index = send.index("channel_message_generation_ready()")
     copy_index = send.index("d1l_channel_store_copy_protocol_key")
-    unique_index = send.index("d1l_channel_store_find_unique_hash")
     timestamp_index = send.index("d1l_time_service_preflight_protocol_timestamp")
     start_index = send.index("D1L_MESHCORE_SERVICE_CMD_START_RX")
-    pending_index = send.index("remember_pending_channel_tx(channel_id, text)")
+    hash_index = send.index("d1l_meshcore_packet_hash_calculate")
+    pending_index = send.index("remember_pending_channel_tx(channel_id, text,")
     radio_index = send.index("meshcore_service_send_raw")
-    assert ready_index < copy_index < unique_index < timestamp_index < start_index
-    assert unique_index < pending_index < radio_index
-    assert "unique_key.channel_id == channel_key.channel_id" in send
-    assert "secure_zero_channel_key(&unique_key)" in send
+    assert ready_index < copy_index < timestamp_index < start_index
+    assert start_index < hash_index < pending_index < radio_index
+    assert "d1l_channel_store_find_unique_hash" not in send
     assert "secure_zero_channel_key(&channel_key)" in send
 
     build = c_function(service, "static esp_err_t build_channel_text_packet(")
@@ -148,13 +147,17 @@ def test_tx_and_rx_use_exact_unique_channel_keys_before_side_effects():
 
     receive = c_function(service, "static void parse_rx_channel_packet(")
     ready_index = receive.index("channel_message_generation_ready()")
-    unique_index = receive.index("d1l_channel_store_find_unique_hash")
+    matches_index = receive.index("d1l_channel_store_copy_hash_matches")
     decrypt_index = receive.index("meshcore_decrypt_after_mac")
+    finish_index = receive.index("d1l_meshcore_channel_dispatch_finish")
     append_index = receive.index("append_channel_message_store_rx(")
-    assert ready_index < unique_index < decrypt_index < append_index
+    assert ready_index < matches_index < decrypt_index < finish_index < append_index
+    assert "D1L_CHANNEL_STORE_CAPACITY" in receive
+    assert "d1l_channel_store_find_unique_hash" not in receive
+    assert "channel_protocol_keys_equal" in receive
     assert "channel_rx_unknown_hash++" in receive
     assert "channel_rx_hash_collision++" in receive
-    assert "secure_zero_channel_key(&channel_key)" in receive
+    assert "secure_zero_bytes(candidates, sizeof(candidates))" in receive
     assert "channel_id, channel.name" in receive
 
     gate = c_function(
@@ -203,6 +206,10 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
     assert "operation->kind != D1L_MESH_TX_OPERATION_PUBLIC" in flush
     assert "operation->operation_id != s_pending_channel_operation_id" in flush
     assert "append_channel_message_store_tx" in flush
+    assert flush.index("d1l_meshcore_packet_hash_cache_remember") < flush.index(
+        "append_channel_message_store_tx"
+    )
+    assert "s_pending_channel_packet_hash_ready" in flush
 
     done = c_function(
         service, "static void meshcore_service_handle_radio_tx_done("
@@ -219,6 +226,7 @@ def test_pending_history_is_bound_to_exact_channel_radio_operation():
     )[0]
     assert "s_pending_channel_operation_id ==" in timeout
     assert "event->tx_operation.operation_id" in timeout
+    assert "clear_pending_channel_tx" in timeout
 
 
 def test_public_clear_is_scoped_and_mark_order_preserves_retry_affordance():

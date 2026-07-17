@@ -108,8 +108,10 @@ As of the 2026-07-16 strict-banked PR #168 exact-main checkpoint:
   packet-hash outcomes, and the exact table receipt. Actions and downstream
   package/audit consumers recompute and compare the binding from the supplied
   receipt rather than accepting any shaped digest; the matrix remains
-  `closure_ready=false`. The declared matrix is now 11
-  implemented / 5 partial / 0 missing requirements, 11 production suites / 77
+  `closure_ready=false`. Configured-channel hash collisions now execute every
+  bounded authenticated candidate, and self/unknown dispatch is fail closed.
+  The declared matrix is now 13
+  implemented / 3 partial / 0 missing requirements, 11 production suites / 75
   scenarios / 38 translation units / 73 source pins, plus 1 companion suite /
   10 cases. The exact-owner ACK coordinator admits only the active
   `AWAITING_ACK` revision and defers deadline clear, route credit, durable ACK

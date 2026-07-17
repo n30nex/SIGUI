@@ -154,8 +154,11 @@ and exact receipt session/revision/hash binding across direct-to-flood retry.
 Eight lifetime cases plus the production node-store suite execute current-boot
 30-minute contact reachability, reboot invalidation without erasing historical
 display timestamps, direct-route boundaries, unsigned clock wrap, the exact
-160-entry packet FIFO, and non-wrapping advert timestamps. The declared matrix is now 11 implemented /
-5 partial / 0 missing requirements, 11 production suites / 77 scenarios / 38
+160-entry packet FIFO, and non-wrapping advert timestamps. Configured-channel
+RX now authenticates every bounded hash match, exact selected-channel TX remains
+available across one-byte hash collisions, and successful terminal TX suppresses
+its own RF echo. The declared matrix is now 13 implemented /
+3 partial / 0 missing requirements, 11 production suites / 75 scenarios / 38
 translation units / 73 pins, plus 1 companion suite / 10 cases. Production also
 retains the exact eight-byte upstream hash algorithm and terminal-only semantic
 cache admission. Complete retained-fault/power-loss recovery, persistent generic

@@ -52,9 +52,9 @@ Coverage:
   Actions, release packaging, reproducibility comparison, and release audit
   must recompute that canonical digest from the supplied exact-commit
   signed-runtime receipt and reject any substituted binding. The declared WP-05
-  host matrix is currently 11 production suites / 77 scenarios / 38 translation
+  host matrix is currently 11 production suites / 75 scenarios / 38 translation
   units / 73 source pins, plus 1 pinned-upstream companion suite / 10 cases.
-  The USB suite executes the production USB command-admission module for
+  The separate USB parser target executes the production USB command-admission module for
   100,000 deterministic inputs. The separate pinned-Clang gate must also run
   `scripts/usb_command_parser_fuzz_d1l.py` for exactly 100,000 libFuzzer inputs,
   upload `usb_command_parser_fuzz_<full-commit>.json`, and prove that both the
@@ -66,7 +66,15 @@ Coverage:
   Native cases also require a 160-entry cyclic cache, correct all-zero occupancy,
   deterministic FIFO eviction, multipart-ACK descriptor normalization, and
   terminal-only admission. Production source contracts must prove authentication
-  and semantic authority before probing; one visible channel/DM row; bounded DM
+  and semantic authority before probing. Configured-channel RX must scan all
+  eight bounded hash matches, accept exactly one MAC-authenticated secret, and
+  reject unknown, unauthenticated, or multiply authenticated dispatch without a
+  retained side effect. Configured-channel TX uses the exact selected channel
+  secret even when its routing hash collides; its exact packet hash enters the
+  boot-local seen cache only after successful terminal TX so an RF echo cannot
+  create a self-message. DM candidates require current canonical contact
+  authority and reject the full local public key before shared-secret work.
+  The remaining production contracts require one visible channel/DM row; bounded DM
   re-ACK; exact-owner ACK persistence/reconciliation across simple, multipart,
   and PATH encodings, with the coordinator armed from the actual
   `AWAITING_ACK` revision, the retained RF receipt bound to that same session,

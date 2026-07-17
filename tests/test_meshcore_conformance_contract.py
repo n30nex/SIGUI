@@ -160,7 +160,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         summary["implemented_requirement_count"],
         summary["partial_requirement_count"],
         summary["missing_requirement_count"],
-    ) == (11, 5, 0)
+    ) == (13, 3, 0)
     assert (
         summary["implemented_fuzz_target_count"],
         summary["partial_fuzz_target_count"],
@@ -169,7 +169,7 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
     assert summary["oracle_semantic_vectors"] == 915
     assert summary["unique_referenced_oracle_semantic_vectors"] == 890
     assert summary["production_suite_count"] == 11
-    assert summary["production_scenario_count"] == 77
+    assert summary["production_scenario_count"] == 75
     assert summary["companion_upstream_suite_count"] == 1
     assert summary["companion_upstream_case_count"] == 10
     assert [suite["id"] for suite in summary["production_host_suites"]] == [
@@ -182,8 +182,8 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "ack_delivery_correlation",
         "advert_replay_admission",
         "packet_hash_and_advert_dedupe",
-        "usb_command_parser",
         "lifetime_boundaries",
+        "channel_and_peer_rx_admission",
     ]
     assert summary["companion_upstream_suites"] == [
         {
@@ -238,8 +238,8 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         "meshcore_ack_completion_semantic",
         "meshcore_advert_admission_semantic",
         "meshcore_packet_hash_semantic",
-        "usb_command_parser_semantic",
         "meshcore_lifetime_semantic",
+        "meshcore_rx_admission_semantic",
     ):
         assert binary in commands
     assert commands.count("-fsanitize=address,undefined") == 11
@@ -508,7 +508,7 @@ def test_production_service_uses_the_codec_exercised_by_the_harness():
     assert '"mesh/meshcore_wire.c"' in cmake
     # Channel, DM, ACK, PATH, TRACE hash binding, advert, and authenticated
     # admin RESPONSE each enter through the same fail-closed decoder.
-    assert service.count("d1l_meshcore_wire_decode_v1(") == 7
+    assert service.count("d1l_meshcore_wire_decode_v1(") == 8
     assert service.count("d1l_meshcore_wire_decode(") == 0
     ack_builder = service.split("static esp_err_t build_dm_ack_response", 1)[1].split(
         "static bool dispatch_bounded_dm_ack", 1
@@ -600,7 +600,7 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["scope"]["packet_semantics_covered"] is False
     assert report["scope"]["bounded_production_semantics_covered"] is True
     assert report["wp05_semantic_matrix"]["closure_ready"] is False
-    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 77
+    assert report["wp05_semantic_matrix"]["production_scenario_count"] == 75
     assert report["signed_advert_runtime"] is None
     semantic_source = report["wp05_semantic_matrix"]["source_verification"]
     assert semantic_source["pins_verified"] is True

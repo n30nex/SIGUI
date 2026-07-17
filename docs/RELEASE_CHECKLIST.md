@@ -46,9 +46,10 @@
   push/PR Actions `29306794376` / `29306795470` each pass 914 host tests and 28
   checksum-contract tests. This closes only the signed-advert runtime slice.
 - [ ] Merge and bank exact-main Actions evidence for the dependent ACK,
-  lifetime, advert-replay, and packet-hash conformance slice. Source coverage is
-  11 implemented / 5 partial / 0 missing WP-05 requirements, 11 production
-  suites / 77 scenarios / 38 translation units / 73 source pins, plus 1
+  lifetime, advert-replay, packet-hash, configured-channel, and fail-closed
+  dispatch conformance slice. Source coverage is
+  13 implemented / 3 partial / 0 missing WP-05 requirements, 11 production
+  suites / 75 scenarios / 38 translation units / 73 source pins, plus 1
   pinned-upstream companion suite
   / 10 cases: five signed timestamp outcomes and five packet-hash/real
   `SimpleMeshTables` outcomes. The conformance receipt must bind the exact
