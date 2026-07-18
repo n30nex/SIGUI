@@ -99,11 +99,13 @@ def test_core_messages_contacts_settings_and_node_detail_hide_excluded_paths():
     settings = read("main/ui/ui_settings.c")
     node_detail = read("main/ui/ui_node_detail.c")
 
-    assert "D1L_CHANNEL_PUBLIC_ID" in body(
+    messages_projection = body(
         phase1,
         "static void messages_view_model_from_snapshot",
         "static bool show_channel_selector_sheet",
     )
+    assert "d1l_ui_messages_projected_channel_id(" in messages_projection
+    assert "view_model->active_channel_id" in messages_projection
     assert "D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT" in messages
     assert "D1L_RELEASE_FEATURE_USER_TRACE" in contacts
     assert "D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI" in contacts
@@ -124,3 +126,21 @@ def test_core_storage_is_internal_until_sd_is_exactly_qualified():
     assert 'sd_history_available ? "SD" : "Storage"' in home
     assert 'sd_history_available ?' in home
     assert '"Internal NVS"' in settings
+    assert "d1l_ui_home_view_apply_release_profile(out_input)" in phase1
+    assert "d1l_ui_more_view_apply_release_profile(out_input)" in phase1
+    assert "d1l_ui_storage_location_available(location->location)" in phase1
+
+
+def test_core_copy_describes_only_reachable_conversations_and_unread_behavior():
+    home = read("main/ui/ui_home.c")
+    contacts = read("main/ui/ui_contact_sheets.c")
+    messages = read("main/ui/ui_messages.c")
+
+    assert '"Public and direct conversations"' in home
+    assert "D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT" in home
+    assert '"Public, direct, and room conversations"' in home
+    assert '"Include in unread count"' in contacts
+    assert '"Exclude from unread count"' in contacts
+    assert "Mute notifications" not in contacts
+    assert "Unmute notifications" not in contacts
+    assert "notification" not in messages.lower()

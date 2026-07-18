@@ -424,7 +424,7 @@ bool d1l_ui_node_detail_render(
     snprintf(line, sizeof(line), "Public key %s  %s  %s",
              view->keyed ? "retained" : "missing",
              view->favorite ? "favorite" : "normal",
-             view->muted ? "muted" : "audible");
+             view->muted ? "unread excluded" : "unread counted");
     lv_obj_t *key = create_label(controller->sheet, line, 0x8EA0AE);
     configure_dot_label(key, 392, 8, 150);
     complete = key != NULL && complete;

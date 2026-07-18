@@ -1496,8 +1496,8 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
         '"Rename"',
         '"Remove from favorites"',
         '"Add to favorites"',
-        '"Unmute notifications"',
-        '"Mute notifications"',
+        '"Include in unread count"',
+        '"Exclude from unread count"',
         '"Export QR"',
         '"Forget contact"',
     ):

@@ -517,7 +517,7 @@ bool d1l_ui_contact_sheets_render_detail(
     snprintf(line, sizeof(line), "%s  %s  %s",
              entry->type[0] ? entry->type : "node",
              entry->favorite ? "favorite" : "normal",
-             entry->muted ? "muted" : "audible");
+             entry->muted ? "unread excluded" : "unread counted");
     lv_obj_t *flags = create_label(sheet, line, 0x8EA0AE);
     if (flags) {
         lv_obj_set_pos(flags, 16, 64);
@@ -650,11 +650,12 @@ bool d1l_ui_contact_sheets_render_options(
         button, 0xFBBF24, entry->favorite ? "On  >" : "Off  >") && complete;
     button = create_button(
         controller, sheet,
-        entry->muted ? "Unmute notifications" : "Mute notifications",
+        entry->muted ? "Include in unread count" : "Exclude from unread count",
         16, 226, 448, 48, BINDING_OPTIONS_MUTE,
         D1L_UI_CONTACT_ACTION_TOGGLE_MUTE);
     complete = style_option_button(
-        button, 0xC4B5FD, entry->muted ? "On  >" : "Off  >") && complete;
+        button, 0xC4B5FD,
+        entry->muted ? "Excluded  >" : "Included  >") && complete;
     if (d1l_ui_contact_action_available(D1L_UI_CONTACT_ACTION_EXPORT)) {
         if (controller->rendered.can_export) {
             button = create_button(

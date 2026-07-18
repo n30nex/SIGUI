@@ -342,10 +342,15 @@ void d1l_ui_home_render(d1l_ui_home_controller_t *controller,
         controller->rendered.more_status_color;
     const d1l_ui_home_action_t third_action = map_available ?
         D1L_UI_HOME_ACTION_MAP : D1L_UI_HOME_ACTION_PACKETS;
+    const char *messages_detail =
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT) ?
+        "Public, direct, and room conversations" :
+        "Public and direct conversations";
 
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MESSAGES,
                             LV_SYMBOL_ENVELOPE, "Messages",
-                            "Public, direct, and room conversations",
+                            messages_detail,
                             controller->rendered.messages_status,
                             controller->rendered.messages_status_color,
                             D1L_UI_HOME_ACTION_MESSAGES,

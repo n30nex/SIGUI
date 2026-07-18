@@ -11,6 +11,13 @@ _Static_assert(sizeof(d1l_ui_messages_controller_t) <=
                    D1L_UI_MESSAGES_CONTROLLER_MAX_BYTES,
                "Messages controller exceeded its persistent-owner size budget");
 
+uint64_t d1l_ui_messages_projected_channel_id(uint64_t active_channel_id)
+{
+    return d1l_release_feature_available(
+               D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT) ?
+        active_channel_id : D1L_CHANNEL_PUBLIC_ID;
+}
+
 bool d1l_ui_messages_action_available(d1l_ui_messages_action_t action)
 {
     switch (action) {
@@ -591,7 +598,8 @@ static void messages_render_dm_row(d1l_ui_messages_controller_t *controller,
     char state_text[96];
     if (unread) {
         snprintf(state_text, sizeof(state_text), "%lu unread%s | %s",
-                 (unsigned long)unread_count, muted ? " muted" : "",
+                 (unsigned long)unread_count,
+                 muted ? " (excluded from total)" : "",
                  latest_state);
     } else {
         snprintf(state_text, sizeof(state_text), "%s", latest_state);
@@ -662,7 +670,7 @@ static void messages_render_root_card(
         snprintf(status, sizeof(status), "%u %s | storage degraded",
                  (unsigned)total, unit ? unit : "retained");
     } else if (muted_unread > 0U) {
-        snprintf(status, sizeof(status), "%u %s | %lu unread + %lu muted",
+        snprintf(status, sizeof(status), "%u %s | %lu unread + %lu excluded",
                  (unsigned)total, unit ? unit : "retained",
                  (unsigned long)unread, (unsigned long)muted_unread);
     } else {
@@ -866,7 +874,7 @@ static void messages_render_direct(d1l_ui_messages_controller_t *controller,
     char summary[96];
     if (controller->rendered.muted_dm_unread > 0U) {
         snprintf(summary, sizeof(summary),
-                 "%u conversations | %lu unread + %lu muted",
+                 "%u conversations | %lu unread + %lu excluded",
                  (unsigned)controller->rendered.dm_total,
                  (unsigned long)controller->rendered.dm_unread,
                  (unsigned long)controller->rendered.muted_dm_unread);

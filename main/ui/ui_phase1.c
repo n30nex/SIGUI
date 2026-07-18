@@ -1708,6 +1708,7 @@ static void home_view_input_from_snapshot(
         .storage_sd_state = snapshot->storage_sd_state,
         .storage_setup_action = snapshot->storage_setup_action,
     };
+    d1l_ui_home_view_apply_release_profile(out_input);
 }
 
 static void more_view_input_from_snapshot(
@@ -1750,6 +1751,7 @@ static void more_view_input_from_snapshot(
         .timezone_label = snapshot->timezone_label,
         .firmware_version = D1L_FIRMWARE_VERSION,
     };
+    d1l_ui_more_view_apply_release_profile(out_input);
 }
 
 static void storage_view_input_from_snapshot(
@@ -4549,15 +4551,10 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     }
     d1l_channel_info_t active_channel = {0};
     bool active_channel_found = false;
-    if (channel_management_available) {
-        view_model->active_channel_id = snapshot->active_channel_id;
-        active_channel_found = snapshot_find_channel(snapshot, snapshot->active_channel_id,
-                                                     &active_channel);
-    } else {
-        view_model->active_channel_id = D1L_CHANNEL_PUBLIC_ID;
-        active_channel_found = snapshot_find_channel(
-            snapshot, D1L_CHANNEL_PUBLIC_ID, &active_channel);
-    }
+    view_model->active_channel_id = d1l_ui_messages_projected_channel_id(
+        snapshot->active_channel_id);
+    active_channel_found = snapshot_find_channel(
+        snapshot, view_model->active_channel_id, &active_channel);
     if (active_channel_found) {
         snprintf(view_model->active_channel_name,
                  sizeof(view_model->active_channel_name), "%s",
@@ -5825,11 +5822,16 @@ static void render_storage_data_locations(void)
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
 
+    size_t visible_index = 0U;
     for (size_t index = 0U; index < s_storage_view.location_count; ++index) {
         const d1l_ui_storage_location_view_t *location =
             &s_storage_view.locations[index];
-        render_storage_location_row(list, (int)(index * 56U), location->name,
+        if (!d1l_ui_storage_location_available(location->location)) {
+            continue;
+        }
+        render_storage_location_row(list, (int)(visible_index * 56U), location->name,
                                     location->value, location->accent);
+        visible_index++;
     }
 }
 

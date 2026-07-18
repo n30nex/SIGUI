@@ -265,7 +265,9 @@ static lv_obj_t *render_menu_item(lv_obj_t *parent,
         item->action == D1L_UI_SETTINGS_ACTION_STORAGE &&
         !d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY);
     const char *title_text = internal_storage ? "Storage" : item->title;
-    const char *status_text = internal_storage ? "Internal NVS" : item->status;
+    const char *status_text = internal_storage ?
+        (item->warning ? "Internal NVS issue" : "Internal NVS") :
+        item->status;
     lv_obj_t *row = settings_create_row(parent, 444, 54, item->warning);
     if (!row) {
         return NULL;

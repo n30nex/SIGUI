@@ -101,7 +101,7 @@ static void test_truthful_render_actions_generation_and_cleanup(void)
     assert(lv_test_has_label(controller.sheet,
                              "Fingerprint 0123456789abcdef"));
     assert(lv_test_has_label(controller.sheet,
-                             "Public key retained  favorite  audible"));
+                             "Public key retained  favorite  unread counted"));
     assert(lv_test_has_label(controller.sheet,
                              "Signal rssi -88  snr -3.5  reachable"));
     assert(lv_test_has_label(controller.sheet,
