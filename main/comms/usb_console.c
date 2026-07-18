@@ -247,6 +247,73 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "ble", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_BLE),
 
+    /*
+     * SD qualification is allowed while the immutable mode is conditional,
+     * but every bridge/media mutation fails closed once the candidate is
+     * frozen with SD history disabled.  Keep the narrow read-only probes
+     * ahead of the mutation rules so their admission remains explicit.
+     */
+    D1L_RELEASE_RULE_EXACT(
+        "storage status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage diag", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage diag raw", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage setup", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 ping", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 stock-probe", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage mount", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage remount", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage reset-bridge", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage filecanary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage export-canary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage export-diagnostics", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage export-data", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage force-nvs off", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "rp2040 set-baud", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "rp2040 baud-probe", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 bootloader", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 reset", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "rp2040 double-reset", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+
     D1L_RELEASE_RULE_EXACT(
         "map center", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_LOCATION),
@@ -544,11 +611,21 @@ static void release_unsupported_result(
     printf("}\n");
 }
 
+static bool release_command_feature_available(
+    d1l_release_feature_id_t feature)
+{
+    if (feature == D1L_RELEASE_FEATURE_SD_HISTORY) {
+        return d1l_release_sd_history_mode() !=
+               D1L_SD_HISTORY_MODE_DISABLED;
+    }
+    return d1l_release_feature_available(feature);
+}
+
 static bool enforce_release_command_policy(
     const d1l_usb_command_view_t *command)
 {
     const d1l_release_command_rule_t *rule = release_command_rule(command);
-    if (!rule || d1l_release_feature_available(rule->feature) ||
+    if (!rule || release_command_feature_available(rule->feature) ||
         rule->access == D1L_RELEASE_COMMAND_READ_ONLY) {
         return true;
     }
@@ -6569,7 +6646,7 @@ static void cmd_help(void)
                "\"ui data-canary <token>\",\"ui capture status\","
                "\"ui capture begin\",\"ui capture chunk <offset> <len>\","
                "\"ui capture end\",\"mesh status\",\"companion status\","
-               "\"storage status\",\"storage force-nvs [on|off]\","
+               "\"storage status\",\"storage force-nvs [on]\","
                "\"storage diag\",\"storage diag raw\","
                "\"storage retained-canary <token>\","
                "\"mesh advert zero\",\"mesh advert flood\","
