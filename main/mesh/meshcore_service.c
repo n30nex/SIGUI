@@ -67,7 +67,9 @@
 #define D1L_MESHCORE_RESPONSE_TYPE 0x01U
 #define D1L_MESHCORE_ANON_REQUEST_TYPE 0x07U
 #define D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS 30000U
-#define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 8192U
+#define D1L_MESHCORE_SERVICE_TASK_BASE_STACK_BYTES 8192U
+#define D1L_MESHCORE_SERVICE_TASK_SAFETY_MARGIN_BYTES 4096U
+#define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 12288U
 #define D1L_MESHCORE_SERVICE_QUEUE_LEN 6U
 #define D1L_MESHCORE_PRIORITY_QUEUE_LEN 4U
 #define D1L_MESHCORE_REQUEST_SLOT_COUNT D1L_MESHCORE_SERVICE_QUEUE_LEN
@@ -102,6 +104,16 @@ _Static_assert(D1L_MESHCORE_PUB_KEY_SIZE ==
 _Static_assert(D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY ==
                    D1L_MESHCORE_ADMIN_MAX_PASSWORD_BYTES + 1U,
                "admin command credential capacity must match protocol");
+_Static_assert(D1L_MESH_COMMAND_ADMIN_RESPONSE_FINGERPRINT_CAPACITY ==
+                   D1L_NODE_FINGERPRINT_LEN,
+               "admin response fingerprint slot must match contact identity");
+_Static_assert(D1L_MESH_COMMAND_ADMIN_RESPONSE_PLAINTEXT_CAPACITY ==
+                   D1L_MESHCORE_MAX_RAW_PACKET + 1U,
+               "admin response slot must fit the bounded decrypted payload");
+_Static_assert(D1L_MESHCORE_SERVICE_TASK_STACK_BYTES ==
+                   D1L_MESHCORE_SERVICE_TASK_BASE_STACK_BYTES +
+                       D1L_MESHCORE_SERVICE_TASK_SAFETY_MARGIN_BYTES,
+               "mesh owner stack must include its configured safety margin");
 _Static_assert(D1L_MESHCORE_TX_ORIGIN_HISTORY_LEN <= 31U,
                "terminal history must fit below the owner reservation bit");
 
@@ -259,6 +271,7 @@ typedef enum {
     D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS,
     D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGOUT,
+    D1L_MESHCORE_SERVICE_CMD_ADMIN_RESPONSE,
     D1L_MESHCORE_SERVICE_EVENT_TX_DONE,
     D1L_MESHCORE_SERVICE_EVENT_TX_TIMEOUT,
     D1L_MESHCORE_SERVICE_EVENT_RX_DONE,
@@ -289,6 +302,9 @@ typedef struct {
     uint8_t request_slot;
     uint64_t request_deadline_us;
     d1l_mesh_tx_operation_identity_t tx_operation;
+    uint32_t admin_response_id;
+    uint64_t admin_response_deadline_us;
+    uint8_t admin_response_slot;
 } d1l_meshcore_service_cmd_t;
 
 typedef struct {
@@ -303,6 +319,8 @@ static d1l_meshcore_request_slot_t
 static uint32_t s_request_slots_init_state;
 static uint32_t s_next_request_id;
 
+static d1l_mesh_admin_response_request_t
+    s_admin_response_slots[D1L_MESHCORE_PRIORITY_QUEUE_LEN];
 static volatile uint32_t s_terminal_lane;
 
 static void d1l_meshcore_start_rx(void);
@@ -2760,7 +2778,92 @@ static bool dispatch_bounded_dm_ack(
     return true;
 }
 
-static d1l_meshcore_admin_response_result_t admin_dispatch_plain_response(
+static bool meshcore_service_enqueue_admin_response_token(
+    void *context, const void *command)
+{
+    return context && command &&
+        xQueueSend((QueueHandle_t)context, command, 0) == pdTRUE;
+}
+
+static esp_err_t meshcore_service_queue_admin_response(
+    const char *fingerprint, uint32_t session_generation,
+    const uint8_t *plaintext, size_t plaintext_len,
+    bool count_rx_on_accept, uint64_t request_deadline_us,
+    uint64_t now_us)
+{
+    if (!fingerprint || fingerprint[0] == '\0' ||
+        strnlen(fingerprint, D1L_NODE_FINGERPRINT_LEN) >=
+            D1L_NODE_FINGERPRINT_LEN ||
+        session_generation == 0U || !plaintext || plaintext_len == 0U ||
+        plaintext_len >
+            D1L_MESH_COMMAND_ADMIN_RESPONSE_PLAINTEXT_CAPACITY ||
+        !s_priority_command_queue) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (request_deadline_us == 0U || now_us >= request_deadline_us) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    const uint32_t request_id = meshcore_request_next_id();
+    if (request_id == 0U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    d1l_mesh_admin_response_request_t *request = NULL;
+    uint8_t slot_index = 0U;
+    for (size_t index = 0U;
+         index < D1L_MESHCORE_PRIORITY_QUEUE_LEN; ++index) {
+        if (d1l_mesh_admin_response_request_claim(
+                &s_admin_response_slots[index], request_id)) {
+            request = &s_admin_response_slots[index];
+            slot_index = (uint8_t)index;
+            break;
+        }
+    }
+    if (!request) {
+        runtime_note_command_saturation(true);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    const uint64_t deadline_us = request_deadline_us;
+    if (!d1l_mesh_admin_response_request_publish(
+            request, request_id, fingerprint, session_generation,
+            plaintext, plaintext_len, count_rx_on_accept,
+            deadline_us)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_meshcore_service_cmd_t cmd;
+    secure_zero_bytes(&cmd, sizeof(cmd));
+    cmd.type = D1L_MESHCORE_SERVICE_CMD_ADMIN_RESPONSE;
+    cmd.monotonic_us = now_us;
+    cmd.admin_response_id = request_id;
+    cmd.admin_response_deadline_us = deadline_us;
+    cmd.admin_response_slot = slot_index;
+    const d1l_mesh_command_enqueue_result_t enqueue_result =
+        d1l_mesh_admin_response_request_enqueue(
+            request, request_id,
+            meshcore_service_enqueue_admin_response_token,
+            (void *)s_priority_command_queue, &cmd);
+    if (enqueue_result == D1L_MESH_COMMAND_ENQUEUE_QUEUED) {
+        runtime_note_queue_depth(
+            s_priority_command_queue,
+            &s_runtime_priority_queue_high_water);
+        meshcore_service_wake();
+        meshcore_service_command_wipe(&cmd);
+        return ESP_OK;
+    }
+    if (enqueue_result == D1L_MESH_COMMAND_ENQUEUE_SATURATED) {
+        runtime_note_command_saturation(true);
+    } else {
+        (void)d1l_mesh_admin_response_request_cancel(
+            request, request_id);
+    }
+    meshcore_service_command_wipe(&cmd);
+    return enqueue_result == D1L_MESH_COMMAND_ENQUEUE_SATURATED ?
+        ESP_ERR_TIMEOUT : ESP_ERR_INVALID_STATE;
+}
+
+static esp_err_t admin_queue_plain_response(
     const d1l_contact_entry_t *contact,
     const uint8_t peer_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
     const uint8_t local_public_key[D1L_MESHCORE_ADMIN_PUBLIC_KEY_BYTES],
@@ -2774,14 +2877,17 @@ static d1l_meshcore_admin_response_result_t admin_dispatch_plain_response(
     if (!contact || !peer_public_key || !local_public_key ||
         !session_secret || !plaintext ||
         !d1l_contact_store_can_admin(contact)) {
-        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+        return ESP_ERR_INVALID_ARG;
     }
 
     d1l_meshcore_admin_context_t context = {0};
     if (!d1l_meshcore_admin_runtime_capture_pending(&context) ||
         strcmp(context.binding.fingerprint, contact->fingerprint) != 0) {
         d1l_meshcore_admin_context_wipe(&context);
-        return D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (out_considered) {
+        *out_considered = true;
     }
 
     d1l_meshcore_admin_binding_t current = {0};
@@ -2794,10 +2900,14 @@ static d1l_meshcore_admin_response_result_t admin_dispatch_plain_response(
            sizeof(current.local_public_key));
     memcpy(current.session_secret, session_secret,
            sizeof(current.session_secret));
-    const d1l_meshcore_admin_response_result_t result =
-        d1l_meshcore_admin_runtime_dispatch_response(
-            &current, context.generation, plaintext, plaintext_len, now_us,
-            out_considered);
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+    if (d1l_meshcore_admin_runtime_validate_binding(
+            &current, context.generation)) {
+        result = meshcore_service_queue_admin_response(
+            context.binding.fingerprint, context.generation,
+            plaintext, plaintext_len, false,
+            context.request_deadline_us, now_us);
+    }
     d1l_meshcore_admin_binding_wipe(&current);
     d1l_meshcore_admin_context_wipe(&context);
     return result;
@@ -2868,18 +2978,20 @@ static bool parse_rx_admin_response_packet(const uint8_t *payload,
         return false;
     }
 
-    bool considered = false;
-    const d1l_meshcore_admin_response_result_t result =
-        d1l_meshcore_admin_runtime_dispatch_response(
-            &current, context.generation, plaintext, plaintext_len,
-            (uint64_t)esp_timer_get_time(), &considered);
+    const esp_err_t queue_ret = meshcore_service_queue_admin_response(
+        context.binding.fingerprint, context.generation,
+        plaintext, plaintext_len, true, context.request_deadline_us,
+        (uint64_t)esp_timer_get_time());
     d1l_meshcore_admin_binding_wipe(&current);
     d1l_meshcore_admin_context_wipe(&context);
     secure_zero_bytes(plaintext, sizeof(plaintext));
-    if (considered && result == D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
-        s_status.rx_packets++;
+    if (queue_ret != ESP_OK) {
+        ESP_LOGW(TAG, "admin direct response handoff failed: %s",
+                 esp_err_to_name(queue_ret));
     }
-    return considered;
+    /* A matching authenticated response is consumed even when the bounded
+     * handoff is saturated; never reinterpret or retain its plaintext. */
+    return true;
 }
 
 static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
@@ -3562,10 +3674,9 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
         snprintf(note, sizeof(note), "path %.12s hops=%u",
                  learned_contact.alias, out_hops);
         bool admin_response_considered = false;
-        d1l_meshcore_admin_response_result_t admin_response =
-            D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED;
+        esp_err_t admin_queue_ret = ESP_ERR_NOT_FOUND;
         if (decoded.kind == D1L_MESHCORE_PATH_EXTRA_RESPONSE) {
-            admin_response = admin_dispatch_plain_response(
+            admin_queue_ret = admin_queue_plain_response(
                 &learned_contact, sender_pub, settings->identity_public_key,
                 secret, decoded.extra, decoded.extra_len,
                 (uint64_t)esp_timer_get_time(),
@@ -3605,9 +3716,9 @@ static void parse_rx_path_packet(const uint8_t *payload, uint16_t size,
                 ESP_LOGW(TAG, "packet log PATH response admission failed");
             }
         } else if (admin_response_considered &&
-                   admin_response != D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED) {
-            ESP_LOGW(TAG, "admin PATH response rejected: %u",
-                     (unsigned)admin_response);
+                   admin_queue_ret != ESP_OK) {
+            ESP_LOGW(TAG, "admin PATH response handoff failed: %s",
+                     esp_err_to_name(admin_queue_ret));
         }
 
         d1l_meshcore_reciprocal_path_plan_t reciprocal_plan = {0};
@@ -4258,6 +4369,21 @@ static void meshcore_service_run_owner_maintenance(void)
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
     meshcore_service_handle_radio_tx_watchdog();
     (void)d1l_meshcore_admin_runtime_expire(now_us);
+    d1l_meshcore_admin_context_t pending_admin = {0};
+    const uint32_t pending_admin_generation =
+        d1l_meshcore_admin_runtime_capture_pending(&pending_admin) ?
+            pending_admin.generation : 0U;
+    const bool caller_is_owner =
+        !d1l_mesh_command_sync_wait_allowed(
+            (const void *)s_service_task,
+            (const void *)xTaskGetCurrentTaskHandle());
+    for (size_t index = 0U;
+         index < D1L_MESHCORE_PRIORITY_QUEUE_LEN; ++index) {
+        (void)d1l_mesh_admin_response_request_owner_reap(
+            &s_admin_response_slots[index], caller_is_owner,
+            pending_admin_generation, now_us);
+    }
+    d1l_meshcore_admin_context_wipe(&pending_admin);
     reconcile_pending_dm_ack_persistence();
     const esp_err_t channel_reconcile_ret =
         d1l_channel_message_reconcile_if_due((uint32_t)(now_us / 1000ULL));
@@ -5421,6 +5547,114 @@ static esp_err_t meshcore_service_handle_admin_logout(void)
     return ESP_OK;
 }
 
+static esp_err_t meshcore_service_handle_admin_response(
+    const d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd || cmd->type != D1L_MESHCORE_SERVICE_CMD_ADMIN_RESPONSE ||
+        cmd->admin_response_id == 0U ||
+        cmd->admin_response_slot >= D1L_MESHCORE_PRIORITY_QUEUE_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    d1l_mesh_admin_response_request_t *request =
+        &s_admin_response_slots[cmd->admin_response_slot];
+    d1l_meshcore_admin_context_t context = {0};
+    const bool pending =
+        d1l_meshcore_admin_runtime_capture_pending(&context);
+    d1l_mesh_admin_response_view_t response = {0};
+    const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    const d1l_mesh_admin_response_admit_result_t admitted =
+        d1l_mesh_admin_response_request_admit(
+            request, cmd->admin_response_id,
+            !d1l_mesh_command_sync_wait_allowed(
+                (const void *)s_service_task,
+                (const void *)xTaskGetCurrentTaskHandle()),
+            pending ? context.generation : 0U, now_us, &response);
+    if (admitted != D1L_MESH_ADMIN_RESPONSE_ADMIT_ACCEPTED) {
+        d1l_meshcore_admin_context_wipe(&context);
+        return admitted == D1L_MESH_ADMIN_RESPONSE_ADMIT_EXPIRED ?
+            ESP_ERR_TIMEOUT : ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_settings_t settings_snapshot = {0};
+    d1l_contact_entry_t contact = {0};
+    d1l_meshcore_admin_binding_t current = {0};
+    esp_err_t ret = ESP_ERR_INVALID_STATE;
+    bool considered = false;
+    if (!pending ||
+        response.deadline_us != cmd->admin_response_deadline_us ||
+        response.deadline_us != context.request_deadline_us ||
+        strcmp(response.fingerprint, context.binding.fingerprint) != 0) {
+        d1l_meshcore_admin_runtime_invalidate(ESP_ERR_INVALID_STATE);
+        goto admin_response_cleanup;
+    }
+
+    (void)d1l_settings_public_snapshot(&settings_snapshot);
+    snprintf(current.fingerprint, sizeof(current.fingerprint), "%s",
+             response.fingerprint);
+    if (!settings_snapshot.identity_ready ||
+        !d1l_contact_store_find_by_fingerprint(
+            current.fingerprint, &contact) ||
+        !d1l_contact_store_can_admin(&contact) ||
+        !hex_to_bytes(current.peer_public_key,
+                      sizeof(current.peer_public_key),
+                      contact.public_key_hex)) {
+        d1l_meshcore_admin_runtime_invalidate(ESP_ERR_INVALID_STATE);
+        goto admin_response_cleanup;
+    }
+    current.role = d1l_meshcore_admin_role_for_contact(&contact);
+    memcpy(current.local_public_key, settings_snapshot.identity_public_key,
+           sizeof(current.local_public_key));
+    if (derive_local_identity_shared_secret(
+            current.peer_public_key, current.local_public_key,
+            current.session_secret) != ESP_OK ||
+        !d1l_meshcore_admin_runtime_validate_binding(
+            &current, context.generation)) {
+        d1l_meshcore_admin_runtime_invalidate(ESP_ERR_INVALID_STATE);
+        goto admin_response_cleanup;
+    }
+
+    const d1l_meshcore_admin_response_result_t result =
+        d1l_meshcore_admin_runtime_dispatch_response(
+            &current, context.generation, response.plaintext,
+            response.plaintext_len, now_us, &considered);
+    if (!considered) {
+        ret = ESP_ERR_INVALID_STATE;
+    } else {
+        switch (result) {
+        case D1L_MESHCORE_ADMIN_RESPONSE_ACCEPTED:
+            if (response.count_rx_on_accept) {
+                s_status.rx_packets++;
+            }
+            ret = ESP_OK;
+            break;
+        case D1L_MESHCORE_ADMIN_RESPONSE_EXPIRED:
+            ret = ESP_ERR_TIMEOUT;
+            break;
+        case D1L_MESHCORE_ADMIN_RESPONSE_MALFORMED:
+        case D1L_MESHCORE_ADMIN_RESPONSE_REPLAYED:
+            ret = ESP_ERR_INVALID_RESPONSE;
+            break;
+        case D1L_MESHCORE_ADMIN_RESPONSE_UNMATCHED:
+        default:
+            ret = ESP_ERR_INVALID_STATE;
+            break;
+        }
+    }
+
+admin_response_cleanup:
+    d1l_meshcore_admin_binding_wipe(&current);
+    d1l_meshcore_admin_context_wipe(&context);
+    secure_zero_bytes(&settings_snapshot, sizeof(settings_snapshot));
+    secure_zero_bytes(&response, sizeof(response));
+    if (!d1l_mesh_admin_response_request_complete(
+            request, cmd->admin_response_id)) {
+        ESP_LOGE(TAG, "admin response secure-slot completion failed");
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ret;
+}
+
 static void meshcore_service_reply(const d1l_meshcore_service_cmd_t *cmd, esp_err_t ret)
 {
     meshcore_request_complete(cmd, ret);
@@ -5676,6 +5910,13 @@ static void meshcore_service_task(void *arg)
             ret = meshcore_service_handle_admin_logout();
             if (ret != ESP_OK) {
                 s_status.rejected_commands++;
+            }
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_ADMIN_RESPONSE:
+            ret = meshcore_service_handle_admin_response(&cmd);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "admin response owner dispatch failed: %s",
+                         esp_err_to_name(ret));
             }
             break;
         case D1L_MESHCORE_SERVICE_EVENT_RX_DONE:

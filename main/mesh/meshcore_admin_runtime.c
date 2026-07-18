@@ -274,6 +274,7 @@ static bool copy_context_locked(d1l_meshcore_admin_context_t *out_context,
            sizeof(out_context->binding.session_secret));
     out_context->state = s_session.state;
     out_context->generation = s_session.generation;
+    out_context->request_deadline_us = s_session.request_deadline_us;
     return true;
 }
 
