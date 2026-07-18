@@ -860,6 +860,133 @@ def write_host_checks_success(
     return marker
 
 
+def rf_hardware_boundary() -> dict:
+    return {
+        "schema": 2,
+        "hardware_required": True,
+        "physical_observed": True,
+        "dry_run": False,
+        "simulated": False,
+        "simulation": False,
+        "source_inspection": False,
+        "execution_complete": True,
+        "dm_rf_tx": True,
+        "public_rf_tx": False,
+        "public_rf_transmit": False,
+        "formats_sd": False,
+        "port": "COM12",
+        "git": {"dirty": False},
+    }
+
+
+def dm_probe_payload(**overrides: object) -> dict:
+    commands = [
+        "mesh send dm 0BF0A701D5AE2DB6 dm_probe_unit",
+        "messages dm 0BF0A701D5AE2DB6",
+        "packets search dm_probe_unit",
+        "routes trace 0BF0A701D5AE2DB6",
+        "health",
+    ]
+    payload = {
+        **rf_hardware_boundary(),
+        "ok": True,
+        "mode": "hardware-dm-probe",
+        "target_fingerprint": "0BF0A701D5AE2DB6",
+        "token": "dm_probe_unit",
+        "controlled_peer": {
+            "fingerprint": "0BF0A701D5AE2DB6",
+            "evidence_source": "explicit_peer_status",
+            "port": "COM17",
+            "status_path": "peer-status.json",
+        },
+        "commands_sent": commands,
+        "steps": [
+            {
+                "command": command,
+                "result": {"ok": True, "token": "dm_probe_unit"},
+            }
+            for command in commands
+        ],
+        "checks": {
+            "controlled_peer_status_connected": True,
+            "send_ok": True,
+            "messages_dm_has_token": True,
+            "packets_search_has_token": True,
+            "route_trace_has_target": True,
+            "controlled_peer_rx_contact_delta": True,
+            "health_ready": True,
+            "no_public_commands": True,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def full_rf_payload(
+    *,
+    evidence_source: str = "explicit_peer_status",
+    peer_port: str | None = "COM17",
+    **overrides: object,
+) -> dict:
+    payload = {
+        **rf_hardware_boundary(),
+        "ok": True,
+        "mode": "rf-full-acceptance",
+        "target_fingerprint": "0BF0A701D5AE2DB6",
+        "outbound_token": "rf_unit_out",
+        "inbound_token": "rf_unit_in",
+        "direct_token": "rf_unit_direct",
+        "inbound_seen_at": "2026-07-18T00:00:00+00:00",
+        "controlled_peer": {
+            "fingerprint": "0BF0A701D5AE2DB6",
+            "evidence_source": evidence_source,
+            "port": peer_port,
+            "status_path": (
+                "peer-status.json"
+                if evidence_source == "explicit_peer_status"
+                else None
+            ),
+        },
+        "steps": [
+            {"command": "identity status", "result": {"ok": True}},
+            {
+                "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out",
+                "result": {"ok": True},
+            },
+            {
+                "command": "packets search rf_unit_out",
+                "result": {"ok": True, "token": "rf_unit_out"},
+            },
+            {
+                "command": "messages dm 0BF0A701D5AE2DB6",
+                "result": {"ok": True, "inbound": "rf_unit_in"},
+            },
+            {"command": "packets", "result": {"ok": True}},
+            {
+                "command": "routes trace 0BF0A701D5AE2DB6",
+                "result": {"ok": True},
+            },
+            {
+                "command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct",
+                "result": {"ok": True},
+            },
+            {"command": "health", "result": {"ok": True}},
+        ],
+        "checks": {
+            "identity_public_key_matches": True,
+            "controlled_peer_observed": True,
+            "outbound_dm": True,
+            "inbound_dm": True,
+            "ack_path": True,
+            "direct_route": True,
+            "health_ready": True,
+            "no_public_commands": True,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 def write_core_evidence(root: Path) -> None:
     write_supported_sdk_workflow(root)
     run_dir = root / "artifacts" / "github" / RUN_ID
@@ -881,25 +1008,7 @@ def write_core_evidence(root: Path) -> None:
     write_json(hardware / "ui_pixel_capture_68350bf.json", ui_pixel_capture_payload())
     write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", compose_keyboard_capture_payload())
     write_json(hardware / "scroll_probe_68350bf.json", scroll_probe_payload())
-    write_json(
-        hardware / "dm_probe_68350bf.json",
-        {
-            "ok": True,
-            "port": "COM12",
-            "meshbot_expected_port": "COM11",
-            "public_rf_transmit": False,
-            "checks": {
-                "meshbot_on_expected_port": True,
-                "send_ok": True,
-                "messages_dm_has_token": True,
-                "packets_search_has_token": True,
-                "route_trace_has_target": True,
-                "meshbot_rx_contact_delta": True,
-                "health_ready": True,
-                "no_public_commands": True,
-            },
-        },
-    )
+    write_json(hardware / "dm_probe_68350bf.json", dm_probe_payload())
     write_json(
         hardware / "rp2040_preflight_68350bf.json",
         {
@@ -1754,6 +1863,8 @@ def audit_args(root: Path):
             str(root / "artifacts" / "hardware" / "com12"),
             "--rp2040-hardware-dir",
             str(root / "artifacts" / "hardware" / "com16"),
+            "--mesh-peer-port",
+            "COM17",
             "--soak-dir",
             str(root / "artifacts" / "soak"),
         ]
@@ -1828,7 +1939,7 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["ui_pixel_capture"]["ok"] is True
     assert gates["ui_compose_keyboard_capture"]["ok"] is True
     assert gates["ui_scroll_probe"]["ok"] is True
-    assert gates["outbound_dm_com11"]["ok"] is True
+    assert gates["outbound_dm_controlled_peer"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
     assert gates["docs_current_evidence"]["ok"] is True
 
@@ -3881,23 +3992,7 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
     )
     write_json(
         hardware / "dm_probe_68350bf.json",
-        {
-            "ok": True,
-            "port": "COM12",
-            "meshbot_expected_port": "COM11",
-            "public_rf_transmit": False,
-            "artifact": {"commit": STALE_COMMIT},
-            "checks": {
-                "meshbot_on_expected_port": True,
-                "send_ok": True,
-                "messages_dm_has_token": True,
-                "packets_search_has_token": True,
-                "route_trace_has_target": True,
-                "meshbot_rx_contact_delta": True,
-                "health_ready": True,
-                "no_public_commands": True,
-            },
-        },
+        dm_probe_payload(artifact={"commit": STALE_COMMIT}),
     )
     write_json(
         hardware / "rp2040_preflight_68350bf.json",
@@ -3956,15 +4051,7 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
     (hardware / "photos" / "screen.jpg").write_bytes(b"screen")
     write_json(
         hardware / "rf_full_acceptance_68350bf.json",
-        {
-            "ok": True,
-            "source": {"commit": STALE_COMMIT},
-            "checks": {
-                "inbound_dm": True,
-                "ack_path": True,
-                "direct_route": True,
-            },
-        },
+        full_rf_payload(source={"commit": STALE_COMMIT}),
     )
     write_strict_sd_evidence(tmp_path, metadata_commit=STALE_COMMIT)
 
@@ -3975,7 +4062,7 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
         "com12_smoke",
         "ui_corruption_probe",
         "ui_scroll_probe",
-        "outbound_dm_com11",
+        "outbound_dm_controlled_peer",
         "sd_official_seeed_smoke_passed",
         "sd_acceptance_matrix",
         *STRICT_SD_GATE_IDS,
@@ -3987,7 +4074,7 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
     assert gates["com12_smoke"]["details"]["path_found"] is False
     assert gates["ui_corruption_probe"]["details"]["path_found"] is False
     assert gates["ui_scroll_probe"]["details"]["path_found"] is False
-    assert gates["outbound_dm_com11"]["details"]["path_found"] is False
+    assert gates["outbound_dm_controlled_peer"]["details"]["path_found"] is False
     assert gates["sd_official_seeed_smoke_passed"]["evidence"] == []
     assert gates["sd_acceptance_matrix"]["evidence"] == []
     for gate_id in STRICT_SD_GATE_IDS:
@@ -4069,20 +4156,126 @@ def test_release_gate_audit_accepts_full_rf_acceptance_artifact(tmp_path: Path):
     write_core_evidence(tmp_path)
     write_json(
         tmp_path / "artifacts" / "hardware" / "com12" / "rf_full_acceptance_68350bf.json",
-        {
-            "ok": True,
-            "checks": {
-                "inbound_dm": True,
-                "ack_path": True,
-                "direct_route": True,
-            },
-        },
+        full_rf_payload(),
     )
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
     assert gates["full_rf_dm_acceptance"]["ok"] is True
+
+
+def test_release_gate_uses_neutral_controlled_peer_gate_and_no_peer_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("MESH_PEER_PORT", raising=False)
+    args = parse_args([])
+    write_core_evidence(tmp_path)
+
+    report = build_audit(audit_args(tmp_path))
+    gate_ids = {gate["id"] for gate in report["gates"]}
+
+    assert args.mesh_peer_port is None
+    assert "outbound_dm_controlled_peer" in gate_ids
+    assert all("com11" not in gate_id.lower() for gate_id in gate_ids)
+
+
+def test_release_gate_accepts_com12_observed_bidirectional_peer_without_local_peer_port(
+    tmp_path: Path,
+):
+    write_core_evidence(tmp_path)
+    write_json(
+        tmp_path / "artifacts" / "hardware" / "com12" / "rf_full_acceptance_68350bf.json",
+        full_rf_payload(
+            evidence_source="d1l_bidirectional_rf",
+            peer_port=None,
+        ),
+    )
+    args = audit_args(tmp_path)
+    args.mesh_peer_port = None
+
+    gates = gate_by_id(build_audit(args))
+
+    assert gates["outbound_dm_controlled_peer"]["ok"] is True
+    assert gates["full_rf_dm_acceptance"]["ok"] is True
+
+
+def test_release_gate_rejects_legacy_forbidden_peer_receipt(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    write_json(
+        hardware / "dm_probe_68350bf.json",
+        {
+            "schema": 1,
+            "mode": "hardware-dm-probe",
+            "ok": True,
+            "port": "COM12",
+            "meshbot_expected_port": "COM11",
+            "public_rf_transmit": False,
+            "checks": {
+                "meshbot_on_expected_port": True,
+                "send_ok": True,
+                "messages_dm_has_token": True,
+                "packets_search_has_token": True,
+                "route_trace_has_target": True,
+                "meshbot_rx_contact_delta": True,
+                "health_ready": True,
+                "no_public_commands": True,
+            },
+        },
+    )
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))[
+        "outbound_dm_controlled_peer"
+    ]
+
+    assert gate["ok"] is False
+    assert gate["details"]["mode"] == "hardware-dm-probe"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"dry_run": True, "physical_observed": False},
+        {"simulated": True},
+        {"steps": []},
+        {
+            "checks": {
+                "inbound_dm": True,
+                "ack_path": True,
+                "direct_route": True,
+            }
+        },
+    ],
+)
+def test_release_gate_rejects_nonphysical_or_partial_full_rf_receipt(
+    tmp_path: Path,
+    overrides: dict,
+):
+    write_core_evidence(tmp_path)
+    write_json(
+        tmp_path / "artifacts" / "hardware" / "com12" / "rf_full_acceptance_68350bf.json",
+        full_rf_payload(**overrides),
+    )
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["full_rf_dm_acceptance"]
+
+    assert gate["ok"] is False
+
+
+@pytest.mark.parametrize("peer_port", ["COM11", r"\\.\COM11", "//?/COM11"])
+def test_release_gate_rejects_forbidden_expected_peer_port(
+    tmp_path: Path,
+    peer_port: str,
+):
+    write_core_evidence(tmp_path)
+    args = audit_args(tmp_path)
+    args.mesh_peer_port = peer_port
+
+    gate = gate_by_id(build_audit(args))["outbound_dm_controlled_peer"]
+
+    assert gate["ok"] is False
 
 
 def test_release_gate_audit_rejects_unchanged_reboot_nonce(tmp_path: Path):

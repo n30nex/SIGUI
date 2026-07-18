@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts import rf_full_acceptance_d1l as rf_accept
 from scripts.smoke_d1l import expected_command_name
 
@@ -15,8 +17,8 @@ class FakeSerial:
 def test_rf_full_acceptance_dry_run_is_dm_only():
     report = rf_accept.dry_run_report(
         port="COM12",
-        bot_status_path=Path(r"F:\Meshcorebot\logs\meshcorebot.status.json"),
-        bot_port="COM11",
+        peer_status_path=Path("peer-status.json"),
+        peer_port="COM17",
         fingerprint="0BF0A701D5AE2DB6",
         public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
         token="rf_unit",
@@ -24,7 +26,11 @@ def test_rf_full_acceptance_dry_run_is_dm_only():
     )
 
     assert report["ok"] is True
+    assert report["schema"] == rf_accept.RF_FULL_ACCEPTANCE_SCHEMA == 2
     assert report["hardware_required"] is False
+    assert report["physical_observed"] is False
+    assert report["dry_run"] is True
+    assert report["dm_rf_tx"] is False
     assert report["discord_command"] == f"+dm {rf_accept.DEFAULT_D1L_PUBLIC_KEY} rf_unit_in"
     assert "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out" in report["commands"]
     assert "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct" in report["commands"]
@@ -110,44 +116,77 @@ def test_rf_full_acceptance_report_requires_real_inbound_ack_and_direct_route():
         },
         {"command": "health", "result": {"ok": True, "cmd": "health", "board_ready": True, "ui_ready": True}},
     ]
-    meshbot = {
-        "serial": {"active_port": "COM11", "meshcore_connected": True},
+    peer = {
+        "serial": {"active_port": "COM17", "meshcore_connected": True},
         "discord": {"connected": True},
     }
 
     report = rf_accept.build_report(
         port="COM12",
         baud=115200,
-        bot_status_path=Path("status.json"),
-        bot_port="COM11",
+        peer_status_path=Path("status.json"),
+        peer_port="COM17",
         fingerprint="0BF0A701D5AE2DB6",
         public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
         token="rf_unit",
         send_outbound=True,
         steps=steps,
-        meshbot_before=meshbot,
-        meshbot_after=meshbot,
+        peer_before=peer,
+        peer_after=peer,
         inbound_seen_at="2026-07-01T00:00:00+00:00",
     )
 
     assert report["ok"] is True
+    assert report["schema"] == rf_accept.RF_FULL_ACCEPTANCE_SCHEMA == 2
+    assert report["hardware_required"] is True
+    assert report["physical_observed"] is True
+    assert report["dry_run"] is False
+    assert report["dm_rf_tx"] is True
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
+    assert report["controlled_peer"]["evidence_source"] == "explicit_peer_status"
+    assert report["controlled_peer"]["port"] == "COM17"
     assert report["checks"]["identity_public_key_matches"] is True
+    assert report["checks"]["controlled_peer_observed"] is True
     assert report["checks"]["inbound_dm"] is True
     assert report["checks"]["ack_path"] is True
     assert report["checks"]["direct_route"] is True
     assert report["checks"]["no_public_commands"] is True
 
+    d1l_observed = rf_accept.build_report(
+        port="COM12",
+        baud=115200,
+        peer_status_path=None,
+        peer_port=None,
+        fingerprint="0BF0A701D5AE2DB6",
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="rf_unit",
+        send_outbound=True,
+        steps=steps,
+        peer_before=None,
+        peer_after=None,
+        inbound_seen_at="2026-07-01T00:00:00+00:00",
+    )
+
+    assert d1l_observed["ok"] is True
+    assert d1l_observed["controlled_peer"] == {
+        "fingerprint": "0BF0A701D5AE2DB6",
+        "evidence_source": "d1l_bidirectional_rf",
+        "port": None,
+        "status_path": None,
+    }
+
 
 def test_rf_full_acceptance_rejects_missing_inbound_token():
-    meshbot = {
-        "serial": {"active_port": "COM11", "meshcore_connected": True},
+    peer = {
+        "serial": {"active_port": "COM17", "meshcore_connected": True},
         "discord": {"connected": True},
     }
     report = rf_accept.build_report(
         port="COM12",
         baud=115200,
-        bot_status_path=Path("status.json"),
-        bot_port="COM11",
+        peer_status_path=Path("status.json"),
+        peer_port="COM17",
         fingerprint="0BF0A701D5AE2DB6",
         public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
         token="rf_unit",
@@ -173,8 +212,8 @@ def test_rf_full_acceptance_rejects_missing_inbound_token():
             },
             {"command": "health", "result": {"ok": True, "board_ready": True, "ui_ready": True}},
         ],
-        meshbot_before=meshbot,
-        meshbot_after=meshbot,
+        peer_before=peer,
+        peer_after=peer,
         inbound_seen_at=None,
     )
 
@@ -185,15 +224,15 @@ def test_rf_full_acceptance_rejects_missing_inbound_token():
 
 
 def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
-    meshbot = {
-        "serial": {"active_port": "COM11", "meshcore_connected": True},
+    peer = {
+        "serial": {"active_port": "COM17", "meshcore_connected": True},
         "discord": {"connected": True},
     }
     report = rf_accept.build_report(
         port="COM12",
         baud=115200,
-        bot_status_path=Path("status.json"),
-        bot_port="COM11",
+        peer_status_path=Path("status.json"),
+        peer_port="COM17",
         fingerprint="0BF0A701D5AE2DB6",
         public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
         token="rf_unit",
@@ -233,8 +272,8 @@ def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
             },
             {"command": "health", "result": {"ok": True, "board_ready": True, "ui_ready": True}},
         ],
-        meshbot_before=meshbot,
-        meshbot_after=meshbot,
+        peer_before=peer,
+        peer_after=peer,
         inbound_seen_at="2026-07-01T00:00:00+00:00",
     )
 
@@ -245,15 +284,15 @@ def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
 
 
 def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
-    meshbot = {
-        "serial": {"active_port": "COM11", "meshcore_connected": True},
+    peer = {
+        "serial": {"active_port": "COM17", "meshcore_connected": True},
         "discord": {"connected": True},
     }
     report = rf_accept.build_report(
         port="COM12",
         baud=115200,
-        bot_status_path=Path("status.json"),
-        bot_port="COM11",
+        peer_status_path=Path("status.json"),
+        peer_port="COM17",
         fingerprint="0BF0A701D5AE2DB6",
         public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
         token="rf_unit",
@@ -298,8 +337,8 @@ def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
             },
             {"command": "health", "result": {"ok": True, "board_ready": True, "ui_ready": True}},
         ],
-        meshbot_before=meshbot,
-        meshbot_after=meshbot,
+        peer_before=peer,
+        peer_after=peer,
         inbound_seen_at="2026-07-01T00:00:00+00:00",
     )
 
@@ -351,3 +390,19 @@ def test_rf_full_acceptance_does_not_retry_dm_send_timeout(monkeypatch):
     assert ser.reset_count == 0
     assert expected_command_name("messages dm 0BF0A701D5AE2DB6") == "messages dm"
     assert expected_command_name("packets search rf_unit") == "packets search"
+
+
+@pytest.mark.parametrize(
+    "port",
+    ["COM8", " com11 ", r"\\.\COM29", "//?/COM11"],
+)
+def test_rf_full_acceptance_rejects_forbidden_d1l_or_peer_ports(port):
+    with pytest.raises(ValueError, match="forbidden"):
+        rf_accept.enforce_port_policy(port)
+    with pytest.raises(ValueError, match="forbidden"):
+        rf_accept.enforce_port_policy("COM12", port)
+
+
+def test_rf_full_acceptance_rejects_non_serial_peer_port():
+    with pytest.raises(ValueError, match="invalid controlled-peer port"):
+        rf_accept.enforce_port_policy("COM12", "COM_DISABLED")

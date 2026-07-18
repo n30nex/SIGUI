@@ -536,7 +536,7 @@ def test_flash_esp32_rejects_checksummed_extra_flash_role(tmp_path):
         runner.verify_esp32_flash_inputs(ctx)
 
 
-def test_release_gate_command_disables_meshbot_port(tmp_path):
+def test_release_gate_command_omits_unconfigured_peer_port(tmp_path):
     ctx = runner.RunContext(
         root=tmp_path,
         commit=COMMIT,
@@ -553,8 +553,8 @@ def test_release_gate_command_disables_meshbot_port(tmp_path):
 
     command = runner.release_gate_command(ctx, tmp_path / "gate.json")
 
-    assert "--meshbot-port" in command
-    assert command[command.index("--meshbot-port") + 1] == "COM_DISABLED"
+    assert "--mesh-peer-port" not in command
+    assert "--meshbot-port" not in command
     assert "COM8" not in command
     assert "COM11" not in command
     assert "COM29" not in command
