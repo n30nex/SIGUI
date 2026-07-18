@@ -1,17 +1,17 @@
 schema_version: 1
-generated_at: '2026-07-17'
+generated_at: '2026-07-18'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: de0bb75bd91146f0dc9896540d12c71889d7766b
-  integrated_candidate: de0bb75bd91146f0dc9896540d12c71889d7766b
-  live_main_actions_run: 29548300732
+  merged_baseline: 710a106d403c98b2f958884b4c54ef61003509ce
+  integrated_candidate: 710a106d403c98b2f958884b4c54ef61003509ce
+  live_main_actions_run: 29635635407
   live_main_actions_status: success
   exact_main_gate_pending: false
-  exact_main_evidence_bank_pending: false
+  exact_main_evidence_bank_pending: true
   last_strict_verified_main: de0bb75bd91146f0dc9896540d12c71889d7766b
   successor_evidence_in_this_slice: true
-  observed_successor_note: PR 182 is merged and strict-banked at exact main de0bb75. Canonical PR Actions 29547584817 and exact-main Actions 29548300732 pass 1,263 host and 33 checksum tests, 1,008 wire vectors, 931 oracle checks, 100,000 native plus 100,000 Clang 18 semantic-packet cases with zero findings, and five downloaded ZIPs / 46 entries / 341 files / 27,208,527 bytes. The truthful WP-05 matrix is 13 implemented / 3 partial / 0 missing semantic requirements and 4 implemented / 1 partial / 3 missing fuzz targets. A non-erasing exact COM12 flash passed, but retained predecessor DM data needs a compatibility or migration correction before reboot persistence can pass; storage/media health stayed green. WP-06 PR171/PR173 foundations are merged, but full WP-05, WP-06, RF, physical acceptance, and release closure remain open.
+  observed_successor_note: PRs 183, 184, 186, and 185 are merged through live main 710a106. Actions 29635635407 are green; downloaded firmware/release ZIPs match SHA-256 4ae3ae76c7d5572aac0ee075e24c409ee4558e2d12264f3fdb90f5fa41408df4 and 7523f8f969f056993a4fb9d33c446d88bc462addf0574f2b723b64b9b3e9bcc1, with 14 and 29 nested checksums passing and app hash 9af6954d501f8ff75a4f64d5360197f3ae57f856cb62d01e44d5d8ccd8a4bdf3. PR183 implements all four remaining declared fuzz targets, but three semantic requirements plus RF/physical acceptance keep WP-05 open. PR185 exact integration 25f8bc1 / Actions 29635160827 closes only the retained-DM migration blocker with COM12 receipt SHA-256 5389edb5297334b51da730eb8b6da60069e47756c37b5b44db3b5110e3c7eb35. WP-11 power-loss/card-lineage/endurance/recovery work remains open. Exact-main 710a106 was not flashed; soak remains deferred.
   completion_reporting_integrity:
     pull_request: 161
     head: 4a7b8f9cd8a157ae606bfab9ff060a4cc1ceefe2
@@ -247,7 +247,11 @@ project:
     retained_user_data_preserved: true
     hardware_or_media_failure: false
     time_migration_confirmation: separately_open
-    status: open_data_preserving_compatibility_or_migration_root_cause_work_in_progress
+    successor_integration_commit: 25f8bc1fd66e6471781fb234d1290fd30d4f13f3
+    successor_actions_run: 29635160827
+    successor_receipt_path: artifacts/hardware/com12/dm_retained_migration_reboot_25f8bc1_actions_29635160827_COM12.json
+    successor_receipt_sha256: 5389edb5297334b51da730eb8b6da60069e47756c37b5b44db3b5110e3c7eb35
+    status: closed_by_pr185_exact_integration_non_erasing_reboot_acceptance
   admin_command_owner:
     pull_request: 171
     base: 6659ff2605747d8ad4e5eb0ef389ade12cf0ac6f
@@ -3437,8 +3441,7 @@ work_packages:
   - bridge_inside_one_delete_card_replacement_window_acceptance
   - named_workload_nvs_write_amplification_and_endurance_evidence
   - exact_candidate_physical_recovery_console_and_durability_qualification
-  blockers:
-  - BLK-WP11-RETAINED-DM-MIGRATION-DE0BB75-20260716
+  blockers: []
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-12
   title: Truthful time service

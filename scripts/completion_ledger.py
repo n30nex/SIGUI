@@ -768,7 +768,11 @@ def render_status(ledger: dict) -> str:
         "",
         "Snapshot: `%s`" % ledger["snapshot_at"],
         "",
-        "- Live `main`: `%s`" % repository["main"]["commit"],
+        "- Observed live `main`: `%s`"
+        % repository["main"]
+        .get("live_main_gate_observed", {})
+        .get("commit", repository["main"]["commit"]),
+        "- Last strict-banked `main`: `%s`" % repository["main"]["commit"],
         "- Working branch: `%s` from `%s`"
         % (
             repository["working_branch"]["name"],
