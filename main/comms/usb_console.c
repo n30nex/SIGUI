@@ -577,6 +577,8 @@ static const d1l_release_command_rule_t *release_command_rule(
 
 static void print_release_profile_fields(void)
 {
+    printf(",\"build_commit\":");
+    print_json_string(D1L_BUILD_GIT_COMMIT);
     printf(",\"release_profile\":");
     print_json_string(d1l_release_profile_name());
     printf(",\"release_profile_id\":%u,\"sd_history_mode\":",

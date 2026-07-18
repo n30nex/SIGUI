@@ -22,7 +22,7 @@ def test_core_profile_is_the_deterministic_build_default():
     component_cmake = read("main/CMakeLists.txt")
 
     assert 'set(D1L_RELEASE_PROFILE "core_1_0" CACHE STRING' in root_cmake
-    assert 'set(D1L_SD_HISTORY_MODE "conditional" CACHE STRING' in root_cmake
+    assert 'set(D1L_SD_HISTORY_MODE "disabled" CACHE STRING' in root_cmake
     assert '"app/release_profile.c"' in component_cmake
     assert "D1L_RELEASE_PROFILE=${D1L_RELEASE_PROFILE_DEFINE}" in component_cmake
     assert "D1L_SD_HISTORY_MODE=${D1L_SD_HISTORY_MODE_DEFINE}" in component_cmake

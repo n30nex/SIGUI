@@ -74,6 +74,19 @@ def test_sd_policy_allows_qualification_unless_mode_is_disabled():
     assert "release_command_feature_available(rule->feature)" in enforcement
 
 
+def test_profile_fields_bind_health_and_status_to_exact_build_identity():
+    profile_fields = CONSOLE.split(
+        "static void print_release_profile_fields(void)", 1
+    )[1].split("static void release_unavailable_status(", 1)[0]
+    health = CONSOLE.split("static void cmd_health(void)", 1)[1].split(
+        "static void print_wifi_status_result(", 1
+    )[0]
+
+    assert "D1L_BUILD_GIT_COMMIT" in profile_fields
+    assert r"\"build_commit\":" in profile_fields
+    assert "print_release_profile_fields();" in health
+
+
 def test_sd_mutations_are_admitted_before_dispatch_and_core_help_is_nvs_only():
     handler = CONSOLE.split("static void handle_line(", 1)[1].split(
         "void d1l_usb_console_run(", 1

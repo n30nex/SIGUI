@@ -24,7 +24,7 @@ The authoritative product boundary, roadmap, and work graph are:
 | Full-feature readiness | `false` |
 | Candidate SHA | not frozen |
 | Candidate Actions run | not started |
-| SD history mode | `conditional` |
+| SD history mode | `disabled` |
 
 ## Immutable safety rules
 
@@ -48,16 +48,17 @@ The authoritative product boundary, roadmap, and work graph are:
 - Map, user Wi-Fi control, multi-channel management, administration,
   Observer/MQTT, signed SD/OTA update, GPS/location, mutable terminal,
   advanced QR/emoji, and user-facing TRACE/PATH tools are unavailable.
-- SD begins as conditional. It becomes `supported_optional` only after the
-  exact paired-candidate matrix passes; otherwise it becomes `disabled`, the
-  RP2040 payload is omitted, and retained NVS remains authoritative.
+- SD is disabled for this candidate because the required paired `COM16`
+  SD/RP2040 target is absent and therefore cannot be qualified against the
+  exact candidate. The RP2040 payload must be omitted and retained NVS is
+  authoritative.
 - PR #197 was integrated as reviewed `.c`/`.h`/native-test substance.
   Generated manifests were regenerated against this branch rather than
   accepting stale hashes from its conflicting branch.
 
 ## Current GitHub snapshot
 
-Snapshot refreshed at `2026-07-18T13:46:38-04:00`.
+Snapshot refreshed at `2026-07-18T14:55:00-04:00`.
 
 | Item | State |
 |---|---|
@@ -97,12 +98,12 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 | R5 | complete | Profile-bound SD admission integrated as `0c72561`; Core conditional/disabled routes retained data to NVS and cannot activate SD |
 | R6 | complete | 109 focused Mesh/DM/contact/route tests passed; one Actions-only libFuzzer case skipped; no `main/mesh/**` P0 or code change |
 | R7 | in progress | Agent E isolated at `F:\SIGUI-worktrees\24h-core-qa`; Core smoke/UI probe/audit/package and exact RF admission |
-| R8 | pending | Independent integrated diff/evidence review |
+| R8 | in progress | Independent integrated diff/evidence review found and lead repaired missing exact build identity in `health`; review continues |
 | R9 | pending | Focused checks plus one full host suite and candidate freeze |
 | R10 | pending | One final `d1l-ci`, download all artifacts, verify all checksums |
 | R11 | pending | Exact non-erasing COM12 flash, UI/boot/persistence gates |
 | R12 | pending | Controlled peer RF/DM; `public_rf_tx=false` |
-| R13 | pending | Exact SD pass or disable/NVS fallback |
+| R13 | in progress | SD disabled/NVS fallback selected because COM16 is absent; exact package/device truth remains |
 | R14 | pending | 60-minute active plus 30-minute idle exact-candidate soak |
 | R15 | inactive | Activate only for a failed Core gate |
 | R16 | pending | Final Core audit and tag/release or exact no-go |
@@ -126,7 +127,7 @@ All rows remain fail-closed until an exact receipt is recorded.
 | Three cold boots | missing | — |
 | Retained state | missing | — |
 | Controlled RF/DM/ACK/PATH/direct route | missing | — |
-| SD decision | pending conditional | — |
+| SD decision | selected disabled | `COM16` absent; compile-time default changed to `disabled`; exact package/device confirmation pending |
 | 60-minute active soak | missing | — |
 | 30-minute idle soak | missing | — |
 | Install/recovery package review | missing | — |
@@ -216,3 +217,40 @@ release is authorized by the evidence currently recorded.
   capability truth, and exact COM12/firmware admission are active in an
   isolated worktree. No build, serial-port open, hardware mutation, RF
   transmission, or SD operation occurred.
+
+### `2026-07-18T15:03:31-04:00`
+
+- GitHub state was refreshed again before candidate preparation:
+  `origin/main` remains
+  `846f728dd3faded85451c6d39ba6a07cb8ca7f44`, PR #197 and excluded draft
+  PR #199 remain the only open pull requests, and main `d1l-ci` run
+  `29652673963` remains successful.
+- Read-only PnP preflight still reports only the allowed D1L endpoint,
+  `USB-SERIAL CH340 (COM12)`, present and OK. The paired `COM16` SD/RP2040
+  target is absent.
+- The candidate SD decision is therefore fail-closed: compile-time SD history
+  defaults to `disabled`, retained NVS is authoritative, and R7 packaging must
+  omit the RP2040 payload. Exact package and flashed-device truth remain
+  required before R13 closes.
+- No serial port has been opened, no firmware has been flashed, no RF
+  transmission has occurred, and no SD operation has occurred.
+
+### `2026-07-18T15:06:46-04:00`
+
+- The independent R8 review found a candidate-freeze blocker: `version`
+  exposed the exact 40-hex build commit, but `health` exposed only release
+  profile and SD mode. R7 intentionally requires both preflight commands to
+  bind to the exact candidate before any hardware action.
+- The shared profile/status field emitter now includes
+  `D1L_BUILD_GIT_COMMIT`, binding `health` and other profile-aware status
+  results to the exact Actions source. The USB parser and MeshCore oracle
+  canonical-LF source pins were refreshed to
+  `87362a8d7a3591a2fc66ca31d8923f3e52ee48b2e7e185ec78aad49d81c23ff6`.
+- Focused lead validation passed 51 release-profile, command-admission,
+  diagnostics, source-pin, retained-profile, metadata, workflow, and Actions
+  security tests; one documented Actions-only execution was skipped.
+- The operator power-cycled the present device. Read-only PnP observation
+  confirmed that COM12 returned present and OK. This is a pre-candidate
+  hardware check and cannot count toward the exact-candidate cold-boot gate.
+- No serial port was opened, no firmware was flashed, no RF transmission
+  occurred, and no SD operation occurred.
