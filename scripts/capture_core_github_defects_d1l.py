@@ -31,6 +31,8 @@ WORKFLOW_PATH = ".github/workflows/d1l-ci.yml"
 CORE_RELEASE_PROFILE = "core_1_0"
 PAGE_SIZE = 100
 MAX_PAGES = 10_000
+DEFAULT_MAX_RECEIPT_AGE_SEC = 15 * 60
+DEFAULT_MAX_FUTURE_SKEW_SEC = 30
 CLASSIFICATION_LABELS = (
     "core-blocker",
     "full-feature-deferred",
@@ -1109,6 +1111,9 @@ def validate_core_github_defect_receipt(
     commit: str,
     run_id: str,
     run_attempt: int | str,
+    max_age_sec: int = DEFAULT_MAX_RECEIPT_AGE_SEC,
+    max_future_skew_sec: int = DEFAULT_MAX_FUTURE_SKEW_SEC,
+    now: datetime | None = None,
     audit_recompute: Callable[[Path, dict[str, Any]], dict[str, Any]]
     | None = None,
 ) -> tuple[bool, list[str], dict[str, Any]]:
@@ -1121,6 +1126,20 @@ def validate_core_github_defect_receipt(
     run_attempt = _numeric_run_attempt(run_attempt)
     if commit is None or run_id is None or run_attempt is None:
         return False, ["validator expected candidate identity is invalid"], details
+    if (
+        isinstance(max_age_sec, bool)
+        or not isinstance(max_age_sec, int)
+        or max_age_sec <= 0
+        or isinstance(max_future_skew_sec, bool)
+        or not isinstance(max_future_skew_sec, int)
+        or max_future_skew_sec < 0
+    ):
+        return False, ["validator freshness bounds are invalid"], details
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None or now.utcoffset() is None:
+        return False, ["validator current time is not timezone-aware"], details
+    now = now.astimezone(timezone.utc)
     try:
         path = _inside(path, root, "Defect receipt")
         if not path.is_file() or is_link_or_reparse(path):
@@ -1153,8 +1172,21 @@ def validate_core_github_defect_receipt(
         if release_phase not in {"pre-tag", "post-tag"}:
             errors.append("receipt release phase is invalid")
             release_phase = "invalid"
-        if not _valid_utc_timestamp(receipt.get("captured_at")):
+        captured_at_value = receipt.get("captured_at")
+        if not _valid_utc_timestamp(captured_at_value):
             errors.append("receipt captured_at is invalid")
+        else:
+            captured_at = datetime.fromisoformat(
+                str(captured_at_value).replace("Z", "+00:00")
+            )
+            capture_age_sec = (now - captured_at).total_seconds()
+            details["capture_age_sec"] = capture_age_sec
+            details["max_capture_age_sec"] = max_age_sec
+            details["max_future_skew_sec"] = max_future_skew_sec
+            if capture_age_sec > max_age_sec:
+                errors.append("receipt captured_at is stale")
+            if capture_age_sec < -max_future_skew_sec:
+                errors.append("receipt captured_at is in the future")
         source = receipt.get("git")
         if not (
             isinstance(source, dict)

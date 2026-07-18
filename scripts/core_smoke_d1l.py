@@ -99,6 +99,15 @@ DISABLED_SD_MUTATION_PROBES = (
     ("ui scroll-probe storage_data", "sd_history"),
 )
 
+DISABLED_SD_UNAVAILABLE_STATUS_PROBES = (
+    ("storage diag", "sd_history"),
+    ("storage diag raw", "sd_history"),
+    ("storage setup", "sd_history"),
+    ("rp2040 status", "sd_history"),
+    ("rp2040 ping", "sd_history"),
+    ("rp2040 stock-probe", "sd_history"),
+)
+
 
 def normalize_port(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
@@ -158,6 +167,28 @@ def exact_unsupported_result(
         and result.get("code") == "ESP_ERR_NOT_SUPPORTED"
         and result.get("release_profile") == CORE_RELEASE_PROFILE
         and result.get("feature") == feature
+    )
+
+
+def exact_unavailable_status_result(
+    result: object,
+    command: str,
+    feature: str,
+    expected_commit: str,
+    expected_sd_history_mode: str,
+) -> bool:
+    return (
+        exact_identity(result, expected_commit, expected_sd_history_mode)
+        and isinstance(result, dict)
+        and result.get("cmd") == command
+        and result.get("available") is False
+        and result.get("feature") == feature
+        and result.get("mutation_allowed") is False
+        and result.get("reason") == "unavailable_in_release_profile"
+        and "uart_ready" not in result
+        and "bridge_ready" not in result
+        and "protocol_supported" not in result
+        and "diag_supported" not in result
     )
 
 
@@ -253,6 +284,17 @@ def mutation_probe_plan(sd_history_mode: str) -> list[dict]:
     return [{"command": command, "feature": feature} for command, feature in probes]
 
 
+def unavailable_status_probe_plan(sd_history_mode: str) -> list[dict]:
+    if sd_history_mode not in SD_HISTORY_MODES:
+        raise ValueError(f"invalid SD history mode: {sd_history_mode}")
+    probes = (
+        DISABLED_SD_UNAVAILABLE_STATUS_PROBES
+        if sd_history_mode == "disabled"
+        else ()
+    )
+    return [{"command": command, "feature": feature} for command, feature in probes]
+
+
 def command_plan(sd_history_mode: str) -> dict:
     """Return a non-closing plan suitable for review and contract tests."""
     return {
@@ -269,6 +311,9 @@ def command_plan(sd_history_mode: str) -> dict:
         "preflight_commands": ["version", "health"],
         "supported_commands": list(CORE_SMOKE_COMMANDS),
         "unavailable_mutation_probes": mutation_probe_plan(sd_history_mode),
+        "unavailable_status_probes": unavailable_status_probe_plan(
+            sd_history_mode
+        ),
         "public_rf_tx": False,
         "formats_sd": False,
     }
@@ -442,6 +487,7 @@ def identity_failure_report(
         "identity_preflight_only": True,
         "supported_commands_executed": [],
         "unavailable_mutation_probes": [],
+        "unavailable_status_probes": [],
         "public_rf_tx": False,
         "formats_sd": False,
         "results": [version] + ([health] if health else []),
@@ -496,6 +542,7 @@ def run_core_smoke(
 
     results: list[dict] = []
     probe_results: list[dict] = []
+    status_probe_results: list[dict] = []
     persistence: dict | None = None
     with open_d1l_serial(
         serial, port=port, baudrate=baud, timeout=timeout
@@ -536,6 +583,14 @@ def run_core_smoke(
 
         for command in CORE_SMOKE_COMMANDS:
             results.append(send_console_command(ser, command, timeout))
+
+        for probe in unavailable_status_probe_plan(
+            expected_sd_history_mode
+        ):
+            result = send_exact_console_command(
+                ser, probe["command"], timeout
+            )
+            status_probe_results.append({**probe, "result": result})
 
         for probe in mutation_probe_plan(expected_sd_history_mode):
             result = send_exact_console_command(
@@ -578,6 +633,16 @@ def run_core_smoke(
         )
         for row in probe_results
     )
+    status_probes_ok = all(
+        exact_unavailable_status_result(
+            row["result"],
+            row["command"],
+            row["feature"],
+            normalized_commit,
+            expected_sd_history_mode,
+        )
+        for row in status_probe_results
+    )
     health_final = results[-1]
     health_ready = (
         exact_identity(health_final, normalized_commit, expected_sd_history_mode)
@@ -591,6 +656,7 @@ def run_core_smoke(
         "ok": bool(
             supported_ok
             and probes_ok
+            and status_probes_ok
             and disabled_storage_ok
             and crashlog_ok
             and health_ready
@@ -614,6 +680,7 @@ def run_core_smoke(
         "supported_commands": list(CORE_SMOKE_COMMANDS),
         "supported_commands_executed": list(CORE_SMOKE_COMMANDS),
         "unavailable_mutation_probes": probe_results,
+        "unavailable_status_probes": status_probe_results,
         "checks": {
             "exact_candidate": True,
             "esp_idf_v5_5_4": version.get("idf") == EXPECTED_IDF_VERSION,
@@ -623,6 +690,7 @@ def run_core_smoke(
             "disabled_sd_nvs_authoritative": disabled_storage_ok,
             "pre_ui_crashlog_clean": crashlog_ok,
             "unavailable_mutations_rejected": probes_ok,
+            "disabled_sd_status_probes_truthful": status_probes_ok,
             "health_ready": health_ready,
             "persistence_pass": persistence is None
             or persistence.get("ok") is True,

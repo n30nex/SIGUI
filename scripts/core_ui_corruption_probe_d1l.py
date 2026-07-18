@@ -18,7 +18,9 @@ try:
         crashlog_clean,
         enforce_core_port,
         exact_identity,
+        exact_unsupported_result,
         exact_version_identity,
+        send_exact_console_command,
     )
     from smoke_d1l import exact_commit, open_d1l_serial, send_console_command
     from ui_corruption_probe_d1l import (
@@ -37,7 +39,9 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         crashlog_clean,
         enforce_core_port,
         exact_identity,
+        exact_unsupported_result,
         exact_version_identity,
+        send_exact_console_command,
     )
     from scripts.smoke_d1l import exact_commit, open_d1l_serial, send_console_command
     from scripts.ui_corruption_probe_d1l import (
@@ -71,6 +75,18 @@ CORE_COMPOSE_TARGETS = (
     "onboarding",
 )
 RELEASE_MIN_ROUNDS = 20
+CORE_UNAVAILABLE_UI_PROBES = (
+    ("ui tab map", "map"),
+    ("ui scroll-probe wi-fi", "wifi_user_control"),
+    ("ui scroll-probe map-menu", "map"),
+    ("ui scroll-probe contact-route", "user_trace"),
+    ("ui scroll-probe mesh-roles", "admin"),
+    ("ui compose-probe map_location", "location"),
+    ("ui compose-probe wifi-pass", "wifi_user_control"),
+)
+DISABLED_SD_UNAVAILABLE_UI_PROBES = (
+    ("ui scroll-probe storage-card", "sd_history"),
+)
 
 
 def core_tab_sequence_ok(tabs: object) -> bool:
@@ -81,7 +97,77 @@ def core_tab_sequence_ok(tabs: object) -> bool:
     )
 
 
-def command_plan(rounds: int = RELEASE_MIN_ROUNDS) -> dict:
+def unavailable_ui_probe_plan(sd_history_mode: str) -> list[dict]:
+    if sd_history_mode not in SD_HISTORY_MODES:
+        raise ValueError(f"invalid SD history mode: {sd_history_mode}")
+    probes = list(CORE_UNAVAILABLE_UI_PROBES)
+    if sd_history_mode == "disabled":
+        probes.extend(DISABLED_SD_UNAVAILABLE_UI_PROBES)
+    return [
+        {"command": command, "feature": feature}
+        for command, feature in probes
+    ]
+
+
+def unavailable_ui_event_ok(
+    event: object,
+    expected: dict,
+    expected_commit: str,
+    expected_sd_history_mode: str,
+) -> bool:
+    if not isinstance(event, dict):
+        return False
+    before = event.get("before")
+    after = event.get("after")
+    command = expected.get("command")
+    feature = expected.get("feature")
+    return (
+        event.get("command") == command
+        and event.get("feature") == feature
+        and exact_unsupported_result(
+            event.get("result"), command, feature
+        )
+        and exact_identity(
+            before, expected_commit, expected_sd_history_mode
+        )
+        and exact_identity(
+            after, expected_commit, expected_sd_history_mode
+        )
+        and before.get("cmd") == "ui status"
+        and after.get("cmd") == "ui status"
+        and before.get("pending") is False
+        and after.get("pending") is False
+        and before.get("active_tab") in CORE_TAB_SEQUENCE
+        and after.get("active_tab") == before.get("active_tab")
+    )
+
+
+def unavailable_ui_events_ok(
+    events: object,
+    expected_commit: str,
+    expected_sd_history_mode: str,
+) -> bool:
+    expected_plan = unavailable_ui_probe_plan(expected_sd_history_mode)
+    return (
+        isinstance(events, list)
+        and len(events) == len(expected_plan)
+        and all(
+            unavailable_ui_event_ok(
+                event,
+                expected,
+                expected_commit,
+                expected_sd_history_mode,
+            )
+            for event, expected in zip(events, expected_plan)
+        )
+    )
+
+
+def command_plan(
+    rounds: int = RELEASE_MIN_ROUNDS,
+    sd_history_mode: str = "disabled",
+) -> dict:
+    unavailable_plan = unavailable_ui_probe_plan(sd_history_mode)
     commands = ["version", "health", "ui status"]
     commands.extend(
         f"ui scroll-probe {surface}" for surface in CORE_SCROLL_SURFACES
@@ -103,6 +189,8 @@ def command_plan(rounds: int = RELEASE_MIN_ROUNDS) -> dict:
     commands.extend(
         f"ui compose-probe {target}" for target in CORE_COMPOSE_TARGETS
     )
+    for probe in unavailable_plan:
+        commands.extend(("ui status", probe["command"], "ui status"))
     return {
         "schema": 1,
         "kind": "core_ui_corruption_probe_plan",
@@ -118,6 +206,7 @@ def command_plan(rounds: int = RELEASE_MIN_ROUNDS) -> dict:
         "tabs": list(CORE_TAB_SEQUENCE),
         "scroll_surfaces": list(CORE_SCROLL_SURFACES),
         "compose_targets": list(CORE_COMPOSE_TARGETS),
+        "unavailable_ui_probes": unavailable_plan,
         "commands": commands,
         "public_rf_tx": False,
         "network_tx": False,
@@ -159,6 +248,7 @@ def _identity_failure_report(
         "release_min_rounds": RELEASE_MIN_ROUNDS,
         "tabs": list(CORE_TAB_SEQUENCE),
         "events": [],
+        "unavailable_events": [],
         "identity_results": [version] + ([health] if health else []),
         "public_rf_tx": False,
         "network_tx": False,
@@ -227,6 +317,7 @@ def run_probe(
     setup_events: list[dict] = []
     scroll_events: list[dict] = []
     compose_events: list[dict] = []
+    unavailable_events: list[dict] = []
     started_at = datetime.now(timezone.utc)
     run_prefix = token_prefix_for_run(started_at)
 
@@ -311,6 +402,22 @@ def run_probe(
                     "result": send_console_command(ser, command, timeout),
                 }
             )
+
+        for probe in unavailable_ui_probe_plan(required_sd_mode):
+            unavailable_events.append(
+                {
+                    **probe,
+                    "before": send_console_command(
+                        ser, "ui status", timeout
+                    ),
+                    "result": send_exact_console_command(
+                        ser, probe["command"], timeout
+                    ),
+                    "after": send_console_command(
+                        ser, "ui status", timeout
+                    ),
+                }
+            )
         for round_number in range(1, rounds + 1):
             for tab in CORE_TAB_SEQUENCE:
                 events.append(
@@ -366,6 +473,32 @@ def run_probe(
         for event in compose_events
         if event.get("result", {}).get("ok") is not True
     ]
+    unavailable_failures = [
+        {
+            "kind": "unavailable_ui_probe",
+            "command": expected["command"],
+            "feature": expected["feature"],
+        }
+        for event, expected in zip(
+            unavailable_events,
+            unavailable_ui_probe_plan(required_sd_mode),
+        )
+        if not unavailable_ui_event_ok(
+            event,
+            expected,
+            normalized_commit,
+            required_sd_mode,
+        )
+    ]
+    if len(unavailable_events) != len(
+        unavailable_ui_probe_plan(required_sd_mode)
+    ):
+        unavailable_failures.append(
+            {
+                "kind": "unavailable_ui_probe",
+                "code": "PROBE_COUNT_MISMATCH",
+            }
+        )
     failures = event_failures(events, skip_data_canary=skip_data_canary)
     identity_failures = []
     for event in events:
@@ -411,6 +544,7 @@ def run_probe(
         setup_failures
         + scroll_failures
         + compose_failures
+        + unavailable_failures
         + failures
         + identity_failures
         + telemetry_failures
@@ -447,17 +581,9 @@ def run_probe(
         "tabs": list(CORE_TAB_SEQUENCE),
         "scroll_surfaces": list(CORE_SCROLL_SURFACES),
         "compose_targets": list(CORE_COMPOSE_TARGETS),
-        "unavailable_destinations_excluded": [
-            "map",
-            "wifi",
-            "ble",
-            "channels",
-            "admin",
-            "observer",
-            "update",
-            "location",
-            "trace",
-        ],
+        "unavailable_ui_probes": unavailable_ui_probe_plan(
+            required_sd_mode
+        ),
         "public_rf_tx": False,
         "network_tx": False,
         "map_network_requests": False,
@@ -489,7 +615,7 @@ def run_probe(
             "data_refreshes_pass": not any(
                 failure.get("kind") == "data_refresh" for failure in failures
             ),
-            "no_unavailable_destination": True,
+            "unavailable_destinations_rejected": not unavailable_failures,
             "no_public_rf": True,
             "no_network_tx": True,
             "no_map_network_requests": True,
@@ -502,6 +628,7 @@ def run_probe(
         "setup_events": setup_events,
         "scroll_events": scroll_events,
         "compose_events": compose_events,
+        "unavailable_events": unavailable_events,
         "final_health": health_final,
         "events": events,
     }

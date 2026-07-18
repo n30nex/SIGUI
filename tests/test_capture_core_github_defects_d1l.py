@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -403,6 +404,49 @@ def test_final_validator_distinguishes_valid_no_go_from_invalid_evidence(
     assert details["release_gate_ok"] is False
     assert details["open_core_p0_count"] == 1
     assert details["receipt"]["ok"] is False
+
+
+@pytest.mark.parametrize(
+    ("offset_sec", "expected_error"),
+    [
+        (-901, "receipt captured_at is stale"),
+        (31, "receipt captured_at is in the future"),
+    ],
+)
+def test_final_validator_rejects_stale_or_future_receipt(
+    tmp_path, monkeypatch, offset_sec, expected_error
+):
+    clean_git(monkeypatch)
+    github = FakeGitHub(
+        [issue_row(1, ["p0", "full-feature-deferred"])],
+        [],
+    )
+    receipt_path = defects.capture(
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        out_dir=tmp_path / "artifacts" / f"freshness-{offset_sec}",
+        api_fetch=github.api,
+    )
+    receipt = read_receipt(receipt_path)
+    captured_at = datetime.fromisoformat(
+        receipt["captured_at"].replace("Z", "+00:00")
+    )
+    now = captured_at - timedelta(seconds=offset_sec)
+
+    ok, errors, details = defects.validate_core_github_defect_receipt(
+        receipt_path,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        now=now,
+    )
+
+    assert ok is False
+    assert expected_error in errors
+    assert details["capture_age_sec"] == pytest.approx(-offset_sec)
 
 
 def test_final_validator_rejects_raw_file_hash_tampering(

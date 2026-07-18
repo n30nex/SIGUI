@@ -656,6 +656,22 @@ static bool enforce_release_command_policy(
         }
     }
     const d1l_release_command_rule_t *rule = release_command_rule(command);
+    if (d1l_release_profile_is_core() && rule &&
+        rule->feature == D1L_RELEASE_FEATURE_SD_HISTORY &&
+        rule->access == D1L_RELEASE_COMMAND_READ_ONLY &&
+        d1l_release_sd_history_mode() == D1L_SD_HISTORY_MODE_DISABLED &&
+        !d1l_usb_command_equals(
+            command, "storage status", sizeof("storage status") - 1U)) {
+        /*
+         * A disabled-SD Core build must not actively interrogate the excluded
+         * RP2040 bridge or media and must not imply that either is supported.
+         * Keep storage status as the one passive NVS-authority projection.
+         */
+        release_unavailable_status(
+            command && command->text ? command->text : rule->pattern,
+            D1L_RELEASE_FEATURE_SD_HISTORY);
+        return false;
+    }
     if (!rule || release_command_feature_available(rule->feature) ||
         rule->access == D1L_RELEASE_COMMAND_READ_ONLY) {
         return true;
@@ -6903,7 +6919,6 @@ static void cmd_help(void)
                "\"ui capture begin\",\"ui capture chunk <offset> <len>\","
                "\"ui capture end\",\"mesh status\",\"companion status\","
                "\"storage status\",\"storage force-nvs [on]\","
-               "\"storage diag\",\"storage diag raw\","
                "\"core retained-canary <token>\","
                "\"mesh advert zero\",\"mesh advert flood\","
                "\"mesh send public <text>\","

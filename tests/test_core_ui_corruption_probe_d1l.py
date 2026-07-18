@@ -18,7 +18,7 @@ def test_core_ui_sequence_is_exact_and_excludes_unavailable_destinations():
     )
 
 
-def test_core_ui_plan_is_non_closing_and_has_no_map_or_network_command():
+def test_core_ui_plan_is_non_closing_and_only_probes_excluded_ui_fail_closed():
     plan = core_ui.command_plan(20)
 
     assert plan["ok"] is False
@@ -45,12 +45,90 @@ def test_core_ui_plan_is_non_closing_and_has_no_map_or_network_command():
         "contact-edit",
         "onboarding",
     ]
+    assert plan["unavailable_ui_probes"] == [
+        {"command": "ui tab map", "feature": "map"},
+        {
+            "command": "ui scroll-probe wi-fi",
+            "feature": "wifi_user_control",
+        },
+        {"command": "ui scroll-probe map-menu", "feature": "map"},
+        {
+            "command": "ui scroll-probe contact-route",
+            "feature": "user_trace",
+        },
+        {"command": "ui scroll-probe mesh-roles", "feature": "admin"},
+        {
+            "command": "ui compose-probe map_location",
+            "feature": "location",
+        },
+        {
+            "command": "ui compose-probe wifi-pass",
+            "feature": "wifi_user_control",
+        },
+        {
+            "command": "ui scroll-probe storage-card",
+            "feature": "sd_history",
+        },
+    ]
     assert not any(
         command.startswith(("map ", "wifi ", "ble "))
-        or command == "ui tab map"
         for command in plan["commands"]
     )
     assert plan["public_rf_tx"] is False
     assert plan["network_tx"] is False
     assert plan["map_network_requests"] is False
     assert plan["formats_sd"] is False
+
+
+def _status(tab: str = "home") -> dict:
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "ui status",
+        "build_commit": "a" * 40,
+        "release_profile": "core_1_0",
+        "sd_history_mode": "disabled",
+        "active_tab": tab,
+        "pending": False,
+    }
+
+
+def _unavailable_events() -> list[dict]:
+    return [
+        {
+            **probe,
+            "before": _status(),
+            "result": {
+                "schema": 1,
+                "ok": False,
+                "cmd": probe["command"],
+                "code": "ESP_ERR_NOT_SUPPORTED",
+                "release_profile": "core_1_0",
+                "feature": probe["feature"],
+            },
+            "after": _status(),
+        }
+        for probe in core_ui.unavailable_ui_probe_plan("disabled")
+    ]
+
+
+def test_unavailable_ui_events_require_exact_rejection_and_stable_tab():
+    events = _unavailable_events()
+    assert core_ui.unavailable_ui_events_ok(
+        events, "a" * 40, "disabled"
+    )
+    assert not core_ui.unavailable_ui_events_ok(
+        events[:-1], "a" * 40, "disabled"
+    )
+
+    tampered = _unavailable_events()
+    tampered[1]["after"] = _status("messages")
+    assert not core_ui.unavailable_ui_events_ok(
+        tampered, "a" * 40, "disabled"
+    )
+
+    tampered = _unavailable_events()
+    tampered[2]["result"]["feature"] = "location"
+    assert not core_ui.unavailable_ui_events_ok(
+        tampered, "a" * 40, "disabled"
+    )

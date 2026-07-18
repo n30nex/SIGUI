@@ -72,6 +72,15 @@ def test_core_smoke_mutation_plan_matches_profile_and_disabled_sd():
             "feature": "sd_history",
         },
     ]
+    assert core_smoke.unavailable_status_probe_plan("conditional") == []
+    assert core_smoke.unavailable_status_probe_plan("disabled") == [
+        {"command": "storage diag", "feature": "sd_history"},
+        {"command": "storage diag raw", "feature": "sd_history"},
+        {"command": "storage setup", "feature": "sd_history"},
+        {"command": "rp2040 status", "feature": "sd_history"},
+        {"command": "rp2040 ping", "feature": "sd_history"},
+        {"command": "rp2040 stock-probe", "feature": "sd_history"},
+    ]
 
 
 def test_core_smoke_exact_identity_and_unsupported_contract():
@@ -101,6 +110,28 @@ def test_core_smoke_exact_identity_and_unsupported_contract():
         "wifi on",
         "wifi_user_control",
     )
+    unavailable = {
+        **identity,
+        "cmd": "rp2040 status",
+        "available": False,
+        "feature": "sd_history",
+        "mutation_allowed": False,
+        "reason": "unavailable_in_release_profile",
+    }
+    assert core_smoke.exact_unavailable_status_result(
+        unavailable,
+        "rp2040 status",
+        "sd_history",
+        COMMIT,
+        "disabled",
+    )
+    assert not core_smoke.exact_unavailable_status_result(
+        {**unavailable, "uart_ready": True},
+        "rp2040 status",
+        "sd_history",
+        COMMIT,
+        "disabled",
+    )
     assert not core_smoke.exact_unsupported_result(
         {**unsupported, "cmd": "wifi off"},
         "wifi on",
@@ -124,6 +155,7 @@ def test_identity_failure_report_cannot_claim_closure():
     assert report["identity_preflight_only"] is True
     assert report["supported_commands_executed"] == []
     assert report["unavailable_mutation_probes"] == []
+    assert report["unavailable_status_probes"] == []
     assert report["public_rf_tx"] is False
 
 

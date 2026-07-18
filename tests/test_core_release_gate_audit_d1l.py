@@ -6,6 +6,7 @@ import pytest
 
 from scripts import core_release_gate_audit_d1l as audit
 from scripts import core_smoke_d1l
+from scripts import core_ui_corruption_probe_d1l
 from scripts import release_gate_audit_d1l as full_audit
 from scripts import soak_d1l as soak_runner
 
@@ -32,6 +33,25 @@ def passing_core_smoke() -> dict:
                     "code": "ESP_ERR_NOT_SUPPORTED",
                     "release_profile": "core_1_0",
                     "feature": probe["feature"],
+                },
+            }
+        )
+    status_probes = []
+    for probe in core_smoke_d1l.unavailable_status_probe_plan("disabled"):
+        status_probes.append(
+            {
+                **probe,
+                "result": {
+                    "schema": 1,
+                    "ok": True,
+                    "cmd": probe["command"],
+                    "available": False,
+                    "build_commit": COMMIT,
+                    "release_profile": "core_1_0",
+                    "sd_history_mode": "disabled",
+                    "feature": probe["feature"],
+                    "mutation_allowed": False,
+                    "reason": "unavailable_in_release_profile",
                 },
             }
         )
@@ -205,6 +225,7 @@ def passing_core_smoke() -> dict:
             "disabled_sd_nvs_authoritative": True,
             "pre_ui_crashlog_clean": True,
             "unavailable_mutations_rejected": True,
+            "disabled_sd_status_probes_truthful": True,
             "health_ready": True,
             "persistence_pass": True,
             "no_public_rf": True,
@@ -214,6 +235,7 @@ def passing_core_smoke() -> dict:
             core_smoke_d1l.CORE_SMOKE_COMMANDS
         ),
         "unavailable_mutation_probes": probes,
+        "unavailable_status_probes": status_probes,
         "persistence": {
             "schema": 1,
             "kind": "core_settings_persistence",
@@ -263,6 +285,220 @@ def test_core_smoke_gate_passes_exact_fixture_and_rejects_dry_or_wrong_sha(
     failed["device_build_commit"] = "b" * 40
     write_json(path, failed)
     assert not audit.core_smoke_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+
+def passing_core_ui() -> dict:
+    def health() -> dict:
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": "health",
+            "build_commit": COMMIT,
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "board_ready": True,
+            "ui_ready": True,
+        }
+
+    def status(tab: str = "home") -> dict:
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": "ui status",
+            "build_commit": COMMIT,
+            "release_profile": "core_1_0",
+            "sd_history_mode": "disabled",
+            "active_tab": tab,
+            "pending": False,
+        }
+
+    def crashlog() -> dict:
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": "crashlog",
+            "entries": [],
+        }
+
+    events = []
+    for round_number in range(
+        1, core_ui_corruption_probe_d1l.RELEASE_MIN_ROUNDS + 1
+    ):
+        for tab in core_ui_corruption_probe_d1l.CORE_TAB_SEQUENCE:
+            events.append(
+                {
+                    "round": round_number,
+                    "kind": "tab",
+                    "tab": tab,
+                    "request": {"schema": 1, "ok": True},
+                    "active": True,
+                    "health": health(),
+                    "crashlog": crashlog(),
+                }
+            )
+        token = f"CORE-UI-{round_number}"
+        events.append(
+            {
+                "round": round_number,
+                "kind": "data_refresh",
+                "token": token,
+                "data_canary": {"schema": 1, "ok": True},
+                "packets_search": {
+                    "schema": 1,
+                    "ok": True,
+                    "entries": [{"note": token}],
+                },
+                "messages_search": {
+                    "schema": 1,
+                    "ok": True,
+                    "entries": [{"text": token}],
+                },
+                "health": health(),
+                "crashlog": crashlog(),
+            }
+        )
+
+    unavailable_events = []
+    unavailable_plan = (
+        core_ui_corruption_probe_d1l.unavailable_ui_probe_plan("disabled")
+    )
+    for probe in unavailable_plan:
+        unavailable_events.append(
+            {
+                **probe,
+                "before": status(),
+                "result": {
+                    "schema": 1,
+                    "ok": False,
+                    "cmd": probe["command"],
+                    "code": "ESP_ERR_NOT_SUPPORTED",
+                    "release_profile": "core_1_0",
+                    "feature": probe["feature"],
+                },
+                "after": status(),
+            }
+        )
+
+    checks = {
+        "exact_candidate": True,
+        "esp_idf_v5_5_4": True,
+        "core_profile": True,
+        "pre_ui_crashlog_clean": True,
+        "core_tab_sequence_exact": True,
+        "core_scroll_surfaces_exact": True,
+        "core_compose_targets_exact": True,
+        "tab_switches_settle": True,
+        "data_refresh_exercised": True,
+        "data_refreshes_pass": True,
+        "unavailable_destinations_rejected": True,
+        "no_public_rf": True,
+        "no_network_tx": True,
+        "no_map_network_requests": True,
+        "no_formatting": True,
+        "uptime_monotonic": True,
+        "no_stuck_pending": True,
+        "final_active_tab_known": True,
+    }
+    version = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "version",
+        "build_commit": COMMIT,
+        "release_profile": "core_1_0",
+        "sd_history_mode": "disabled",
+        "idf": "v5.5.4",
+    }
+    return {
+        "schema": 1,
+        "kind": "core_ui_corruption_probe",
+        "mode": "hardware",
+        "ok": True,
+        "closure_eligible": True,
+        "hardware_required": True,
+        "physical_observed": True,
+        "port": "COM12",
+        "release_profile": "core_1_0",
+        "sd_history_mode": "disabled",
+        "expected_firmware_commit": COMMIT,
+        "device_build_commit": COMMIT,
+        "firmware_identity_required": True,
+        "firmware_identity_ok": True,
+        "github_actions_run": RUN_ID,
+        "workflow_run_attempt": RUN_ATTEMPT,
+        "git": {"commit": COMMIT, "dirty": False, "dirty_entries": []},
+        "rounds": core_ui_corruption_probe_d1l.RELEASE_MIN_ROUNDS,
+        "tabs": list(core_ui_corruption_probe_d1l.CORE_TAB_SEQUENCE),
+        "scroll_surfaces": list(
+            core_ui_corruption_probe_d1l.CORE_SCROLL_SURFACES
+        ),
+        "scroll_events": [
+            {
+                "surface": surface,
+                "command": f"ui scroll-probe {surface}",
+                "result": {"schema": 1, "ok": True},
+            }
+            for surface in core_ui_corruption_probe_d1l.CORE_SCROLL_SURFACES
+        ],
+        "compose_targets": list(
+            core_ui_corruption_probe_d1l.CORE_COMPOSE_TARGETS
+        ),
+        "compose_events": [
+            {
+                "target": target,
+                "command": f"ui compose-probe {target}",
+                "result": {"schema": 1, "ok": True},
+            }
+            for target in core_ui_corruption_probe_d1l.CORE_COMPOSE_TARGETS
+        ],
+        "unavailable_ui_probes": unavailable_plan,
+        "unavailable_events": unavailable_events,
+        "skip_data_canary": False,
+        "data_refresh_events": (
+            core_ui_corruption_probe_d1l.RELEASE_MIN_ROUNDS
+        ),
+        "clear_crashlog_before_start": False,
+        "checks": checks,
+        "setup_events": [
+            {"command": "version", "result": version},
+            {"command": "health", "result": health()},
+            {"command": "ui status", "result": status()},
+            {"command": "crashlog", "result": crashlog()},
+        ],
+        "final_health": health(),
+        "public_rf_tx": False,
+        "network_tx": False,
+        "map_network_requests": False,
+        "formats_sd": False,
+        "events": events,
+    }
+
+
+def test_core_ui_gate_recomputes_unavailable_deep_link_events(tmp_path):
+    path = write_json(tmp_path / "core-ui.json", passing_core_ui())
+    assert audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+    missing = passing_core_ui()
+    missing["unavailable_events"].pop()
+    write_json(path, missing)
+    assert not audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+    changed_tab = passing_core_ui()
+    changed_tab["unavailable_events"][0]["after"]["active_tab"] = "messages"
+    write_json(path, changed_tab)
+    assert not audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+    wrong_feature = passing_core_ui()
+    wrong_feature["unavailable_events"][1]["result"]["feature"] = "map"
+    write_json(path, wrong_feature)
+    assert not audit.core_ui_gate(
         path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
     ).ok
 
@@ -925,6 +1161,10 @@ def test_defect_gate_delegates_to_strict_raw_api_validator(
                 "commit": COMMIT,
                 "run_id": RUN_ID,
                 "run_attempt": RUN_ATTEMPT,
+                "max_age_sec": audit.DEFECT_RECEIPT_MAX_AGE_SEC,
+                "max_future_skew_sec": (
+                    audit.DEFECT_RECEIPT_MAX_FUTURE_SKEW_SEC
+                ),
             },
         )
     ]

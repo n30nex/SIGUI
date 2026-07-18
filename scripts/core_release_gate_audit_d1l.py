@@ -13,6 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+
+DEFECT_RECEIPT_MAX_AGE_SEC = 15 * 60
+DEFECT_RECEIPT_MAX_FUTURE_SKEW_SEC = 30
+
 try:
     import release_gate_audit_d1l as full_release_audit
     import rf_full_acceptance_d1l as rf_acceptance
@@ -37,7 +41,9 @@ try:
         crashlog_clean,
         disabled_storage_status_ok,
         exact_unsupported_result,
+        exact_unavailable_status_result,
         mutation_probe_plan,
+        unavailable_status_probe_plan,
     )
     from core_flash_only_d1l import (
         FLASH_PHASE_RETAINED_REFLASH,
@@ -52,6 +58,8 @@ try:
         CORE_TAB_SEQUENCE,
         RELEASE_MIN_ROUNDS,
         core_tab_sequence_ok,
+        unavailable_ui_events_ok,
+        unavailable_ui_probe_plan,
     )
     from package_release_d1l import core_capability_truth
     from release_gate_audit_d1l import (
@@ -95,7 +103,9 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         crashlog_clean,
         disabled_storage_status_ok,
         exact_unsupported_result,
+        exact_unavailable_status_result,
         mutation_probe_plan,
+        unavailable_status_probe_plan,
     )
     from scripts.core_flash_only_d1l import (
         FLASH_PHASE_RETAINED_REFLASH,
@@ -110,6 +120,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         CORE_TAB_SEQUENCE,
         RELEASE_MIN_ROUNDS,
         core_tab_sequence_ok,
+        unavailable_ui_events_ok,
+        unavailable_ui_probe_plan,
     )
     from scripts.package_release_d1l import core_capability_truth
     from scripts.release_gate_audit_d1l import (
@@ -1225,6 +1237,27 @@ def core_smoke_gate(
             for observed, expected in zip(probes, expected_plan)
         )
     )
+    status_probes = data.get("unavailable_status_probes")
+    expected_status_plan = unavailable_status_probe_plan(sd_history_mode)
+    status_probes_ok = (
+        isinstance(status_probes, list)
+        and len(status_probes) == len(expected_status_plan)
+        and all(
+            isinstance(observed, dict)
+            and observed.get("command") == expected["command"]
+            and observed.get("feature") == expected["feature"]
+            and exact_unavailable_status_result(
+                observed.get("result"),
+                expected["command"],
+                expected["feature"],
+                commit,
+                sd_history_mode,
+            )
+            for observed, expected in zip(
+                status_probes, expected_status_plan
+            )
+        )
+    )
     commands = data.get("supported_commands_executed")
     commands_exact = commands == list(CORE_SMOKE_COMMANDS)
     no_public_send = isinstance(commands, list) and not any(
@@ -1298,6 +1331,7 @@ def core_smoke_gate(
         "disabled_sd_nvs_authoritative",
         "pre_ui_crashlog_clean",
         "unavailable_mutations_rejected",
+        "disabled_sd_status_probes_truthful",
         "health_ready",
         "persistence_pass",
         "no_public_rf",
@@ -1324,6 +1358,7 @@ def core_smoke_gate(
         and str(data.get("workflow_run_attempt")) == str(run_attempt)
         and checks_exact
         and probes_ok
+        and status_probes_ok
         and commands_exact
         and no_public_send
         and raw_results_ok
@@ -1342,6 +1377,7 @@ def core_smoke_gate(
         {
             "artifact_ok": data.get("ok"),
             "probe_plan_exact": probes_ok,
+            "status_probe_plan_exact": status_probes_ok,
             "supported_commands_exact": commands_exact,
             "raw_supported_results_ok": raw_results_ok,
             "disabled_sd_nvs_authoritative": disabled_storage_ok,
@@ -1388,6 +1424,16 @@ def core_ui_gate(
             and event.get("command") == f"ui compose-probe {target}"
             and event.get("result", {}).get("ok") is True
             for event, target in zip(compose_events, CORE_COMPOSE_TARGETS)
+        )
+    )
+    unavailable_events = data.get("unavailable_events")
+    unavailable_ok = (
+        data.get("unavailable_ui_probes")
+        == unavailable_ui_probe_plan(sd_history_mode)
+        and unavailable_ui_events_ok(
+            unavailable_events,
+            commit,
+            sd_history_mode,
         )
     )
     events = data.get("events")
@@ -1439,7 +1485,7 @@ def core_ui_gate(
         "tab_switches_settle",
         "data_refresh_exercised",
         "data_refreshes_pass",
-        "no_unavailable_destination",
+        "unavailable_destinations_rejected",
         "no_public_rf",
         "no_network_tx",
         "no_map_network_requests",
@@ -1516,6 +1562,7 @@ def core_ui_gate(
         and core_tab_sequence_ok(data.get("tabs"))
         and scroll_ok
         and compose_ok
+        and unavailable_ok
         and data.get("skip_data_canary") is False
         and data.get("data_refresh_events") == data.get("rounds")
         and raw_events_pass
@@ -1540,6 +1587,7 @@ def core_ui_gate(
             "expected_tabs": list(CORE_TAB_SEQUENCE),
             "scroll_surfaces_exact": scroll_ok,
             "compose_targets_exact": compose_ok,
+            "unavailable_destinations_rejected": unavailable_ok,
             "raw_round_sequence_exact": raw_sequence_ok,
             "raw_event_checks_pass": raw_events_pass,
             "pre_ui_setup_exact": setup_ok,
@@ -3059,6 +3107,10 @@ def defect_gate(
                     commit=commit,
                     run_id=str(run_id),
                     run_attempt=str(run_attempt),
+                    max_age_sec=DEFECT_RECEIPT_MAX_AGE_SEC,
+                    max_future_skew_sec=(
+                        DEFECT_RECEIPT_MAX_FUTURE_SKEW_SEC
+                    ),
                 )
             )
         except (OSError, RuntimeError, TypeError, ValueError) as exc:

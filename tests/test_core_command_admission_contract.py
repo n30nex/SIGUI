@@ -88,6 +88,46 @@ def test_sd_policy_allows_qualification_unless_mode_is_disabled():
     assert "D1L_SD_HISTORY_MODE_DISABLED" in availability
     assert "D1L_SD_HISTORY_MODE_CONDITIONAL" not in availability
     assert "release_command_feature_available(rule->feature)" in enforcement
+    assert "rule->feature == D1L_RELEASE_FEATURE_SD_HISTORY" in enforcement
+    assert "rule->access == D1L_RELEASE_COMMAND_READ_ONLY" in enforcement
+    assert "D1L_SD_HISTORY_MODE_DISABLED" in enforcement
+    assert (
+        'command, "storage status", sizeof("storage status") - 1U'
+        in enforcement
+    )
+    assert "release_unavailable_status(" in enforcement
+
+
+def test_disabled_sd_core_short_circuits_active_bridge_status_handlers():
+    enforcement = CONSOLE.split(
+        "static bool enforce_release_command_policy(", 1
+    )[1].split("static void print_hex_bytes_json(", 1)[0]
+    handler = CONSOLE.split("static void handle_line(", 1)[1].split(
+        "void d1l_usb_console_run(", 1
+    )[0]
+    assert handler.index("enforce_release_command_policy(command)") < min(
+        handler.index(f'strcmp(line, "{command}")')
+        for command in (
+            "rp2040 status",
+            "rp2040 ping",
+            "rp2040 stock-probe",
+            "storage diag",
+            "storage diag raw",
+            "storage setup",
+        )
+    )
+    assert "d1l_rp2040_bridge" not in enforcement
+
+    core_help, _ = _help_profiles()
+    for command in (
+        r"rp2040 status",
+        r"rp2040 ping",
+        r"rp2040 stock-probe",
+        r"storage diag",
+        r"storage diag raw",
+        r"storage setup",
+    ):
+        assert command not in core_help
 
 
 def test_profile_fields_bind_health_and_status_to_exact_build_identity():
