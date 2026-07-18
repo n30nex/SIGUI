@@ -2,9 +2,32 @@
 
 MeshCore DeskOS D1L is firmware for the Seeed SenseCAP Indicator D1L: ESP32-S3, RP2040, 480x480 touch display, and SX1262 LoRa radio. The goal is a touch-first MeshCore desk console for Public messages, direct messages, node visibility, packet diagnostics, and optional FAT32 SD-card backed history.
 
-Current public-release status: **not ready to tag**. Exact main `de0bb75bd91146f0dc9896540d12c71889d7766b` through PR #182 is strict-banked by Actions `29548300732`: 1,263 host plus 33 checksum tests, 1,008 wire vectors, 931 oracle checks, existing wire/advert fuzzing, and 100,000 native plus 100,000 Clang 18 semantic-packet cases pass with zero findings. Five artifacts / 46 entries / 341 files total 27,208,527 bytes; canonical receipt SHA-256 is `8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9`. The truthful WP-05 matrix is 13 implemented / 3 partial / 0 missing semantic requirements across 11 suites / 75 scenarios; fuzz is 4 implemented / 1 partial / 3 missing. PRs #171/#173 bank WP-06 Admin-owner and queue-fairness foundations, but complete ownership remains open. A non-erasing exact COM12 flash passed; retained predecessor DM data now has an explicit data-preserving migration blocker while final storage health remained READY_SD/FAT32/mounted with zero SD/NVS-mirror I/O errors. Official-peer RF, physical acceptance, full WP-05/WP-06, and release closure remain open. Reporting remains 80% capability implementation, 74% weighted release progress, and 0 of 11 final gates green. No tag may be cut until the exact release-commit gate is green.
+Current production-release status: **74% at the last strict-verified checkpoint; current fail-closed live score 64%; not ready to tag**. Capability implementation is 80%, but final release-gate closure is 0 of 11. The live score temporarily excludes automated-acceptance credit until the current `main` artifacts are downloaded and checksum-verified. Live merged `main` is `bd6ea0e685442d8a820766f4686395e50ca5397f` through PR #198; exact-main Actions `29651963484` passed. The last fully downloaded/checksum-verified strict bank remains predecessor `d24894268d877c09644d41bb45f23a795af8b93d` / Actions `29645992569`; its audit is fail-closed with 6 pass / 30 fail, including 28 P0 and 2 P1 failures. No tag may be cut until the exact release-commit audit reports `ready_for_public_release=true`.
 
-## Feature Matrix
+## Completion at a glance
+
+“Complete” means the implementation is merged; exact-candidate hardware, interoperability, recovery, and release evidence are still required where applicable.
+
+| State | Count | Feature domains | Main work still required |
+|---|---:|---|---|
+| **Implementation complete** | 7 | Boot/board/display/touch; Home/navigation; Public messages; Packets; Radio profile; SD bridge/core files; Diagnostics/crash/health | One frozen-candidate physical/interoperability/recovery/soak pass. |
+| **Advanced** | 13 | Direct messages; Contacts; Heard nodes; Channels; Routes; TRACE; Identity/adverts; Retained history; Map; Wi-Fi; Emoji/UTF-8; QR; Packaging/release | Official-peer RF, physical UI, live Map/Wi-Fi, storage durability, exact full artifacts, and release proof. |
+| **Partial** | 5 | Repeater/room administration; Notifications; Terminal/log; truthful no-onboard-GPS/manual location; Observer/MQTT | Finish workflows, product decisions, security/ownership, accessibility, and acceptance. |
+| **Not merged / not started** | 2 | BLE companion transport; Signed SD/OTA update and recovery | Fix/finish draft #199, then implement secure update, anti-rollback, recovery, and hardware proof. |
+
+See the [current production handoff](docs/RELEASE_HANDOFF_2026-07-18.md) for the full 27-domain implemented-versus-required matrix and the [active roadmap](docs/ROADMAP.md) for execution order.
+
+## Current UI
+
+These 480×480 images were regenerated on 2026-07-18 from the merged UI base `9edc22f`. They are simulator references, not device photos or physical release evidence.
+
+| Home | Messages | Nodes |
+|---|---|---|
+| <img src="docs/screenshots/home.png" width="240" alt="Current SIGUI Home simulator"> | <img src="docs/screenshots/messages.png" width="240" alt="Current SIGUI Messages simulator"> | <img src="docs/screenshots/nodes.png" width="240" alt="Current SIGUI Nodes simulator"> |
+| Map | TRACE | Tools / Settings |
+| <img src="docs/screenshots/map.png" width="240" alt="Current SIGUI Map simulator"> | <img src="docs/screenshots/route_trace_sheet.png" width="240" alt="Current SIGUI TRACE simulator"> | <img src="docs/screenshots/settings.png" width="240" alt="Current SIGUI Tools and Settings simulator"> |
+
+## Detailed feature matrix
 
 Status values: Working, Hardware-proven, Partial, Experimental, Not started.
 
@@ -26,7 +49,7 @@ Status values: Working, Hardware-proven, Partial, Experimental, Not started.
 | Map and tile cache | Partial | Map uses the built-in OpenStreetMap Standard tile source with no provider editor. The simple setup path is `Map -> Map options -> Set location or Cache status`; connect Wi-Fi, then open the actual Map. PR #131 owns the bounded setup/controller lifecycle. PR #175 adds bounded signed-location pins, verified age/role/unknown-accuracy truth, explicit center provenance, trust-loss invalidation, and backward-time rollback rechecks without background prefetch, RF transmission, or SD formatting. The Map starts at regional zoom 10, supports one-finger pan plus 44x44-or-larger `-`, `+`, and `Center` controls across zooms 8 through 14, and requests at most the visible current-view 3x3 at one zoom per visible generation. Map provider/cache/fetch/render/cancel/revisit qualification, combined-COM12 pixels, live control/cache/heap proof, and physical acceptance remain pending. |
 | Truthful time | Partial | PR #120 centralizes monotonic, wall, certificate-validity, and MeshCore protocol clocks. PR #124 binds the protocol allocator floor to the exact source epoch, quarantines excessive SNTP forward jumps, permits authenticated representable companion recovery, preflights protocol time before TX-side effects, and exposes persistence/admission recovery truth. Retained validated-wall recovery, explicit legacy migration, timezone/display conversion, authenticated companion transport acceptance, and exact-device cold-boot/SNTP/jump/reboot/power/TLS proof remain open. |
 | Wi-Fi | Partial | Setup UI and bounded serial controls exist and remain disabled by default. PR #121 adds a truthful connectivity view model; PR #126 adds the bounded reconnect policy; PR #128 adds the CRC-protected persisted repeated-crash boot guard. PR #130 extracts the setup sheet into one bounded controller with owned immutable view strings, nine persistent generation-checked bindings, fail-closed malformed-state cleanup, repeat-create safety, and password buffers cleared before refresh, hide, or destruction. The credential physical-flash threat model/NVS-encryption decision and exact-candidate live AP/reboot/wrong-password/weak-signal/safe-mode/full reconnect-stress plus touch/keyboard/credential-memory proof remain open. Standalone `de79c9f` remains predecessor hardware evidence only. |
-| BLE, OTA, GPS | Not started | PR #132 owns a truthful BLE setup sheet that keeps pairing/forget unavailable; it does not implement release-grade BLE companion transport. BLE transport, OTA, GPS/location-source integration, and nearby GPS node pins remain pending. |
+| BLE, signed update, GPS/location | Not merged / not started | Draft PR #199 adds a secure NimBLE foundation but currently fails the Actions firmware build on two missing NimBLE declarations and is not part of the supported merged matrix. Mesh-owner integration, bonding/PIN management, official-client hardware/coexistence/cycle/soak proof, and signed SD/OTA anti-rollback/update/recovery remain open. D1L has no onboard GPS; manual or companion location must remain truthful. |
 | Soak and physical review | Partial | Short evidence exists. Full 12-hour idle/listening soak and physical photos/manual UI review are still open. |
 
 Retained Public/DM message history, route history, packet history, diagnostic exports, sampled user-data exports, and map-tile cache can use SD only when the RP2040 bridge reports a ready FAT32 card with file operations and atomic rename. These retained stores keep NVS fallback available.
@@ -83,7 +106,7 @@ Current D1L bench defaults:
 - ESP32 app/console: `COM12`
 - RP2040 smoke/UF2 maintenance: `COM16`; the production bridge intentionally
   exposes no USB CDC port and is controlled through the ESP32 console on `COM12`.
-- Never use `COM8`, `COM11`, or `COM29` as the D1L serial/flash target. `COM11` may be checked separately only as the independent bot/radio endpoint for controlled DM evidence.
+- Never open or use `COM8`, `COM11`, or `COM29`. Controlled-peer RF evidence must use a distinct non-forbidden endpoint or D1L-observed bidirectional proof.
 - Do not format SD from firmware, scripts, serial commands, or UI.
 - Do not send Public RF during SD validation.
 
