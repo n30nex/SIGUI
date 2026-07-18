@@ -278,6 +278,12 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         "rp2040 stock-probe", D1L_RELEASE_COMMAND_READ_ONLY,
         D1L_RELEASE_FEATURE_SD_HISTORY),
     D1L_RELEASE_RULE_EXACT(
+        "ui scroll-probe storage_card", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "ui scroll-probe storage_data", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
         "storage mount", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
     D1L_RELEASE_RULE_EXACT(
@@ -635,12 +641,19 @@ static bool release_command_feature_available(
 static bool enforce_release_command_policy(
     const d1l_usb_command_view_t *command)
 {
-    if (d1l_release_profile_is_core() &&
-        d1l_usb_command_equals(
-            command, "packets clear", sizeof("packets clear") - 1U)) {
-        release_unsupported_result(
-            command, D1L_RELEASE_FEATURE_PACKETS);
-        return false;
+    if (d1l_release_profile_is_core()) {
+        if (d1l_usb_command_equals(
+                command, "packets clear", sizeof("packets clear") - 1U)) {
+            release_unsupported_result(
+                command, D1L_RELEASE_FEATURE_PACKETS);
+            return false;
+        }
+        if (d1l_usb_command_equals(
+                command, "nodes clear", sizeof("nodes clear") - 1U)) {
+            release_unsupported_result(
+                command, D1L_RELEASE_FEATURE_NODES);
+            return false;
+        }
     }
     const d1l_release_command_rule_t *rule = release_command_rule(command);
     if (!rule || release_command_feature_available(rule->feature) ||
@@ -5264,7 +5277,9 @@ static void cmd_messages_read(const char *line)
 static void cmd_nodes(void)
 {
     d1l_node_store_stats_t stats = d1l_node_store_stats();
-    const uint32_t marker_generation = d1l_node_store_marker_generation();
+    const bool include_location = !d1l_release_profile_is_core();
+    const uint32_t marker_generation = include_location ?
+        d1l_node_store_marker_generation() : 0U;
     static d1l_node_view_t entries[8];
     const d1l_node_query_t query = {
         .filter = D1L_NODE_FILTER_ALL,
@@ -5275,28 +5290,42 @@ static void cmd_nodes(void)
     };
     size_t copied = d1l_node_store_query(&query, entries, 8);
     ok_begin("nodes");
-    printf(",\"count\":%u,\"capacity\":%u,\"active_capacity\":%u,\"sd_history_capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"marker_generation\":%lu,\"filter\":\"all\",\"sort\":\"last_heard\",\"entries\":[",
+    printf(",\"count\":%u,\"capacity\":%u,\"active_capacity\":%u,\"sd_history_capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu",
            (unsigned)stats.count, (unsigned)stats.capacity,
            (unsigned)D1L_NODE_RAM_ACTIVE_CAPACITY,
            (unsigned)D1L_NODE_SD_HISTORY_CAPACITY,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
-           (unsigned long)marker_generation);
+           (unsigned long)stats.total_written,
+           (unsigned long)stats.dropped_oldest);
+    if (include_location) {
+        printf(",\"marker_generation\":%lu",
+               (unsigned long)marker_generation);
+    }
+    printf(",\"filter\":\"all\",\"sort\":\"last_heard\",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         const d1l_node_view_t *view = &entries[i];
         const d1l_node_entry_t *e = &view->node;
-        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"display_name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"favorite\":%s,\"muted\":%s,\"keyed\":%s,\"reachable\":%s,\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"location_valid\":%s,\"lat_e6\":%ld,\"lon_e6\":%ld,\"location_advert_timestamp\":%lu,\"location_seq\":%lu}",
+        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"display_name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"favorite\":%s,\"muted\":%s,\"keyed\":%s,\"reachable\":%s,\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->first_heard_ms,
                (unsigned long)e->last_heard_ms, (unsigned long)e->advert_timestamp,
                (unsigned long)e->heard_count, e->fingerprint, e->public_key_hex,
                e->name, view->display_name, e->type, view->role,
                bool_json(view->favorite), bool_json(view->muted),
                bool_json(view->keyed), bool_json(view->reachable),
-               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
-               bool_json(e->location_valid), (long)e->lat_e6, (long)e->lon_e6,
-               (unsigned long)e->location_advert_timestamp,
-               (unsigned long)e->location_seq);
+               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops);
+        if (include_location) {
+            printf(",\"location_valid\":%s,\"lat_e6\":%ld,\"lon_e6\":%ld,\"location_advert_timestamp\":%lu,\"location_seq\":%lu",
+                   bool_json(e->location_valid), (long)e->lat_e6,
+                   (long)e->lon_e6,
+                   (unsigned long)e->location_advert_timestamp,
+                   (unsigned long)e->location_seq);
+        }
+        printf("}");
     }
-    printf("],\"persisted\":true,\"note\":\"Verified MeshCore adverts populate this bounded heard-node store; enriched query rows expose role, favorite, keyed, and reachability state\"}\n");
+    if (include_location) {
+        printf("],\"persisted\":true,\"note\":\"Verified MeshCore adverts populate this bounded heard-node store; enriched query rows expose role, favorite, keyed, and reachability state\"}\n");
+    } else {
+        printf("],\"persisted\":true,\"note\":\"Core node projection exposes verified identity, role, favorite, keyed, reachability, route, and signal fields\"}\n");
+    }
 }
 
 static void cmd_nodes_clear(void)
@@ -6885,8 +6914,7 @@ static void cmd_help(void)
                "\"messages dm <fingerprint> [offset <n>]\","
                "\"messages unread\","
                "\"messages read <public|dm|dm <fingerprint>|all>\","
-               "\"messages clear\",\"messages dm clear\",\"nodes\","
-               "\"nodes clear\",\"contacts\","
+               "\"messages clear\",\"messages dm clear\",\"nodes\",\"contacts\","
                "\"contacts export [fingerprint]\","
                "\"contacts import <meshcore-uri>\","
                "\"contacts add <fingerprint> [alias]\","

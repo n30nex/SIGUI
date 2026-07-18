@@ -59,6 +59,36 @@ static void test_valid_and_explicit_length_contract(void)
         &view, "mesh send public ", sizeof("mesh send public ") - 1U));
 }
 
+static void test_exact_release_command_boundaries(void)
+{
+    char buffer[256];
+    d1l_usb_command_view_t view = {0};
+    const char *const exact_commands[] = {
+        "nodes clear",
+        "packets clear",
+        "ui scroll-probe storage_card",
+        "ui scroll-probe storage_data",
+    };
+    for (size_t i = 0U;
+         i < sizeof(exact_commands) / sizeof(exact_commands[0]); ++i) {
+        const char *literal = exact_commands[i];
+        const size_t length = strlen(literal);
+        assert(admit_bytes(
+                   (const uint8_t *)literal, length, buffer, sizeof(buffer),
+                   &view) == D1L_USB_COMMAND_ADMIT_OK);
+        assert(d1l_usb_command_equals(&view, literal, length));
+
+        char suffixed[64] = {0};
+        assert(length + 2U < sizeof(suffixed));
+        memcpy(suffixed, literal, length);
+        memcpy(suffixed + length, " x", 3U);
+        assert(admit_bytes(
+                   (const uint8_t *)suffixed, length + 2U, buffer,
+                   sizeof(buffer), &view) == D1L_USB_COMMAND_ADMIT_OK);
+        assert(!d1l_usb_command_equals(&view, literal, length));
+    }
+}
+
 static void test_hidden_and_control_bytes_fail_closed(void)
 {
     char buffer[256];
@@ -214,6 +244,7 @@ static void test_deterministic_fuzz_contract(void)
 int main(void)
 {
     test_valid_and_explicit_length_contract();
+    test_exact_release_command_boundaries();
     test_hidden_and_control_bytes_fail_closed();
     test_empty_truncated_prefix_and_oversize_contract();
     test_numeric_suffixes_fail_closed();

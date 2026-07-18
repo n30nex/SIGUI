@@ -281,7 +281,7 @@ def test_marker_query_is_bounded_passive_and_location_only():
         assert forbidden not in query
 
 
-def test_serial_nodes_and_diagnostic_export_report_exact_advert_coordinates():
+def test_non_core_serial_nodes_and_export_report_exact_advert_coordinates():
     console = read("main/comms/usb_console.c")
     cmd_nodes = function_slice(console, "static void cmd_nodes", "static void cmd_nodes_clear")
     export_nodes = function_slice(
@@ -300,6 +300,8 @@ def test_serial_nodes_and_diagnostic_export_report_exact_advert_coordinates():
         assert field in cmd_nodes
         if "marker_generation" not in field:
             assert field in export_nodes
+    assert "const bool include_location = !d1l_release_profile_is_core();" in cmd_nodes
+    assert cmd_nodes.count("if (include_location) {") == 3
 
 
 def test_product_contract_has_manual_center_and_no_onboard_gps_claim():
