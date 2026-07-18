@@ -150,6 +150,20 @@ def _numeric_run_attempt(value: object) -> int | None:
     return normalized if normalized >= 1 and str(normalized) == str(value) else None
 
 
+def _has_exact_run_attempt_aliases(
+    payload: object, expected: int
+) -> bool:
+    if not isinstance(payload, dict) or type(expected) is not int or expected < 1:
+        return False
+    github_attempt = payload.get("github_actions_run_attempt")
+    workflow_attempt = payload.get("workflow_run_attempt")
+    return (
+        type(github_attempt) is int
+        and type(workflow_attempt) is int
+        and github_attempt == workflow_attempt == expected
+    )
+
+
 def _inside(path: Path, root: Path, label: str) -> Path:
     root = root.resolve()
     resolved = path.resolve()
@@ -239,6 +253,7 @@ def _validate_actions_run(
     repository = repository if isinstance(repository, dict) else {}
     if not (
         str(payload.get("id")) == run_id
+        and type(payload.get("run_attempt")) is int
         and payload.get("run_attempt") == run_attempt
         and payload.get("status") == "completed"
         and payload.get("conclusion") == "success"
@@ -324,6 +339,8 @@ def _validate_issue_rows(issues: list[dict[str, Any]]) -> None:
     numbers: set[int] = set()
     repository_url = f"https://api.github.com/repos/{REPOSITORY}"
     for issue in issues:
+        if not isinstance(issue, dict):
+            raise ValueError("GitHub issue query returned a non-object issue row")
         number = issue.get("number")
         labels = issue.get("labels")
         comments = issue.get("comments")
@@ -357,6 +374,10 @@ def _validate_comment_rows(
     issue_by_number = {issue["number"]: issue for issue in issues}
     by_issue: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for comment in comments:
+        if not isinstance(comment, dict):
+            raise ValueError(
+                "GitHub issue-comment query returned a non-object row"
+            )
         number = _issue_number_from_comment(comment)
         user = comment.get("user")
         if not (
@@ -664,7 +685,7 @@ def _recompute_core_audit(
         "--github-run-id",
         str(audit.get("github_actions_run")),
         "--github-run-attempt",
-        str(audit.get("github_actions_run_attempt")),
+        str(audit.get("workflow_run_attempt")),
         "--github-run-dir",
         str(audit.get("github_run_dir")),
         "--commit",
@@ -694,6 +715,7 @@ def _audit_projection(audit: dict[str, Any]) -> dict[str, Any]:
         "commit",
         "github_actions_run",
         "github_actions_run_attempt",
+        "workflow_run_attempt",
         "github_run_dir",
         "d1l_port",
         "sd_history_mode",
@@ -766,7 +788,7 @@ def validate_non_tag_audit(
         and audit.get("release_profile") == CORE_RELEASE_PROFILE
         and exact_sha(audit.get("commit")) == commit
         and str(audit.get("github_actions_run")) == run_id
-        and audit.get("github_actions_run_attempt") == run_attempt
+        and _has_exact_run_attempt_aliases(audit, run_attempt)
         and audit.get("full_feature_release_ready") is False
         and audit.get("core_release_ready") is False
     ):
@@ -932,6 +954,486 @@ def _write_page_set(
         "item_count": sum(row["item_count"] for row in rows),
         "pages": rows,
     }
+
+
+def _validated_receipt_file(
+    row: object,
+    *,
+    root: Path,
+    label: str,
+    seen_paths: set[str],
+    expected_parent: Path | None,
+) -> tuple[Path, bytes]:
+    if not isinstance(row, dict) or set(row) != {"path", "size", "sha256"}:
+        raise ValueError(f"{label} file row is invalid")
+    relative = row.get("path")
+    if (
+        not isinstance(relative, str)
+        or not relative
+        or "\\" in relative
+        or Path(relative).is_absolute()
+    ):
+        raise ValueError(f"{label} path is not a canonical repository path")
+    path = _inside(root / relative, root, label)
+    if path.relative_to(root.resolve()).as_posix() != relative:
+        raise ValueError(f"{label} path is not canonical")
+    if expected_parent is not None and path.parent != expected_parent.resolve():
+        raise ValueError(f"{label} must be beside its defect receipt")
+    canonical_relative = path.relative_to(root.resolve()).as_posix()
+    if canonical_relative in seen_paths:
+        raise ValueError(f"{label} duplicates a retained raw path")
+    seen_paths.add(canonical_relative)
+    if (
+        not path.is_file()
+        or is_link_or_reparse(path)
+        or type(row.get("size")) is not int
+        or row["size"] < 0
+        or not isinstance(row.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", row["sha256"]) is None
+    ):
+        raise ValueError(f"{label} retained raw file is missing or invalid")
+    actual = file_row(path, root)
+    if actual != row:
+        raise ValueError(f"{label} retained raw file hash/size mismatch")
+    return path, path.read_bytes()
+
+
+def _recompute_raw_page_set(
+    page_set: object,
+    *,
+    root: Path,
+    receipt_dir: Path,
+    label: str,
+    base_endpoint: str,
+    seen_paths: set[str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not isinstance(page_set, dict) or set(page_set) != {
+        "complete",
+        "empty_sentinel_page",
+        "page_count_including_empty_sentinel",
+        "item_count",
+        "pages",
+    }:
+        raise ValueError(f"{label} page-set schema is invalid")
+    pages = page_set.get("pages")
+    if page_set.get("complete") is not True or not isinstance(pages, list) or not pages:
+        raise ValueError(f"{label} page set is incomplete")
+    items: list[dict[str, Any]] = []
+    item_ids: set[int] = set()
+    recomputed_rows: list[dict[str, Any]] = []
+    for expected_page, page in enumerate(pages, start=1):
+        if not isinstance(page, dict) or set(page) != {
+            "page",
+            "endpoint",
+            "item_count",
+            "response",
+        }:
+            raise ValueError(f"{label} page {expected_page} schema is invalid")
+        expected_endpoint = _page_endpoint(base_endpoint, expected_page)
+        if (
+            page.get("page") != expected_page
+            or page.get("endpoint") != expected_endpoint
+        ):
+            raise ValueError(f"{label} page order/endpoint is invalid")
+        _, raw = _validated_receipt_file(
+            page.get("response"),
+            root=root,
+            label=f"{label} page {expected_page}",
+            seen_paths=seen_paths,
+            expected_parent=receipt_dir,
+        )
+        page_value = _json_value(raw, f"{label} page {expected_page}")
+        if not isinstance(page_value, list):
+            raise ValueError(f"{label} page {expected_page} is not an array")
+        page_items: list[dict[str, Any]] = []
+        for item in page_value:
+            if not isinstance(item, dict):
+                raise ValueError(f"{label} contains a non-object item")
+            page_items.append(item)
+        if len(page_items) > PAGE_SIZE:
+            raise ValueError(f"{label} page {expected_page} exceeds per_page")
+        if page.get("item_count") != len(page_items):
+            raise ValueError(f"{label} page {expected_page} item count mismatch")
+        if expected_page < len(pages) and not page_items:
+            raise ValueError(f"{label} has an early empty sentinel")
+        for item in page_items:
+            item_id = item.get("id")
+            if (
+                not isinstance(item_id, int)
+                or isinstance(item_id, bool)
+                or item_id <= 0
+                or item_id in item_ids
+            ):
+                raise ValueError(f"{label} contains an invalid/duplicate item id")
+            item_ids.add(item_id)
+        items.extend(page_items)
+        recomputed_rows.append(
+            {
+                "page": expected_page,
+                "endpoint": expected_endpoint,
+                "item_count": len(page_items),
+                "response": page["response"],
+            }
+        )
+    if pages[-1].get("item_count") != 0:
+        raise ValueError(f"{label} is missing its empty sentinel")
+    recomputed = {
+        "complete": True,
+        "empty_sentinel_page": len(pages),
+        "page_count_including_empty_sentinel": len(pages),
+        "item_count": len(items),
+        "pages": recomputed_rows,
+    }
+    if page_set != recomputed:
+        raise ValueError(f"{label} page-set summary mismatch")
+    return items, recomputed
+
+
+def _valid_utc_timestamp(value: object) -> bool:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (
+        parsed.tzinfo is not None
+        and parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+    )
+
+
+def validate_core_github_defect_receipt(
+    path: Path,
+    *,
+    root: Path,
+    commit: str,
+    run_id: str,
+    run_attempt: int | str,
+    audit_recompute: Callable[[Path, dict[str, Any]], dict[str, Any]]
+    | None = None,
+) -> tuple[bool, list[str], dict[str, Any]]:
+    """Recompute a retained Core defect receipt from every raw GitHub response."""
+    errors: list[str] = []
+    details: dict[str, Any] = {}
+    root = root.resolve()
+    commit = exact_sha(commit)
+    run_id = _numeric_run_id(run_id)
+    run_attempt = _numeric_run_attempt(run_attempt)
+    if commit is None or run_id is None or run_attempt is None:
+        return False, ["validator expected candidate identity is invalid"], details
+    try:
+        path = _inside(path, root, "Defect receipt")
+        if not path.is_file() or is_link_or_reparse(path):
+            raise ValueError("Defect receipt must be a direct regular file")
+        receipt = _read_json_file(path)
+        receipt_dir = path.parent.resolve()
+        details["receipt"] = receipt
+        required = {
+            "schema": 1,
+            "kind": "core_github_defect_snapshot",
+            "mode": "github-api-snapshot",
+            "source": "github_api",
+            "dry_run": False,
+            "simulated": False,
+            "edited": False,
+            "source_only": False,
+            "release_profile": CORE_RELEASE_PROFILE,
+            "repository": REPOSITORY,
+            "commit": commit,
+            "github_actions_run": run_id,
+            "capture_complete": True,
+            "full_feature_release_ready": False,
+        }
+        for field, expected in required.items():
+            if receipt.get(field) != expected:
+                errors.append(f"receipt {field} mismatch")
+        if not _has_exact_run_attempt_aliases(receipt, run_attempt):
+            errors.append("receipt run-attempt aliases mismatch")
+        release_phase = receipt.get("release_phase")
+        if release_phase not in {"pre-tag", "post-tag"}:
+            errors.append("receipt release phase is invalid")
+            release_phase = "invalid"
+        if not _valid_utc_timestamp(receipt.get("captured_at")):
+            errors.append("receipt captured_at is invalid")
+        source = receipt.get("git")
+        if not (
+            isinstance(source, dict)
+            and exact_sha(source.get("commit")) == commit
+            and source.get("dirty") is False
+            and source.get("dirty_entries") == []
+        ):
+            errors.append("receipt git identity is not the exact clean candidate")
+
+        issue_endpoint = (
+            f"repos/{REPOSITORY}/issues"
+            "?state=all&sort=created&direction=asc"
+        )
+        comment_endpoint = (
+            f"repos/{REPOSITORY}/issues/comments"
+            "?sort=created&direction=asc"
+        )
+        expected_query_contract = {
+            "api": "GitHub REST API 2022-11-28 plus minimal GraphQL viewer query",
+            "page_size": PAGE_SIZE,
+            "issues": issue_endpoint,
+            "comments": comment_endpoint,
+            "github_actions_run_attempt": run_attempt,
+            "workflow_run_attempt": run_attempt,
+            "pagination": "ascending pages through retained empty sentinel",
+            "stability_check": "second complete issue query plus repository identity",
+        }
+        if receipt.get("query_contract") != expected_query_contract:
+            errors.append("receipt query contract mismatch")
+
+        raw_capture = receipt.get("raw_capture")
+        if not isinstance(raw_capture, dict) or set(raw_capture) != {
+            "authenticated_user",
+            "repository",
+            "commit",
+            "actions_run",
+            "issue_pages",
+            "comment_pages",
+            "issue_verification_pages",
+        }:
+            raise ValueError("raw_capture schema is invalid")
+        seen_paths: set[str] = set()
+
+        authenticated = raw_capture.get("authenticated_user")
+        if not isinstance(authenticated, dict) or set(authenticated) != {
+            "login",
+            "response",
+        }:
+            raise ValueError("authenticated-user raw schema is invalid")
+        _, viewer_raw = _validated_receipt_file(
+            authenticated.get("response"),
+            root=root,
+            label="authenticated viewer",
+            seen_paths=seen_paths,
+            expected_parent=receipt_dir,
+        )
+        viewer = _json_object(viewer_raw, "authenticated viewer raw")
+        viewer_login = _validate_viewer(viewer)
+        if authenticated.get("login") != viewer_login:
+            errors.append("authenticated viewer summary mismatch")
+
+        repository = raw_capture.get("repository")
+        if not isinstance(repository, dict) or set(repository) != {
+            "full_name",
+            "stable_during_capture",
+            "before_response",
+            "after_response",
+        }:
+            raise ValueError("repository raw schema is invalid")
+        _, repository_before_raw = _validated_receipt_file(
+            repository.get("before_response"),
+            root=root,
+            label="repository before",
+            seen_paths=seen_paths,
+            expected_parent=receipt_dir,
+        )
+        _, repository_after_raw = _validated_receipt_file(
+            repository.get("after_response"),
+            root=root,
+            label="repository after",
+            seen_paths=seen_paths,
+            expected_parent=receipt_dir,
+        )
+        repository_before = _json_object(
+            repository_before_raw, "repository before raw"
+        )
+        repository_after = _json_object(
+            repository_after_raw, "repository after raw"
+        )
+        _validate_repository(repository_before)
+        _validate_repository(repository_after)
+        _validate_repository_stable(repository_before, repository_after)
+        if (
+            repository.get("full_name") != REPOSITORY
+            or repository.get("stable_during_capture") is not True
+        ):
+            errors.append("repository raw summary mismatch")
+
+        raw_commit = raw_capture.get("commit")
+        if not isinstance(raw_commit, dict) or set(raw_commit) != {
+            "sha",
+            "response",
+        }:
+            raise ValueError("commit raw schema is invalid")
+        _, commit_raw = _validated_receipt_file(
+            raw_commit.get("response"),
+            root=root,
+            label="commit",
+            seen_paths=seen_paths,
+            expected_parent=receipt_dir,
+        )
+        commit_payload = _json_object(commit_raw, "commit raw")
+        _validate_commit(commit_payload, commit)
+        if exact_sha(raw_commit.get("sha")) != commit:
+            errors.append("commit raw summary mismatch")
+
+        actions_run = raw_capture.get("actions_run")
+        if not isinstance(actions_run, dict) or set(actions_run) != {
+            "id",
+            "run_attempt",
+            "status",
+            "conclusion",
+            "response",
+        }:
+            raise ValueError("Actions-run raw schema is invalid")
+        _, run_raw = _validated_receipt_file(
+            actions_run.get("response"),
+            root=root,
+            label="Actions run",
+            seen_paths=seen_paths,
+            expected_parent=receipt_dir,
+        )
+        run_payload = _json_object(run_raw, "Actions run raw")
+        _validate_actions_run(
+            run_payload,
+            commit=commit,
+            run_id=run_id,
+            run_attempt=run_attempt,
+        )
+        if not (
+            str(actions_run.get("id")) == run_id
+            and type(actions_run.get("run_attempt")) is int
+            and actions_run.get("run_attempt") == run_attempt
+            and actions_run.get("status") == run_payload.get("status")
+            and actions_run.get("conclusion") == run_payload.get("conclusion")
+        ):
+            errors.append("Actions-run raw summary mismatch")
+
+        issues, _ = _recompute_raw_page_set(
+            raw_capture.get("issue_pages"),
+            root=root,
+            receipt_dir=receipt_dir,
+            label="issue pages",
+            base_endpoint=issue_endpoint,
+            seen_paths=seen_paths,
+        )
+        comments, _ = _recompute_raw_page_set(
+            raw_capture.get("comment_pages"),
+            root=root,
+            receipt_dir=receipt_dir,
+            label="comment pages",
+            base_endpoint=comment_endpoint,
+            seen_paths=seen_paths,
+        )
+        verification_issues, _ = _recompute_raw_page_set(
+            raw_capture.get("issue_verification_pages"),
+            root=root,
+            receipt_dir=receipt_dir,
+            label="issue verification pages",
+            base_endpoint=issue_endpoint,
+            seen_paths=seen_paths,
+        )
+        if issues != verification_issues:
+            errors.append("duplicated issue query changed during capture")
+        analysis = analyze_issues(
+            issues,
+            comments,
+            commit=commit,
+            run_id=run_id,
+            run_attempt=run_attempt,
+        )
+
+        embedded_exception = receipt.get("pending_tag_exception")
+        embedded_audit = (
+            embedded_exception.get("non_tag_audit")
+            if isinstance(embedded_exception, dict)
+            else None
+        )
+        audit_validation = None
+        if embedded_audit is not None:
+            if release_phase != "pre-tag" or not isinstance(embedded_audit, dict):
+                errors.append("non-tag audit is not admissible for this receipt")
+            else:
+                audit_file = embedded_audit.get("file")
+                audit_path, _ = _validated_receipt_file(
+                    audit_file,
+                    root=root,
+                    label="pre-tag non-tag audit",
+                    seen_paths=seen_paths,
+                    expected_parent=None,
+                )
+                audit_validation = validate_non_tag_audit(
+                    audit_path,
+                    root=root,
+                    commit=commit,
+                    run_id=run_id,
+                    run_attempt=run_attempt,
+                    recompute=audit_recompute,
+                )
+                if audit_validation != embedded_audit:
+                    errors.append("embedded non-tag audit validation mismatch")
+        expected_exception = pending_tag_exception(
+            analysis,
+            release_phase=release_phase,
+            audit_validation=audit_validation,
+        )
+        if embedded_exception != expected_exception:
+            errors.append("pending-tag exception mismatch")
+
+        blocking_after_exception = list(
+            analysis["blocking_core_p0_issue_numbers_raw"]
+        )
+        if expected_exception["applied"]:
+            blocking_after_exception.remove(PENDING_TAG_ISSUE)
+            for issue in analysis["issues"]:
+                if issue["number"] == PENDING_TAG_ISSUE:
+                    issue["excluded_by_pending_tag_exception"] = True
+                    break
+        open_core_p0_count = len(blocking_after_exception)
+        capture_ok = (
+            not analysis["classification_errors"]
+            and open_core_p0_count == 0
+            and analysis["open_core_crash_data_loss_security_p1_count"] == 0
+        )
+        expected_summary = {
+            "ok": capture_ok,
+            "closure_eligible": capture_ok,
+            "classification_labels": list(CLASSIFICATION_LABELS),
+            "classification_errors": analysis["classification_errors"],
+            "mixed_transitions": analysis["mixed_transitions"],
+            "issues": analysis["issues"],
+            "open_core_p0_count_raw": analysis["open_core_p0_count_raw"],
+            "blocking_core_p0_issue_numbers_raw": analysis[
+                "blocking_core_p0_issue_numbers_raw"
+            ],
+            "pending_tag_exception": expected_exception,
+            "open_core_p0_count": open_core_p0_count,
+            "blocking_core_p0_issue_numbers": blocking_after_exception,
+            "open_core_crash_data_loss_security_p1_count": analysis[
+                "open_core_crash_data_loss_security_p1_count"
+            ],
+            "critical_core_p1_issue_numbers": analysis[
+                "critical_core_p1_issue_numbers"
+            ],
+            "open_full_feature_deferred_p0_count": analysis[
+                "open_full_feature_deferred_p0_count"
+            ],
+            "open_full_feature_deferred_p0_issue_numbers": analysis[
+                "open_full_feature_deferred_p0_issue_numbers"
+            ],
+        }
+        for field, expected in expected_summary.items():
+            if receipt.get(field) != expected:
+                errors.append(f"receipt recomputed {field} mismatch")
+        details.update(
+            {
+                "release_gate_ok": capture_ok,
+                "open_core_p0_count": open_core_p0_count,
+                "open_core_crash_data_loss_security_p1_count": analysis[
+                    "open_core_crash_data_loss_security_p1_count"
+                ],
+                "classification_errors": analysis["classification_errors"],
+                "pending_tag_exception": expected_exception,
+                "raw_file_count": len(seen_paths),
+            }
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        errors.append(str(exc))
+    return not errors, errors, details
 
 
 def capture(
@@ -1158,6 +1660,7 @@ def capture(
             "commit": commit,
             "github_actions_run": run_id,
             "github_actions_run_attempt": run_attempt,
+            "workflow_run_attempt": run_attempt,
             "captured_at": utc_now(),
             "capture_complete": True,
             "query_contract": {
@@ -1166,6 +1669,7 @@ def capture(
                 "issues": issue_endpoint,
                 "comments": comment_endpoint,
                 "github_actions_run_attempt": run_attempt,
+                "workflow_run_attempt": run_attempt,
                 "pagination": "ascending pages through retained empty sentinel",
                 "stability_check": "second complete issue query plus repository identity",
             },

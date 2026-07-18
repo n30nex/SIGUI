@@ -161,6 +161,22 @@ def read_receipt(path: Path) -> dict:
     return json.loads(path.read_text(encoding="ascii"))
 
 
+def write_receipt(path: Path, value: dict) -> None:
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n",
+        encoding="ascii",
+        newline="\n",
+    )
+
+
+def rewrite_raw(root: Path, row: dict, value: object) -> None:
+    path = root / row["path"]
+    raw = json.dumps(value, sort_keys=True).encode("utf-8")
+    path.write_bytes(raw)
+    row["size"] = len(raw)
+    row["sha256"] = hashlib.sha256(raw).hexdigest()
+
+
 def audit_payload(*, package_ok: bool = True) -> dict:
     gates = [
         {
@@ -197,6 +213,7 @@ def audit_payload(*, package_ok: bool = True) -> dict:
         "commit": COMMIT,
         "github_actions_run": RUN_ID,
         "github_actions_run_attempt": RUN_ATTEMPT,
+        "workflow_run_attempt": RUN_ATTEMPT,
         "github_run_dir": f"artifacts/github/{RUN_ID}",
         "d1l_port": "COM12",
         "sd_history_mode": "disabled",
@@ -245,6 +262,7 @@ def test_capture_retains_complete_authenticated_raw_page_sets(
     assert receipt["commit"] == COMMIT
     assert receipt["github_actions_run"] == RUN_ID
     assert receipt["github_actions_run_attempt"] == RUN_ATTEMPT
+    assert receipt["workflow_run_attempt"] == RUN_ATTEMPT
     assert receipt["raw_capture"]["authenticated_user"]["login"] == "release-lead"
     assert set(receipt["raw_capture"]["authenticated_user"]) == {
         "login",
@@ -321,6 +339,214 @@ def test_capture_refuses_to_overwrite_immutable_raw_evidence(
         )
 
     assert len(github.calls) == call_count
+
+
+def test_final_validator_recomputes_every_retained_raw_response(
+    tmp_path, monkeypatch
+):
+    clean_git(monkeypatch)
+    monkeypatch.setattr(defects, "PAGE_SIZE", 2)
+    github = FakeGitHub(
+        [issue_row(1, ["p0", "full-feature-deferred"])],
+        [],
+    )
+    receipt_path = defects.capture(
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        out_dir=tmp_path / "artifacts" / "validated-defects",
+        api_fetch=github.api,
+    )
+
+    ok, errors, details = defects.validate_core_github_defect_receipt(
+        receipt_path,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert ok is True, errors
+    assert errors == []
+    assert details["release_gate_ok"] is True
+    assert details["open_core_p0_count"] == 0
+    assert details["raw_file_count"] == 10
+
+
+def test_final_validator_distinguishes_valid_no_go_from_invalid_evidence(
+    tmp_path, monkeypatch
+):
+    clean_git(monkeypatch)
+    github = FakeGitHub(
+        [issue_row(1, ["p0", "core-blocker"])],
+        [],
+    )
+    receipt_path = defects.capture(
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        out_dir=tmp_path / "artifacts" / "valid-no-go",
+        api_fetch=github.api,
+    )
+
+    valid, errors, details = defects.validate_core_github_defect_receipt(
+        receipt_path,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert valid is True, errors
+    assert details["release_gate_ok"] is False
+    assert details["open_core_p0_count"] == 1
+    assert details["receipt"]["ok"] is False
+
+
+def test_final_validator_rejects_raw_file_hash_tampering(
+    tmp_path, monkeypatch
+):
+    clean_git(monkeypatch)
+    github = FakeGitHub(
+        [issue_row(1, ["p0", "full-feature-deferred"])],
+        [],
+    )
+    receipt_path = defects.capture(
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        out_dir=tmp_path / "artifacts" / "hash-tamper",
+        api_fetch=github.api,
+    )
+    receipt = read_receipt(receipt_path)
+    row = receipt["raw_capture"]["issue_pages"]["pages"][0]["response"]
+    (tmp_path / row["path"]).write_bytes(b"[]")
+
+    ok, errors, _ = defects.validate_core_github_defect_receipt(
+        receipt_path,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert ok is False
+    assert any("hash/size mismatch" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("page_set", "expected_error"),
+    [
+        ("issue_pages", "issue pages contains a non-object item"),
+        ("comment_pages", "comment pages contains a non-object item"),
+    ],
+)
+def test_final_validator_rejects_non_object_raw_page_items(
+    tmp_path, monkeypatch, page_set, expected_error
+):
+    clean_git(monkeypatch)
+    github = FakeGitHub(
+        [issue_row(1, ["p0", "full-feature-deferred"])],
+        [],
+    )
+    receipt_path = defects.capture(
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        out_dir=tmp_path / "artifacts" / "non-object-item",
+        api_fetch=github.api,
+    )
+    receipt = read_receipt(receipt_path)
+    row = receipt["raw_capture"][page_set]["pages"][0]["response"]
+    rewrite_raw(tmp_path, row, ["malformed"])
+    write_receipt(receipt_path, receipt)
+
+    ok, errors, _ = defects.validate_core_github_defect_receipt(
+        receipt_path,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert ok is False
+    assert expected_error in errors
+
+
+def test_final_validator_rejects_rehashed_raw_summary_tampering(
+    tmp_path, monkeypatch
+):
+    clean_git(monkeypatch)
+    github = FakeGitHub(
+        [issue_row(1, ["p0", "full-feature-deferred"])],
+        [],
+    )
+    receipt_path = defects.capture(
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        out_dir=tmp_path / "artifacts" / "summary-tamper",
+        api_fetch=github.api,
+    )
+    receipt = read_receipt(receipt_path)
+    mutated = [issue_row(1, ["p0", "core-blocker"])]
+    for page_set in ("issue_pages", "issue_verification_pages"):
+        row = receipt["raw_capture"][page_set]["pages"][0]["response"]
+        rewrite_raw(tmp_path, row, mutated)
+    write_receipt(receipt_path, receipt)
+
+    ok, errors, _ = defects.validate_core_github_defect_receipt(
+        receipt_path,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert ok is False
+    assert "receipt recomputed open_core_p0_count mismatch" in errors
+    assert "receipt recomputed issues mismatch" in errors
+
+
+def test_final_validator_rejects_pagination_and_attempt_alias_tampering(
+    tmp_path, monkeypatch
+):
+    clean_git(monkeypatch)
+    github = FakeGitHub(
+        [issue_row(1, ["p0", "full-feature-deferred"])],
+        [],
+    )
+    receipt_path = defects.capture(
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        out_dir=tmp_path / "artifacts" / "metadata-tamper",
+        api_fetch=github.api,
+    )
+    receipt = read_receipt(receipt_path)
+    receipt["workflow_run_attempt"] = str(RUN_ATTEMPT)
+    receipt["raw_capture"]["issue_pages"]["pages"][0][
+        "endpoint"
+    ] += "&page=99"
+    write_receipt(receipt_path, receipt)
+
+    ok, errors, _ = defects.validate_core_github_defect_receipt(
+        receipt_path,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
+
+    assert ok is False
+    assert "receipt run-attempt aliases mismatch" in errors
+    assert any("page order/endpoint is invalid" in error for error in errors)
 
 
 def test_open_p0_classification_is_recomputed_fail_closed():
@@ -520,6 +746,21 @@ def test_non_tag_audit_must_recompute_and_have_every_other_gate_green(
     assert valid["valid"] is True
     assert valid["recomputed_exact"] is True
 
+    mismatched_attempt = json.loads(json.dumps(audit))
+    mismatched_attempt["workflow_run_attempt"] = str(RUN_ATTEMPT)
+    path.write_text(json.dumps(mismatched_attempt), encoding="utf-8")
+    mismatch = defects.validate_non_tag_audit(
+        path,
+        root=tmp_path,
+        commit=COMMIT,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+        recompute=lambda _root, _audit: mismatched_attempt,
+    )
+    assert mismatch["valid"] is False
+    assert "audit_identity_or_release_state_invalid" in mismatch["failures"]
+    path.write_text(json.dumps(audit), encoding="utf-8")
+
     hand_authored = defects.validate_non_tag_audit(
         path,
         root=tmp_path,
@@ -548,6 +789,26 @@ def test_non_tag_audit_must_recompute_and_have_every_other_gate_green(
     assert red["non_tag_non_defect_gate_failures"] == [
         "exact_candidate_package"
     ]
+
+
+def test_analysis_rejects_non_object_issue_and_comment_rows_as_value_error():
+    with pytest.raises(ValueError, match="non-object issue row"):
+        defects.analyze_issues(
+            ["malformed"],
+            [],
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+        )
+
+    with pytest.raises(ValueError, match="issue-comment.*non-object"):
+        defects.analyze_issues(
+            [issue_row(1, [], comments=1)],
+            ["malformed"],
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+        )
 
 
 def test_issue_71_exception_is_only_pre_tag_and_only_after_all_other_gates(
@@ -581,6 +842,19 @@ def test_issue_71_exception_is_only_pre_tag_and_only_after_all_other_gates(
     assert receipt["pending_tag_exception"]["applied"] is True
     assert receipt["open_core_p0_count"] == 0
     assert receipt["issues"][0]["excluded_by_pending_tag_exception"] is True
+    valid, validation_errors, details = (
+        defects.validate_core_github_defect_receipt(
+            receipt_path,
+            root=tmp_path,
+            commit=COMMIT,
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+            audit_recompute=lambda _root, _audit: audit,
+        )
+    )
+    assert valid is True, validation_errors
+    assert validation_errors == []
+    assert details["pending_tag_exception"]["applied"] is True
 
     post_tag = defects.pending_tag_exception(
         defects.analyze_issues(
