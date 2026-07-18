@@ -135,6 +135,6 @@
     "main/ui/ui_node_detail.c": "ce7c440a40d946d13537dd3474aee281f574355cbce3368a134428dacb1d3243",
     "main/ui/ui_node_detail.h": "320490b05cf56de0e60fbeefd5c052ba268c4a778f9b82338febf8cd5c75e659",
     "main/ui/ui_phase1.c": "8999f5fd3721220be06e8ceb18eb423c19c0223acb1fa41020531eb78f8fdd1f",
-    "tools/ui_simulator.py": "8b5bdc00b1e783b9e57befa431e983a3c7842984d7b9e375710d49e8d4e87785"
+    "tools/ui_simulator.py": "c7ae05575b7e852ca2d9fc317b5c8a209f30306852cc707d81ec93763a637809"
   }
 }
