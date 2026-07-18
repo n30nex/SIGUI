@@ -635,6 +635,13 @@ static bool release_command_feature_available(
 static bool enforce_release_command_policy(
     const d1l_usb_command_view_t *command)
 {
+    if (d1l_release_profile_is_core() &&
+        d1l_usb_command_equals(
+            command, "packets clear", sizeof("packets clear") - 1U)) {
+        release_unsupported_result(
+            command, D1L_RELEASE_FEATURE_PACKETS);
+        return false;
+    }
     const d1l_release_command_rule_t *rule = release_command_rule(command);
     if (!rule || release_command_feature_available(rule->feature) ||
         rule->access == D1L_RELEASE_COMMAND_READ_ONLY) {
@@ -6890,7 +6897,7 @@ static void cmd_help(void)
                "\"routes trace <fingerprint>\",\"signal\",\"packets\","
                "\"packets filter <any|rx|tx> <any|text|kind>\","
                "\"packets search <text>\",\"packets detail <seq>\","
-               "\"packets raw <seq>\",\"packets clear\",\"health\","
+               "\"packets raw <seq>\",\"health\","
                "\"crashlog\",\"crashlog clear\",\"reboot\","
                "\"factory-reset-status\",\"factory-reset-confirm\"],"
                "\"unavailable_status_commands\":[\"wifi status\","

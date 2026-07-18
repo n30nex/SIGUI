@@ -110,6 +110,47 @@ def test_sd_mutations_are_admitted_before_dispatch_and_core_help_is_nvs_only():
     assert r"storage retained-canary <token>" not in core_help
 
 
+def test_core_packet_diagnostics_are_read_only_before_dispatch():
+    enforcement = CONSOLE.split(
+        "static bool enforce_release_command_policy(", 1
+    )[1].split("static void print_hex_bytes_json(", 1)[0]
+    core_deny = enforcement.split(
+        "const d1l_release_command_rule_t *rule", 1
+    )[0]
+    assert "d1l_release_profile_is_core()" in core_deny
+    assert (
+        'command, "packets clear", sizeof("packets clear") - 1U'
+        in core_deny
+    )
+    assert (
+        "release_unsupported_result(\n"
+        "            command, D1L_RELEASE_FEATURE_PACKETS);"
+        in core_deny
+    )
+    assert "return false;" in core_deny
+    assert "d1l_packet_log_clear" not in enforcement
+
+    handler = CONSOLE.split("static void handle_line(", 1)[1].split(
+        "void d1l_usb_console_run(", 1
+    )[0]
+    assert handler.index("enforce_release_command_policy(command)") < handler.index(
+        'strcmp(line, "packets clear")'
+    )
+
+    help_body = CONSOLE.split("static void cmd_help(void)", 1)[1].split(
+        "static void release_factory_reset_quiesces(void)", 1
+    )[0]
+    core_help, full_help = help_body.split("return;", 1)
+    assert r"packets clear" not in core_help
+    assert r"packets clear" in full_help
+
+    clear_handler = CONSOLE.split("static void cmd_packets_clear(void)", 1)[
+        1
+    ].split("static void print_public_message_entry_json", 1)[0]
+    assert "d1l_packet_log_clear()" in clear_handler
+    assert 'ok_begin("packets clear")' in clear_handler
+
+
 def test_core_retained_canary_is_nvs_only_and_excluded_sd_canary_is_closed():
     table = CONSOLE.split(
         "static const d1l_release_command_rule_t s_release_command_rules[] = {",
