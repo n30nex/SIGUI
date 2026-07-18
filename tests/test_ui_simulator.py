@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 86
+    assert len(views) == 87
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -545,6 +545,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Display", "Screen controls", "Brightness", "Night", "Contrast", "Timeout"} <= labels_by_view["display_settings_sheet"]
     assert {"Diagnostics", "Advanced health", "Health", "Crashlog", "Export", "Soak"} <= labels_by_view["diagnostics_sheet"]
     assert {"Compose Public", "Public message", "20 chars | 20/138 B", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
+    assert {"DM YKF Corebot", "Direct message", "reply to YKF Corebot", "20 chars | 20/138 B", "Send", "Clear", "Close"} <= labels_by_view["compose_dm_sheet"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
         "Storage",
@@ -782,12 +783,14 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["dm_thread_sheet"]["close_dm_thread"]["destination"] == "messages_dm"
     assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["visual_box"] == [16, 420, 464, 472]
     assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["height"] >= 48
+    assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["destination"] == "compose_dm_sheet"
     assert actions_by_view["dm_thread_sheet"]["toggle_dm_details"]["destination"] == "dm_thread_details_sheet"
     assert actions_by_view["dm_thread_sheet"]["open_dm_search"]["destination"] == "dm_search_sheet"
     assert actions_by_view["dm_thread_sheet"]["open_dm_search"]["rf_tx"] is False
     assert actions_by_view["dm_thread_details_sheet"]["toggle_dm_details"]["destination"] == "dm_thread_sheet"
     assert actions_by_view["dm_thread_details_sheet"]["open_dm_reply"]["visual_box"] == [16, 420, 464, 472]
     assert actions_by_view["dm_thread_details_sheet"]["open_dm_reply"]["height"] >= 48
+    assert actions_by_view["dm_thread_details_sheet"]["open_dm_reply"]["destination"] == "compose_dm_sheet"
     assert views["dm_thread_details_sheet"]["metrics"]["dm_thread_details_expanded"] is True
     assert views["dm_thread_details_sheet"]["metrics"]["dm_thread_navigation_rf_silent"] is True
     assert actions_by_view["dm_search_sheet"]["apply_dm_search"]["destination"] == "dm_thread_search_results"
@@ -801,6 +804,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         assert target["height"] >= 44
     assert "mark_dm_thread_read" not in actions_by_view["dm_thread_sheet"]
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
+    assert not any(target["kind"] == "dock_tab" for target in views["compose_dm_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])
     assert actions_by_view["home"]["open_messages_root"]["visual_box"] == [12, 16, 234, 156]
     assert actions_by_view["home"]["open_nodes"]["visual_box"] == [246, 16, 468, 156]
@@ -910,6 +914,9 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["map_location"]["edit_map_longitude"]["kind"] == "text_field"
     assert actions_by_view["map_location"]["close_map_location"]["destination"] == "map_options"
     assert actions_by_view["nodes"]["open_node_detail"]["destination"] == "node_detail_sheet"
+    assert actions_by_view["nodes"]["open_dm_compose"]["destination"] == "compose_dm_sheet"
+    assert actions_by_view["nodes"]["open_node_dm"]["destination"] == "compose_dm_sheet"
+    assert actions_by_view["node_detail_sheet"]["open_node_dm"]["destination"] == "compose_dm_sheet"
     assert actions_by_view["node_detail_sheet"]["close_node_detail"]["destination"] == "nodes"
     assert set(actions_by_view["contact_detail_sheet"]) == {
         "close_contact_detail",
@@ -917,7 +924,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "open_contact_options",
     }
     assert actions_by_view["contact_detail_sheet"]["close_contact_detail"]["destination"] == "nodes"
-    assert actions_by_view["contact_detail_sheet"]["open_dm_compose"]["destination"] == "compose_sheet"
+    assert actions_by_view["contact_detail_sheet"]["open_dm_compose"]["destination"] == "compose_dm_sheet"
     assert actions_by_view["contact_detail_sheet"]["open_contact_options"]["destination"] == "contact_options_page"
     assert set(actions_by_view["contact_options_page"]) == {
         "close_contact_options",
@@ -987,6 +994,15 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert views["messages"]["metrics"]["messages_navigation_rf_silent"] is True
     assert views["messages_public"]["metrics"]["public_navigation_rf_silent"] is True
     assert actions_by_view["compose_sheet"]["send_channel_text"]["public_rf_tx"] is True
+    assert views["compose_dm_sheet"]["metrics"]["compose_is_dm"] is True
+    assert views["compose_dm_sheet"]["metrics"]["compose_send_enabled"] is True
+    assert views["compose_dm_sheet"]["metrics"]["compose_eligibility_reason"] == "ready"
+    assert actions_by_view["compose_dm_sheet"]["send_dm_text"]["enabled"] is True
+    assert actions_by_view["compose_dm_sheet"]["send_dm_text"]["rf_tx"] is True
+    assert actions_by_view["compose_dm_sheet"]["send_dm_text"]["public_rf_tx"] is False
+    assert actions_by_view["compose_dm_sheet"]["send_dm_text"]["dm_tx"] is True
+    assert actions_by_view["compose_dm_sheet"]["clear_dm_message"]["rf_tx"] is False
+    assert actions_by_view["compose_dm_sheet"]["close_compose"]["destination"] == "messages_dm"
     assert views["compose_utf8_sheet"]["metrics"]["compose_validation"] == "valid_utf8"
     assert views["compose_utf8_sheet"]["metrics"]["compose_byte_count"] == 12
     assert views["compose_utf8_sheet"]["metrics"]["compose_character_count"] == 7
@@ -1028,6 +1044,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "compose_byte_limit_sheet",
         "compose_oversize_sheet",
         "compose_invalid_sheet",
+        "compose_dm_sheet",
         *disabled_runtime_views,
         "compose_retry_sheet",
     ):
@@ -2044,7 +2061,7 @@ def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_pat
         if target["action"] == "open_node_dm"
     ]
     assert len(dm_targets) == 1
-    assert dm_targets[0]["destination"] == "compose_sheet"
+    assert dm_targets[0]["destination"] == "compose_dm_sheet"
     assert detail["metrics"]["node_detail_return_destination"] == "map"
     assert detail["metrics"]["node_detail_return_reuses_map_view"] is True
 
