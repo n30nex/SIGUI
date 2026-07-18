@@ -15,7 +15,9 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "mbedtls/md.h"
 
+#include "ed_25519.h"
 #include "d1l_config.h"
 #include "app/app_model.h"
 #include "app/settings_model.h"
@@ -47,6 +49,7 @@
 #include "storage/export_store.h"
 #include "storage/factory_reset.h"
 #include "storage/map_tile_store.h"
+#include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
 
@@ -295,6 +298,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "storage export-data", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage retained-canary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
     D1L_RELEASE_RULE_EXACT(
         "storage force-nvs off", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
@@ -313,6 +319,9 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
     D1L_RELEASE_RULE_TOKEN(
         "rp2040 double-reset", D1L_RELEASE_COMMAND_MUTATION,
         D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "core retained-canary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_RETAINED_NVS),
 
     D1L_RELEASE_RULE_EXACT(
         "map center", D1L_RELEASE_COMMAND_READ_ONLY,
@@ -5582,6 +5591,212 @@ static void cmd_contacts_import(const char *line)
            bool_json(d1l_contact_store_can_admin(&contact)));
 }
 
+static bool core_retained_canary_nvs_only(void)
+{
+    for (size_t i = 0U; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
+        d1l_retained_blob_store_backend_state_t state = {0};
+        if (!d1l_retained_blob_store_backend_state(
+                (d1l_retained_blob_store_id_t)i, &state) ||
+            state.enabled) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool core_retained_canary_public_key(
+    const char *token,
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN])
+{
+    static const char prefix[] = "sigui-core-retained-canary:";
+    static const char hex[] = "0123456789abcdef";
+    char material[sizeof(prefix) + 31U] = {0};
+    uint8_t seed[32] = {0};
+    uint8_t public_key[32] = {0};
+    uint8_t private_key[64] = {0};
+    const int material_len = snprintf(
+        material, sizeof(material), "%s%s", prefix, token ? token : "");
+    const mbedtls_md_info_t *md =
+        mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    bool ok =
+        token && public_key_hex && material_len > 0 &&
+        (size_t)material_len < sizeof(material) && md &&
+        mbedtls_md(md, (const unsigned char *)material,
+                   (size_t)material_len, seed) == 0;
+    if (ok) {
+        ed25519_create_keypair(public_key, private_key, seed);
+        for (size_t i = 0U; i < sizeof(public_key); ++i) {
+            public_key_hex[i * 2U] =
+                hex[(public_key[i] >> 4U) & 0x0FU];
+            public_key_hex[i * 2U + 1U] =
+                hex[public_key[i] & 0x0FU];
+        }
+        public_key_hex[sizeof(public_key) * 2U] = '\0';
+    }
+    wipe_console_bytes(seed, sizeof(seed));
+    wipe_console_bytes(private_key, sizeof(private_key));
+    wipe_console_bytes(public_key, sizeof(public_key));
+    wipe_console_bytes(material, sizeof(material));
+    return ok;
+}
+
+/*
+ * Core release persistence evidence must create its own exact-candidate
+ * canaries.  This diagnostic mutates only the retained NVS stores and the
+ * contact NVS store: it never calls the MeshCore send path, storage manager,
+ * SD status refresh, or RP2040 bridge.
+ */
+static void cmd_core_retained_canary(const char *line)
+{
+    static const char prefix[] = "core retained-canary ";
+    char token[32] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !copy_storage_canary_token(
+            token, sizeof(token), line + strlen(prefix))) {
+        err_result("core retained-canary", "INVALID_TOKEN",
+                   "usage: core retained-canary <token-with-a-z-0-9-dot-dash-underscore>");
+        return;
+    }
+
+    if (!d1l_release_profile_is_core() ||
+        d1l_release_sd_history_mode() != D1L_SD_HISTORY_MODE_DISABLED) {
+        err_result("core retained-canary", "ESP_ERR_NOT_SUPPORTED",
+                   "requires the Core 1.0 release profile with SD history disabled");
+        return;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_RETAINED_NVS) ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_PUBLIC_MESSAGES) ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_DIRECT_MESSAGES) ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_BASIC_CONTACTS)) {
+        err_result("core retained-canary", "ESP_ERR_NOT_SUPPORTED",
+                   "required retained Core capabilities are unavailable");
+        return;
+    }
+    if (!d1l_retained_blob_store_nvs_ready() ||
+        !d1l_retained_blob_store_nvs_marker_ready() ||
+        !d1l_retained_blob_store_nvs_markers_complete() ||
+        !d1l_retained_blob_store_nvs_anchor_ready() ||
+        !d1l_retained_blob_store_nvs_sentinel_ready() ||
+        !core_retained_canary_nvs_only()) {
+        err_result("core retained-canary", "RETAINED_NVS_NOT_READY",
+                   "all retained stores must be ready on NVS with SD backends disabled");
+        return;
+    }
+
+    char public_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    if (!core_retained_canary_public_key(token, public_key)) {
+        err_result("core retained-canary", "ESP_FAIL",
+                   "could not derive the deterministic local contact key");
+        return;
+    }
+    char contact_uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
+    const int uri_len = snprintf(
+        contact_uri, sizeof(contact_uri),
+        "meshcore://contact/add?name=Core+Canary&public_key=%s&type=1",
+        public_key);
+    if (uri_len <= 0 || (size_t)uri_len >= sizeof(contact_uri)) {
+        err_result("core retained-canary", "ESP_ERR_INVALID_SIZE",
+                   "local contact URI exceeded its fixed bound");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        return;
+    }
+
+    d1l_contact_import_result_t contact_result = D1L_CONTACT_IMPORT_NONE;
+    d1l_contact_entry_t contact = {0};
+    esp_err_t ret = d1l_contact_store_import_uri(
+        contact_uri, (size_t)uri_len, &contact_result, &contact);
+    wipe_console_bytes(contact_uri, sizeof(contact_uri));
+    if (ret != ESP_OK ||
+        !d1l_contact_store_is_canonical(&contact) ||
+        !d1l_contact_store_can_dm(&contact)) {
+        err_result("core retained-canary",
+                   ret == ESP_OK ? "CONTACT_NOT_CANONICAL" :
+                                   esp_err_to_name(ret),
+                   "could not persist the deterministic canonical Core contact");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    char text[D1L_MESSAGE_TEXT_LEN] = {0};
+    snprintf(text, sizeof(text), "core-retained-canary %s", token);
+    const uint32_t public_seq = d1l_message_store_stats().next_seq;
+    ret = d1l_message_store_append_public(
+        "rx", "Core Canary", text, 0, 0, 1, 0, true);
+    d1l_message_store_stats_t public_stats = d1l_message_store_stats();
+    if (ret != ESP_OK || public_seq == 0U ||
+        public_stats.next_seq != public_seq + 1U) {
+        err_result("core retained-canary",
+                   ret == ESP_OK ? "PUBLIC_SEQUENCE_RACE" :
+                                   esp_err_to_name(ret),
+                   "could not persist one exact local Public canary row");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    const uint32_t dm_seq = d1l_dm_store_stats().next_seq;
+    ret = d1l_dm_store_append(
+        contact.fingerprint, "Core Canary", "rx", text,
+        0, 0, 1, 0, 0, true, false, retained_canary_hash(token));
+    d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
+    if (ret != ESP_OK || dm_seq == 0U ||
+        dm_stats.next_seq != dm_seq + 1U) {
+        err_result("core retained-canary",
+                   ret == ESP_OK ? "DM_SEQUENCE_RACE" :
+                                   esp_err_to_name(ret),
+                   "could not persist one exact local DM canary row");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    ret = d1l_route_store_worker_force_flush(
+        D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
+    public_stats = d1l_message_store_stats();
+    dm_stats = d1l_dm_store_stats();
+    const d1l_contact_store_stats_t contact_stats =
+        d1l_contact_store_stats();
+    if (ret != ESP_OK || public_stats.persistence_dirty ||
+        public_stats.nvs_fallback_dirty ||
+        public_stats.sd_primary_required ||
+        dm_stats.persistence_dirty || dm_stats.nvs_fallback_dirty ||
+        dm_stats.sd_primary_required || contact_stats.persistence_dirty ||
+        !core_retained_canary_nvs_only()) {
+        err_result("core retained-canary",
+                   ret == ESP_OK ? "RETAINED_NVS_NOT_CLEAN" :
+                                   esp_err_to_name(ret),
+                   "candidate-local Core canaries are not clean on NVS");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    ok_begin("core retained-canary");
+    printf(",\"token\":");
+    print_json_string(token);
+    printf(",\"message_text\":");
+    print_json_string(text);
+    printf(",\"fingerprint\":");
+    print_json_string(contact.fingerprint);
+    printf(",\"public_key\":");
+    print_json_string(public_key);
+    printf(",\"public_seq\":%lu,\"dm_seq\":%lu,\"contact_seq\":%lu,"
+           "\"contact_result\":",
+           (unsigned long)public_seq,
+           (unsigned long)dm_seq,
+           (unsigned long)contact.seq);
+    print_json_string(contact_import_result_name(contact_result));
+    printf(",\"persisted\":true,\"retention\":\"nvs\","
+           "\"backend_mode\":\"nvs_disabled\",\"synthetic_local\":true,"
+           "\"retained_flush\":\"ESP_OK\",\"public_rf_tx\":false,"
+           "\"dm_rf_tx\":false,\"sd_access\":false,"
+           "\"rp2040_access\":false,\"formats_sd\":false,"
+           "\"predecessor_evidence_used\":false}\n");
+    wipe_console_bytes(public_key, sizeof(public_key));
+    wipe_console_bytes(&contact, sizeof(contact));
+}
+
 static void cmd_contacts_clear(void)
 {
     esp_err_t ret = d1l_contact_store_clear();
@@ -6653,7 +6868,7 @@ static void cmd_help(void)
                "\"ui capture end\",\"mesh status\",\"companion status\","
                "\"storage status\",\"storage force-nvs [on]\","
                "\"storage diag\",\"storage diag raw\","
-               "\"storage retained-canary <token>\","
+               "\"core retained-canary <token>\","
                "\"mesh advert zero\",\"mesh advert flood\","
                "\"mesh send public <text>\","
                "\"mesh send dm <fingerprint> <text>\","
@@ -7163,6 +7378,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_storage_export_data(line);
     } else if (strncmp(line, "storage retained-canary ", strlen("storage retained-canary ")) == 0) {
         cmd_storage_retained_canary(line);
+    } else if (strncmp(line, "core retained-canary ", strlen("core retained-canary ")) == 0) {
+        cmd_core_retained_canary(line);
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
     } else if (strncmp(line, "packets filter ", 15) == 0) {
