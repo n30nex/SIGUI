@@ -1,0 +1,142 @@
+import pytest
+
+from scripts import core_smoke_d1l as core_smoke
+
+
+COMMIT = "a" * 40
+
+
+def test_core_smoke_requires_exact_com12():
+    assert core_smoke.enforce_core_port(" com12 ") == "COM12"
+    assert core_smoke.enforce_core_port(r"\\.\COM12") == "COM12"
+    for port in (None, "COM8", "COM11", "COM16", "COM29", "COM30"):
+        with pytest.raises(ValueError, match="requires COM12"):
+            core_smoke.enforce_core_port(port)
+
+
+def test_core_smoke_plan_never_closes_or_transmits_public_rf():
+    plan = core_smoke.command_plan("disabled")
+
+    assert plan["ok"] is False
+    assert plan["closure_eligible"] is False
+    assert plan["physical_observed"] is False
+    assert plan["port"] == "COM12"
+    assert plan["release_profile"] == "core_1_0"
+    assert plan["public_rf_tx"] is False
+    assert plan["formats_sd"] is False
+    assert not any(
+        command.startswith("mesh send public ")
+        for command in plan["supported_commands"]
+    )
+    assert not any(
+        command.startswith(("wifi ", "ble ", "map "))
+        for command in plan["supported_commands"]
+    )
+
+
+def test_core_smoke_mutation_plan_matches_profile_and_disabled_sd():
+    conditional = core_smoke.mutation_probe_plan("conditional")
+    disabled = core_smoke.mutation_probe_plan("disabled")
+
+    assert {row["feature"] for row in conditional} == {
+        "wifi_user_control",
+        "ble",
+        "map",
+        "location",
+        "multi_channel_management",
+        "packets",
+        "nodes",
+        "user_trace",
+        "admin",
+        "observer_mqtt",
+        "signed_update",
+        "mutable_terminal",
+        "advanced_qr_emoji",
+    }
+    assert not any(row["feature"] == "sd_history" for row in conditional)
+    assert {
+        "command": "packets clear",
+        "feature": "packets",
+    } in conditional
+    assert [
+        row for row in disabled if row["feature"] == "sd_history"
+    ] == [
+        {"command": "storage mount", "feature": "sd_history"},
+        {"command": "rp2040 reset", "feature": "sd_history"},
+        {
+            "command": "ui scroll-probe storage_card",
+            "feature": "sd_history",
+        },
+        {
+            "command": "ui scroll-probe storage_data",
+            "feature": "sd_history",
+        },
+    ]
+
+
+def test_core_smoke_exact_identity_and_unsupported_contract():
+    identity = {
+        "ok": True,
+        "build_commit": COMMIT,
+        "release_profile": "core_1_0",
+        "sd_history_mode": "disabled",
+    }
+    unsupported = {
+        "ok": False,
+        "cmd": "wifi on",
+        "code": "ESP_ERR_NOT_SUPPORTED",
+        "release_profile": "core_1_0",
+        "feature": "wifi_user_control",
+    }
+
+    assert core_smoke.exact_identity(identity, COMMIT, "disabled")
+    assert core_smoke.exact_unsupported_result(
+        unsupported, "wifi on", "wifi_user_control"
+    )
+    assert not core_smoke.exact_identity(
+        {**identity, "build_commit": "b" * 40}, COMMIT, "disabled"
+    )
+    assert not core_smoke.exact_unsupported_result(
+        {**unsupported, "code": "ESP_OK"},
+        "wifi on",
+        "wifi_user_control",
+    )
+    assert not core_smoke.exact_unsupported_result(
+        {**unsupported, "cmd": "wifi off"},
+        "wifi on",
+        "wifi_user_control",
+    )
+
+
+def test_identity_failure_report_cannot_claim_closure():
+    report = core_smoke.identity_failure_report(
+        port="COM12",
+        baud=115200,
+        expected_commit=COMMIT,
+        expected_sd_history_mode="disabled",
+        version={"ok": True, "build_commit": "b" * 40},
+        github_run_id="123456789",
+        workflow_run_attempt="1",
+    )
+
+    assert report["ok"] is False
+    assert report["closure_eligible"] is False
+    assert report["identity_preflight_only"] is True
+    assert report["supported_commands_executed"] == []
+    assert report["unavailable_mutation_probes"] == []
+    assert report["public_rf_tx"] is False
+
+
+def test_hardware_smoke_rejects_zero_run_before_serial_open():
+    with pytest.raises(ValueError, match="positive integers"):
+        core_smoke.run_core_smoke(
+            port="COM12",
+            baud=115200,
+            timeout=1.0,
+            expected_commit=COMMIT,
+            expected_sd_history_mode="disabled",
+            persistence_test=False,
+            manual_touch=False,
+            github_run_id="0",
+            workflow_run_attempt="1",
+        )

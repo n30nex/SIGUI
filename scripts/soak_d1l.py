@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import time
@@ -13,21 +14,25 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 try:
-    from artifact_metadata import stamp_report
+    import rf_full_acceptance_d1l as rf_acceptance
+    from artifact_metadata import git_metadata, stamp_report
     from smoke_d1l import (
         exact_commit,
         firmware_identity_matches,
         open_d1l_serial,
         send_console_command,
     )
+    from verify_checksums import is_link_or_reparse, sha256_file
 except ModuleNotFoundError:
-    from scripts.artifact_metadata import stamp_report
+    from scripts import rf_full_acceptance_d1l as rf_acceptance
+    from scripts.artifact_metadata import git_metadata, stamp_report
     from scripts.smoke_d1l import (
         exact_commit,
         firmware_identity_matches,
         open_d1l_serial,
         send_console_command,
     )
+    from scripts.verify_checksums import is_link_or_reparse, sha256_file
 
 
 SOAK_COMMANDS = [
@@ -44,6 +49,12 @@ SD_FILE_CANARY_MIN_TIMEOUT_SECONDS = 120.0
 DM_FINGERPRINT_RE = re.compile(r"^[0-9A-Fa-f]{16}$")
 DM_TEXT_MAX_CHARS = 138
 TERMINAL_COMMAND_CODES = {"TIMEOUT", "UNEXPECTED_RESTART"}
+ACTIVE_LISTENER_COUNTER_FIELDS = (
+    "rx_dm_total",
+    "tx_dm_total",
+    "local_fast_reply_total",
+    "tx_dm_ack_miss_total",
+)
 STORAGE_REQUIRED_SD_FIELDS = (
     "state",
     "filesystem",
@@ -136,6 +147,199 @@ def active_dm_command(
     if len(active_dm_text) > DM_TEXT_MAX_CHARS:
         raise ValueError(f"active DM text must be at most {DM_TEXT_MAX_CHARS} characters")
     return f"mesh send dm {active_dm_fingerprint.upper()} {active_dm_text}"
+
+
+def listener_test_text_ok(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and re.search(
+            r"(?i)(?<![A-Za-z0-9])test(?![A-Za-z0-9])",
+            value,
+        )
+        is not None
+    )
+
+
+def expected_active_send_count(
+    duration_sec: object, active_interval_sec: object
+) -> int | None:
+    if (
+        not isinstance(duration_sec, (int, float))
+        or isinstance(duration_sec, bool)
+        or duration_sec <= 0
+        or not isinstance(active_interval_sec, (int, float))
+        or isinstance(active_interval_sec, bool)
+        or active_interval_sec <= 0
+    ):
+        return None
+    return max(1, math.ceil(duration_sec / active_interval_sec))
+
+
+def qualified_controlled_peer_receipt(
+    *,
+    path: Path,
+    root: Path,
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+    fingerprint: str,
+) -> dict:
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(
+            "controlled-peer receipt must stay inside the repository"
+        ) from exc
+    if not resolved.is_file() or is_link_or_reparse(resolved):
+        raise ValueError("controlled-peer receipt is missing or linked")
+    try:
+        data = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("controlled-peer receipt is invalid JSON") from exc
+    peer = data.get("controlled_peer") if isinstance(data, dict) else None
+    peer_public_key = (
+        rf_acceptance.exact_public_key(peer.get("public_key"))
+        if isinstance(peer, dict)
+        else None
+    )
+    d1l_public_key = (
+        rf_acceptance.exact_public_key(data.get("d1l_public_key"))
+        if isinstance(data, dict)
+        else None
+    )
+    try:
+        peer_status_path = Path(str(peer.get("status_path"))).resolve()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        peer_status_path = None
+    if not (
+        isinstance(data, dict)
+        and data.get("mode") == "rf-full-acceptance"
+        and data.get("ok") is True
+        and data.get("closure_eligible") is True
+        and exact_commit(data.get("expected_firmware_commit")) == commit
+        and str(data.get("github_actions_run")) == str(run_id)
+        and str(data.get("workflow_run_attempt")) == str(run_attempt)
+        and data.get("controlled_peer_adapter")
+        == "openclaw_radio_listener"
+        and data.get("target_fingerprint") == fingerprint
+        and isinstance(peer, dict)
+        and peer.get("fingerprint") == fingerprint
+        and peer.get("port") == "COM15"
+        and peer_status_path
+        == rf_acceptance.RADIO_LISTENER_STATUS_PATH.resolve()
+        and peer_public_key is not None
+        and rf_acceptance.public_key_fingerprint(peer_public_key)
+        == fingerprint
+        and d1l_public_key is not None
+        and data.get("public_rf_tx") is False
+    ):
+        raise ValueError(
+            "active soak controlled-peer receipt does not match the exact "
+            "qualified candidate/run/peer"
+        )
+    return data, {
+        "path": resolved.relative_to(root.resolve()).as_posix(),
+        "size": resolved.stat().st_size,
+        "sha256": sha256_file(resolved),
+    }
+
+
+def controlled_peer_receipt_row(
+    *,
+    path: Path,
+    root: Path,
+    commit: str,
+    run_id: str,
+    run_attempt: str,
+    fingerprint: str,
+) -> dict:
+    _, row = qualified_controlled_peer_receipt(
+        path=path,
+        root=root,
+        commit=commit,
+        run_id=run_id,
+        run_attempt=run_attempt,
+        fingerprint=fingerprint,
+    )
+    return row
+
+
+def active_listener_flow_ok(
+    before: dict | None,
+    after: dict | None,
+    *,
+    successful_send_count: int,
+    d1l_public_key: object,
+    peer_fingerprint: str,
+    peer_public_key: object,
+    minimum_send_count: int = 1,
+) -> tuple[bool, dict[str, int | None]]:
+    deltas = {
+        field: rf_acceptance.counter_delta(before, after, field)
+        for field in ACTIVE_LISTENER_COUNTER_FIELDS
+    }
+    expected_peer_key = rf_acceptance.exact_public_key(peer_public_key)
+    before_peer_key = rf_acceptance.exact_public_key(
+        rf_acceptance.get_path(before, "serial", "public_key")
+    )
+    after_peer_key = rf_acceptance.exact_public_key(
+        rf_acceptance.get_path(after, "serial", "public_key")
+    )
+    count_ok = (
+        isinstance(successful_send_count, int)
+        and not isinstance(successful_send_count, bool)
+        and isinstance(minimum_send_count, int)
+        and not isinstance(minimum_send_count, bool)
+        and minimum_send_count >= 1
+        and successful_send_count >= minimum_send_count
+    )
+    identity_ok = (
+        expected_peer_key is not None
+        and before_peer_key == expected_peer_key
+        and after_peer_key == expected_peer_key
+        and rf_acceptance.public_key_fingerprint(expected_peer_key)
+        == peer_fingerprint
+    )
+    continuity_ok = (
+        isinstance(before, dict)
+        and isinstance(after, dict)
+        and before.get("run_id") == after.get("run_id")
+        and isinstance(before.get("run_id"), str)
+        and bool(before.get("run_id"))
+        and before.get("service") == after.get("service")
+        and before.get("service") == "openclaw-radio-listener"
+        and rf_acceptance.radio_listener_connected(
+            before,
+            rf_acceptance.RADIO_LISTENER_PORT,
+            peer_fingerprint,
+        )
+        and rf_acceptance.radio_listener_connected(
+            after,
+            rf_acceptance.RADIO_LISTENER_PORT,
+            peer_fingerprint,
+        )
+    )
+    counters_ok = (
+        count_ok
+        and deltas["rx_dm_total"] == successful_send_count
+        and deltas["tx_dm_total"] == successful_send_count
+        and deltas["local_fast_reply_total"] == successful_send_count
+        and deltas["tx_dm_ack_miss_total"] == 0
+    )
+    activity_ok = (
+        rf_acceptance.listener_sender_matches(after, d1l_public_key)
+        and rf_acceptance.get_path(after, "mesh", "last_rx_kind") == "dm"
+        and rf_acceptance.get_path(after, "mesh", "last_tx_kind") == "dm"
+        and rf_acceptance.get_path(before, "mesh", "last_rx_at")
+        != rf_acceptance.get_path(after, "mesh", "last_rx_at")
+        and rf_acceptance.get_path(before, "mesh", "last_tx_at")
+        != rf_acceptance.get_path(after, "mesh", "last_tx_at")
+    )
+    return (
+        count_ok and identity_ok and continuity_ok and counters_ok and activity_ok,
+        deltas,
+    )
 
 
 def unexpected_console_restart(result: dict) -> bool:
@@ -620,6 +824,8 @@ def dry_run_report(
     active_dm_fingerprint: str | None = None,
     active_dm_text: str | None = None,
     expected_firmware_commit: str | None = None,
+    github_run_id: str | None = None,
+    workflow_run_attempt: str | None = None,
 ) -> dict:
     normalized_commit = (
         exact_commit(expected_firmware_commit)
@@ -640,6 +846,14 @@ def dry_run_report(
         "ok": True,
         "preflight_commands": ["version"] if normalized_commit is not None else [],
         "expected_firmware_commit": normalized_commit,
+        "github_actions_run": (
+            str(github_run_id) if github_run_id is not None else None
+        ),
+        "workflow_run_attempt": (
+            str(workflow_run_attempt)
+            if workflow_run_attempt is not None
+            else None
+        ),
         "device_build_commit": None,
         "firmware_identity_required": normalized_commit is not None,
         "firmware_identity_ok": None,
@@ -690,7 +904,14 @@ def run_serial_soak(
     active_dm_fingerprint: str | None = None,
     active_dm_text: str | None = None,
     expected_firmware_commit: str | None = None,
+    github_run_id: str | None = None,
+    workflow_run_attempt: str | None = None,
+    expected_release_profile: str | None = None,
+    expected_sd_history_mode: str | None = None,
+    controlled_peer_receipt: Path | None = None,
+    peer_capture_dir: Path | None = None,
 ) -> dict:
+    root = Path(__file__).resolve().parents[1]
     normalized_commit = (
         exact_commit(expected_firmware_commit)
         if expected_firmware_commit is not None
@@ -699,6 +920,50 @@ def run_serial_soak(
     if expected_firmware_commit is not None and normalized_commit is None:
         raise ValueError(
             "expected_firmware_commit must be an exact 40-character hexadecimal SHA"
+        )
+    release_bound = (
+        str(github_run_id or "").isdigit()
+        and int(str(github_run_id or "0")) >= 1
+        and str(workflow_run_attempt or "").isdigit()
+        and int(str(workflow_run_attempt or "0")) >= 1
+    )
+    if (github_run_id is None) != (workflow_run_attempt is None) or (
+        github_run_id is not None and not release_bound
+    ):
+        raise ValueError(
+            "GitHub run id and run attempt must both be positive integers"
+    )
+    if normalized_commit is not None and release_bound:
+        source = git_metadata(root)
+        if not (
+            exact_commit(source.get("commit")) == normalized_commit
+            and source.get("dirty") is False
+            and source.get("dirty_entries") == []
+        ):
+            raise ValueError(
+                "hardware soak must run from the exact clean candidate source"
+            )
+    core_disabled = (
+        expected_release_profile == "core_1_0"
+        and expected_sd_history_mode == "disabled"
+    )
+    if core_disabled:
+        normalized_port = rf_acceptance.normalize_port(port)
+        if normalized_port != rf_acceptance.D1L_REQUIRED_PORT:
+            raise ValueError(
+                "Core 1.0 soak requires COM12; got "
+                f"{normalized_port or '<missing>'}"
+            )
+        port = normalized_port
+    if core_disabled and not (
+        sample_storage
+        and allow_sd_unavailable
+        and not sd_file_canary
+        and not clear_crashlog_before_start
+    ):
+        raise ValueError(
+            "disabled Core soak requires --sample-storage, "
+            "--allow-sd-unavailable, no SD canary, and no crashlog clear"
         )
 
     try:
@@ -714,8 +979,85 @@ def run_serial_soak(
     if sample_interval_sec <= 0:
         raise ValueError("sample_interval_sec must be positive")
     if active_command and active_interval_sec <= 0:
-        raise ValueError("active_interval_sec must be positive when active DM TX is enabled")
-
+        raise ValueError(
+            "active_interval_sec must be positive when active DM TX is enabled"
+        )
+    peer_receipt_row = None
+    peer_receipt: dict | None = None
+    peer_before: dict | None = None
+    peer_after: dict | None = None
+    peer_before_receipt: dict | None = None
+    peer_after_receipt: dict | None = None
+    peer_counter_deltas: dict[str, int | None] | None = None
+    peer_successful_send_count: int | None = None
+    peer_expected_send_count: int | None = None
+    peer_flow_ok: bool | None = None
+    after_capture: Path | None = None
+    if active_command is not None and release_bound:
+        if controlled_peer_receipt is None or normalized_commit is None:
+            raise ValueError(
+                "active DM soak requires --controlled-peer-receipt"
+            )
+        peer_receipt, peer_receipt_row = qualified_controlled_peer_receipt(
+            path=controlled_peer_receipt,
+            root=root,
+            commit=normalized_commit,
+            run_id=str(github_run_id),
+            run_attempt=str(workflow_run_attempt),
+            fingerprint=str(active_dm_fingerprint).upper(),
+        )
+        if not listener_test_text_ok(active_dm_text):
+            raise ValueError(
+                "COM15 OpenClaw active soak DM text must contain the "
+                "case-insensitive word 'test'"
+            )
+        peer_expected_send_count = expected_active_send_count(
+            duration_sec, active_interval_sec
+        )
+        if peer_expected_send_count is None:
+            raise ValueError(
+                "active soak duration and interval must define a positive "
+                "send-count floor"
+            )
+        peer = peer_receipt["controlled_peer"]
+        capture_dir = (
+            peer_capture_dir
+            or root / "artifacts" / "soak" / "rf-peer"
+        )
+        capture_token = (
+            f"core-soak-{normalized_commit[:12]}-{github_run_id}-"
+            f"{workflow_run_attempt}-"
+            f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
+        )
+        safe_token = re.sub(r"[^A-Za-z0-9_.-]", "_", capture_token)
+        before_capture = capture_dir / f"{safe_token}_peer_before.json"
+        after_capture = capture_dir / f"{safe_token}_peer_after.json"
+        peer_before, peer_before_receipt = rf_acceptance.capture_peer_status(
+            rf_acceptance.RADIO_LISTENER_STATUS_PATH,
+            before_capture,
+            root,
+        )
+        expected_peer_key = rf_acceptance.exact_public_key(
+            peer.get("public_key")
+        )
+        if not (
+            expected_peer_key is not None
+            and rf_acceptance.radio_listener_connected(
+                peer_before,
+                rf_acceptance.RADIO_LISTENER_PORT,
+                str(active_dm_fingerprint).upper(),
+            )
+            and rf_acceptance.exact_public_key(
+                rf_acceptance.get_path(
+                    peer_before, "serial", "public_key"
+                )
+            )
+            == expected_peer_key
+        ):
+            raise ValueError(
+                "COM15 OpenClaw listener status/public-key identity is not "
+                "ready for active soak"
+            )
     samples: list[dict] = []
     active_events: list[dict] = []
     setup_events: list[dict] = []
@@ -743,6 +1085,16 @@ def run_serial_soak(
             firmware_identity_ok = (
                 version_preflight.get("ok") is True
                 and firmware_identity_matches(version_preflight, normalized_commit)
+                and (
+                    expected_release_profile is None
+                    or version_preflight.get("release_profile")
+                    == expected_release_profile
+                )
+                and (
+                    expected_sd_history_mode is None
+                    or version_preflight.get("sd_history_mode")
+                    == expected_sd_history_mode
+                )
             )
             if version_preflight.get("ok") is not True:
                 preflight_failure = "version_preflight_failed"
@@ -850,6 +1202,37 @@ def run_serial_soak(
             if final_sample.get("aborted_after_timeout"):
                 fatal_timeout_command = final_sample["aborted_after_timeout"]
 
+    if peer_before is not None:
+        if (
+            peer_receipt is None
+            or after_capture is None
+            or peer_before_receipt is None
+        ):
+            raise ValueError("active soak peer capture state is incomplete")
+        peer_after, peer_after_receipt = rf_acceptance.capture_peer_status(
+            rf_acceptance.RADIO_LISTENER_STATUS_PATH,
+            after_capture,
+            root,
+        )
+        peer_successful_send_count = sum(
+            1
+            for event in active_events
+            if isinstance(event, dict)
+            and isinstance(event.get("result"), dict)
+            and event["result"].get("ok") is True
+        )
+        peer_flow_ok, peer_counter_deltas = active_listener_flow_ok(
+            peer_before,
+            peer_after,
+            successful_send_count=peer_successful_send_count,
+            d1l_public_key=peer_receipt.get("d1l_public_key"),
+            peer_fingerprint=str(active_dm_fingerprint).upper(),
+            peer_public_key=peer_receipt["controlled_peer"].get(
+                "public_key"
+            ),
+            minimum_send_count=peer_expected_send_count or 1,
+        )
+
     ended_at = datetime.now(timezone.utc)
     summary = summarize_soak(
         samples=samples,
@@ -878,15 +1261,42 @@ def run_serial_soak(
     if preflight_failure is not None:
         summary["threshold_failures"].append(preflight_failure)
         summary["ok"] = False
+    if peer_flow_ok is False:
+        summary["threshold_failures"].append(
+            "controlled_peer_flow_not_exact"
+        )
+        summary["ok"] = False
 
     return {
         "schema": 1,
         "mode": "hardware",
+        "hardware_required": True,
+        "physical_observed": True,
+        "closure_eligible": summary["ok"],
         "port": port,
         "baud": baud,
         "preflight_commands": ["version"] if normalized_commit is not None else [],
         "expected_firmware_commit": normalized_commit,
+        "github_actions_run": (
+            str(github_run_id) if github_run_id is not None else None
+        ),
+        "workflow_run_attempt": (
+            str(workflow_run_attempt)
+            if workflow_run_attempt is not None
+            else None
+        ),
         "device_build_commit": version_preflight.get("build_commit"),
+        "device_idf_version": version_preflight.get("idf"),
+        "device_release_profile": version_preflight.get(
+            "release_profile"
+        ),
+        "device_sd_history_mode": version_preflight.get(
+            "sd_history_mode"
+        ),
+        "expected_release_profile": expected_release_profile,
+        "expected_sd_history_mode": expected_sd_history_mode,
+        "release_profile": expected_release_profile,
+        "sd_history_mode": expected_sd_history_mode,
         "firmware_identity_required": normalized_commit is not None,
         "firmware_identity_ok": firmware_identity_ok,
         "version_preflight": version_preflight,
@@ -902,6 +1312,19 @@ def run_serial_soak(
         ),
         "active_dm_text": active_dm_text,
         "active_command": active_command,
+        "controlled_peer_receipt": peer_receipt_row,
+        "controlled_peer_before": rf_acceptance.status_snapshot(
+            peer_before
+        ),
+        "controlled_peer_after": rf_acceptance.status_snapshot(peer_after),
+        "controlled_peer_before_receipt": peer_before_receipt,
+        "controlled_peer_after_receipt": peer_after_receipt,
+        "controlled_peer_counter_deltas": peer_counter_deltas,
+        "controlled_peer_successful_send_count": (
+            peer_successful_send_count
+        ),
+        "controlled_peer_expected_send_count": peer_expected_send_count,
+        "controlled_peer_flow_ok": peer_flow_ok,
         "dm_rf_tx": active_command is not None,
         "public_rf_tx": False,
         "formats_sd": False,
@@ -960,6 +1383,18 @@ def main() -> int:
     parser.add_argument("--sd-file-canary", action="store_true")
     parser.add_argument("--allow-sd-unavailable", action="store_true")
     parser.add_argument("--expected-firmware-commit", default=None)
+    parser.add_argument("--github-run-id")
+    parser.add_argument("--github-run-attempt")
+    parser.add_argument("--expected-release-profile")
+    parser.add_argument("--expected-sd-history-mode")
+    parser.add_argument("--controlled-peer-receipt")
+    parser.add_argument(
+        "--peer-capture-dir",
+        help=(
+            "repository-contained directory for read-only COM15 status "
+            "snapshots (active release soak only)"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -1001,6 +1436,8 @@ def main() -> int:
             active_dm_fingerprint=args.active_dm_fingerprint,
             active_dm_text=args.active_dm_text,
             expected_firmware_commit=normalized_commit,
+            github_run_id=args.github_run_id,
+            workflow_run_attempt=args.github_run_attempt,
         )
         mode = "dry-run"
     else:
@@ -1008,6 +1445,16 @@ def main() -> int:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
         if normalized_commit is None:
             parser.error("Hardware soak requires --expected-firmware-commit.")
+        if (
+            not str(args.github_run_id or "").isdigit()
+            or int(str(args.github_run_id or "0")) < 1
+            or not str(args.github_run_attempt or "").isdigit()
+            or int(str(args.github_run_attempt or "0")) < 1
+        ):
+            parser.error(
+                "Hardware soak requires positive --github-run-id and "
+                "--github-run-attempt."
+            )
         try:
             report = run_serial_soak(
                 port=args.port,
@@ -1030,6 +1477,30 @@ def main() -> int:
                 active_dm_fingerprint=args.active_dm_fingerprint,
                 active_dm_text=args.active_dm_text,
                 expected_firmware_commit=normalized_commit,
+                github_run_id=str(args.github_run_id),
+                workflow_run_attempt=str(args.github_run_attempt),
+                expected_release_profile=args.expected_release_profile,
+                expected_sd_history_mode=args.expected_sd_history_mode,
+                controlled_peer_receipt=(
+                    (
+                        Path(args.controlled_peer_receipt)
+                        if Path(args.controlled_peer_receipt).is_absolute()
+                        else Path(__file__).resolve().parents[1]
+                        / args.controlled_peer_receipt
+                    )
+                    if args.controlled_peer_receipt
+                    else None
+                ),
+                peer_capture_dir=(
+                    (
+                        Path(args.peer_capture_dir)
+                        if Path(args.peer_capture_dir).is_absolute()
+                        else Path(__file__).resolve().parents[1]
+                        / args.peer_capture_dir
+                    )
+                    if args.peer_capture_dir
+                    else None
+                ),
             )
         except ValueError as exc:
             parser.error(str(exc))

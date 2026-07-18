@@ -1,4 +1,6 @@
+import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -827,6 +829,119 @@ def test_collect_sample_aborts_after_timeout_without_followup_commands(monkeypat
     assert len(row["results"]) == 1
 
 
+def test_active_listener_flow_requires_exact_counters_and_12_hex_sender():
+    peer_public_key = "0123456789abcdef" + "22" * 24
+    d1l_public_key = "abcdef012345" + "33" * 26
+
+    def listener_status(
+        *,
+        rx_dm: int,
+        tx_dm: int,
+        replies: int,
+        ack_misses: int,
+        rx_at: str,
+        tx_at: str,
+    ) -> dict:
+        return {
+            "run_id": "listener-run-1",
+            "service": "openclaw-radio-listener",
+            "serial": {
+                "port": "COM15",
+                "mesh_connected": True,
+                "public_key": peer_public_key,
+            },
+            "mesh": {
+                "last_rx_sender": d1l_public_key[:12],
+                "last_rx_kind": "dm",
+                "last_tx_kind": "dm",
+                "last_rx_at": rx_at,
+                "last_tx_at": tx_at,
+            },
+            "counters": {
+                "rx_dm_total": rx_dm,
+                "tx_dm_total": tx_dm,
+                "local_fast_reply_total": replies,
+                "tx_dm_ack_miss_total": ack_misses,
+            },
+        }
+
+    before = listener_status(
+        rx_dm=10,
+        tx_dm=20,
+        replies=30,
+        ack_misses=2,
+        rx_at="before-rx",
+        tx_at="before-tx",
+    )
+    after = listener_status(
+        rx_dm=16,
+        tx_dm=26,
+        replies=36,
+        ack_misses=2,
+        rx_at="after-rx",
+        tx_at="after-tx",
+    )
+    ok, deltas = soak_d1l.active_listener_flow_ok(
+        before,
+        after,
+        successful_send_count=6,
+        d1l_public_key=d1l_public_key,
+        peer_fingerprint=peer_public_key[:16].upper(),
+        peer_public_key=peer_public_key,
+        minimum_send_count=6,
+    )
+
+    assert ok is True
+    assert deltas == {
+        "rx_dm_total": 6,
+        "tx_dm_total": 6,
+        "local_fast_reply_total": 6,
+        "tx_dm_ack_miss_total": 0,
+    }
+
+    wrong_sender = json.loads(json.dumps(after))
+    wrong_sender["mesh"]["last_rx_sender"] = d1l_public_key[:16]
+    assert soak_d1l.active_listener_flow_ok(
+        before,
+        wrong_sender,
+        successful_send_count=6,
+        d1l_public_key=d1l_public_key,
+        peer_fingerprint=peer_public_key[:16].upper(),
+        peer_public_key=peer_public_key,
+        minimum_send_count=6,
+    )[0] is False
+    assert soak_d1l.active_listener_flow_ok(
+        before,
+        after,
+        successful_send_count=5,
+        d1l_public_key=d1l_public_key,
+        peer_fingerprint=peer_public_key[:16].upper(),
+        peer_public_key=peer_public_key,
+        minimum_send_count=6,
+    )[0] is False
+
+
+def test_openclaw_active_soak_text_and_send_floor_are_fail_fast():
+    assert soak_d1l.listener_test_text_ok("Core acceptance TEST 1")
+    assert soak_d1l.listener_test_text_ok("core_soak_test")
+    assert not soak_d1l.listener_test_text_ok("core soak")
+    assert not soak_d1l.listener_test_text_ok("contest")
+    assert soak_d1l.expected_active_send_count(3600, 600) == 6
+    assert soak_d1l.expected_active_send_count(3600, 601) == 6
+    assert soak_d1l.expected_active_send_count(3600, 0) is None
+
+
+def test_core_disabled_soak_rejects_non_com12_before_serial_open():
+    with pytest.raises(ValueError, match="requires COM12"):
+        run_soak_for_timeout_test(
+            port="COM8",
+            expected_release_profile="core_1_0",
+            expected_sd_history_mode="disabled",
+            sample_storage=True,
+            allow_sd_unavailable=True,
+        )
+
+
 class FakeSoakPort:
     def reset_input_buffer(self):
         pass
@@ -863,6 +978,63 @@ def run_soak_for_timeout_test(**overrides):
     }
     args.update(overrides)
     return soak_d1l.run_serial_soak(**args)
+
+
+def test_release_active_soak_rejects_non_test_text_before_peer_capture(
+    monkeypatch,
+):
+    commit = "a" * 40
+
+    class FakeSerialModule:
+        pass
+
+    monkeypatch.setitem(sys.modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(
+        soak_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "qualified_controlled_peer_receipt",
+        lambda **_kwargs: (
+            {
+                "controlled_peer": {
+                    "public_key": "0123456789abcdef" + "22" * 24,
+                },
+                "d1l_public_key": "abcdef012345" + "33" * 26,
+            },
+            {"path": "rf.json", "size": 1, "sha256": "0" * 64},
+        ),
+    )
+    monkeypatch.setattr(
+        soak_d1l.rf_acceptance,
+        "capture_peer_status",
+        lambda *_args, **_kwargs: pytest.fail(
+            "peer status must not be captured for invalid test text"
+        ),
+    )
+    monkeypatch.setattr(
+        soak_d1l,
+        "open_d1l_serial",
+        lambda *_args, **_kwargs: pytest.fail(
+            "COM12 must not open for invalid test text"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="word 'test'"):
+        run_soak_for_timeout_test(
+            active_dm_fingerprint="0123456789ABCDEF",
+            active_dm_text="core soak",
+            expected_firmware_commit=commit,
+            github_run_id="123",
+            workflow_run_attempt="1",
+            controlled_peer_receipt=Path("ignored.json"),
+        )
 
 
 def test_soak_stops_after_crashlog_clear_timeout(monkeypatch):
