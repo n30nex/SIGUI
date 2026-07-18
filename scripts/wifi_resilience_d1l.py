@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail-closed saved-profile Wi-Fi resilience acceptance for DeskOS D1L.
 
-The runner is deliberately limited to the ESP32 console on COM12. It never
+The runner is deliberately limited to the configured D1L ESP32 console. It never
 accepts a Wi-Fi password, never rewrites or clears the saved profile, never
 opens the RP2040, never formats storage, and never sends Mesh RF traffic.
 Provision credentials separately before using this acceptance runner.
@@ -30,7 +30,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-D1L_PORT = "COM12"
+D1L_PORT_NUMBER = 12
+D1L_PORT = f"COM{D1L_PORT_NUMBER}"
 D1L_CONSOLE_BAUD = 115200
 FORBIDDEN_PORTS = {"COM" + number for number in ("8", "11", "15", "29")}
 SAFE_COMMANDS = frozenset(
@@ -1369,7 +1370,7 @@ def write_report(report: dict, path: Path | None = None) -> Path:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Saved-profile COM12 Wi-Fi resilience acceptance; "
+            "Saved-profile D1L Wi-Fi resilience acceptance; "
             "no password input is accepted."
         )
     )
