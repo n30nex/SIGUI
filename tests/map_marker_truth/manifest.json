@@ -107,7 +107,7 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "1a8375e1929ffc5ffa2bbb51f5bd9a382f6a1c10c33a68470ba0b7c4aee660ab",
+    "main/app/app_model.c": "8b7bd8f545d71367ada272375facff78370e99687e15f5ca4dfa68935151c2aa",
     "main/app/app_model.h": "471448b0689e4fdf08241e764edc0cb5d5a488df1b5b2b99ecb7273c3d6eef69",
     "main/app/settings_model.c": "15a5d7baa096daa03c0369068282525baab1303e2ecbcc1010123d25bfeb6fa6",
     "main/app/settings_model.h": "17e976c5105e35978187c58cd81da756d8a20808cac0cce9cfffba2e97ce5795",

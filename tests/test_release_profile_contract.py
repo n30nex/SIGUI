@@ -120,6 +120,92 @@ def test_unavailable_background_stacks_are_rejected_before_startup_or_side_effec
     assert '"unsupported_in_release_profile"' in connectivity
 
 
+def test_app_boundary_forces_public_and_rejects_unavailable_mutations():
+    app = read("main/app/app_model.c")
+
+    assert "static bool multi_channel_management_available(void)" in app
+    assert "channel_id != D1L_CHANNEL_PUBLIC_ID" in between(
+        app,
+        "esp_err_t d1l_app_model_send_channel_text",
+        "esp_err_t d1l_app_model_send_active_channel_text",
+    )
+    assert "D1L_CHANNEL_PUBLIC_ID, text" in between(
+        app,
+        "esp_err_t d1l_app_model_send_active_channel_text",
+        "esp_err_t d1l_app_model_copy_channels",
+    )
+    copy_channels = between(
+        app,
+        "esp_err_t d1l_app_model_copy_channels",
+        "esp_err_t d1l_app_model_select_channel",
+    )
+    assert "*out_count = 1U;" in copy_channels
+    assert "*out_active_channel_id = D1L_CHANNEL_PUBLIC_ID;" in copy_channels
+
+    for start, end in (
+        (
+            "esp_err_t d1l_app_model_add_channel",
+            "esp_err_t d1l_app_model_create_channel",
+        ),
+        (
+            "esp_err_t d1l_app_model_create_channel",
+            "esp_err_t d1l_app_model_import_channel_uri",
+        ),
+        (
+            "esp_err_t d1l_app_model_import_channel_uri",
+            "esp_err_t d1l_app_model_update_channel",
+        ),
+        (
+            "esp_err_t d1l_app_model_update_channel",
+            "esp_err_t d1l_app_model_remove_channel",
+        ),
+        (
+            "esp_err_t d1l_app_model_remove_channel",
+            "esp_err_t d1l_app_model_export_channel_share_uri",
+        ),
+        (
+            "esp_err_t d1l_app_model_export_channel_share_uri",
+            "void d1l_app_model_clear_channel_share_uri",
+        ),
+    ):
+        body = between(app, start, end)
+        guard = "if (!multi_channel_management_available())"
+        assert guard in body
+        assert body.index(guard) < body.index("return ESP_ERR_NOT_SUPPORTED;")
+
+    for start, end in (
+        (
+            "esp_err_t d1l_app_model_request_path_discovery_probe",
+            "esp_err_t d1l_app_model_send_trace_contact",
+        ),
+        (
+            "esp_err_t d1l_app_model_send_trace_contact",
+            "size_t d1l_app_model_query_dm_thread_page",
+        ),
+    ):
+        body = between(app, start, end)
+        assert "D1L_RELEASE_FEATURE_USER_TRACE" in body
+        assert body.index("D1L_RELEASE_FEATURE_USER_TRACE") < body.index(
+            "d1l_meshcore_service_"
+        )
+
+    for start, end in (
+        (
+            "esp_err_t d1l_app_model_set_map_location",
+            "esp_err_t d1l_app_model_clear_map_location",
+        ),
+        (
+            "esp_err_t d1l_app_model_clear_map_location",
+            "esp_err_t d1l_app_model_set_timezone_offset_minutes",
+        ),
+    ):
+        body = between(app, start, end)
+        assert "D1L_RELEASE_FEATURE_LOCATION" in body
+        assert body.index("D1L_RELEASE_FEATURE_LOCATION") < body.index(
+            "d1l_settings_update_fields"
+        )
+
+
 def test_release_profile_native_matrix(tmp_path):
     compiler = shutil.which("gcc") or shutil.which("clang")
     if compiler is None:

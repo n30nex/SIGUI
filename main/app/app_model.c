@@ -96,6 +96,12 @@ static bool valid_radio_edit(const d1l_app_radio_profile_edit_t *profile)
            profile->tx_power_dbm <= D1L_RADIO_TX_POWER_DBM;
 }
 
+static bool multi_channel_management_available(void)
+{
+    return d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
+}
+
 static void radio_edit_from_settings(const d1l_settings_t *settings,
                                      d1l_app_radio_profile_edit_t *profile)
 {
@@ -553,11 +559,19 @@ esp_err_t d1l_app_model_send_public_text(const char *text)
 esp_err_t d1l_app_model_send_channel_text(uint64_t channel_id,
                                           const char *text)
 {
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     return d1l_meshcore_service_send_channel(channel_id, text);
 }
 
 esp_err_t d1l_app_model_send_active_channel_text(const char *text)
 {
+    if (!multi_channel_management_available()) {
+        return d1l_meshcore_service_send_channel(
+            D1L_CHANNEL_PUBLIC_ID, text);
+    }
     return d1l_meshcore_service_send_active_channel(text);
 }
 
@@ -572,6 +586,26 @@ esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
         out_stats);
     if (ret != ESP_OK) {
         return ret;
+    }
+    if (!multi_channel_management_available()) {
+        size_t public_index = *out_count;
+        for (size_t i = 0U; i < *out_count; ++i) {
+            if (out_channels[i].channel_id == D1L_CHANNEL_PUBLIC_ID) {
+                public_index = i;
+                break;
+            }
+        }
+        if (public_index == *out_count) {
+            *out_count = 0U;
+            *out_active_channel_id = 0U;
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (public_index != 0U) {
+            out_channels[0] = out_channels[public_index];
+        }
+        *out_count = 1U;
+        *out_active_channel_id = D1L_CHANNEL_PUBLIC_ID;
+        out_stats->count = 1U;
     }
     const d1l_read_state_stats_t read_state = d1l_read_state_stats();
     for (size_t i = 0U; i < *out_count; ++i) {
@@ -588,6 +622,10 @@ esp_err_t d1l_app_model_select_channel(uint64_t channel_id,
 {
     if (channel_id == 0U) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        return ESP_ERR_NOT_SUPPORTED;
     }
     if (out_channel) {
         memset(out_channel, 0, sizeof(*out_channel));
@@ -639,6 +677,9 @@ esp_err_t d1l_app_model_add_channel(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -653,6 +694,9 @@ esp_err_t d1l_app_model_create_channel(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -677,6 +721,9 @@ esp_err_t d1l_app_model_import_channel_uri(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -691,6 +738,9 @@ esp_err_t d1l_app_model_update_channel(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -705,6 +755,9 @@ esp_err_t d1l_app_model_remove_channel(
     d1l_channel_mutation_result_t *out_result,
     d1l_channel_info_t *out_channel)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const esp_err_t prepared = prepare_channel_mutation_outputs(
         out_result, out_channel);
     if (prepared != ESP_OK) {
@@ -719,6 +772,9 @@ esp_err_t d1l_app_model_remove_channel(
 esp_err_t d1l_app_model_export_channel_share_uri(
     uint64_t channel_id, char *dest, size_t dest_size)
 {
+    if (!multi_channel_management_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (!dest || dest_size == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -758,6 +814,13 @@ size_t d1l_app_model_query_channel_messages_page(
     size_t max_entries, size_t skip_newest, const char *query,
     size_t *out_total_matches)
 {
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        if (out_total_matches) {
+            *out_total_matches = 0U;
+        }
+        return 0U;
+    }
     return d1l_message_store_query_channel_page(
         channel_id, out_entries, max_entries, skip_newest, query,
         out_total_matches);
@@ -772,12 +835,18 @@ esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
                                                      char *out_token,
                                                      size_t out_token_size)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     return d1l_meshcore_service_request_path_discovery_probe(
         fingerprint, out_token, out_token_size);
 }
 
 esp_err_t d1l_app_model_send_trace_contact(const char *fingerprint)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     return d1l_meshcore_service_send_trace_contact(fingerprint);
 }
 
@@ -895,6 +964,10 @@ esp_err_t d1l_app_model_mark_channel_read(uint64_t channel_id)
     if (channel_id == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!multi_channel_management_available() &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (channel_id == D1L_CHANNEL_PUBLIC_ID) {
         return d1l_app_model_mark_public_read();
     }
@@ -915,6 +988,9 @@ esp_err_t d1l_app_model_request_advert(bool flood)
 
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (lat_e7 < D1L_MAP_LOCATION_LAT_E7_MIN ||
         lat_e7 > D1L_MAP_LOCATION_LAT_E7_MAX ||
         lon_e7 < D1L_MAP_LOCATION_LON_E7_MIN ||
@@ -932,6 +1008,9 @@ esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7)
 
 esp_err_t d1l_app_model_clear_map_location(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     d1l_settings_t settings = {0};
     settings.map_location_set = false;
     settings.map_lat_e7 = 0;
