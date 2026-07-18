@@ -58,7 +58,7 @@ The authoritative product boundary, roadmap, and work graph are:
 
 ## Current GitHub snapshot
 
-Snapshot refreshed at `2026-07-18T15:15:36-04:00`.
+Snapshot refreshed at `2026-07-18T19:40:03-04:00`.
 
 | Item | State |
 |---|---|
@@ -109,15 +109,15 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 | ID | Status | Evidence / next action |
 |---|---|---|
 | R0 | complete | Contract/roadmap/backlog and ledger committed as `c09c9b4e6ee0a7eb9ea4bc405369ffdc94544265` |
-| R1 | in progress | Central immutable profile, compile-time SD mode, app snapshot, version, health, settings, mesh, companion, and storage truth are wired; package wiring remains in R7 |
+| R1 | complete | Central immutable profile, compile-time disabled-SD mode, app/runtime projections, package scope, version, health, settings, Mesh, companion, and storage truth are integrated and tested |
 | R2 | complete | Initial boundary `bec47e2` plus truth/profile-matrix follow-up `8b36d99`; 227 integrated UI/profile/map tests passed |
 | R3 | complete | Profile-aware command admission integrated as `b356e45` plus disabled-SD fail-closed follow-up `cbbfbed`; 52 integrated command/profile/source-pin tests passed |
 | R4 | complete | Reviewed PR #197 substance integrated as `2824d63c6c779560ce0ad1ca787e230634b5c3ff`; 47 storage tests and 7 integrated source-pin checks passed |
 | R5 | complete | Profile-bound SD admission integrated as `0c72561`; Core conditional/disabled routes retained data to NVS and cannot activate SD |
-| R6 | complete | 109 focused Mesh/DM/contact/route tests passed; one Actions-only libFuzzer case skipped; no `main/mesh/**` P0 or code change |
-| R7 | in progress | Agent E isolated at `F:\SIGUI-worktrees\24h-core-qa`; Core smoke/UI probe/audit/package and exact RF admission |
-| R8 | in progress | Independent integrated diff/evidence review found and lead repaired missing exact build identity in `health`; review continues |
-| R9 | pending | Focused checks plus one full host suite and candidate freeze |
+| R6 | complete | Public-only Core runtime boundary `e3f99a6` rejects private-channel RX/TX before decrypt/key/store/RF and prevents retained private-channel reconciliation; focused Mesh/DM/contact/route suites are green |
+| R7 | complete | Exact Actions capture, package/provenance/SBOM, non-erasing flash, Core smoke/UI, manual/install review, reboot, RF/DM, soak, defect, and final audit producers are integrated through `f9e26e0` |
+| R8 | complete | Three-lane final freeze review passed runtime and release-flow scope and closed its one evidence finding with deterministic provenance recomputation `f9e26e0`; no remaining concrete pre-freeze Core P0/P1 found |
+| R9 | in progress | Integrated focused suites are green; run the single full host suite, validate ledger/manifests/diff, then freeze the exact candidate SHA |
 | R10 | pending | One final `d1l-ci`, download all artifacts, verify all checksums |
 | R11 | pending | Exact non-erasing COM12 flash, UI/boot/persistence gates |
 | R12 | pending | Controlled peer RF/DM; `public_rf_tx=false` |
@@ -487,4 +487,39 @@ release is authorized by the evidence currently recorded.
 - The operator's power cycle remains pre-candidate only. COM12 and COM15 have
   not been opened by this release flow, the full host suite and candidate
   workflow have not run, and no firmware build, flash, RF transmission, or SD
+  operation occurred.
+
+### `2026-07-18T19:40:03-04:00`
+
+- The remaining pre-freeze producer/audit alignment is closed. Commits
+  `735abe2` and `44bf5ce` make the manual physical UI receipt immutable,
+  checksum-bound, exact-run/attempt-bound, explicit about zero DM/Public RF,
+  and strictly recomputed by the Core audit. The automated Core UI receipt now
+  executes rejected excluded-feature deep links and proves the active Core tab
+  remains unchanged.
+- Commit `28a8d49` canonicalizes excluded scroll/compose aliases before UI
+  handlers, and the combined disabled-SD admission path returns truthful
+  unavailable status without probing the RP2040 or media. Commit `c4629ea`
+  also enforces a 15-minute GitHub defect-snapshot age with bounded future
+  skew. The combined console policy source pins were refreshed in `826d7de`.
+- Commits `fc41c10`, `ae9f222`, and `f9e26e0` bind provenance to
+  `n30nex/SIGUI`, `d1l-ci`, the canonical workflow path, Core profile, exact
+  run and attempt, and then deterministically recompute every subject and
+  material against the current clean source and package. The final adversarial
+  checksum-preserving subject-digest transplant now fails closed.
+- Integrated focused validation after these repairs passed 107 tests with two
+  expected platform skips; the final provenance/package/audit slice passed 37
+  additional focused tests. Independent runtime and release-flow reviews found
+  no remaining concrete pre-freeze Core P0/P1. The single full host suite is
+  the next and only remaining R9 action.
+- Live GitHub refresh confirms `origin/main` remains
+  `846f728dd3faded85451c6d39ba6a07cb8ca7f44`, PR #197 remains open at
+  `79d3efae9c784d65b70b0d79fae352b3ad5199aa`, excluded draft PR #199
+  remains open at `6c854159dfc37525ff4df2d57ca216e4b2303bc2`, no
+  release-branch `d1l-ci` run exists, and no `v1.0.0` tag or release exists.
+  Open P1s remain explicitly Full Feature deferred; no known Core
+  crash/data-loss/security P1 was introduced.
+- The user's power cycle remains pre-candidate availability only. COM12 and
+  COM15 have not been opened by this release flow. No firmware was built
+  locally, no firmware was flashed, no RF transmission occurred, and no SD
   operation occurred.
