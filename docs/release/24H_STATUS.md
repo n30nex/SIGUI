@@ -367,3 +367,23 @@ release is authorized by the evidence currently recorded.
   cycle is not release evidence. No firmware was built locally, COM12 was not
   opened or flashed, no RF transmission occurred, and no SD operation
   occurred.
+
+### `2026-07-18T16:30:47-04:00`
+
+- Post-power-cycle read-only Windows checks confirm
+  `USB-SERIAL CH340 (COM12)` is present with `CM_PROB_NONE` and remains mapped
+  to the live serial namespace. `Win32_SerialPort` did not enumerate the CH340,
+  so release admission uses the authoritative Plug-and-Play state. COM12 was
+  not opened and the pre-candidate cycle remains ineligible for release proof.
+- Commit `c84b190` adds executable Core-only manual UI and package
+  install/recovery review producers. Both fail closed unless bound to the
+  exact candidate SHA, Actions run and attempt, clean source, exact COM12/Core
+  profile, and hashed automated/package evidence. They require distinct
+  operator and reviewer attestations; optional PNG evidence is validated when
+  supplied but is not an added Core-only prerequisite.
+- Focused validation passed all nine manual UI and install/recovery producer
+  tests plus Python compilation. The branch remains unfrozen while R7
+  artifact/RF/flash work and R8 reboot/cold-cycle and live-defect producers
+  complete. No full host suite or candidate workflow has run.
+- No firmware was built locally, no serial port was opened, no firmware was
+  flashed, no RF transmission occurred, and no SD operation occurred.
