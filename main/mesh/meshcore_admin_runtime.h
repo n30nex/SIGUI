@@ -31,6 +31,7 @@ typedef struct {
     d1l_meshcore_admin_binding_t binding;
     d1l_meshcore_admin_state_t state;
     uint32_t generation;
+    uint64_t request_deadline_us;
 } d1l_meshcore_admin_context_t;
 
 typedef struct {

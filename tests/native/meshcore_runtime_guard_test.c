@@ -161,6 +161,65 @@ static bool admin_test_enqueue(void *context, const void *command)
     return queue->accept;
 }
 
+typedef struct {
+    uint32_t request_id;
+    uint64_t deadline_us;
+    uint8_t slot;
+} admin_response_token_t;
+
+typedef struct {
+    bool accept;
+    unsigned calls;
+    admin_response_token_t token;
+} admin_response_test_queue_t;
+
+static bool admin_response_request_clear(
+    const d1l_mesh_admin_response_request_t *request)
+{
+    return request && !request->present && request->deadline_us == 0U &&
+           request->session_generation == 0U &&
+           request->plaintext_len == 0U &&
+           !request->count_rx_on_accept &&
+           bytes_zero(request->fingerprint, sizeof(request->fingerprint)) &&
+           bytes_zero(request->plaintext, sizeof(request->plaintext));
+}
+
+static bool bytes_contain(const void *haystack, size_t haystack_len,
+                          const void *needle, size_t needle_len)
+{
+    const uint8_t *bytes = haystack;
+    if (!bytes || !needle || needle_len == 0U || needle_len > haystack_len) {
+        return false;
+    }
+    for (size_t offset = 0U; offset + needle_len <= haystack_len; ++offset) {
+        if (memcmp(bytes + offset, needle, needle_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool admin_response_test_enqueue(void *context, const void *command)
+{
+    admin_response_test_queue_t *queue = context;
+    assert(queue && command);
+    queue->calls++;
+    memcpy(&queue->token, command, sizeof(queue->token));
+    return queue->accept;
+}
+
+static void publish_admin_response(
+    d1l_mesh_admin_response_request_t *request, uint32_t request_id,
+    uint32_t session_generation, const uint8_t *plaintext,
+    size_t plaintext_len, uint64_t deadline_us)
+{
+    assert(d1l_mesh_admin_response_request_claim(request, request_id));
+    assert(admin_response_request_clear(request));
+    assert(d1l_mesh_admin_response_request_publish(
+        request, request_id, "0011223344556677", session_generation,
+        plaintext, plaintext_len, true, deadline_us));
+}
+
 static void publish_admin_login(d1l_mesh_command_request_t *request,
                                 uint32_t request_id,
                                 const char *password)
@@ -293,6 +352,235 @@ static void test_admin_logout_and_owner_recursion_use_production_guard(void)
         &logout, 131U, D1L_MESH_REQUEST_COMPLETED));
     assert(logout_mutations == 1U);
     assert(request_password_clear(&logout));
+}
+
+static void test_admin_response_mutation_requires_runtime_owner(void)
+{
+    static const uint8_t plaintext[] = "owner-only-response-secret";
+    static const uint8_t secret_marker[] = "response-secret";
+    d1l_mesh_admin_response_request_t request = {0};
+    publish_admin_response(&request, 201U, 7U, plaintext,
+                           sizeof(plaintext) - 1U, 500U);
+    admin_response_token_t token;
+    memset(&token, 0, sizeof(token));
+    token.request_id = 201U;
+    token.deadline_us = 500U;
+    token.slot = 2U;
+    admin_response_test_queue_t queue = {.accept = true};
+    assert(d1l_mesh_admin_response_request_enqueue(
+               &request, 201U, admin_response_test_enqueue, &queue,
+               &token) == D1L_MESH_COMMAND_ENQUEUE_QUEUED);
+    assert(queue.calls == 1U);
+    assert(memcmp(&queue.token, &token, sizeof(token)) == 0);
+    assert(bytes_contain(plaintext, sizeof(plaintext) - 1U,
+                         secret_marker, sizeof(secret_marker) - 1U));
+    assert(!bytes_contain(&queue.token, sizeof(queue.token),
+                          secret_marker, sizeof(secret_marker) - 1U));
+    assert(!bytes_contain(&queue.token, sizeof(queue.token),
+                          "0011223344556677", 16U));
+
+    unsigned mutations = 0U;
+    d1l_mesh_admin_response_view_t view = {0};
+    assert(d1l_mesh_admin_response_request_admit(
+               &request, 201U, false, 7U, 100U, &view) ==
+           D1L_MESH_ADMIN_RESPONSE_ADMIT_OWNER_REQUIRED);
+    assert(mutations == 0U);
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_PENDING);
+    assert(request.present);
+    assert(bytes_zero(&view, sizeof(view)));
+
+    assert(d1l_mesh_admin_response_request_admit(
+               &request, 201U, true, 7U, 100U, &view) ==
+           D1L_MESH_ADMIN_RESPONSE_ADMIT_ACCEPTED);
+    mutations++;
+    assert(view.session_generation == 7U);
+    assert(view.deadline_us == 500U);
+    assert(view.count_rx_on_accept);
+    assert(view.plaintext_len == sizeof(plaintext) - 1U);
+    assert(memcmp(view.plaintext, plaintext, view.plaintext_len) == 0);
+    assert(strcmp(view.fingerprint, "0011223344556677") == 0);
+    assert(mutations == 1U);
+    assert(d1l_mesh_admin_response_request_complete(&request, 201U));
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_FREE);
+    assert(admin_response_request_clear(&request));
+}
+
+static void test_admin_response_rejects_stale_session_and_slot_generation(void)
+{
+    static const uint8_t old_plaintext[] = "old-generation-secret";
+    static const uint8_t new_plaintext[] = "new-generation-secret";
+    d1l_mesh_admin_response_request_t request = {0};
+    d1l_mesh_admin_response_view_t view = {0};
+    unsigned mutations = 0U;
+
+    publish_admin_response(&request, 202U, 7U, old_plaintext,
+                           sizeof(old_plaintext) - 1U, 500U);
+    assert(d1l_mesh_admin_response_request_admit(
+               &request, 202U, true, 8U, 100U, &view) ==
+           D1L_MESH_ADMIN_RESPONSE_ADMIT_STALE_SESSION);
+    assert(mutations == 0U);
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_FREE);
+    assert(admin_response_request_clear(&request));
+
+    publish_admin_response(&request, 203U, 8U, new_plaintext,
+                           sizeof(new_plaintext) - 1U, 600U);
+    assert(d1l_mesh_admin_response_request_admit(
+               &request, 202U, true, 8U, 100U, &view) ==
+           D1L_MESH_ADMIN_RESPONSE_ADMIT_INVALID);
+    assert(request.present);
+    assert(memcmp(request.plaintext, new_plaintext,
+                  sizeof(new_plaintext) - 1U) == 0);
+    assert(d1l_mesh_admin_response_request_admit(
+               &request, 203U, true, 8U, 100U, &view) ==
+           D1L_MESH_ADMIN_RESPONSE_ADMIT_ACCEPTED);
+    mutations++;
+    assert(d1l_mesh_admin_response_request_complete(&request, 203U));
+    assert(mutations == 1U);
+    assert(admin_response_request_clear(&request));
+}
+
+static void test_admin_response_saturation_and_timeout_wipe_plaintext(void)
+{
+    static const uint8_t plaintext[] = "bounded-response-secret";
+    const admin_response_token_t token = {
+        .request_id = 204U,
+        .deadline_us = 500U,
+        .slot = 1U,
+    };
+    d1l_mesh_admin_response_request_t saturated = {0};
+    admin_response_test_queue_t full_queue = {.accept = false};
+    publish_admin_response(&saturated, 204U, 9U, plaintext,
+                           sizeof(plaintext) - 1U, 500U);
+    assert(d1l_mesh_admin_response_request_enqueue(
+               &saturated, 204U, admin_response_test_enqueue, &full_queue,
+               &token) == D1L_MESH_COMMAND_ENQUEUE_SATURATED);
+    assert(full_queue.calls == 1U);
+    assert(d1l_mesh_request_guard_state(&saturated.lifecycle) ==
+           D1L_MESH_REQUEST_FREE);
+    assert(admin_response_request_clear(&saturated));
+
+    d1l_mesh_admin_response_request_t expired = {0};
+    d1l_mesh_admin_response_view_t view = {0};
+    publish_admin_response(&expired, 205U, 9U, plaintext,
+                           sizeof(plaintext) - 1U, 100U);
+    assert(d1l_mesh_admin_response_request_admit(
+               &expired, 205U, true, 9U, 100U, &view) ==
+           D1L_MESH_ADMIN_RESPONSE_ADMIT_EXPIRED);
+    assert(d1l_mesh_request_guard_state(&expired.lifecycle) ==
+           D1L_MESH_REQUEST_FREE);
+    assert(admin_response_request_clear(&expired));
+    assert(bytes_zero(&view, sizeof(view)));
+}
+
+static void test_admin_response_owner_reap_due_and_zero_deadline_wipes(void)
+{
+    static const uint8_t plaintext[] = "reap-due-secret";
+    d1l_mesh_admin_response_request_t request = {0};
+
+    publish_admin_response(&request, 206U, 10U, plaintext,
+                           sizeof(plaintext) - 1U, 100U);
+    assert(!d1l_mesh_admin_response_request_owner_reap(
+        &request, false, 10U, 100U));
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_PENDING);
+    assert(request.present);
+    assert(d1l_mesh_admin_response_request_owner_reap(
+        &request, true, 10U, 100U));
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_FREE);
+    assert(admin_response_request_clear(&request));
+
+    publish_admin_response(&request, 207U, 10U, plaintext,
+                           sizeof(plaintext) - 1U, 200U);
+    request.deadline_us = 0U;
+    assert(d1l_mesh_admin_response_request_owner_reap(
+        &request, true, 10U, 50U));
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_FREE);
+    assert(admin_response_request_clear(&request));
+}
+
+static void test_admin_response_owner_reap_stale_generation_wipes(void)
+{
+    static const uint8_t plaintext[] = "reap-stale-secret";
+    d1l_mesh_admin_response_request_t request = {0};
+    publish_admin_response(&request, 208U, 10U, plaintext,
+                           sizeof(plaintext) - 1U, 500U);
+    assert(d1l_mesh_admin_response_request_owner_reap(
+        &request, true, 11U, 100U));
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_FREE);
+    assert(admin_response_request_clear(&request));
+}
+
+static void test_admin_response_owner_reap_keeps_valid_predeadline_slot(void)
+{
+    static const uint8_t plaintext[] = "reap-valid-secret";
+    d1l_mesh_admin_response_request_t request = {0};
+    d1l_mesh_admin_response_view_t view = {0};
+    publish_admin_response(&request, 209U, 11U, plaintext,
+                           sizeof(plaintext) - 1U, 500U);
+    assert(!d1l_mesh_admin_response_request_owner_reap(
+        &request, true, 11U, 499U));
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_PENDING);
+    assert(request.present);
+    assert(memcmp(request.plaintext, plaintext,
+                  sizeof(plaintext) - 1U) == 0);
+    assert(d1l_mesh_admin_response_request_admit(
+               &request, 209U, true, 11U, 499U, &view) ==
+           D1L_MESH_ADMIN_RESPONSE_ADMIT_ACCEPTED);
+    assert(d1l_mesh_admin_response_request_complete(&request, 209U));
+    assert(admin_response_request_clear(&request));
+}
+
+static void test_admin_response_reap_reuse_rejects_stale_token_aba(void)
+{
+    static const uint8_t plaintext_a[] = "generation-a-secret";
+    static const uint8_t plaintext_b[] = "generation-b-secret";
+    d1l_mesh_admin_response_request_t request = {0};
+    admin_response_token_t token_a;
+    memset(&token_a, 0, sizeof(token_a));
+    token_a.request_id = 210U;
+    token_a.deadline_us = 100U;
+    token_a.slot = 0U;
+    admin_response_test_queue_t queue = {.accept = true};
+
+    publish_admin_response(&request, 210U, 12U, plaintext_a,
+                           sizeof(plaintext_a) - 1U, 100U);
+    assert(d1l_mesh_admin_response_request_enqueue(
+               &request, 210U, admin_response_test_enqueue, &queue,
+               &token_a) == D1L_MESH_COMMAND_ENQUEUE_QUEUED);
+    assert(queue.token.request_id == 210U);
+    assert(d1l_mesh_admin_response_request_owner_reap(
+        &request, true, 12U, 100U));
+    assert(admin_response_request_clear(&request));
+
+    publish_admin_response(&request, 211U, 13U, plaintext_b,
+                           sizeof(plaintext_b) - 1U, 600U);
+    d1l_mesh_admin_response_view_t stale_view = {0};
+    assert(d1l_mesh_admin_response_request_admit(
+               &request, token_a.request_id, true, 13U, 200U,
+               &stale_view) == D1L_MESH_ADMIN_RESPONSE_ADMIT_INVALID);
+    assert(d1l_mesh_request_guard_matches(&request.lifecycle, 211U));
+    assert(d1l_mesh_request_guard_state(&request.lifecycle) ==
+           D1L_MESH_REQUEST_PENDING);
+    assert(request.present);
+    assert(memcmp(request.plaintext, plaintext_b,
+                  sizeof(plaintext_b) - 1U) == 0);
+
+    d1l_mesh_admin_response_view_t view_b = {0};
+    assert(d1l_mesh_admin_response_request_admit(
+               &request, 211U, true, 13U, 200U, &view_b) ==
+           D1L_MESH_ADMIN_RESPONSE_ADMIT_ACCEPTED);
+    assert(view_b.plaintext_len == sizeof(plaintext_b) - 1U);
+    assert(memcmp(view_b.plaintext, plaintext_b,
+                  view_b.plaintext_len) == 0);
+    assert(d1l_mesh_admin_response_request_complete(&request, 211U));
+    assert(admin_response_request_clear(&request));
 }
 
 static void test_owner_scheduler_terminal_recovery_precedes_overload(void)
@@ -995,6 +1283,13 @@ int main(void)
     test_admin_queue_saturation_and_admission_execute_production_guard();
     test_admin_slot_reuse_rejects_stale_generation_without_wipe();
     test_admin_logout_and_owner_recursion_use_production_guard();
+    test_admin_response_mutation_requires_runtime_owner();
+    test_admin_response_rejects_stale_session_and_slot_generation();
+    test_admin_response_saturation_and_timeout_wipe_plaintext();
+    test_admin_response_owner_reap_due_and_zero_deadline_wipes();
+    test_admin_response_owner_reap_stale_generation_wipes();
+    test_admin_response_owner_reap_keeps_valid_predeadline_slot();
+    test_admin_response_reap_reuse_rejects_stale_token_aba();
     test_owner_scheduler_terminal_recovery_precedes_overload();
     test_terminal_lane_publication_blocks_queue_dispatch();
     test_dequeued_send_raw_is_retained_across_terminal_race();

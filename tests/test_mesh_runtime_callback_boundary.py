@@ -105,7 +105,10 @@ def test_mesh_runtime_task_owns_radio_event_processing_and_telemetry():
 
     assert "D1L_MESHCORE_RADIO_EVENT_QUEUE_LEN 8U" in source
     assert "D1L_MESHCORE_PRIORITY_QUEUE_LEN 4U" in source
-    assert "D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 8192U" in source
+    assert "D1L_MESHCORE_SERVICE_TASK_BASE_STACK_BYTES 8192U" in source
+    assert "D1L_MESHCORE_SERVICE_TASK_SAFETY_MARGIN_BYTES 4096U" in source
+    assert "D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 12288U" in source
+    assert "mesh owner stack must include its configured safety margin" in source
     assert "D1L_MESH_OWNER_RADIO_EVENT_BURST_MAX 4U" in guard
     assert "D1L_MESH_OWNER_PRIORITY_COMMAND_BURST_MAX 2U" in guard
     assert "d1l_mesh_owner_scheduler_choose(" in task

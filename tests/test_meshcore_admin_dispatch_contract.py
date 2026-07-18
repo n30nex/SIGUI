@@ -48,6 +48,29 @@ def test_admin_protocol_and_runtime_are_separate_production_modules() -> None:
 
 def test_runtime_snapshot_redacts_all_authority_material() -> None:
     runtime_h = read("main/mesh/meshcore_admin_runtime.h")
+    runtime_c = read("main/mesh/meshcore_admin_runtime.c")
+    context = body(
+        runtime_h,
+        "typedef struct {\n    d1l_meshcore_admin_binding_t binding;",
+        "} d1l_meshcore_admin_context_t;",
+    )
+    copy_context = body(
+        runtime_c,
+        "static bool copy_context_locked",
+        "static bool binding_matches_locked",
+    )
+    capture_pending = body(
+        runtime_c,
+        "bool d1l_meshcore_admin_runtime_capture_pending",
+        "bool d1l_meshcore_admin_runtime_capture_authenticated",
+    )
+    assert "uint64_t request_deadline_us;" in context
+    assert "out_context->request_deadline_us = s_session.request_deadline_us" in \
+        copy_context
+    assert capture_pending.index("d1l_store_lock_take(&s_lock)") < \
+        capture_pending.index("copy_context_locked(out_context, false)") < \
+        capture_pending.index("d1l_store_lock_give(&s_lock)")
+
     snapshot = body(
         runtime_h,
         "typedef struct {\n    d1l_meshcore_admin_state_t state;",
@@ -73,6 +96,7 @@ def test_service_revalidates_every_live_admin_binding_and_zeroizes_copies() -> N
         "derive_local_identity_shared_secret",
         "d1l_meshcore_admin_runtime_validate_binding",
         "meshcore_decrypt_after_mac",
+        "meshcore_service_queue_admin_response",
         "d1l_meshcore_admin_binding_wipe",
         "d1l_meshcore_admin_context_wipe",
         "secure_zero_bytes(plaintext, sizeof(plaintext))",
@@ -88,13 +112,17 @@ def test_service_revalidates_every_live_admin_binding_and_zeroizes_copies() -> N
         derive_failure
     assert derive_failure.index("d1l_meshcore_admin_runtime_invalidate") < \
         derive_failure.index("d1l_meshcore_admin_binding_wipe")
+    assert "d1l_meshcore_admin_runtime_dispatch_response" not in direct
+    assert "return true;" in direct
+    assert "plaintext,plaintext_len,true,context.request_deadline_us," in \
+        "".join(direct.split())
 
     path_rx = body(service, "static void parse_rx_path_packet",
                    "static void parse_rx_trace_packet")
-    dispatch = path_rx[path_rx.index("admin_dispatch_plain_response("):
-                       path_rx.index("admin_dispatch_plain_response(") + 350]
-    assert "settings->identity_public_key" in dispatch
-    assert "secret" in dispatch
+    handoff = path_rx[path_rx.index("admin_queue_plain_response("):
+                      path_rx.index("admin_queue_plain_response(") + 350]
+    assert "settings->identity_public_key" in handoff
+    assert "secret" in handoff
     assert "if (!admin_response_considered)" in path_rx
     decrypted = path_rx[path_rx.index("uint8_t plain["):]
     before_cleanup, cleanup = decrypted.split("path_candidate_cleanup:", 1)
@@ -115,6 +143,53 @@ def test_service_revalidates_every_live_admin_binding_and_zeroizes_copies() -> N
     assert cleanup.count("secure_zero_bytes(plain, sizeof(plain));") == 1
     assert cleanup.index("secure_zero_bytes(plain, sizeof(plain));") < \
         cleanup.index("if (continue_after_cleanup)") < cleanup.index("return;")
+
+    path_helper = body(
+        service,
+        "static esp_err_t admin_queue_plain_response",
+        "static bool parse_rx_admin_response_packet",
+    )
+    for required in (
+        "d1l_meshcore_admin_runtime_capture_pending",
+        "d1l_meshcore_admin_runtime_validate_binding",
+        "meshcore_service_queue_admin_response",
+        "d1l_meshcore_admin_binding_wipe",
+        "d1l_meshcore_admin_context_wipe",
+    ):
+        assert required in path_helper
+    assert "d1l_meshcore_admin_runtime_dispatch_response" not in path_helper
+    assert "plaintext,plaintext_len,false,context.request_deadline_us,now_us" in \
+        "".join(path_helper.split())
+
+    owner = body(
+        service,
+        "static esp_err_t meshcore_service_handle_admin_response",
+        "static void meshcore_service_reply",
+    )
+    for required in (
+        "d1l_mesh_command_sync_wait_allowed",
+        "d1l_mesh_admin_response_request_admit",
+        "d1l_meshcore_admin_runtime_capture_pending",
+        "d1l_contact_store_find_by_fingerprint",
+        "derive_local_identity_shared_secret",
+        "d1l_meshcore_admin_runtime_validate_binding",
+        "d1l_meshcore_admin_runtime_dispatch_response",
+        "d1l_meshcore_admin_binding_wipe",
+        "d1l_meshcore_admin_context_wipe",
+        "d1l_mesh_admin_response_request_complete",
+    ):
+        assert required in owner
+    assert owner.index("d1l_mesh_admin_response_request_admit") < \
+        owner.index("d1l_meshcore_admin_runtime_dispatch_response")
+    assert owner.index("d1l_meshcore_admin_runtime_validate_binding") < \
+        owner.index("d1l_meshcore_admin_runtime_dispatch_response")
+    assert owner.index("d1l_meshcore_admin_runtime_dispatch_response") < \
+        owner.index("d1l_mesh_admin_response_request_complete")
+    assert "response.deadline_us != cmd->admin_response_deadline_us" in owner
+    assert "response.deadline_us != context.request_deadline_us" in owner
+    assert "if (response.count_rx_on_accept)" in owner
+    assert service.count(
+        "d1l_meshcore_admin_runtime_dispatch_response(") == 1
 
     status = body(
         service,
@@ -209,6 +284,7 @@ def test_admin_commands_and_secrets_are_owned_by_the_mesh_runtime_task() -> None
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGIN",
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_REQUEST_STATUS",
         "D1L_MESHCORE_SERVICE_CMD_ADMIN_LOGOUT",
+        "D1L_MESHCORE_SERVICE_CMD_ADMIN_RESPONSE",
     ):
         assert command_name in task
     admission_drop = task[
@@ -220,7 +296,19 @@ def test_admin_commands_and_secrets_are_owned_by_the_mesh_runtime_task() -> None
     assert task.rindex("meshcore_service_command_wipe(&cmd);") > \
         task.index("meshcore_service_reply(&cmd, ret);")
     assert "admin_password" not in command
+    for forbidden in (
+        "plaintext",
+        "session_secret",
+        "peer_public_key",
+        "local_public_key",
+        "password",
+    ):
+        assert forbidden not in command
+    assert "admin_response_id" in command
+    assert "admin_response_deadline_us" in command
+    assert "admin_response_slot" in command
     assert "d1l_mesh_command_request_t request;" in slots
+    assert "s_admin_response_slots[D1L_MESHCORE_PRIORITY_QUEUE_LEN]" in service
     assert "admin_password[D1L_MESH_COMMAND_ADMIN_PASSWORD_CAPACITY]" in \
         command_guard
     assert "admin_password_present" in command_guard
@@ -230,6 +318,7 @@ def test_admin_commands_and_secrets_are_owned_by_the_mesh_runtime_task() -> None
         service, "void d1l_meshcore_service_init",
         "esp_err_t d1l_meshcore_service_ensure_identity",
     )
+    assert "meshcore_service_handle_admin_response(&cmd)" in task
 
     assert "meshcore_service_send_admin_login_command" in public_login
     assert "d1l_meshcore_admin_runtime_begin_login" not in public_login
@@ -330,13 +419,117 @@ def test_admin_request_timeout_saturation_and_zeroization_fail_closed() -> None:
     assert "d1l_mesh_command_request_cancel_and_release" in queue_guard
 
 
+def test_admin_response_handoff_is_bounded_generation_safe_and_zeroized() -> None:
+    service = read("main/mesh/meshcore_service.c")
+    command_guard = read("main/mesh/meshcore_command_guard.h")
+    queue = body(
+        service,
+        "static bool meshcore_service_enqueue_admin_response_token",
+        "static esp_err_t admin_queue_plain_response",
+    )
+    for required in (
+        "xQueueSend((QueueHandle_t)context, command, 0)",
+        "d1l_mesh_admin_response_request_claim",
+        "d1l_mesh_admin_response_request_publish",
+        "d1l_mesh_admin_response_request_enqueue",
+        "D1L_MESH_COMMAND_ENQUEUE_SATURATED",
+        "runtime_note_command_saturation(true)",
+        "meshcore_service_command_wipe(&cmd)",
+    ):
+        assert required in queue
+    assert "memcpy(cmd.raw" not in queue
+    assert "secure_zero_bytes(&cmd, sizeof(cmd))" in queue
+    assert "cmd.admin_response_id = request_id" in queue
+    assert "cmd.admin_response_slot = slot_index" in queue
+    assert "cmd.admin_response_deadline_us = deadline_us" in queue
+    assert "request_deadline_us == 0U || now_us >= request_deadline_us" in \
+        queue
+    assert "const uint64_t deadline_us = request_deadline_us" in queue
+    assert "now_us + D1L_MESHCORE_ADMIN_REQUEST_TIMEOUT_US" not in queue
+
+    wipe = body(
+        command_guard,
+        "static inline void d1l_mesh_admin_response_request_wipe",
+        "static inline bool d1l_mesh_admin_response_request_claim",
+    )
+    for field in (
+        "request->fingerprint",
+        "request->plaintext",
+        "request->deadline_us = 0U",
+        "request->session_generation = 0U",
+        "request->plaintext_len = 0U",
+        "request->count_rx_on_accept = false",
+        "request->present = false",
+    ):
+        assert field in wipe
+
+    enqueue = body(
+        command_guard,
+        "d1l_mesh_admin_response_request_enqueue(",
+        "/* Only the runtime owner may reap queued Admin response bytes.",
+    )
+    assert "d1l_mesh_admin_response_request_cancel" in enqueue
+    assert "D1L_MESH_COMMAND_ENQUEUE_SATURATED" in enqueue
+
+    reap = body(
+        command_guard,
+        "static inline bool d1l_mesh_admin_response_request_owner_reap",
+        "static inline d1l_mesh_admin_response_admit_result_t",
+    )
+    assert reap.index("if (!request || !caller_is_owner)") < \
+        reap.index("__atomic_load_n(") < reap.index(
+            "__atomic_compare_exchange_n(")
+    assert "state != D1L_MESH_REQUEST_PENDING" in reap
+    assert "request->deadline_us == 0U" in reap
+    assert "now_us >= request->deadline_us" in reap
+    assert "request->session_generation !=\n        current_session_generation" \
+        in reap
+    assert "D1L_MESH_REQUEST_OWNER_EXPIRED" in reap
+    assert reap.index("__atomic_compare_exchange_n(") < \
+        reap.index("d1l_mesh_admin_response_request_wipe(request)") < \
+        reap.index("d1l_mesh_request_guard_release(")
+
+    admit = body(
+        command_guard,
+        "d1l_mesh_admin_response_request_admit(",
+        "static inline bool d1l_mesh_admin_response_request_complete",
+    )
+    assert admit.index("if (!caller_is_owner)") < admit.index(
+        "d1l_mesh_request_guard_transition")
+    assert "D1L_MESH_ADMIN_RESPONSE_ADMIT_OWNER_REQUIRED" in admit
+    assert "request->session_generation !=" in admit
+    assert "current_session_generation" in admit
+    assert "D1L_MESH_ADMIN_RESPONSE_ADMIT_STALE_SESSION" in admit
+    assert "now_us >= request->deadline_us" in admit
+    assert "D1L_MESH_ADMIN_RESPONSE_ADMIT_EXPIRED" in admit
+    assert "d1l_mesh_admin_response_request_wipe(request)" in admit
+    assert "d1l_mesh_request_guard_release" in admit
+
+    complete = command_guard[
+        command_guard.index(
+            "static inline bool d1l_mesh_admin_response_request_complete"):
+    ]
+    assert complete.index("d1l_mesh_admin_response_request_wipe") < \
+        complete.index("d1l_mesh_request_guard_release")
+
+
 def test_owner_maintenance_expires_idle_absolute_and_request_deadlines() -> None:
     service = read("main/mesh/meshcore_service.c")
     maintenance = body(
         service, "static void meshcore_service_run_owner_maintenance",
         "static void meshcore_service_handle_radio_rx_done",
     )
-    assert "d1l_meshcore_admin_runtime_expire(now_us)" in maintenance
+    expire = maintenance.index("d1l_meshcore_admin_runtime_expire(now_us)")
+    capture = maintenance.index(
+        "d1l_meshcore_admin_runtime_capture_pending(&pending_admin)")
+    sweep = maintenance.index(
+        "d1l_mesh_admin_response_request_owner_reap(")
+    wipe = maintenance.index(
+        "d1l_meshcore_admin_context_wipe(&pending_admin)")
+    assert expire < capture < sweep < wipe
+    assert "pending_admin.generation : 0U" in maintenance
+    assert "index < D1L_MESHCORE_PRIORITY_QUEUE_LEN" in maintenance
+    assert "pending_admin_generation, now_us" in maintenance
 
 
 def test_admin_command_guards_are_exact_production_binding_sources() -> None:
@@ -347,6 +540,8 @@ def test_admin_command_guards_are_exact_production_binding_sources() -> None:
     )[1].split("}", 1)[0]
 
     for relative in (
+        "main/mesh/meshcore_admin_runtime.c",
+        "main/mesh/meshcore_admin_runtime.h",
         "main/mesh/meshcore_command_guard.h",
         "main/mesh/meshcore_runtime_guard.h",
         "main/mesh/meshcore_service.c",
