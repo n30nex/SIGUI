@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "work_package": "WP-05",
+  "target": "remaining_wp05_fuzz_targets",
+  "status": "implemented",
+  "coverage_boundary": "production_remaining_wp05_fuzz_targets",
+  "targets": [
+    {"id": "decrypt_auth_path", "status": "implemented"},
+    {"id": "dm_session_transition_input", "status": "implemented"},
+    {"id": "retained_envelope_decoder", "status": "implemented"},
+    {"id": "route_path_parser", "status": "implemented"}
+  ],
+  "engine": "libFuzzer",
+  "runs_per_target": 100000,
+  "total_runs": 400000,
+  "seed": 13746277,
+  "max_input_bytes": 256,
+  "sanitizers": ["address", "undefined"],
+  "required_host": "ubuntu_clang_18_actions",
+  "native_preflight_targets": [
+    "production_decrypt_auth_fixed_vector_and_bounds",
+    "dm_delivery_state_and_owner_matrix",
+    "settings_envelope_build_validate_preservation",
+    "route_path_selection_and_correlation_vectors"
+  ],
+  "crypto_fixed_vector": {
+    "secret": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "plaintext": "78563412",
+    "mac_ciphertext": "44e4298fdc7da62c81ab4e54c67d6bffe73e",
+    "host_aes": "vendored_seeed_semtech_brian_gladman_aes",
+    "host_hmac_sha256": "tests_meshcore_oracle_sha256_adapter"
+  },
+  "corpus": {
+    "path": "tests/meshcore_remaining_fuzz/corpus.json",
+    "sha256": "e2c2cfbc457cc074ed5ceadcdd625593313bb6a5b39442b825882842aecf9717",
+    "seed_counts": {
+      "decrypt_auth_path": 7,
+      "dm_session_transition_input": 5,
+      "retained_envelope_decoder": 10,
+      "route_path_parser": 12
+    }
+  },
+  "source_pins": {
+    ".github/workflows/d1l-ci.yml": "0802680967525a277cb3bc46c1674d93020c3f689246ddd00264f27564687825",
+    "main/CMakeLists.txt": "a71403d0365da4101343088679b8b34ba3ae44adf03882a6190ec4d17785b24c",
+    "main/app/settings_envelope.c": "2053f567c1c38439663fa578eebfed1e9d0c9cdf5e211f8e57f4cf85481e22d2",
+    "main/app/settings_envelope.h": "f072606e5ba28ae15a61627b34818b37f9cb268b66ee52abe70bf38f36ffe92e",
+    "main/mesh/dm_delivery_state.c": "a3ff6903299b70ed68727284de8c2b6e81b2f9db69a80902db75983ee91aee94",
+    "main/mesh/dm_delivery_state.h": "d27b3666f03d27e74cb30efb2e77c47bd50f0273d7991e29315e55d5a2fd4185",
+    "main/mesh/meshcore_crypto.c": "a0693d20aafc7a4d1e3e17a3d0bd38533a52ec931b619c629af3c6df6b4cc147",
+    "main/mesh/meshcore_crypto.h": "d27b85fabb7d90edb811cd41a951b4c2ba761db0e04523e6c67539718af396ea",
+    "main/mesh/meshcore_path_dispatch.h": "653e453a9c8a50f079fd0c605ea8aab4ba5c62ce94e12188a8b912a15b27c918",
+    "main/mesh/meshcore_path_state.c": "a6a5f42bc95f511115f1b9da12e4853fb868646ebc34ffaaeae85eb15cb72a58",
+    "main/mesh/meshcore_path_state.h": "c61a0143a7fb25a2a7385cfb5abbb111b2fccdc8395f989256abcb1914cccf94",
+    "main/mesh/meshcore_route_selection.h": "aeb33be4e29d0595a80225db210c5de343d963a1aedb80f233b0621e2ec7e1fd",
+    "main/mesh/meshcore_service.c": "b443475c2e3d4e2c700d42afbbed497c441986c4bef5e4667d65f2c6d5830259",
+    "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
+    "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
+    "scripts/meshcore_conformance_d1l.py": "6ce9db135b8ee9b0fe79b823e59149a78cb849248197e15cb6b69b09ef2ffac1",
+    "scripts/meshcore_remaining_fuzz_d1l.py": "5d4259df97a43ffd7302e324bbdc9ac9c4221edf5254c075612ae1b022822829",
+    "tests/fuzz/dm_delivery_transition_fuzz.c": "a50dd4ba3d431a988777e065c13f3204618d6f0017b45ab6c10cbbec7b00be60",
+    "tests/fuzz/meshcore_decrypt_auth_fuzz.c": "969821b5b88d881ffa599c7267f41aa49d9749a8d034bcb170309e003e7a2ed7",
+    "tests/fuzz/meshcore_route_path_fuzz.c": "f9022d611e730e767c6a0ade7b7a36c49c5209a9fc88ad53dc6f611abd1fc457",
+    "tests/fuzz/settings_envelope_fuzz.c": "ddcb8ce9b14005c1a746bcd215666cd01280115f01d7efce186dcf68c418c5cd",
+    "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
+    "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "a1b4a798842ea2bad36f710a6b7de779018071d6dae39c4e49f4450e58a43034",
+    "tests/meshcore_remaining_fuzz/crypto_host_adapter.cpp": "1fa19502918fa07f1e30610ec04cf7d394d14caa16e0c5f779ce148a790842f6",
+    "tests/meshcore_remaining_fuzz/stubs/esp_err.h": "a32529585b01ed39217555a23159f8434fcbf8601947728a66156715c0c6d2e2",
+    "tests/meshcore_remaining_fuzz/stubs/mbedtls/aes.h": "ea331364a1c181f34a09a38e825d5ddb781261738785b47e814a54e18d3fe53f",
+    "tests/meshcore_remaining_fuzz/stubs/mbedtls/md.h": "66fc3fd811f1f8b5d36d2afca31dea14ee4b0c7a71f59f2596d2c48625663f4f",
+    "tests/native/dm_delivery_state_test.c": "8f595cd3fdd26170191b8d7388c0097361a66a004cd29e213dbada75076a0f2c",
+    "tests/native/meshcore_crypto_test.c": "a397b7a7d28053984993cc146fea05849544af5f315c9644eca2214c16db769e",
+    "tests/native/meshcore_route_selection_test.c": "6c318ccab70eed048687ecf6fb728cc2d3a01fbacb358ce0eac7b9dc55c7f988",
+    "tests/native/settings_envelope_test.c": "158353ab42c51142e05bb3b0f180aafdc12167ece20372a4a50cc2ae6924cd7a",
+    "tests/test_meshcore_conformance_contract.py": "e051e2eb247449782020b031769d1251a5034bd48b3f467106c4c60ef9f92966",
+    "tests/test_meshcore_public_rf_contract.py": "0bf9c2ec5402a5151de5c1414239779ed2323e327af7b364d8bcd3e89c650726",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
+  },
+  "wp05_closure_ready": false,
+  "full_semantic_matrix_covered": false,
+  "release_closure_ready": false,
+  "residual_gaps": [
+    "three partial WP-05 semantic requirements remain",
+    "exact-candidate RF and physical acceptance remains"
+  ]
+}

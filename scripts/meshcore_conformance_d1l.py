@@ -264,11 +264,11 @@ EXPECTED_WP05_REQUIREMENT_STATUSES = {
 EXPECTED_WP05_FUZZ_TARGET_STATUSES = {
     "raw_wire_decoder": "implemented",
     "semantic_packet_parser": "implemented",
-    "decrypt_auth_path": "missing",
+    "decrypt_auth_path": "implemented",
     "advert_parser": "implemented",
-    "dm_session_transition_input": "missing",
-    "retained_envelope_decoder": "missing",
-    "route_path_parser": "partial",
+    "dm_session_transition_input": "implemented",
+    "retained_envelope_decoder": "implemented",
+    "route_path_parser": "implemented",
     "usb_protocol_command_parser": "implemented",
 }
 EXPECTED_WP05_PRODUCTION_SUITES = {
@@ -1373,6 +1373,8 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/meshcore_admin_runtime.h",
     "main/mesh/meshcore_ack_completion.h",
     "main/mesh/meshcore_command_guard.h",
+    "main/mesh/meshcore_crypto.c",
+    "main/mesh/meshcore_crypto.h",
     "main/mesh/meshcore_identity_exchange.c",
     "main/mesh/meshcore_identity_exchange.h",
     "main/mesh/meshcore_dm_retry.h",
@@ -4484,9 +4486,9 @@ def wp05_semantic_summary_valid(value: Any, *, expected_cc: Any = None) -> bool:
         and value.get("partial_requirement_count") == 3
         and value.get("missing_requirement_count") == 0
         and value.get("fuzz_target_count") == 8
-        and value.get("implemented_fuzz_target_count") == 4
-        and value.get("partial_fuzz_target_count") == 1
-        and value.get("missing_fuzz_target_count") == 3
+        and value.get("implemented_fuzz_target_count") == 8
+        and value.get("partial_fuzz_target_count") == 0
+        and value.get("missing_fuzz_target_count") == 0
         and value.get("oracle_semantic_vectors") == 915
         and isinstance(value.get("unique_referenced_oracle_semantic_vectors"), int)
         and 0 < value["unique_referenced_oracle_semantic_vectors"] <= 915
