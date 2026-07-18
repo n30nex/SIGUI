@@ -1,8 +1,9 @@
+import copy
 import json
 
 import pytest
 
-from scripts import package_release_d1l
+from scripts import core_release_gate_audit_d1l, package_release_d1l
 from tests.test_package_release_d1l import (
     install_fake_source_identity,
     write_fake_build,
@@ -151,6 +152,52 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         for capability in truth["unavailable_capabilities"]
     ]
     assert capability_payload["full_feature_release_ready"] is False
+
+    monkeypatch.setattr(
+        core_release_gate_audit_d1l,
+        "find_release_package",
+        lambda _run_dir: package,
+    )
+    assert core_release_gate_audit_d1l.package_gate(
+        tmp_path,
+        root,
+        commit,
+        "123456789",
+        "1",
+        "disabled",
+    ).ok
+
+    original_provenance = copy.deepcopy(provenance)
+    for field_name, transplanted_value in (
+        ("workflowRunId", "987654321"),
+        ("workflowRunAttempt", "2"),
+        ("releaseProfile", "d1l"),
+    ):
+        transplanted = copy.deepcopy(original_provenance)
+        transplanted["predicate"]["buildDefinition"]["externalParameters"][
+            field_name
+        ] = transplanted_value
+        provenance_path.write_text(
+            package_release_d1l.canonical_json(transplanted),
+            encoding="ascii",
+        )
+        manifest["provenance"]["sha256"] = package_release_d1l.sha256_file(
+            provenance_path
+        )
+        (package / "manifest.json").write_text(
+            json.dumps(manifest, indent=2),
+            encoding="ascii",
+        )
+        gate = core_release_gate_audit_d1l.package_gate(
+            tmp_path,
+            root,
+            commit,
+            "123456789",
+            "1",
+            "disabled",
+        )
+        assert gate.ok is False
+        assert "provenance.semantic_binding" in gate.details["failures"]
 
 
 def test_core_supported_optional_package_requires_paired_rp2040(

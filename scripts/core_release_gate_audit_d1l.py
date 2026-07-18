@@ -65,6 +65,7 @@ try:
         unavailable_ui_probe_plan,
     )
     from package_release_d1l import core_capability_truth
+    from provenance_d1l import validate_core_actions_binding
     from release_gate_audit_d1l import (
         checksum_gate,
         esp32_flash_receipt_gate,
@@ -130,6 +131,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         unavailable_ui_probe_plan,
     )
     from scripts.package_release_d1l import core_capability_truth
+    from scripts.provenance_d1l import validate_core_actions_binding
     from scripts.release_gate_audit_d1l import (
         checksum_gate,
         esp32_flash_receipt_gate,
@@ -859,6 +861,32 @@ def package_gate(
             or exact_sha(metadata.get("source_commit")) != commit
         ):
             failures.append(f"{metadata_name}.identity")
+        if metadata_name == "provenance":
+            expected_provenance_metadata = {
+                "release_profile": CORE_RELEASE_PROFILE,
+                "workflow_repository": "n30nex/SIGUI",
+                "workflow_name": "d1l-ci",
+                "workflow_path": ".github/workflows/d1l-ci.yml",
+                "workflow_run_id": str(run_id),
+                "workflow_run_attempt": str(run_attempt),
+            }
+            if any(
+                metadata.get(field_name) != expected_value
+                for field_name, expected_value in expected_provenance_metadata.items()
+            ):
+                failures.append("provenance.metadata_binding")
+            provenance_errors = (
+                validate_core_actions_binding(
+                    read_json(target),
+                    commit,
+                    str(run_id),
+                    str(run_attempt),
+                )
+                if target is not None
+                else ["provenance statement is unavailable"]
+            )
+            if provenance_errors:
+                failures.append("provenance.semantic_binding")
 
     if package:
         for guide in (
