@@ -5648,11 +5648,11 @@ static void cmd_health(void)
            d1l_app_model_get()->ui_ready ? "true" : "false");
 }
 
-static void cmd_wifi_status(void)
+static void print_wifi_status_result(const char *command)
 {
     d1l_connectivity_status_t status = {0};
     d1l_connectivity_status(&status);
-    ok_begin("wifi status");
+    ok_begin(command);
     printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"connected\":%s,\"connecting\":%s,\"scan_supported\":%s,\"profile_saved\":%s,\"password_saved\":%s,\"ssid\":",
             bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
             bool_json(status.wifi_stack_active), bool_json(status.wifi_connected),
@@ -5690,6 +5690,11 @@ static void cmd_wifi_status(void)
            status.coexistence_policy, bool_json(status.wifi_stack_active));
 }
 
+static void cmd_wifi_status(void)
+{
+    print_wifi_status_result("wifi status");
+}
+
 static void cmd_wifi_off(void)
 {
     esp_err_t ret = d1l_connectivity_set_wifi_enabled(false);
@@ -5708,8 +5713,6 @@ static void cmd_wifi_off(void)
 
 static void cmd_wifi_on(void)
 {
-    d1l_connectivity_status_t status = {0};
-    d1l_connectivity_status(&status);
     esp_err_t ret = d1l_connectivity_set_wifi_enabled(true);
     if (ret != ESP_OK) {
         err_result("wifi on",
@@ -5719,7 +5722,7 @@ static void cmd_wifi_on(void)
                    "Wi-Fi runtime could not be enabled on this release build");
         return;
     }
-    cmd_wifi_status();
+    print_wifi_status_result("wifi on");
 }
 
 static void cmd_wifi_save(const char *line)
