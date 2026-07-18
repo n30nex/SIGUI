@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_partition.h"
 #include "hal/rp2040_bridge.h"
@@ -267,6 +268,12 @@ static const d1l_retained_blob_store_config_t *find_store(d1l_retained_blob_stor
     return NULL;
 }
 
+static bool release_profile_allows_sd_history(void)
+{
+    return d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_SD_HISTORY);
+}
+
 static bool key_is_safe(const char *key)
 {
     if (!key || key[0] == '\0') {
@@ -307,8 +314,10 @@ static bool copy_store_backend_state(
     if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT || !out_state) {
         return false;
     }
+    const bool profile_allows_sd = release_profile_allows_sd_history();
     portENTER_CRITICAL(&s_store_state_mux);
-    out_state->enabled = s_store_sd_enabled[config->id];
+    out_state->enabled =
+        profile_allows_sd && s_store_sd_enabled[config->id];
     out_state->generation = s_store_backend_generation[config->id];
     portEXIT_CRITICAL(&s_store_state_mux);
     return true;
@@ -1650,6 +1659,7 @@ void d1l_retained_blob_store_note_sd_backend(bool data_ready,
                                              uint32_t path_max)
 {
     const bool can_use_retained_sd =
+        release_profile_allows_sd_history() &&
         data_ready &&
         file_ops_supported &&
         atomic_rename_supported &&

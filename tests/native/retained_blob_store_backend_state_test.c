@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "hal/rp2040_bridge.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
@@ -1035,6 +1036,112 @@ static void assert_all_states(bool enabled, uint32_t generation)
         assert(d1l_retained_blob_store_uses_sd(
                    (d1l_retained_blob_store_id_t)id) == enabled);
     }
+}
+
+static void test_release_profile_sd_admission(void)
+{
+#ifndef EXPECT_PROFILE_SD_ENABLED
+#error "EXPECT_PROFILE_SD_ENABLED must bind the retained-store profile case"
+#endif
+    static const uint8_t payload[] = "profile-bound retained state";
+    uint8_t readback[sizeof(payload)] = {0};
+    size_t readback_len = sizeof(readback);
+
+    s_nvs_enabled = true;
+    reset_sd_files();
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_ready());
+    assert(d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_RETAINED_NVS));
+    assert(d1l_retained_blob_store_is_available(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES));
+
+    static const struct {
+        bool data_ready;
+        bool file_ops_supported;
+        bool atomic_rename_supported;
+        uint32_t file_line_max;
+        uint32_t file_chunk_max;
+        uint32_t path_max;
+    } incomplete_prerequisites[] = {
+        {false, true, true, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX},
+        {true, false, true, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX},
+        {true, true, false, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX},
+        {true, true, true, D1L_RP2040_FILE_LINE_MAX - 1U,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX},
+        {true, true, true, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX - 1U, D1L_RP2040_FILE_PATH_MAX},
+        {true, true, true, D1L_RP2040_FILE_LINE_MAX,
+         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX - 1U},
+    };
+    for (size_t i = 0U;
+         i < sizeof(incomplete_prerequisites) /
+                 sizeof(incomplete_prerequisites[0]);
+         ++i) {
+        d1l_retained_blob_store_note_sd_backend(
+            incomplete_prerequisites[i].data_ready,
+            incomplete_prerequisites[i].file_ops_supported,
+            incomplete_prerequisites[i].atomic_rename_supported,
+            incomplete_prerequisites[i].file_line_max,
+            incomplete_prerequisites[i].file_chunk_max,
+            incomplete_prerequisites[i].path_max);
+        assert_all_states(false, 0U);
+    }
+
+    d1l_retained_blob_store_note_sd_backend(
+        true, true, true, D1L_RP2040_FILE_LINE_MAX,
+        D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
+
+#if EXPECT_PROFILE_SD_ENABLED
+    assert(d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_SD_HISTORY));
+    assert_all_states(true, 1U);
+    assert(strcmp(d1l_retained_blob_store_backend_name(
+                      D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES),
+                  "sd") == 0);
+#else
+    assert(!d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_SD_HISTORY));
+    assert_all_states(false, 0U);
+    assert(strcmp(d1l_retained_blob_store_backend_name(
+                      D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES),
+                  "nvs") == 0);
+    assert(d1l_retained_blob_store_write_sd_primary(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               payload, sizeof(payload)) == ESP_ERR_INVALID_STATE);
+    assert(s_sd_event_count == 0U);
+#endif
+
+    assert(d1l_retained_blob_store_write(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               payload, sizeof(payload)) == ESP_OK);
+    assert_nvs_blob(true, "d1l_messages", "public",
+                    payload, sizeof(payload));
+#if EXPECT_PROFILE_SD_ENABLED
+    assert(s_rename_count > 0U);
+#else
+    assert(s_sd_event_count == 0U);
+#endif
+
+    assert(d1l_retained_blob_store_read(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               readback, &readback_len) == ESP_OK);
+    assert(readback_len == sizeof(payload));
+    assert(memcmp(readback, payload, sizeof(payload)) == 0);
+
+    assert(d1l_retained_blob_store_erase(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+               "public") == ESP_OK);
+#if EXPECT_PROFILE_SD_ENABLED
+    assert(s_delete_count > 0U);
+#else
+    assert(s_sd_event_count == 0U);
+#endif
 }
 
 static void test_retained_partition_init(void)
@@ -2231,8 +2338,14 @@ static void test_factory_reset_sd_recovery_end_to_end(void)
     assert(ready);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "profile-gate") == 0) {
+        test_release_profile_sd_admission();
+        puts("native retained SD profile admission: ok");
+        return 0;
+    }
+
     /* Production initializes default NVS before enabling any SD backend; the
      * lineage gate must be able to prove that no reset generation exists. */
     s_nvs_enabled = true;
