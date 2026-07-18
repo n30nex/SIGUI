@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_at": "2026-07-17T02:10:25Z",
+  "snapshot_at": "2026-07-18T08:05:00Z",
   "project": "SIGUI / MeshCore DeskOS D1L",
   "release_posture": "not_ready_to_tag",
   "source_documents": [
@@ -104,14 +104,31 @@
       "exact_main_evidence_bank_pending": false,
       "strict_evidence_metrics_scope_commit": "de0bb75bd91146f0dc9896540d12c71889d7766b",
       "live_main_gate_observed": {
-        "commit": "de0bb75bd91146f0dc9896540d12c71889d7766b",
-        "merged_pull_request": 182,
-        "actions_run": "29548300732",
+        "commit": "710a106d403c98b2f958884b4c54ef61003509ce",
+        "merged_pull_request": 185,
+        "actions_run": "29635635407",
         "actions_status": "success",
-        "artifact_evidence_bank_pending": false,
-        "strict_metrics_admitted": true,
-        "predecessor_strict_checkpoint": "bf9e6f31a1dc65d49126ac2df7f56557738e7dc0",
-        "scope": "strict_banked_merged_PR182_semantic_packet_parser_and_fuzz; PR177_through_PR181_banks_preserved; canonical_PR_and_exact_main_software_and_artifact_metrics_admitted; retained_DM_data_preserving_migration_blocker_open; no_full_WP05_physical_RF_or_release_closure"
+        "artifact_evidence_bank_pending": true,
+        "strict_metrics_admitted": false,
+        "predecessor_strict_checkpoint": "de0bb75bd91146f0dc9896540d12c71889d7766b",
+        "scope": "live_main_through_PR185_with_PR183_remaining_fuzz_PR184_docs_PR186_DM_compose_simulator_and_PR185_retained_DM_migration_fix_merged; exact_main_Actions_green_and_downloaded_firmware_release_pairs_checksum_verified; full_five_artifact_strict_bank_and_exact_main_flash_not_claimed"
+      },
+      "post_pr182_live_main_checkpoint": {
+        "commit": "710a106d403c98b2f958884b4c54ef61003509ce",
+        "merged_pull_requests": [183, 184, 186, 185],
+        "actions_run": "29635635407",
+        "actions_status": "success",
+        "available_actions_artifacts": 5,
+        "downloaded_artifacts_verified": 2,
+        "firmware_artifact_zip_sha256": "4ae3ae76c7d5572aac0ee075e24c409ee4558e2d12264f3fdb90f5fa41408df4",
+        "release_artifact_zip_sha256": "7523f8f969f056993a4fb9d33c446d88bc462addf0574f2b723b64b9b3e9bcc1",
+        "firmware_nested_checksums_verified": 14,
+        "release_nested_checksums_verified": 29,
+        "application_sha256": "9af6954d501f8ff75a4f64d5360197f3ae57f856cb62d01e44d5d8ccd8a4bdf3",
+        "exact_main_image_flashed": false,
+        "physical_closure_claimed": false,
+        "last_full_strict_bank_commit": "de0bb75bd91146f0dc9896540d12c71889d7766b",
+        "last_full_strict_bank_actions_run": "29548300732"
       },
       "latest_merged_pull_request_gate": {
         "pull_request": 182,
@@ -332,12 +349,12 @@
       }
     },
     "working_branch": {
-      "name": "codex/post-wp05-ledger-main",
-      "base_commit": "bf9e6f31a1dc65d49126ac2df7f56557738e7dc0",
+      "name": "codex/post-pr185-ledger",
+      "base_commit": "710a106d403c98b2f958884b4c54ef61003509ce",
       "pull_request": null,
       "head_commit": null,
-      "merged_pull_request": 181,
-      "status": "PR170_through_PR180_banks_preserved; PR181_configured_channel_collision_self_echo_and_peer_admission_PR_and_exact_main_gates_banked; remaining_WP05_semantic_fuzz_RF_physical_and_release_closure_open"
+      "merged_pull_request": 185,
+      "status": "post_PR185_completion_ledger_checkpoint_in_progress"
     },
     "merged_pull_request_receipts": {
       "64": {
@@ -3247,10 +3264,10 @@
       "integrated_candidate": "07322ed4c700866106ecca6c31ff70ea3a3d4ede"
     },
     "integrated_candidate": {
-      "commit": "de0bb75bd91146f0dc9896540d12c71889d7766b",
+      "commit": "710a106d403c98b2f958884b4c54ef61003509ce",
       "branch": "main",
-      "actions_run": "29548300732",
-      "status": "strict_verified_main_through_pr182_semantic_packet_parser_and_fuzz_with_PR177_through_PR181_preserved; canonical_exact_main_actions_and_artifacts_banked; retained_DM_data_preserving_migration_blocker_open; full_WP05_RF_physical_and_release_closure_open"
+      "actions_run": "29635635407",
+      "status": "actions_green_firmware_and_release_pairs_downloaded_and_checksum_verified_exact_main_image_not_flashed_full_strict_bank_pending"
     },
     "pinned_meshcore": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "selected_esp_idf": "5.5.4",
@@ -3433,9 +3450,9 @@
       "id": "BLK-WP11-RETAINED-DM-MIGRATION-DE0BB75-20260716",
       "work_package": "WP-11",
       "kind": "exact_main_data_preserving_retained_dm_migration_required",
-      "status": "open",
+      "status": "closed",
       "observed_at": "2026-07-17T01:57:42Z",
-      "missing_input": "A source-level compatibility or data-preserving migration correction that can load and flush the retained predecessor DM store on the exact successor without erase or format, followed by a checksum-verified exact-successor reboot persistence receipt.",
+      "missing_input": null,
       "why_source_work_cannot_close": "Exact main de0bb75 flashed successfully without erase and both persistence-smoke attempts verified settings mutation, but the retained scheduler reported direct_messages ESP_ERR_INVALID_STATE and firmware correctly cancelled reboot. Final storage remained READY_SD/FAT32/mounted/data-root-ready with zero SD or NVS-mirror I/O errors. Predecessor exact 092293f proved 16 retained DM rows at content revision 469. Hardware/media replacement, erase, format, simulation, or predecessor evidence cannot close exact-successor retained compatibility.",
       "last_valid_sha": "de0bb75bd91146f0dc9896540d12c71889d7766b",
       "last_valid_actions_run": "29548300732",
@@ -3445,12 +3462,19 @@
       "flash_report_sha256": "d7098f4412a15c82f2df2fa93f7390e631a57523ef80abe1f68b7b7e5b1760bf",
       "autonomous_report_sha256": "5d9b4b24f44ac61ad26f706a39cc2dca1314bbef2930b20db9bc33dacae43d43",
       "predecessor_smoke_sha256": "030b2369b2de80188043d62be6f3b0f06fb6be5ba001d8e2766d09a8707baa1b",
-      "operator_action": "No erase, SD format, RP2040 flash, public RF transmission, or further hardware action is requested. Continue source-level root-cause and data-preserving migration work, then rerun only the narrow non-erasing COM12 persistence smoke on a new exact Actions artifact. Confirm time migration separately.",
-      "blocks_package": true,
-      "blocks_release": true,
+      "operator_action": "No further retained-DM migration action is requested. Preserve the successful PR-integration receipt; exact-main 710a106 remains unflashed and all independent WP-11 power-loss, card-lineage, endurance, recovery, and time-migration gates remain open.",
+      "closed_at": "2026-07-18T07:20:40Z",
+      "closed_by_pull_request": 185,
+      "closed_by_integration_commit": "25f8bc1fd66e6471781fb234d1290fd30d4f13f3",
+      "closed_by_actions_run": "29635160827",
+      "closure_receipt_path": "artifacts/hardware/com12/dm_retained_migration_reboot_25f8bc1_actions_29635160827_COM12.json",
+      "closure_receipt_sha256": "5389edb5297334b51da730eb8b6da60069e47756c37b5b44db3b5110e3c7eb35",
+      "closure_scope": "all_16_retained_rows_survive_non_erasing_upgrade_and_controlled_reboot_with_READY_SD_and_no_RF_or_format_commands",
+      "blocks_package": false,
+      "blocks_release": false,
       "blocks_execution": false,
       "hardware_or_media_failure": false,
-      "still_unblocked": ["WP-05 remaining fuzz", "WP-06 runtime ownership", "all non-hardware source work"]
+      "still_unblocked": []
     },
     {
       "id": "BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713",
@@ -4565,6 +4589,23 @@
       "implementation_merged": true,
       "partial_implementation_merged": true,
       "proof_banked": false,
+      "post_pr182_checkpoint": {
+        "pull_request": 183,
+        "merge_commit": "2dcd494b8f598cda74321d482aa69ab5cf40a7d5",
+        "actions_run": "29633464282",
+        "remaining_declared_fuzz_targets_implemented": 4,
+        "runs_per_target": 100000,
+        "total_runs": 400000,
+        "fuzz_findings": 0,
+        "implemented_fuzz_target_count": 8,
+        "partial_fuzz_target_count": 0,
+        "missing_fuzz_target_count": 0,
+        "implemented_requirement_count": 13,
+        "partial_requirement_count": 3,
+        "missing_requirement_count": 0,
+        "wp05_closure_ready": false,
+        "remaining": "three_partial_semantic_requirements_plus_official_peer_RF_and_physical_acceptance"
+      },
       "required_evidence": ["meshcore_conformance_<sha>.json"],
       "evidence": [
         {
@@ -5865,6 +5906,24 @@
       "partial_implementation_merged": true,
       "software_implementation_status": "bounded_interruption_safe_exact_inventory_factory_reset_merged_physical_power_loss_card_durability_and_endurance_acceptance_pending",
       "proof_banked": false,
+      "retained_dm_migration_successor_checkpoint": {
+        "pull_request": 185,
+        "integration_commit": "25f8bc1fd66e6471781fb234d1290fd30d4f13f3",
+        "merge_commit": "710a106d403c98b2f958884b4c54ef61003509ce",
+        "actions_run": "29635160827",
+        "receipt_path": "artifacts/hardware/com12/dm_retained_migration_reboot_25f8bc1_actions_29635160827_COM12.json",
+        "receipt_sha256": "5389edb5297334b51da730eb8b6da60069e47756c37b5b44db3b5110e3c7eb35",
+        "physical_observed": true,
+        "dry_run": false,
+        "simulated": false,
+        "formats_sd": false,
+        "public_rf_tx": false,
+        "dm_rf_tx": false,
+        "retained_rows_preserved": 16,
+        "reboot_proven": true,
+        "blocker_closed": true,
+        "wp11_closure_ready": false
+      },
       "required_evidence": ["retained_invariants_<sha>.json", "retained_powerloss_<sha>.json", "nvs_write_amplification_<sha>.json"],
       "evidence": [
         {
@@ -6165,14 +6224,13 @@
         }
       },
       "residual_capabilities": [
-        "data_preserving_retained_predecessor_DM_compatibility_or_migration_and_exact_successor_reboot_persistence",
         "exact_candidate_interrupted_write_and_repeated_power_loss_acceptance",
         "physical_four_store_sd_lineage_absent_insert_swap_remove_reinsert_reboot_acceptance",
         "bridge_inside_one_delete_card_replacement_window_acceptance",
         "named_workload_nvs_write_amplification_and_endurance_evidence",
         "exact_candidate_physical_recovery_console_and_durability_qualification"
       ],
-      "blockers": ["BLK-WP11-RETAINED-DM-MIGRATION-DE0BB75-20260716"]
+      "blockers": []
     },
     {
       "id": "WP-12",

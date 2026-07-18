@@ -1,6 +1,6 @@
 # SIGUI Audit Evidence Index
 
-**Audit date:** 2026-07-12; live reconciliation refreshed 2026-07-17
+**Audit date:** 2026-07-12; live reconciliation refreshed 2026-07-18
 **Repository:** `n30nex/SIGUI`  
 **Purpose:** make the master roadmap traceable to the exact repository state inspected.
 
@@ -8,11 +8,12 @@
 
 | Item | Value |
 |---|---|
-| Live merged main | `de0bb75bd91146f0dc9896540d12c71889d7766b` through PR #182; exact-main Actions `29548300732` strict-pass and are admitted |
+| Live merged main | `710a106d403c98b2f958884b4c54ef61003509ce` through PR #185; exact-main Actions `29635635407` pass |
 | Last strict-verified merged checkpoint included in this pack | `de0bb75bd91146f0dc9896540d12c71889d7766b` / Actions `29548300732` / receipt `8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9` / gate manifest `11c349cf8ad118463db411d7cf83366cdf86b5b67cbcc20034be845693c03ede` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
 | Open pull requests | No open PR is admitted by this checkpoint; later draft work is intentionally excluded until corrected, merged, and exact-main banked |
-| Merged completion slices | PRs #152-#168 and #170-#182 remain banked. PR #182 adds the semantic packet parser/fuzz target while preserving earlier reset, Map, runtime, and protocol banks. Full WP-05/WP-06 and RF/physical/release closure remain open |
+| Merged completion slices | PRs #152-#168 and #170-#186 remain merged/banked to their stated scope. PR #183 completes the four remaining declared fuzz targets; PR #184 banks the predecessor checkpoint; PR #186 adds truthful sendable-DM simulator compose; PR #185 fixes retained DM schema migration. Full WP-05/WP-06/WP-11 and RF/physical/release closure remain open |
+| Current exact-main packaging pair | Actions `29635635407`: firmware ZIP `4ae3ae76c7d5572aac0ee075e24c409ee4558e2d12264f3fdb90f5fa41408df4`, release ZIP `7523f8f969f056993a4fb9d33c446d88bc462addf0574f2b723b64b9b3e9bcc1`, 14 + 29 nested checksums pass, app image `9af6954d501f8ff75a4f64d5360197f3ae57f856cb62d01e44d5d8ccd8a4bdf3`; exact-main image not flashed |
 | Candidate integration state | PR #182 head `f00486282b3b3d0ec1d6e1b25b3985a8e8485a47`, synthetic merge `a0569cf233eb7f7b53e81c11b3fca24be98e6a1b`, and exact main `de0bb75bd91146f0dc9896540d12c71889d7766b` share tree `efc7ce1acbdd2ab7a9c963ec9477a71eda991823`. PR/exact-main Actions `29547584817` / `29548300732` pass; exact main records 1,263 host, 33 checksum, 100,000 native plus 100,000 Clang 18 semantic cases, and five ZIPs / 46 entries / 341 files / 27,208,527 archive bytes |
 | Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
@@ -20,7 +21,7 @@
 | Last banked host suite | Exact-main Actions `29548300732` passed 1,263 host and 33 checksum-contract tests, 1,008 wire vectors, 931 oracle checks, and 100,000 native plus 100,000 Clang 18 semantic-packet cases with zero findings |
 | Last banked candidate CI | At exact main `de0bb75`, five ZIPs / 46 entries strict-verified across 341 files / 27,208,527 archive bytes with exact-source provenance and SPDX 2.3; strict receipt SHA-256 `8da06d90df77a439e37892560272f902243776107365a1676fdd5a49824b74d9`. Provenance is valid but unauthenticated and no SLSA level is claimed |
 | Conformance closure | false overall; this pack admits PR #182 and reports 3 semantic classes partial plus 3 fuzz targets missing and 1 partial. Pinned official-client RF, exact-candidate reboot/reset/recovery and physical acceptance, required artifacts, downstream work packages, and final release closure remain open |
-| Exact-main hardware blocker | Non-erasing COM12 flash passed; `docs/completion/evidence/wp11/retained_dm_migration_blocker_de0bb75bd91146f0dc9896540d12c71889d7766b_COM12.json` (SHA-256 `734266054fd2c3da6320445f8f8bd7c20c6c5bffc09dd2653683286ef01f0074`) records a data-preserving retained-DM compatibility/migration blocker, not hardware/media failure or closure |
+| Retained-DM migration | Closed only for PR #185 exact integration `25f8bc1fd66e6471781fb234d1290fd30d4f13f3` / Actions `29635160827`. Raw COM12 receipt `artifacts/hardware/com12/dm_retained_migration_reboot_25f8bc1_actions_29635160827_COM12.json` has SHA-256 `5389edb5297334b51da730eb8b6da60069e47756c37b5b44db3b5110e3c7eb35` and proves 16 retained rows across non-erasing reboot. WP-11 remains open; exact main was not flashed |
 | Release status | not ready to tag; exact main `de0bb75` audit SHA-256 `42fce2a53c4c08e3ddeb4aa1d34456c875632cc2df2e776a05bfc84f97f85613` is fail-closed with 33 P0 / 35 overall; the reproducible reporting estimate remains 80% capability implementation / 74% weighted progress, not a gate waiver |
 
 ## Live post-audit reconciliation
