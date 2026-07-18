@@ -79,10 +79,10 @@ def test_completion_reporting_is_recomputed_and_does_not_waive_release_gates():
         "not_started": 2,
     }
     assert metrics["capability_reported_percent"] == 80
-    assert metrics["acceptance_percent"] == 100
+    assert metrics["acceptance_percent"] == 0
     assert metrics["gate_green"] == 0
     assert metrics["gate_total"] == 11
-    assert metrics["weighted_reported_percent"] == 74
+    assert metrics["weighted_reported_percent"] == 64
     assert release_ready(ledger) is False
     assert "not a release-gate waiver" in rendered
 
@@ -115,7 +115,7 @@ def test_completion_reporting_rejects_stale_capability_and_weighted_percentages(
     assert any("weighted reported_percent is stale" in error for error in errors)
 
 
-def test_completion_reporting_rejects_stale_exact_main_automated_acceptance():
+def test_completion_reporting_rejects_stale_scope_without_waiving_acceptance():
     ledger = ledger_copy()
     reporting = ledger["completion_reporting"]
     reporting["scope_commit"] = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
@@ -123,8 +123,9 @@ def test_completion_reporting_rejects_stale_exact_main_automated_acceptance():
     errors = validate_ledger(ledger)
 
     assert any("scope_commit must match" in error for error in errors)
-    assert any("automated acceptance status is stale" in error for error in errors)
-    assert any("automated acceptance percent is stale" in error for error in errors)
+    metrics = completion_reporting_metrics(ledger)
+    assert metrics["acceptance_status"] == "fail"
+    assert metrics["acceptance_percent"] == 0
 
 
 def test_completion_reporting_rejects_tampered_automated_acceptance_metric():
@@ -139,8 +140,9 @@ def test_completion_reporting_rejects_tampered_automated_acceptance_metric():
     assert any(
         "automated acceptance host_tests_passed is stale" in error for error in errors
     )
-    assert any("automated acceptance status is stale" in error for error in errors)
-    assert any("automated acceptance percent is stale" in error for error in errors)
+    metrics = completion_reporting_metrics(ledger)
+    assert metrics["acceptance_status"] == "fail"
+    assert metrics["acceptance_percent"] == 0
 
 
 def test_completion_reporting_rejects_non_object_acceptance_without_crashing():
