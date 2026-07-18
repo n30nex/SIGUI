@@ -387,3 +387,28 @@ release is authorized by the evidence currently recorded.
   complete. No full host suite or candidate workflow has run.
 - No firmware was built locally, no serial port was opened, no firmware was
   flashed, no RF transmission occurred, and no SD operation occurred.
+
+### `2026-07-18T16:54:19-04:00`
+
+- A second operator power cycle was observed read-only. Plug-and-Play again
+  reports the same `USB-SERIAL CH340 (COM12)` identity present and healthy;
+  the controlled listener remains on COM15, and COM16 remains absent. This
+  pre-candidate cycle is not release evidence. No serial port was opened.
+- Commit `a6f9477` adds the non-secret full 64-hex public key to
+  `identity status`, allowing the controlled RF runner to verify the D1L
+  fingerprint and the COM15 listener's 12-hex sender prefix from one exact
+  identity. Focused identity/profile/source-pin validation passed 27 tests
+  with one documented Actions-only skip.
+- Every open P1 was reviewed against the Core product contract. Issues #12,
+  #17, #18, #19, and #22 are enhancement work for excluded or broader Full
+  Feature scope, not reports of a known Core crash, data-loss, or security
+  defect. Each now has exactly one `full-feature-deferred` classification and
+  an explanatory issue comment; none was closed.
+- Pre-freeze review found that the first Core audit draft still consumed old
+  reboot/defect schemas and that `storage retained-canary` remained outside
+  disabled-SD command admission. R7/R8 remain open until the final audit
+  recomputes the hash-bound matrix/API receipts and every SD mutation is
+  unreachable. The one full host suite and final Actions candidate remain
+  deliberately unstarted.
+- No firmware was built locally, no firmware was flashed, no RF transmission
+  occurred, and no SD operation occurred.
