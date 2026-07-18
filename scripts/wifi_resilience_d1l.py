@@ -48,11 +48,24 @@ WIFI_SCAN_MAX = 8
 RETAINED_STACK_MIN_BYTES = 4096
 CURRENT_STACK_MIN_WORDS = 256
 UI_STACK_MIN_WORDS = 512
-WIFI_RETRY_STACK_MIN_BYTES = 512
+WIFI_RETRY_STACK_MIN_BYTES = 1024
 MAX_HEAP_LOSS_BYTES = 65536
 MAX_INTERNAL_HEAP_LOSS_BYTES = 32768
 MAX_DMA_HEAP_LOSS_BYTES = 32768
 MAX_PSRAM_LOSS_BYTES = 262144
+FEATURE_CLAIM_SCOPE = "saved_profile_scan_connect_toggle_subset"
+FULL_WP13_UNCOVERED_SCENARIOS = (
+    "credential_at_rest_threat_model_and_nvs_encryption_decision",
+    "wifi_ble_coexistence",
+    "access_point_reboot_recovery",
+    "wrong_password_recovery",
+    "weak_signal_recovery",
+    "saved_profile_device_reboot",
+    "safe_mode_recovery",
+    "one_hundred_live_reconnect_cycles",
+    "map_visible_only_resume",
+    "current_idf_exact_device_qualification",
+)
 
 
 class AcceptanceFailure(RuntimeError):
@@ -397,6 +410,18 @@ def _summarize_result(command: str, result: object) -> dict:
         "safe_mode",
         "crash_loop_detected",
         "boot_guard_ready",
+        "boot_guard_recovered",
+        "consecutive_crash_boots",
+        "retry_scheduled",
+        "retry_attempt",
+        "retry_delay_ms",
+        "user_cancelled",
+        "last_disconnect_reason",
+        "last_failure_class",
+        "last_active_subsystem",
+        "boot_guard_error",
+        "last_error",
+        "policy",
         "live_network",
     }
     summary = {key: result[key] for key in allowed if key in result}
@@ -507,14 +532,16 @@ def _health_summary(samples: list[dict]) -> dict:
     if not samples:
         return {"ok": False, "sample_count": 0}
     first = samples[0]
-    final = samples[-1]
     loss_limits = {
         "heap_free": MAX_HEAP_LOSS_BYTES,
         "internal_heap_free": MAX_INTERNAL_HEAP_LOSS_BYTES,
         "dma_heap_free": MAX_DMA_HEAP_LOSS_BYTES,
         "psram_free": MAX_PSRAM_LOSS_BYTES,
     }
-    losses = {field: max(0, first[field] - final[field]) for field in loss_limits}
+    losses = {
+        field: max(max(0, first[field] - sample[field]) for sample in samples)
+        for field in loss_limits
+    }
     nonces = {sample["boot_nonce"] for sample in samples}
     return {
         "ok": len(nonces) == 1
@@ -541,7 +568,10 @@ def _base_report(
 ) -> dict:
     return {
         "schema": 1,
-        "kind": "wifi_resilience",
+        "kind": "wifi_saved_profile_resilience",
+        "claim_scope": FEATURE_CLAIM_SCOPE,
+        "full_wp13_matrix_covered": False,
+        "uncovered_release_scenarios": list(FULL_WP13_UNCOVERED_SCENARIOS),
         "mode": mode,
         "port": normalize_port(args.port),
         "expected_firmware_commit": expected_commit,
@@ -553,6 +583,7 @@ def _base_report(
         "classification": "not_run",
         "ok": False,
         "acceptance_passed": False,
+        "feature_evidence_eligible": False,
         "release_gate_eligible": False,
         "truth": {
             "physical_observed": False,
@@ -565,6 +596,7 @@ def _base_report(
         "simulated": mode == "simulation",
         "dry_run": mode == "dry-run",
         "hardware_required": True,
+        "hardware_transport": None,
         "public_rf_tx": False,
         "dm_rf_tx": False,
         "formats_sd": False,
@@ -672,6 +704,7 @@ def run_acceptance(
         report["ended_at"] = utc_now()
         return report
 
+    hardware_transport: dict | None = None
     if command_sender is None:
         if serial_module is None:
             try:
@@ -692,6 +725,20 @@ def run_acceptance(
                 baudrate=args.baud,
                 timeout=min(args.timeout, 1.0),
             )
+            observed_port = normalize_port(
+                str(getattr(serial_handle, "port", port) or port)
+            )
+            observed_baud = _integer(
+                getattr(serial_handle, "baudrate", args.baud), minimum=1
+            )
+            if observed_port != port or observed_baud != args.baud:
+                raise ValueError("serial transport identity does not match request")
+            hardware_transport = {
+                "opened_by_runner": True,
+                "port": observed_port,
+                "baud": observed_baud,
+                "closed_by_runner": False,
+            }
             if args.open_settle_sec:
                 sleep(args.open_settle_sec)
             if hasattr(serial_handle, "reset_input_buffer"):
@@ -906,6 +953,8 @@ def run_acceptance(
         if serial_handle is not None:
             try:
                 serial_handle.close()
+                if hardware_transport is not None:
+                    hardware_transport["closed_by_runner"] = True
             except Exception:
                 pass
 
@@ -943,6 +992,7 @@ def run_acceptance(
             "physical_observed": mode == "hardware" and bool(recorder.commands),
             "simulated": mode == "simulation",
             "dry_run": False,
+            "hardware_transport": hardware_transport,
         }
     )
     report["checks"] = {
@@ -969,9 +1019,259 @@ def run_acceptance(
         report["classification"] = failure.code
         report["failure"] = {"code": failure.code, "message": str(failure)}
     report["acceptance_passed"] = mode == "hardware" and report["ok"] is True
-    report["release_gate_eligible"] = report["acceptance_passed"]
+    # This runner intentionally proves only the bounded saved-profile
+    # scan/connect/toggle slice. The full WP-13 release matrix has additional
+    # credential, coexistence, fault-injection, reboot, Map, and exact-IDF
+    # requirements, so this artifact can never close the release gate.
+    report["feature_evidence_eligible"] = False
+    report["release_gate_eligible"] = False
     report["ended_at"] = utc_now()
     return report
+
+
+def _recorded_feature_evidence_valid(report: dict, expected_commit: str) -> bool:
+    """Re-derive the bounded feature result from recorded device responses."""
+    steps = report.get("steps")
+    commands = report.get("commands")
+    target_ssid = report.get("target_ssid")
+    cycles = report.get("cycles")
+    cycles_requested = _integer(report.get("cycles_requested"), minimum=1)
+    if (
+        not isinstance(steps, list)
+        or not steps
+        or not isinstance(commands, list)
+        or not isinstance(target_ssid, str)
+        or not target_ssid
+        or not isinstance(cycles, list)
+        or cycles_requested is None
+        or cycles_requested > 100
+        or len(cycles) != cycles_requested
+        or report.get("cycles_completed") != cycles_requested
+    ):
+        return False
+
+    parsed: dict[str, object] = {}
+    label_metadata: dict[str, tuple[int, str]] = {}
+    derived_commands: list[str] = []
+    health_samples: list[dict] = []
+    try:
+        for expected_index, step in enumerate(steps, start=1):
+            if (
+                not isinstance(step, dict)
+                or step.get("index") != expected_index
+                or not isinstance(step.get("label"), str)
+                or not step["label"]
+                or step["label"] in parsed
+                or not isinstance(step.get("command"), str)
+            ):
+                return False
+            label = step["label"]
+            command = step["command"]
+            enforce_safe_command(command)
+            response = _require_command_result(step.get("response"), command)
+            label_metadata[label] = (expected_index, command)
+            derived_commands.append(command)
+            if command == "version":
+                parsed[label] = response
+            elif command == "health":
+                sample = health_snapshot(response)
+                health_samples.append(sample)
+                parsed[label] = sample
+            elif command in {"wifi status", "wifi on"}:
+                status = wifi_status_snapshot(response, command)
+                if command == "wifi on":
+                    _require_saved_target(status, target_ssid)
+                    if (
+                        status["setting_enabled"] is not True
+                        or status["build_enabled"] is not True
+                    ):
+                        return False
+                parsed[label] = status
+            elif command == "wifi scan":
+                parsed[label] = scan_snapshot(response, target_ssid)
+            elif command == "wifi connect":
+                _connect_result(response, target_ssid)
+                parsed[label] = response
+            elif command == "wifi off":
+                _off_result(response)
+                parsed[label] = response
+            else:  # pragma: no cover - SAFE_COMMANDS is exhaustive above
+                return False
+    except (AcceptanceFailure, KeyError, TypeError, ValueError):
+        return False
+
+    if commands != derived_commands:
+        return False
+    version = parsed.get("preflight-version")
+    initial = parsed.get("preflight-wifi-status")
+    if (
+        not isinstance(version, dict)
+        or exact_commit(version.get("build_commit")) != expected_commit
+        or not isinstance(initial, dict)
+    ):
+        return False
+    try:
+        _require_saved_target(initial, target_ssid)
+    except AcceptanceFailure:
+        return False
+    profile_before = profile_metadata(initial)
+    original_enabled = initial["setting_enabled"]
+
+    def last_status(prefix: str) -> dict | None:
+        matches = [
+            (step["index"], parsed[step["label"]])
+            for step in steps
+            if isinstance(step, dict)
+            and isinstance(step.get("label"), str)
+            and step["label"].startswith(prefix)
+            and isinstance(parsed.get(step["label"]), dict)
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda item: item[0])[1]
+
+    derived_cycles: list[dict] = []
+    for cycle_number in range(1, cycles_requested + 1):
+        start_label = f"cycle-{cycle_number}-start"
+        scan_label = f"cycle-{cycle_number}-scan"
+        reconnect_label = f"cycle-{cycle_number}-reconnect"
+        connected_health_label = f"cycle-{cycle_number}-connected-health"
+        disable_label = f"cycle-{cycle_number}-disable"
+        disabled_health_label = f"cycle-{cycle_number}-disabled-health"
+        restored_health_label = f"cycle-{cycle_number}-restored-health"
+        toggle_label = (
+            f"cycle-{cycle_number}-restore-enable"
+            if original_enabled
+            else f"cycle-{cycle_number}-enable"
+        )
+        required_actions = {
+            start_label: "wifi status",
+            toggle_label: "wifi on",
+            scan_label: "wifi scan",
+            reconnect_label: "wifi connect",
+            connected_health_label: "health",
+            disable_label: "wifi off",
+            disabled_health_label: "health",
+            restored_health_label: "health",
+        }
+        if any(
+            label_metadata.get(label, (None, None))[1] != command
+            for label, command in required_actions.items()
+        ):
+            return False
+        ordered_labels = (
+            [
+                start_label,
+                toggle_label,
+                scan_label,
+                reconnect_label,
+                connected_health_label,
+                disable_label,
+                disabled_health_label,
+                restored_health_label,
+            ]
+            if not original_enabled
+            else [
+                start_label,
+                scan_label,
+                reconnect_label,
+                connected_health_label,
+                disable_label,
+                disabled_health_label,
+                toggle_label,
+                restored_health_label,
+            ]
+        )
+        action_indices = [label_metadata[label][0] for label in ordered_labels]
+        if action_indices != sorted(action_indices) or len(set(action_indices)) != len(
+            action_indices
+        ):
+            return False
+        cycle = cycles[cycle_number - 1]
+        scan = parsed.get(scan_label)
+        connected = last_status(f"cycle-{cycle_number}-reconnect-poll-")
+        disabled = last_status(f"cycle-{cycle_number}-disable-poll-")
+        restored = (
+            last_status(f"cycle-{cycle_number}-restore-enable-poll-")
+            if original_enabled
+            else disabled
+        )
+        if (
+            not isinstance(cycle, dict)
+            or cycle.get("cycle") != cycle_number
+            or cycle.get("ok") is not True
+            or not isinstance(scan, dict)
+            or not isinstance(connected, dict)
+            or not isinstance(disabled, dict)
+            or not isinstance(restored, dict)
+        ):
+            return False
+        try:
+            if not connected_status_ok(connected, target_ssid):
+                return False
+            if not disabled_status_ok(disabled, target_ssid):
+                return False
+            if original_enabled:
+                if not connected_status_ok(restored, target_ssid):
+                    return False
+            elif not disabled_status_ok(restored, target_ssid):
+                return False
+        except AcceptanceFailure:
+            return False
+        derived_cycle = {
+            "cycle": cycle_number,
+            "ok": True,
+            "scan": scan,
+            "connected": connected,
+            "disabled": disabled,
+            "restored": restored,
+        }
+        if cycle != derived_cycle:
+            return False
+        derived_cycles.append(derived_cycle)
+
+    final_status = last_status("cleanup-final-poll-")
+    if not isinstance(final_status, dict):
+        return False
+    try:
+        _require_saved_target(final_status, target_ssid)
+    except AcceptanceFailure:
+        return False
+    profile_after = profile_metadata(final_status)
+    derived_health = _health_summary(health_samples)
+    profile_preserved = profile_before == profile_after
+    enable_intent_restored = (
+        final_status.get("setting_enabled") == original_enabled
+    )
+    derived_checks = {
+        "exact_commit_verified": True,
+        "saved_profile_precondition": True,
+        "target_ssid_exact_match": profile_before.get("ssid") == target_ssid,
+        "cycles_complete": len(derived_cycles) == cycles_requested,
+        "networks_schema_consumed": all(
+            "networks" in cycle["scan"] for cycle in derived_cycles
+        ),
+        "bounded_scan_target_seen": all(
+            bool(cycle["scan"].get("target_matches"))
+            for cycle in derived_cycles
+        ),
+        "boot_nonce_stable": derived_health.get("boot_nonce_stable") is True,
+        "health_and_stack_ok": derived_health.get("ok") is True,
+        "profile_preserved": profile_preserved,
+        "enable_intent_restored": enable_intent_restored,
+        "no_profile_write_or_clear": True,
+        "no_rf_or_sd_format": True,
+    }
+    return (
+        report.get("classification") == "passed"
+        and report.get("profile_before") == profile_before
+        and report.get("profile_after") == profile_after
+        and report.get("original_enable_intent") == original_enabled
+        and report.get("profile_preserved") is profile_preserved
+        and report.get("enable_intent_restored") is enable_intent_restored
+        and report.get("health") == derived_health
+        and report.get("checks") == derived_checks
+    )
 
 
 def validate_completed_report(report: object) -> bool:
@@ -984,16 +1284,29 @@ def validate_completed_report(report: object) -> bool:
     credentials = report.get("credential_handling")
     health = report.get("health")
     git = report.get("git")
+    transport = report.get("hardware_transport")
     expected_commit = exact_commit(report.get("expected_firmware_commit"))
     return (
         report.get("schema") == 1
-        and report.get("kind") == "wifi_resilience"
+        and report.get("kind") == "wifi_saved_profile_resilience"
+        and report.get("claim_scope") == FEATURE_CLAIM_SCOPE
+        and report.get("full_wp13_matrix_covered") is False
+        and report.get("uncovered_release_scenarios")
+        == list(FULL_WP13_UNCOVERED_SCENARIOS)
         and report.get("mode") == "hardware"
         and report.get("ok") is True
         and report.get("acceptance_passed") is True
+        and report.get("release_gate_eligible") is False
         and report.get("port") == D1L_PORT
         and expected_commit is not None
         and exact_commit(report.get("commit")) == expected_commit
+        and transport
+        == {
+            "opened_by_runner": True,
+            "port": D1L_PORT,
+            "baud": D1L_CONSOLE_BAUD,
+            "closed_by_runner": True,
+        }
         and isinstance(git, dict)
         and git.get("dirty") is False
         and isinstance(truth, dict)
@@ -1026,13 +1339,14 @@ def validate_completed_report(report: object) -> bool:
         and health.get("ok") is True
         and isinstance(checks, dict)
         and all(value is True for value in checks.values())
+        and _recorded_feature_evidence_valid(report, expected_commit)
     )
 
 
 def default_out_path(report: dict) -> Path:
     commit = exact_commit(report.get("expected_firmware_commit")) or "unknown"
     port = str(report.get("port") or D1L_PORT).upper()
-    filename = f"wifi_resilience_{commit}_{port}.json"
+    filename = f"wifi_saved_profile_resilience_{commit}_{port}.json"
     if report.get("mode") == "hardware":
         return ROOT / "artifacts" / "hardware" / port.lower() / filename
     return ROOT / "artifacts" / str(report.get("mode") or "dry-run") / filename
@@ -1043,7 +1357,8 @@ def write_report(report: dict, path: Path | None = None) -> Path:
     if not out.is_absolute():
         out = ROOT / out
     stamp_report(report, ROOT)
-    report["release_gate_eligible"] = validate_completed_report(report)
+    report["feature_evidence_eligible"] = validate_completed_report(report)
+    report["release_gate_eligible"] = False
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="ascii"

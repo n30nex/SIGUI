@@ -44,6 +44,7 @@ class FakeWifiDevice:
         target_in_scan=True,
         flip_boot_nonce=False,
         current_stack=1024,
+        retry_stack=2304,
     ):
         self.enabled = enabled
         self.connected = enabled
@@ -53,6 +54,7 @@ class FakeWifiDevice:
         self.target_in_scan = target_in_scan
         self.flip_boot_nonce = flip_boot_nonce
         self.current_stack = current_stack
+        self.retry_stack = retry_stack
         self.commands = []
         self.health_count = 0
         self.uptime = 1000
@@ -85,7 +87,9 @@ class FakeWifiDevice:
             "safe_mode": False,
             "last_disconnect_reason": 0,
             "last_failure_class": "none",
-            "retry_task_stack_high_water_bytes": 2304 if self.enabled else 0,
+            "retry_task_stack_high_water_bytes": self.retry_stack
+            if self.enabled
+            else 0,
             "boot_guard_ready": True,
             "boot_guard_recovered": False,
             "consecutive_crash_boots": 0,
@@ -248,6 +252,7 @@ def test_dry_run_is_truthful_non_hardware_and_has_no_password_surface():
         "exact_commit_verified": False,
     }
     assert report["acceptance_passed"] is False
+    assert report["feature_evidence_eligible"] is False
     assert report["release_gate_eligible"] is False
     assert report["commands"] == []
     assert called is False
@@ -401,7 +406,7 @@ def test_serial_open_failure_returns_a_redacted_receipt_without_commands():
     assert report["commands"] == []
 
 
-def test_completed_validator_rejects_simulation_and_accepts_only_truthful_physical_shape():
+def test_completed_validator_rejects_simulation_and_derives_physical_fixture():
     report = wifi.run_acceptance(
         make_args(), command_sender=FakeWifiDevice(), sleep=lambda _seconds: None
     )
@@ -416,9 +421,60 @@ def test_completed_validator_rejects_simulation_and_accepts_only_truthful_physic
     physical["acceptance_passed"] = True
     physical["commit"] = COMMIT
     physical["git"] = {"dirty": False}
-    physical["release_gate_eligible"] = True
+    physical["release_gate_eligible"] = False
+    assert wifi.validate_completed_report(physical) is False
+
+    physical["hardware_transport"] = {
+        "opened_by_runner": True,
+        "port": "COM12",
+        "baud": 115200,
+        "closed_by_runner": True,
+    }
     assert wifi.validate_completed_report(physical) is True
 
+    for missing_label in (
+        "cycle-1-enable",
+        "cycle-1-reconnect",
+        "cycle-1-disable",
+    ):
+        missing_action = copy.deepcopy(physical)
+        step_index = next(
+            index
+            for index, step in enumerate(missing_action["steps"])
+            if step["label"] == missing_label
+        )
+        del missing_action["steps"][step_index]
+        del missing_action["commands"][step_index]
+        for index, step in enumerate(missing_action["steps"], start=1):
+            step["index"] = index
+        assert wifi.validate_completed_report(missing_action) is False
+
+    for field, value in (
+        ("setting_enabled", False),
+        ("build_enabled", False),
+        ("profile_saved", False),
+        ("ssid", "Different network"),
+    ):
+        invalid_enable = copy.deepcopy(physical)
+        enable_response = next(
+            step["response"]
+            for step in invalid_enable["steps"]
+            if step["label"] == "cycle-1-enable"
+        )
+        enable_response[field] = value
+        assert wifi.validate_completed_report(invalid_enable) is False
+
+    physical["steps"][0]["response"]["build_commit"] = "f" * 40
+    assert wifi.validate_completed_report(physical) is False
+    physical["steps"][0]["response"]["build_commit"] = COMMIT
+
+    physical["cycles"][0]["connected"]["ip"] = "0.0.0.0"
+    assert wifi.validate_completed_report(physical) is False
+    physical["cycles"][0]["connected"]["ip"] = "192.0.2.44"
+
+    physical["release_gate_eligible"] = True
+    assert wifi.validate_completed_report(physical) is False
+    physical["release_gate_eligible"] = False
     physical["truth"]["dry_run"] = True
     assert wifi.validate_completed_report(physical) is False
 
@@ -430,8 +486,63 @@ def test_default_receipt_name_uses_exact_sha_and_d1l_port():
         "port": "COM12",
     }
     path = wifi.default_out_path(report)
-    assert path.name == f"wifi_resilience_{COMMIT}_COM12.json"
+    assert path.name == f"wifi_saved_profile_resilience_{COMMIT}_COM12.json"
     assert path.parent.name == "com12"
+
+
+def test_feature_receipt_can_never_be_promoted_to_full_wp13_release_gate(
+    tmp_path, monkeypatch
+):
+    report = wifi.run_acceptance(
+        make_args(), command_sender=FakeWifiDevice(), sleep=lambda _seconds: None
+    )
+    report["mode"] = "hardware"
+    report["truth"]["physical_observed"] = True
+    report["truth"]["simulated"] = False
+    report["physical_observed"] = True
+    report["simulated"] = False
+    report["acceptance_passed"] = True
+    report["hardware_transport"] = {
+        "opened_by_runner": True,
+        "port": "COM12",
+        "baud": 115200,
+        "closed_by_runner": True,
+    }
+
+    def exact_stamp(payload, _root):
+        payload["commit"] = COMMIT
+        payload["git"] = {"dirty": False}
+
+    monkeypatch.setattr(wifi, "stamp_report", exact_stamp)
+    out = wifi.write_report(report, tmp_path / "receipt.json")
+    written = json.loads(out.read_text(encoding="ascii"))
+
+    assert written["feature_evidence_eligible"] is True
+    assert written["release_gate_eligible"] is False
+    assert written["full_wp13_matrix_covered"] is False
+    assert written["uncovered_release_scenarios"] == list(
+        wifi.FULL_WP13_UNCOVERED_SCENARIOS
+    )
+
+
+def test_connected_status_requires_one_kib_retry_stack_margin():
+    low = FakeWifiDevice(enabled=True, retry_stack=1023).status()
+    exact = FakeWifiDevice(enabled=True, retry_stack=1024).status()
+
+    assert wifi.connected_status_ok(wifi.wifi_status_snapshot(low), TARGET) is False
+    assert wifi.connected_status_ok(wifi.wifi_status_snapshot(exact), TARGET) is True
+
+
+def test_health_summary_measures_peak_loss_not_only_final_recovery():
+    first = wifi.health_snapshot(FakeWifiDevice().health())
+    transient = copy.deepcopy(first)
+    transient["heap_free"] -= wifi.MAX_HEAP_LOSS_BYTES + 1
+    recovered = copy.deepcopy(first)
+
+    summary = wifi._health_summary([first, transient, recovered])
+
+    assert summary["heap_loss_bytes"]["heap_free"] == wifi.MAX_HEAP_LOSS_BYTES + 1
+    assert summary["ok"] is False
 
 
 def test_console_wifi_on_preserves_its_machine_readable_identity():
