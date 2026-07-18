@@ -11,6 +11,12 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def between(source: str, start: str, end: str) -> str:
+    assert start in source
+    assert end in source
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
 def test_core_profile_is_the_deterministic_build_default():
     root_cmake = read("CMakeLists.txt")
     component_cmake = read("main/CMakeLists.txt")
@@ -43,6 +49,75 @@ def test_release_profile_is_one_immutable_authority_with_no_runtime_setter():
     assert "d1l_release_capabilities_t release_capabilities;" in app_header
     assert "snapshot->release_profile = d1l_release_profile_name();" in app_source
     assert "snapshot->release_capabilities = *d1l_release_capabilities();" in app_source
+
+
+def test_unavailable_background_stacks_are_rejected_before_startup_or_side_effects():
+    app_main = read("main/app_main.c")
+    connectivity = read("main/comms/connectivity_manager.c")
+
+    assert "const bool sd_history_available = d1l_release_feature_available(" in app_main
+    assert between(
+        app_main,
+        "const bool sd_history_available",
+        "esp_err_t crash_log_ret",
+    ).count("d1l_rp2040_bridge_init()") == 1
+    assert "if (sd_history_available) {\n        esp_err_t storage_manager_ret" in app_main
+    assert "d1l_storage_manager_force_nvs(true);" in app_main
+
+    init = between(
+        connectivity,
+        "esp_err_t d1l_connectivity_init(void)",
+        "void d1l_connectivity_status",
+    )
+    assert init.index("if (!release_wifi_user_control_available())") < (
+        init.index("xSemaphoreCreateMutex")
+    )
+    assert init.index("if (!release_wifi_user_control_available())") < (
+        init.index("d1l_connectivity_wifi_connect()")
+    )
+
+    mutators = (
+        (
+            "esp_err_t d1l_connectivity_wifi_scan",
+            "esp_err_t d1l_connectivity_wifi_connect",
+            "release_wifi_user_control_available",
+        ),
+        (
+            "esp_err_t d1l_connectivity_wifi_connect",
+            "esp_err_t d1l_connectivity_wifi_disconnect",
+            "release_wifi_user_control_available",
+        ),
+        (
+            "esp_err_t d1l_connectivity_wifi_disconnect",
+            "esp_err_t d1l_connectivity_set_wifi_enabled",
+            "release_wifi_user_control_available",
+        ),
+        (
+            "esp_err_t d1l_connectivity_set_wifi_enabled",
+            "esp_err_t d1l_connectivity_set_ble_enabled",
+            "release_wifi_user_control_available",
+        ),
+        (
+            "esp_err_t d1l_connectivity_set_ble_enabled",
+            "esp_err_t d1l_connectivity_save_wifi_profile",
+            "release_ble_available",
+        ),
+        (
+            "esp_err_t d1l_connectivity_save_wifi_profile",
+            "esp_err_t d1l_connectivity_clear_wifi_profile",
+            "release_wifi_user_control_available",
+        ),
+    )
+    for start, end, guard in mutators:
+        body = between(connectivity, start, end)
+        assert f"if (!{guard}())" in body
+        assert body.index(f"if (!{guard}())") < body.index("return ESP_ERR_NOT_SUPPORTED;")
+
+    clear_profile = connectivity.split(
+        "esp_err_t d1l_connectivity_clear_wifi_profile(void)", 1
+    )[1]
+    assert "if (!release_wifi_user_control_available())" in clear_profile
+    assert '"unsupported_in_release_profile"' in connectivity
 
 
 def test_release_profile_native_matrix(tmp_path):

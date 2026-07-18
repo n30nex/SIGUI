@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "comms/connectivity_boot_guard.h"
 #include "comms/wifi_retry_policy.h"
 #include "freertos/FreeRTOS.h"
@@ -75,6 +76,17 @@ static bool build_ble_enabled(void)
 #else
     return false;
 #endif
+}
+
+static bool release_wifi_user_control_available(void)
+{
+    return d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL);
+}
+
+static bool release_ble_available(void)
+{
+    return d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
 }
 
 static d1l_wifi_retry_policy_t wifi_policy_snapshot(void)
@@ -925,6 +937,10 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     memset(out_status, 0, sizeof(*out_status));
     d1l_settings_t settings = {0};
     (void)d1l_settings_public_snapshot(&settings);
+    const bool wifi_available = release_wifi_user_control_available();
+    const bool ble_available = release_ble_available();
+    const bool observer_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_OBSERVER_MQTT);
     const d1l_wifi_retry_policy_t policy = wifi_policy_snapshot();
     d1l_connectivity_boot_guard_record_t boot_guard;
     d1l_connectivity_boot_guard_decision_t boot_decision;
@@ -939,37 +955,54 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     boot_guard_error = s_boot_guard_error;
     portEXIT_CRITICAL(&s_wifi_policy_lock);
     out_status->usb_console_ready = true;
-    out_status->wifi_enabled_setting = settings.wifi_enabled;
-    out_status->ble_companion_enabled_setting = settings.ble_companion_enabled;
-    out_status->observer_enabled_setting = settings.observer_enabled;
-    out_status->wifi_build_enabled = build_wifi_enabled();
-    out_status->ble_build_enabled = build_ble_enabled();
-    out_status->wifi_stack_active = s_wifi_started;
-    out_status->wifi_connected = s_wifi_connected;
-    out_status->wifi_connecting = s_wifi_connecting;
-    out_status->wifi_retry_scheduled = policy.retry_scheduled;
-    out_status->wifi_user_cancelled = policy.user_cancelled;
-    out_status->wifi_safe_mode = policy.safe_mode;
-    out_status->wifi_boot_guard_ready = boot_guard_ready;
-    out_status->wifi_boot_guard_recovered = boot_guard_recovered;
-    out_status->wifi_crash_loop_detected = boot_decision.crash_loop_detected;
+    out_status->wifi_enabled_setting =
+        wifi_available && settings.wifi_enabled;
+    out_status->ble_companion_enabled_setting =
+        ble_available && settings.ble_companion_enabled;
+    out_status->observer_enabled_setting =
+        observer_available && settings.observer_enabled;
+    out_status->wifi_build_enabled =
+        wifi_available && build_wifi_enabled();
+    out_status->ble_build_enabled =
+        ble_available && build_ble_enabled();
+    out_status->wifi_stack_active = wifi_available && s_wifi_started;
+    out_status->wifi_connected = wifi_available && s_wifi_connected;
+    out_status->wifi_connecting = wifi_available && s_wifi_connecting;
+    out_status->wifi_retry_scheduled =
+        wifi_available && policy.retry_scheduled;
+    out_status->wifi_user_cancelled =
+        wifi_available && policy.user_cancelled;
+    out_status->wifi_safe_mode = wifi_available && policy.safe_mode;
+    out_status->wifi_boot_guard_ready =
+        wifi_available && boot_guard_ready;
+    out_status->wifi_boot_guard_recovered =
+        wifi_available && boot_guard_recovered;
+    out_status->wifi_crash_loop_detected =
+        wifi_available && boot_decision.crash_loop_detected;
     out_status->ble_stack_active = false;
-    out_status->wifi_profile_saved = settings.wifi_profile_saved;
-    out_status->wifi_password_saved = d1l_settings_wifi_password_saved();
+    out_status->wifi_profile_saved =
+        wifi_available && settings.wifi_profile_saved;
+    out_status->wifi_password_saved =
+        wifi_available && d1l_settings_wifi_password_saved();
     out_status->wifi_scan_supported = out_status->wifi_build_enabled;
-    out_status->wifi_state = out_status->wifi_build_enabled ?
-        d1l_wifi_runtime_state_name(policy.state) : "off";
-    out_status->ble_state =
-        ble_runtime_state(settings.ble_companion_enabled, out_status->ble_build_enabled);
+    out_status->wifi_state = !wifi_available ?
+        "unsupported_in_release_profile" :
+        out_status->wifi_build_enabled ?
+            d1l_wifi_runtime_state_name(policy.state) : "off";
+    out_status->ble_state = !ble_available ?
+        "unsupported_in_release_profile" :
+        ble_runtime_state(settings.ble_companion_enabled,
+                          out_status->ble_build_enabled);
     snprintf(out_status->wifi_ssid, sizeof(out_status->wifi_ssid), "%s",
-             settings.wifi_ssid);
-    out_status->wifi_ip = s_wifi_ip;
+             wifi_available ? settings.wifi_ssid : "");
+    out_status->wifi_ip = wifi_available ? s_wifi_ip : "";
     out_status->wifi_retry_attempt = policy.retry_attempt;
     out_status->wifi_consecutive_crash_boots =
         boot_guard.consecutive_crash_boots;
     out_status->wifi_last_disconnect_reason = s_wifi_last_disconnect_reason;
     out_status->wifi_retry_delay_ms = policy.retry_delay_ms;
-    out_status->wifi_last_error = s_wifi_last_error;
+    out_status->wifi_last_error = wifi_available ?
+        s_wifi_last_error : "unsupported_in_release_profile";
     out_status->wifi_last_failure_class =
         d1l_wifi_failure_class_name(policy.last_failure);
     const d1l_connectivity_subsystem_t reported_subsystem =
@@ -1027,6 +1060,14 @@ esp_err_t d1l_connectivity_prepare_reboot(void)
 
 esp_err_t d1l_connectivity_init(void)
 {
+    if (!release_wifi_user_control_available()) {
+        portENTER_CRITICAL(&s_wifi_policy_lock);
+        d1l_wifi_retry_policy_init(&s_wifi_policy, false, false);
+        portEXIT_CRITICAL(&s_wifi_policy_lock);
+        set_wifi_last_error("unsupported_in_release_profile");
+        return ESP_OK;
+    }
+
     d1l_settings_t settings = {0};
     (void)d1l_settings_public_snapshot(&settings);
     if (settings.wifi_enabled && settings.ble_companion_enabled) {
@@ -1108,6 +1149,9 @@ void d1l_connectivity_status(d1l_connectivity_status_t *out_status)
 
 esp_err_t d1l_connectivity_wifi_scan(d1l_wifi_scan_result_t *out_result)
 {
+    if (!release_wifi_user_control_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (!out_result) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1247,6 +1291,9 @@ esp_err_t d1l_connectivity_wifi_scan(d1l_wifi_scan_result_t *out_result)
 
 esp_err_t d1l_connectivity_wifi_connect(void)
 {
+    if (!release_wifi_user_control_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     d1l_settings_t settings = {0};
     (void)d1l_settings_public_snapshot(&settings);
     if (!settings.wifi_enabled) {
@@ -1390,6 +1437,9 @@ esp_err_t d1l_connectivity_wifi_connect(void)
 
 esp_err_t d1l_connectivity_wifi_disconnect(void)
 {
+    if (!release_wifi_user_control_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     portENTER_CRITICAL(&s_wifi_policy_lock);
     d1l_wifi_retry_policy_cancel(&s_wifi_policy);
     portEXIT_CRITICAL(&s_wifi_policy_lock);
@@ -1424,6 +1474,9 @@ esp_err_t d1l_connectivity_wifi_disconnect(void)
 
 esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
 {
+    if (!release_wifi_user_control_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (enabled && !build_wifi_enabled()) {
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -1511,6 +1564,9 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
 
 esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
 {
+    if (!release_ble_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (enabled && !build_ble_enabled()) {
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -1560,6 +1616,9 @@ esp_err_t d1l_connectivity_set_ble_enabled(bool enabled)
 
 esp_err_t d1l_connectivity_save_wifi_profile(const char *ssid, const char *password)
 {
+    if (!release_wifi_user_control_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     esp_err_t ret = d1l_settings_save_wifi_profile(ssid, password);
     if (ret != ESP_OK) {
         return ret;
@@ -1579,6 +1638,9 @@ esp_err_t d1l_connectivity_save_wifi_profile(const char *ssid, const char *passw
 
 esp_err_t d1l_connectivity_clear_wifi_profile(void)
 {
+    if (!release_wifi_user_control_available()) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     esp_err_t ret = d1l_settings_clear_wifi_profile();
     if (ret == ESP_OK) {
         const esp_err_t disconnect_ret =
