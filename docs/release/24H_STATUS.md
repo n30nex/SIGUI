@@ -297,3 +297,23 @@ release is authorized by the evidence currently recorded.
   `evidence-only`, nine `full-feature-deferred`, and zero stale closures.
   No issue was closed, and evidence-only items remain open until the exact
   candidate receipts pass.
+
+### `2026-07-18T15:25:58-04:00`
+
+- Independent documentation review confirmed that the previous public README
+  and user guide advertised Full Feature Map, Wi-Fi, BLE, SD, channel,
+  administration, TRACE, and forbidden-port workflows that are unreachable in
+  Core 1.0.
+- The public README and documentation index now describe only the immutable
+  Core surface, SD-disabled/NVS operation, Actions-only builds, COM12, exact
+  package verification, and unavailable capabilities. The prior full-feature
+  user guide is preserved under an explicit historical filename and replaced
+  by a Core-only user guide. Flash/recovery guidance now uses COM12 and
+  distinguishes non-erasing normal flash from typed-confirm destructive
+  recovery.
+- Focused documentation, storage, location-boundary, DM-identity, no-format,
+  and hardware-script validation passed 79 tests.
+- R7 is independently removing the Full Feature and RP2040/SD documents from
+  Core packages and generating exact Core install/recovery, support-matrix,
+  and release README files. Final package review remains open until that
+  commit is integrated.
