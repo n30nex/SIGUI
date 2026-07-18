@@ -33,6 +33,9 @@ try:
     from core_install_recovery_review_d1l import (
         validate_install_review_receipt,
     )
+    from manual_ui_review_d1l import (
+        validate_core_manual_ui_review_receipt,
+    )
     from core_smoke_d1l import (
         CORE_RELEASE_PROFILE,
         CORE_SMOKE_COMMANDS,
@@ -94,6 +97,9 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     )
     from scripts.core_install_recovery_review_d1l import (
         validate_install_review_receipt,
+    )
+    from scripts.manual_ui_review_d1l import (
+        validate_core_manual_ui_review_receipt,
     )
     from scripts.core_smoke_d1l import (
         CORE_RELEASE_PROFILE,
@@ -1603,6 +1609,28 @@ def manual_review_gate(
     run_attempt: str,
     core_ui_path: Path | None,
 ) -> CoreGate:
+    strict_ok = False
+    strict_reasons: list[str] = []
+    strict_details: dict[str, Any] = {}
+    if path is None or core_ui_path is None:
+        strict_reasons = ["manual_or_automated_ui_receipt_missing"]
+    else:
+        try:
+            strict_ok, strict_reasons, strict_details = (
+                validate_core_manual_ui_review_receipt(
+                    path,
+                    root=root,
+                    core_ui_path=core_ui_path,
+                    commit=commit,
+                    run_id=str(run_id),
+                    run_attempt=str(run_attempt),
+                )
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            strict_reasons = [
+                "strict_manual_ui_validator_failed:"
+                f"{type(exc).__name__}"
+            ]
     data = read_json(path)
     confirmations = data.get("confirmations")
     photo_receipts = data.get("photo_receipts")
@@ -1703,7 +1731,8 @@ def manual_review_gate(
     except (TypeError, ValueError):
         timestamps_ok = False
     ok = (
-        real_evidence(data)
+        strict_ok
+        and real_evidence(data)
         and data.get("kind") == "core_manual_ui_review"
         and data.get("mode") == "manual-physical-ui-review"
         and data.get("ok") is True
@@ -1740,6 +1769,9 @@ def manual_review_gate(
             "photos_optional": True,
             "photo_coverage": sorted(observed_photo_coverage),
             "timestamps_ok": timestamps_ok,
+            "strict_validator_ok": strict_ok,
+            "strict_validator_reasons": strict_reasons,
+            "strict_validator_details": strict_details,
         },
     )
 

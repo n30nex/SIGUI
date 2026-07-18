@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts import core_release_gate_audit_d1l as audit
+from scripts import core_ui_corruption_probe_d1l as core_ui
 from scripts import manual_ui_review_d1l as review
 
 
@@ -76,6 +77,41 @@ def core_ui_receipt() -> dict:
                 "crashlog": crashlog(),
             }
         )
+    unavailable_plan = core_ui.unavailable_ui_probe_plan("disabled")
+    unavailable_events = [
+        {
+            **probe,
+            "before": {
+                "schema": 1,
+                "ok": True,
+                "cmd": "ui status",
+                "build_commit": COMMIT,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+                "active_tab": "home",
+                "pending": False,
+            },
+            "result": {
+                "schema": 1,
+                "ok": False,
+                "cmd": probe["command"],
+                "code": "ESP_ERR_NOT_SUPPORTED",
+                "release_profile": "core_1_0",
+                "feature": probe["feature"],
+            },
+            "after": {
+                "schema": 1,
+                "ok": True,
+                "cmd": "ui status",
+                "build_commit": COMMIT,
+                "release_profile": "core_1_0",
+                "sd_history_mode": "disabled",
+                "active_tab": "home",
+                "pending": False,
+            },
+        }
+        for probe in unavailable_plan
+    ]
     return {
         "schema": 1,
         "kind": "core_ui_corruption_probe",
@@ -103,6 +139,8 @@ def core_ui_receipt() -> dict:
         "tabs": list(review.CORE_TAB_SEQUENCE),
         "scroll_surfaces": list(review.CORE_SCROLL_SURFACES),
         "compose_targets": list(review.CORE_COMPOSE_TARGETS),
+        "unavailable_ui_probes": unavailable_plan,
+        "unavailable_events": unavailable_events,
         "public_rf_tx": False,
         "network_tx": False,
         "map_network_requests": False,

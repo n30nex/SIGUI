@@ -58,7 +58,7 @@ REQUIRED_UI_CHECKS = frozenset(
         "tab_switches_settle",
         "data_refresh_exercised",
         "data_refreshes_pass",
-        "no_unavailable_destination",
+        "unavailable_destinations_rejected",
         "no_public_rf",
         "no_network_tx",
         "no_map_network_requests",
