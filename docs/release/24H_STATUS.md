@@ -58,7 +58,7 @@ The authoritative product boundary, roadmap, and work graph are:
 
 ## Current GitHub snapshot
 
-Snapshot refreshed at `2026-07-18T14:55:00-04:00`.
+Snapshot refreshed at `2026-07-18T15:15:36-04:00`.
 
 | Item | State |
 |---|---|
@@ -66,10 +66,28 @@ Snapshot refreshed at `2026-07-18T14:55:00-04:00`.
 | Main `d1l-ci` | run `29652673963`, success |
 | PR #197 | open, non-draft, conflicting; Actions `29650366501` success |
 | PR #199 | open draft, conflicting; Actions `29650450872` firmware failure; excluded |
-| Open release-blocker P0 issues | 21; tracker not yet Core/deferred classified |
+| Open release-blocker P0 issues | 21; all classified for Core 1.0 |
 | Existing `release/24h-core` before sprint | none |
 | Existing `v1.0.0` tag/release | none |
 | Active/queued Actions runs at snapshot | none |
+
+## P0 tracker classification
+
+Each open P0 has exactly one Core-sprint classification label. Classification
+does not close an issue or substitute for exact-candidate evidence.
+
+| Classification | Issues | Core handling |
+|---|---|---|
+| `core-blocker` | #71 | Must close through exact package, Actions, hardware, audit, and release evidence |
+| `evidence-only` | #7, #8, #63, #66, #67, #68, #69, #70, #74, #75, #76 | Software is present for the Core subset; exact candidate evidence remains fail-closed |
+| `full-feature-deferred` | #4, #6, #11, #13, #14, #16, #73, #77, #78 | Unavailable Core surface; retained for Full Feature work |
+| `stale/close after reconciliation` | none | Nothing was closed as stale during classification |
+
+Mixed-scope issues are narrowed by the authoritative Core contract: #67
+requires only basic contact-to-DM evidence while multi-channel breadth is
+deferred; #68 requires internal DM PATH/route behavior while user-facing
+TRACE is deferred; #74 is fixed Public plus DM only; and #76 omits unavailable
+Map, Wi-Fi, BLE, and SD feature claims.
 
 ## File ownership
 
@@ -267,3 +285,15 @@ release is authorized by the evidence currently recorded.
   channel lookup instead of the removed inline expression.
 - Integrated R2 validation passed all 227 UI, release-profile,
   retained-profile, and map-marker tests.
+
+### `2026-07-18T15:15:36-04:00`
+
+- `origin/main`, open PRs, and Actions were refreshed again. Main remains
+  `846f728dd3faded85451c6d39ba6a07cb8ca7f44`; PR #197 and excluded draft
+  PR #199 remain the only open PRs; no workflow was triggered by the
+  `release/24h-core` backup push.
+- All 21 open P0 issues were reviewed against their current bodies and given
+  exactly one required classification label: one `core-blocker`, eleven
+  `evidence-only`, nine `full-feature-deferred`, and zero stale closures.
+  No issue was closed, and evidence-only items remain open until the exact
+  candidate receipts pass.
