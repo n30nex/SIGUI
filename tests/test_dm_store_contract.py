@@ -27,7 +27,8 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert 'D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"' in blob_store
     assert 'D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"' in blob_store
     assert "D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
-    assert "D1L_DM_STORE_SCHEMA 6U" in source
+    assert "D1L_DM_STORE_SCHEMA 7U" in source
+    assert "D1L_DM_STORE_SCHEMA_V6 6U" in source
     assert "D1L_DM_STORE_SCHEMA_V5 5U" in source
     assert "D1L_DM_STORE_SCHEMA_V4 4U" in source
     assert "D1L_DM_STORE_SCHEMA_V3 3U" in source
@@ -38,6 +39,8 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "convert_v3_blob" in source
     assert "convert_v4_blob" in source
     assert "convert_v5_blob" in source
+    assert "convert_v6_narrow_blob" in source
+    assert "convert_v6_wide_blob" in source
     assert "d1l_dm_entry_v5_t" in source
     assert "d1l_dm_store_blob_v5_t" in source
     assert "d1l_dm_entry_v4_t" in source
@@ -105,6 +108,39 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert "static d1l_dm_entry_t s_overlay_entries" in source
     assert '"mesh/dm_store.c"' in cmake
     assert "d1l_dm_store_init()" in app_main
+
+
+def test_dm_persisted_abis_are_frozen_and_schema6_is_length_dispatched():
+    header = read("main/mesh/dm_store.h")
+    source = read("main/mesh/dm_store.c")
+    native = read("tests/native/dm_store_behavior_test.c")
+
+    assert "D1L_DM_CONTACT_ALIAS_LEN 32U" in header
+    assert "contact_alias[D1L_DM_CONTACT_ALIAS_LEN]" in header
+    assert "D1L_DM_CONTACT_ALIAS_LEN_LEGACY 24U" in source
+    assert source.count(
+        "contact_alias[D1L_DM_CONTACT_ALIAS_LEN_LEGACY]"
+    ) == 4
+    assert "d1l_dm_entry_v6_narrow_t" in source
+    assert "d1l_dm_store_blob_v6_narrow_t" in source
+    assert "d1l_dm_store_blob_v6_wide_t" in source
+    assert "sizeof(d1l_dm_store_blob_v6_narrow_t) !=" in source
+    schema6_decode = source.split(
+        "if (raw->schema == D1L_DM_STORE_SCHEMA_V6)", 1
+    )[1].split("if (raw->schema == D1L_DM_STORE_SCHEMA_V5)", 1)[0]
+    assert "len == sizeof(raw->v6_narrow)" in schema6_decode
+    assert "len == sizeof(raw->v6_wide)" in schema6_decode
+    assert "blob_v6_narrow_is_valid" in schema6_decode
+    assert "blob_v6_wide_is_valid" in schema6_decode
+    assert "return ESP_ERR_INVALID_STATE" in schema6_decode
+    assert "*out_upgrade = true" in schema6_decode
+    assert "TEST_LEGACY_CONTACT_ALIAS_LEN 24U" in native
+    assert "test_blob_v6_narrow_t" in native
+    assert "test_blob_v6_wide_t" in native
+    assert "test_literal_v4_full_ring_migrates_without_data_loss" in native
+    assert "test_schema_v6_narrow_preserves_all_metadata" in native
+    assert "test_schema_v6_wide_preserves_utf8_and_rewrites_sd" in native
+    assert "test_schema_v6_unknown_lengths_fail_closed_without_mutation" in native
 
 
 def test_outbound_delivery_state_is_persisted_cas_guarded_and_reboot_safe():
@@ -331,7 +367,8 @@ def test_inbound_dm_ack_identity_and_dispatch_state_are_retained_across_reboot()
         "esp_err_t d1l_meshcore_service_ensure_identity", 1
     )[0]
 
-    assert "D1L_DM_STORE_SCHEMA 6U" in store_c
+    assert "D1L_DM_STORE_SCHEMA 7U" in store_c
+    assert "D1L_DM_STORE_SCHEMA_V6 6U" in store_c
     assert "D1L_DM_STORE_SCHEMA_V5 5U" in store_c
     assert "D1L_DM_STORE_SCHEMA_V4 4U" in store_c
     assert "d1l_dm_entry_v4_t" in store_c
@@ -427,7 +464,7 @@ def test_current_dm_rows_preserve_strict_utf8_while_legacy_rows_stay_ascii():
     append = source.split("static esp_err_t append_internal", 1)[1].split(
         "esp_err_t d1l_dm_store_append(", 1
     )[0]
-    assert "D1L_DM_STORE_SCHEMA 6U" in source
+    assert "D1L_DM_STORE_SCHEMA 7U" in source
     assert "d1l_user_text_validate_bounded(entry->text" in current
     assert "persisted_ascii_is_valid(entry->text" in legacy
     assert "persisted_ascii_is_valid(entry->text" in v5
