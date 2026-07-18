@@ -13,6 +13,10 @@ extern "C" {
 
 #define D1L_MESHCORE_TRACE_FIXED_BYTES 9U
 #define D1L_MESHCORE_TRACE_MAX_HOPS 63U
+#define D1L_MESHCORE_TRACE_MAX_HASH_BYTES 8U
+#define D1L_MESHCORE_TRACE_MAX_CONTACT_HASH_BYTES 2U
+#define D1L_MESHCORE_TRACE_MAX_PATH_BYTES \
+    (D1L_MESHCORE_MAX_PACKET_PAYLOAD - D1L_MESHCORE_TRACE_FIXED_BYTES)
 #define D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS 30000U
 #define D1L_MESHCORE_TRACE_DUPLICATE_WINDOW_MS 60000U
 #define D1L_MESHCORE_TRACE_RETAINED_TARGET "trace_last"
@@ -20,8 +24,9 @@ extern "C" {
 typedef struct {
     uint32_t tag;
     uint32_t auth_code;
+    uint8_t path_hash_bytes;
     uint8_t path_hops;
-    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS];
+    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
     uint8_t raw_len;
 } d1l_meshcore_trace_source_t;
@@ -29,8 +34,9 @@ typedef struct {
 typedef struct {
     uint32_t tag;
     uint32_t auth_code;
+    uint8_t path_hash_bytes;
     uint8_t path_hops;
-    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS];
+    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
     int8_t path_snrs_quarter_db[D1L_MESHCORE_TRACE_MAX_HOPS];
 } d1l_meshcore_trace_terminal_t;
 
@@ -39,8 +45,9 @@ typedef struct {
     uint32_t pending_tag;
     uint32_t pending_auth_code;
     uint32_t pending_started_ms;
+    uint8_t pending_path_hash_bytes;
     uint8_t pending_path_hops;
-    uint8_t pending_path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS];
+    uint8_t pending_path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
     bool completed;
     uint32_t completed_at_ms;
     d1l_meshcore_trace_terminal_t last_result;
@@ -56,8 +63,9 @@ typedef enum {
 
 typedef struct {
     bool includes_contact;
+    uint8_t path_hash_bytes;
     uint8_t path_hops;
-    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS];
+    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
 } d1l_meshcore_contact_trace_plan_t;
 
 typedef enum {
@@ -94,21 +102,37 @@ static inline uint32_t d1l_meshcore_trace_read_le32(const uint8_t *src)
            ((uint32_t)src[3] << 24U);
 }
 
+static inline bool d1l_meshcore_trace_hash_width_supported(
+    uint8_t path_hash_bytes)
+{
+    return path_hash_bytes > 0U &&
+           path_hash_bytes <= D1L_MESHCORE_TRACE_MAX_HASH_BYTES &&
+           (path_hash_bytes & (path_hash_bytes - 1U)) == 0U;
+}
+
+static inline uint8_t d1l_meshcore_trace_flags_for_hash_width(
+    uint8_t path_hash_bytes)
+{
+    return path_hash_bytes == 1U ? 0U :
+           path_hash_bytes == 2U ? 1U :
+           path_hash_bytes == 4U ? 2U : 3U;
+}
+
 /*
  * Derive the only contact TRACE loop accepted by DeskOS. The caller must
- * first authorize one immutable, current-boot direct route. One-byte route
- * hashes are copied in transmit order. Repeater and room contacts can forward
- * TRACE, so their exact public-key hash is the pivot; chat and sensor contacts
- * cannot, so the farthest proven repeater is the pivot. The return leg omits
- * that pivot and reverses only the already-authorized route. No caller-supplied
- * arbitrary loop can enter this helper.
+ * first authorize one immutable, current-boot direct route. One- or two-byte
+ * route hashes are copied in transmit order. Repeater and room contacts can
+ * forward TRACE, so their exact public-key hash prefix is the pivot; chat and
+ * sensor contacts cannot, so the farthest proven repeater is the pivot. The
+ * return leg omits that pivot and reverses only whole hashes from the already
+ * authorized route. No caller-supplied arbitrary loop can enter this helper.
  */
 static inline d1l_meshcore_contact_trace_plan_result_t
 d1l_meshcore_trace_plan_contact(
     const uint8_t *out_path,
     uint8_t out_path_len,
     bool contact_forwards_trace,
-    uint8_t contact_hash,
+    const uint8_t *contact_hash,
     d1l_meshcore_contact_trace_plan_t *out_plan)
 {
     if (!out_plan || !d1l_meshcore_wire_path_len_valid(out_path_len)) {
@@ -120,10 +144,14 @@ d1l_meshcore_trace_plan_contact(
         d1l_meshcore_wire_path_hash_count(out_path_len);
     const uint8_t path_bytes =
         d1l_meshcore_wire_path_byte_len(out_path_len);
-    if (hash_bytes != 1U) {
+    if (hash_bytes == 0U ||
+        hash_bytes > D1L_MESHCORE_TRACE_MAX_CONTACT_HASH_BYTES) {
         return D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH;
     }
     if (path_bytes > 0U && !out_path) {
+        return D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
+    }
+    if (contact_forwards_trace && !contact_hash) {
         return D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
     }
     if (path_hops == 0U && !contact_forwards_trace) {
@@ -139,23 +167,34 @@ d1l_meshcore_trace_plan_contact(
 
     d1l_meshcore_contact_trace_plan_t plan = {
         .includes_contact = contact_forwards_trace,
+        .path_hash_bytes = hash_bytes,
         .path_hops = (uint8_t)loop_hops,
     };
-    if (path_hops > 0U) {
-        memcpy(plan.path_hashes, out_path, path_hops);
+    const size_t loop_bytes = loop_hops * hash_bytes;
+    if (loop_bytes > sizeof(plan.path_hashes)) {
+        return D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG;
     }
-    size_t write_index = path_hops;
+    if (path_bytes > 0U) {
+        memcpy(plan.path_hashes, out_path, path_bytes);
+    }
+    size_t write_hop = path_hops;
     if (contact_forwards_trace) {
-        plan.path_hashes[write_index++] = contact_hash;
+        memcpy(&plan.path_hashes[write_hop * hash_bytes],
+               contact_hash, hash_bytes);
+        write_hop++;
         for (size_t i = path_hops; i > 0U; --i) {
-            plan.path_hashes[write_index++] = out_path[i - 1U];
+            memcpy(&plan.path_hashes[write_hop * hash_bytes],
+                   &out_path[(i - 1U) * hash_bytes], hash_bytes);
+            write_hop++;
         }
     } else {
         for (size_t i = path_hops - 1U; i > 0U; --i) {
-            plan.path_hashes[write_index++] = out_path[i - 1U];
+            memcpy(&plan.path_hashes[write_hop * hash_bytes],
+                   &out_path[(i - 1U) * hash_bytes], hash_bytes);
+            write_hop++;
         }
     }
-    if (write_index != loop_hops) {
+    if (write_hop != loop_hops) {
         return D1L_MESHCORE_CONTACT_TRACE_PLAN_INVALID;
     }
     *out_plan = plan;
@@ -171,20 +210,27 @@ static inline const char *d1l_meshcore_trace_retained_target_for_tag(
 }
 
 /*
- * Build the exact public flags-zero source frame from pinned Mesh::createTrace
- * followed by Mesh::sendDirect. TRACE is never flood-routed: its explicit
- * one-byte hashes are appended to the payload and the outer path starts empty
- * so repeaters can append SNR samples there.
+ * Build the exact public source frame from pinned Mesh::createTrace followed
+ * by Mesh::sendDirect. TRACE is never flood-routed: its explicit
+ * hashes are appended to the payload and the outer path starts empty so
+ * repeaters can append one SNR sample per hop there. Pinned MeshCore v1.11+
+ * stores log2(hash-width) in the TRACE flags low bits. The generic helper
+ * accepts the complete pinned 1/2/4/8-byte wire set, while the contact planner
+ * can derive only the 1/2-byte subset from canonical SIGUI contact routes.
  */
 static inline bool d1l_meshcore_trace_build_source(
     uint32_t tag,
     uint32_t auth_code,
+    uint8_t path_hash_bytes,
     const uint8_t *path_hashes,
     size_t path_hops,
     d1l_meshcore_trace_source_t *out_source)
 {
+    const size_t path_bytes = path_hops * path_hash_bytes;
     if (!out_source || path_hops > D1L_MESHCORE_TRACE_MAX_HOPS ||
-        (path_hops > 0U && !path_hashes)) {
+        !d1l_meshcore_trace_hash_width_supported(path_hash_bytes) ||
+        path_bytes > D1L_MESHCORE_TRACE_MAX_PATH_BYTES ||
+        (path_bytes > 0U && !path_hashes)) {
         return false;
     }
 
@@ -195,33 +241,35 @@ static inline bool d1l_meshcore_trace_build_source(
     if (!d1l_meshcore_wire_write_prefix(
             header, 0U, 0U, 0U, NULL, source.raw, sizeof(source.raw),
             &raw_len) ||
-        raw_len + D1L_MESHCORE_TRACE_FIXED_BYTES + path_hops >
+        raw_len + D1L_MESHCORE_TRACE_FIXED_BYTES + path_bytes >
             D1L_MESHCORE_MAX_RAW_PACKET) {
         return false;
     }
 
     source.tag = tag;
     source.auth_code = auth_code;
+    source.path_hash_bytes = path_hash_bytes;
     source.path_hops = (uint8_t)path_hops;
-    if (path_hops > 0U) {
-        memcpy(source.path_hashes, path_hashes, path_hops);
+    if (path_bytes > 0U) {
+        memcpy(source.path_hashes, path_hashes, path_bytes);
     }
     d1l_meshcore_trace_write_le32(&source.raw[raw_len], tag);
     raw_len += 4U;
     d1l_meshcore_trace_write_le32(&source.raw[raw_len], auth_code);
     raw_len += 4U;
-    source.raw[raw_len++] = 0U;
-    if (path_hops > 0U) {
-        memcpy(&source.raw[raw_len], path_hashes, path_hops);
-        raw_len += path_hops;
+    source.raw[raw_len++] =
+        d1l_meshcore_trace_flags_for_hash_width(path_hash_bytes);
+    if (path_bytes > 0U) {
+        memcpy(&source.raw[raw_len], path_hashes, path_bytes);
+        raw_len += path_bytes;
     }
     source.raw_len = (uint8_t)raw_len;
     *out_source = source;
     return true;
 }
 
-/* Classify direct TRACE without treating valid source/in-flight copies or
- * valid multi-byte-path flags outside this bounded slice as malformed. */
+/* Classify direct TRACE without treating valid source/in-flight copies as
+ * malformed. Reserved high flag bits remain explicitly unsupported. */
 static inline d1l_meshcore_trace_frame_kind_t d1l_meshcore_trace_classify(
     const uint8_t *raw,
     size_t raw_len,
@@ -257,7 +305,8 @@ static inline d1l_meshcore_trace_frame_kind_t d1l_meshcore_trace_classify(
         packet.path_hops > explicit_hops) {
         return D1L_MESHCORE_TRACE_FRAME_MALFORMED;
     }
-    if (flags != 0U) {
+    if ((flags & 0xfcU) != 0U ||
+        explicit_path_bytes > D1L_MESHCORE_TRACE_MAX_PATH_BYTES) {
         return D1L_MESHCORE_TRACE_FRAME_UNSUPPORTED;
     }
     if (packet.path_hops == 0U) {
@@ -270,9 +319,11 @@ static inline d1l_meshcore_trace_frame_kind_t d1l_meshcore_trace_classify(
     d1l_meshcore_trace_terminal_t terminal = {0};
     terminal.tag = d1l_meshcore_trace_read_le32(packet.payload);
     terminal.auth_code = d1l_meshcore_trace_read_le32(&packet.payload[4]);
+    terminal.path_hash_bytes = (uint8_t)explicit_hash_bytes;
     terminal.path_hops = (uint8_t)explicit_hops;
     memcpy(terminal.path_hashes,
-           &packet.payload[D1L_MESHCORE_TRACE_FIXED_BYTES], explicit_hops);
+           &packet.payload[D1L_MESHCORE_TRACE_FIXED_BYTES],
+           explicit_path_bytes);
     memcpy(terminal.path_snrs_quarter_db, packet.path, explicit_hops);
     if (out_terminal) {
         *out_terminal = terminal;
@@ -280,7 +331,7 @@ static inline d1l_meshcore_trace_frame_kind_t d1l_meshcore_trace_classify(
     return D1L_MESHCORE_TRACE_FRAME_TERMINAL;
 }
 
-/* Parse only a canonical terminal flags-zero TRACE frame. */
+/* Parse only a canonical terminal TRACE frame with a supported hash width. */
 static inline bool d1l_meshcore_trace_parse_terminal(
     const uint8_t *raw,
     size_t raw_len,
@@ -308,24 +359,29 @@ static inline bool d1l_meshcore_trace_tracker_begin(
     d1l_meshcore_trace_tracker_t *tracker,
     uint32_t tag,
     uint32_t auth_code,
+    uint8_t path_hash_bytes,
     const uint8_t *path_hashes,
     size_t path_hops,
     uint32_t now_ms)
 {
+    const size_t path_bytes = path_hops * path_hash_bytes;
     if (!tracker || tracker->pending ||
         path_hops > D1L_MESHCORE_TRACE_MAX_HOPS ||
-        (path_hops > 0U && !path_hashes)) {
+        !d1l_meshcore_trace_hash_width_supported(path_hash_bytes) ||
+        path_bytes > D1L_MESHCORE_TRACE_MAX_PATH_BYTES ||
+        (path_bytes > 0U && !path_hashes)) {
         return false;
     }
     tracker->pending = true;
     tracker->pending_tag = tag;
     tracker->pending_auth_code = auth_code;
     tracker->pending_started_ms = now_ms;
+    tracker->pending_path_hash_bytes = path_hash_bytes;
     tracker->pending_path_hops = (uint8_t)path_hops;
     memset(tracker->pending_path_hashes, 0,
            sizeof(tracker->pending_path_hashes));
-    if (path_hops > 0U) {
-        memcpy(tracker->pending_path_hashes, path_hashes, path_hops);
+    if (path_bytes > 0U) {
+        memcpy(tracker->pending_path_hashes, path_hashes, path_bytes);
     }
     return true;
 }
@@ -345,14 +401,19 @@ static inline bool d1l_meshcore_trace_tracker_cancel(
 
 static inline bool d1l_meshcore_trace_path_matches(
     const d1l_meshcore_trace_terminal_t *terminal,
+    uint8_t expected_hash_bytes,
     uint8_t expected_hops,
     const uint8_t *expected_hashes)
 {
-    return terminal && terminal->path_hops == expected_hops &&
+    const size_t expected_bytes =
+        (size_t)expected_hash_bytes * expected_hops;
+    return terminal &&
+           terminal->path_hash_bytes == expected_hash_bytes &&
+           terminal->path_hops == expected_hops &&
            (expected_hops == 0U ||
             (expected_hashes &&
              memcmp(terminal->path_hashes, expected_hashes,
-                    expected_hops) == 0));
+                    expected_bytes) == 0));
 }
 
 static inline d1l_meshcore_trace_correlation_t
@@ -373,7 +434,8 @@ d1l_meshcore_trace_tracker_consume(
         const bool auth_matches =
             terminal->auth_code == tracker->pending_auth_code;
         const bool path_matches = d1l_meshcore_trace_path_matches(
-            terminal, tracker->pending_path_hops,
+            terminal, tracker->pending_path_hash_bytes,
+            tracker->pending_path_hops,
             tracker->pending_path_hashes);
         if (expired) {
             tracker->pending = false;
@@ -401,7 +463,8 @@ d1l_meshcore_trace_tracker_consume(
         terminal->tag == tracker->last_result.tag &&
         terminal->auth_code == tracker->last_result.auth_code &&
         d1l_meshcore_trace_path_matches(
-            terminal, tracker->last_result.path_hops,
+            terminal, tracker->last_result.path_hash_bytes,
+            tracker->last_result.path_hops,
             tracker->last_result.path_hashes)) {
         return D1L_MESHCORE_TRACE_CORRELATION_DUPLICATE;
     }

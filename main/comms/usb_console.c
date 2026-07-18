@@ -1713,7 +1713,7 @@ static void cmd_mesh_status(void)
            (unsigned long)status.runtime_task_heartbeat,
            (unsigned long)status.runtime_task_stack_free_words,
            (unsigned long long)status.runtime_last_event_monotonic_us);
-    printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"flags_zero_direct_only\":true,\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":true,\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to a runtime-derived canonical contact loop, terminal parsing, and correlation\"}\n",
+    printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"flags_zero_direct_only\":false,\"trace_flags_supported\":[0,1,2,3],\"trace_wire_hash_bytes_supported\":[1,2,4,8],\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":false,\"contact_trace_path_hash_bytes_supported\":[1,2],\"contact_route_hash_bytes_rejected\":[3],\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to a runtime-derived canonical contact loop, terminal parsing, and correlation\"}\n",
            (unsigned long)status.trace_tx_queued,
            (unsigned long)status.trace_rx_matched,
            (unsigned long)status.trace_rx_duplicates,
@@ -5341,7 +5341,7 @@ static void cmd_routes_trace_contact(const char *line)
                 "derived contact route loop is too long" :
             ret == ESP_ERR_INVALID_STATE ?
                 "contact/path is noncanonical, missing, expired, preboot, ambiguous, or another radio operation is active" :
-                "could not queue the contact-derived flags-zero TRACE";
+                "could not queue the contact-derived TRACE";
         err_result("routes trace contact", esp_err_to_name(ret), detail);
         return;
     }
@@ -5351,14 +5351,19 @@ static void cmd_routes_trace_contact(const char *line)
     const uint32_t tag = trace.pending ? trace.pending_tag : trace.last_tag;
     const uint8_t path_hops = trace.pending ?
         trace.pending_path_hops : trace.last_path_hops;
+    const uint8_t path_hash_bytes = trace.pending ?
+        trace.pending_path_hash_bytes : trace.last_path_hash_bytes;
+    const size_t path_bytes = (size_t)path_hash_bytes * path_hops;
     const uint8_t *path_hashes = trace.pending ?
         trace.pending_path_hashes : trace.last_path_hashes;
     ok_begin("routes trace contact");
-    printf(",\"fingerprint\":\"%s\",\"queued\":true,\"pending\":%s,\"tag\":%lu,\"tag_hex\":\"%08lX\",\"path_hops\":%u,\"path_hashes_hex\":",
+    printf(",\"fingerprint\":\"%s\",\"queued\":true,\"pending\":%s,\"tag\":%lu,\"tag_hex\":\"%08lX\",\"path_hash_bytes\":%u,\"path_hops\":%u,\"path_hashes_hex\":",
            fingerprint, bool_json(trace.pending), (unsigned long)tag,
-           (unsigned long)tag, (unsigned)path_hops);
-    print_hex_bytes_json(path_hashes, path_hops);
-    printf(",\"route\":\"direct\",\"route_source\":\"current_boot_proven_contact_path\",\"flags\":0,\"path_hash_bytes\":1,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"public_rf_tx\":false,\"targeted_trace_rf_tx\":true,\"hardware_verified\":false,\"note\":\"Runtime derived the immutable loop from the exact canonical contact and current proven path; repeater/room routes include the contact hash while chat/sensor routes pivot at the farthest proven repeater\"}\n");
+           (unsigned long)tag, (unsigned)path_hash_bytes,
+           (unsigned)path_hops);
+    print_hex_bytes_json(path_hashes, path_bytes);
+    printf(",\"route\":\"direct\",\"route_source\":\"current_boot_proven_contact_path\",\"flags\":%u,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"public_rf_tx\":false,\"targeted_trace_rf_tx\":true,\"hardware_verified\":false,\"note\":\"Runtime derived the immutable loop from the exact canonical contact and current proven path; repeater/room routes include the contact hash while chat/sensor routes pivot at the farthest proven repeater\"}\n",
+           path_hash_bytes == 2U ? 1U : 0U);
 }
 
 static void cmd_routes_trace_status(void)
@@ -5380,7 +5385,7 @@ static void cmd_routes_trace_status(void)
             "Route summary and packet preview retention both failed";
 
     ok_begin("routes trace status");
-    printf(",\"counters\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu},\"pending\":{\"active\":%s,\"expired\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hops\":%u,\"path_hashes_hex\":",
+    printf(",\"counters\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu},\"pending\":{\"active\":%s,\"expired\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hash_bytes\":%u,\"path_hops\":%u,\"path_hashes_hex\":",
            (unsigned long)status.trace_tx_queued,
            (unsigned long)status.trace_rx_matched,
            (unsigned long)status.trace_rx_duplicates,
@@ -5396,18 +5401,24 @@ static void cmd_routes_trace_status(void)
            bool_json(trace.pending), bool_json(trace.pending_expired),
            (unsigned long)trace.pending_tag,
            (unsigned long)trace.pending_age_ms,
+           trace.pending_path_hash_bytes,
            trace.pending_path_hops);
-    print_hex_bytes_json(trace.pending_path_hashes, trace.pending_path_hops);
-    printf("},\"last_result\":{\"valid\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hops\":%u,\"path_hashes_hex\":",
+    print_hex_bytes_json(
+        trace.pending_path_hashes,
+        (size_t)trace.pending_path_hash_bytes * trace.pending_path_hops);
+    printf("},\"last_result\":{\"valid\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hash_bytes\":%u,\"path_hops\":%u,\"path_hashes_hex\":",
            bool_json(trace.last_result_valid), (unsigned long)trace.last_tag,
-           (unsigned long)trace.last_age_ms, trace.last_path_hops);
-    print_hex_bytes_json(trace.last_path_hashes, trace.last_path_hops);
+           (unsigned long)trace.last_age_ms, trace.last_path_hash_bytes,
+           trace.last_path_hops);
+    print_hex_bytes_json(
+        trace.last_path_hashes,
+        (size_t)trace.last_path_hash_bytes * trace.last_path_hops);
     printf(",\"path_snrs_quarter_db\":[");
     for (size_t i = 0; i < trace.last_path_hops; ++i) {
         printf("%s%d", i ? "," : "",
                (int)trace.last_path_snrs_quarter_db[i]);
     }
-    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,\"route_summary_durable_verified\":false,\"packet_preview_retained\":%s,\"per_hop_complete\":false,\"packet_preview_bytes\":%u},\"correlation_scope\":\"tag_auth_immutable_contact_loop\",\"last_detail_scope\":\"boot_local\",\"flags_zero_direct_only\":true,\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":true,\"hardware_verified\":false,\"note\":\"%s; full per-hop detail is boot-local and multi-byte TRACE forwarding/RF remain unverified\"}\n",
+    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,\"route_summary_durable_verified\":false,\"packet_preview_retained\":%s,\"per_hop_complete\":false,\"packet_preview_bytes\":%u},\"correlation_scope\":\"tag_auth_immutable_contact_loop\",\"last_detail_scope\":\"boot_local\",\"flags_zero_direct_only\":false,\"trace_flags_supported\":[0,1,2,3],\"trace_wire_hash_bytes_supported\":[1,2,4,8],\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":false,\"contact_trace_path_hash_bytes_supported\":[1,2],\"contact_route_hash_bytes_rejected\":[3],\"hardware_verified\":false,\"note\":\"%s; full per-hop detail is boot-local; two-byte contact TRACE and wider wire parsing remain hardware-unverified\"}\n",
            trace.last_rssi_dbm, trace.last_radio_snr_quarter_db,
            bool_json(trace.last_retention_attempted),
            bool_json(trace.last_route_summary_accepted),

@@ -3824,7 +3824,9 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
                s_trace_tracker.last_result.tag == terminal.tag &&
                s_trace_tracker.last_result.auth_code == terminal.auth_code &&
                d1l_meshcore_trace_path_matches(
-                   &terminal, s_trace_tracker.last_result.path_hops,
+                   &terminal,
+                   s_trace_tracker.last_result.path_hash_bytes,
+                   s_trace_tracker.last_result.path_hops,
                    s_trace_tracker.last_result.path_hashes) &&
                s_trace_last_retention_attempted &&
                (!s_trace_last_route_summary_accepted ||
@@ -3883,15 +3885,16 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
     const esp_err_t route_ret = route_retention_needed ?
         d1l_route_store_upsert_observation(
             target, "Explicit TRACE", "trace_reply", "direct", "rx", rssi,
-            (snr * 10) / 4, 1U, terminal.path_hops, size) : ESP_OK;
+            (snr * 10) / 4, terminal.path_hash_bytes,
+            terminal.path_hops, size) : ESP_OK;
     if (route_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store TRACE reply failed: %s",
                  esp_err_to_name(route_ret));
     }
     const bool packet_retained = !packet_retention_needed ||
         append_packet_log_deferred(
-            "rx", "trace_reply", rssi, snr, 1U, terminal.path_hops, size,
-            payload, size, note);
+            "rx", "trace_reply", rssi, snr, terminal.path_hash_bytes,
+            terminal.path_hops, size, payload, size, note);
     if (!packet_retained) {
         ESP_LOGW(TAG, "packet log TRACE reply retention failed");
     }
@@ -3900,7 +3903,8 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
         s_trace_tracker.last_result.tag == terminal.tag &&
         s_trace_tracker.last_result.auth_code == terminal.auth_code &&
         d1l_meshcore_trace_path_matches(
-            &terminal, s_trace_tracker.last_result.path_hops,
+            &terminal, s_trace_tracker.last_result.path_hash_bytes,
+            s_trace_tracker.last_result.path_hops,
             s_trace_tracker.last_result.path_hashes)) {
         s_trace_last_retention_attempted = true;
         s_trace_last_route_summary_accepted =
@@ -5286,7 +5290,7 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
     const d1l_meshcore_contact_trace_plan_result_t plan_result =
         d1l_meshcore_trace_plan_contact(
             selection.path, selection.path_len, contact_forwards_trace,
-            contact_public_key[0], &plan);
+            contact_public_key, &plan);
     secure_zero_bytes(contact_public_key, sizeof(contact_public_key));
     if (plan_result == D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH ||
         plan_result == D1L_MESHCORE_CONTACT_TRACE_PLAN_EMPTY) {
@@ -5303,7 +5307,8 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
     const uint32_t auth_code = esp_random();
     d1l_meshcore_trace_source_t source = {0};
     if (!d1l_meshcore_trace_build_source(
-            tag, auth_code, plan.path_hashes, plan.path_hops, &source)) {
+            tag, auth_code, plan.path_hash_bytes, plan.path_hashes,
+            plan.path_hops, &source)) {
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -5311,7 +5316,8 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
     const bool expired = d1l_meshcore_trace_tracker_expire_pending(
         &s_trace_tracker, now_ms);
     const bool began = d1l_meshcore_trace_tracker_begin(
-        &s_trace_tracker, tag, auth_code, plan.path_hashes,
+        &s_trace_tracker, tag, auth_code, plan.path_hash_bytes,
+        plan.path_hashes,
         plan.path_hops, now_ms);
     d1l_store_lock_give(&s_trace_lock);
     if (expired) {
@@ -5346,13 +5352,13 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
         d1l_route_store_upsert_observation_volatile(
             contact.fingerprint,
             contact.alias[0] ? contact.alias : contact.fingerprint,
-            "trace_request", "direct", "tx", 0, 0, 1U,
+            "trace_request", "direct", "tx", 0, 0, plan.path_hash_bytes,
             plan.path_hops, source.raw_len);
     if (route_ret != ESP_OK) {
         ESP_LOGW(TAG, "volatile contact TRACE request route failed: %s",
                  esp_err_to_name(route_ret));
     }
-    append_packet_log("tx", "trace_request", 0, 0, 1U,
+    append_packet_log("tx", "trace_request", 0, 0, plan.path_hash_bytes,
                       plan.path_hops, source.raw_len, source.raw,
                       source.raw_len, note);
     status_lock();
@@ -6438,20 +6444,26 @@ void d1l_meshcore_service_trace_snapshot(
             (uint32_t)(now_ms - s_trace_tracker.pending_started_ms);
         snapshot.pending_expired =
             snapshot.pending_age_ms >= D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS;
+        snapshot.pending_path_hash_bytes =
+            s_trace_tracker.pending_path_hash_bytes;
         snapshot.pending_path_hops = s_trace_tracker.pending_path_hops;
         memcpy(snapshot.pending_path_hashes,
                s_trace_tracker.pending_path_hashes,
-               snapshot.pending_path_hops);
+               (size_t)snapshot.pending_path_hash_bytes *
+                   snapshot.pending_path_hops);
     }
     if (s_trace_tracker.completed) {
         snapshot.last_result_valid = true;
         snapshot.last_tag = s_trace_tracker.last_result.tag;
         snapshot.last_age_ms =
             (uint32_t)(now_ms - s_trace_tracker.completed_at_ms);
+        snapshot.last_path_hash_bytes =
+            s_trace_tracker.last_result.path_hash_bytes;
         snapshot.last_path_hops = s_trace_tracker.last_result.path_hops;
         memcpy(snapshot.last_path_hashes,
                s_trace_tracker.last_result.path_hashes,
-               snapshot.last_path_hops);
+               (size_t)snapshot.last_path_hash_bytes *
+                   snapshot.last_path_hops);
         memcpy(snapshot.last_path_snrs_quarter_db,
                s_trace_tracker.last_result.path_snrs_quarter_db,
                snapshot.last_path_hops);

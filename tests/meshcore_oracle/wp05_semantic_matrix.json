@@ -128,7 +128,7 @@
         "contact_trace"
       ],
       "remaining": [
-        "execute multi-byte and multi-hop forwarding against the pinned upstream",
+        "execute controlled multi-hop forwarding for supported contact widths against the pinned upstream",
         "qualify official-peer RF"
       ]
     },
@@ -515,7 +515,7 @@
     "main/mesh/meshcore_runtime_guard.h": "5b3630e4a27b15d65a10f7b7524ee646123680b89efb9586f7b02ba33c899708",
     "main/mesh/meshcore_text_plaintext.c": "09e7c094afa77979aeeb9e2d3b580b16d1e69a9fe422ed4467c47c8e009d7d18",
     "main/mesh/meshcore_text_plaintext.h": "2197868b508ea8315511eeae1de0ad2e0adae3466011252a816f6e0da59b9ef0",
-    "main/mesh/meshcore_trace.h": "dcfd9d18f65555baa018412f1b7c9e6079a04b1b6ad89fda1452ec3943a6dc78",
+    "main/mesh/meshcore_trace.h": "f9ecdb5861dfa258dd628aa1cfee8d820fde582f7eb80ce2cf3c4822e34cbc61",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
     "main/mesh/node_store.c": "e2fcfecd12aa8b22c203806f700086bb18daf7c0f983786e8a4294463ddb8db6",
@@ -541,7 +541,7 @@
     "tests/native/meshcore_rx_admission_test.c": "f541b4a4dc6f768ee3e2f1eeb88362944f4a1172b906d1483770f1056d457b69",
     "tests/native/meshcore_packet_hash_test.c": "c8d9bbed666168cccd2e1dab86676a252e3aee5a8cb900077ba7ab972a35fb97",
     "tests/native/meshcore_text_plaintext_test.c": "b7f4edbe648c00b5725878b631c705c251c3a81ffe4652cd706d8b996d1e6e7b",
-    "tests/native/meshcore_trace_test.c": "c046cdc354a40d5feae8e79eb8e8f66fa1426ecae97a083ef6f6ca7c56092eff",
+    "tests/native/meshcore_trace_test.c": "ef3e07461e63841c8daff2cd1264685e8643fccb5571e77d66e4f0ca5cd0b57c",
     "tests/native/mock_esp_nvs.h": "186a12a057672734ddeddeeba5667298aadf69fb2b074d42c4dbd588f9d552fd",
     "tests/native/settings_protocol_migration_test.c": "6e0093fed3ac42bc02fe8f5d4e18185eb52f6f86febca805e489c2d794de0b93",
     "tests/native/stubs/esp_err.h": "2fbaacdc20942f446a184b2f0ba1cef537beb573f015772aa81f757c9e277895",
