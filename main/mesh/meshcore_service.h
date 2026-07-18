@@ -91,13 +91,15 @@ typedef struct {
     bool pending_expired;
     uint32_t pending_tag;
     uint32_t pending_age_ms;
+    uint8_t pending_path_hash_bytes;
     uint8_t pending_path_hops;
-    uint8_t pending_path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS];
+    uint8_t pending_path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
     bool last_result_valid;
     uint32_t last_tag;
     uint32_t last_age_ms;
+    uint8_t last_path_hash_bytes;
     uint8_t last_path_hops;
-    uint8_t last_path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS];
+    uint8_t last_path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
     int8_t last_path_snrs_quarter_db[D1L_MESHCORE_TRACE_MAX_HOPS];
     int last_rssi_dbm;
     int last_radio_snr_quarter_db;

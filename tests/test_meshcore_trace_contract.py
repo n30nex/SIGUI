@@ -15,22 +15,30 @@ def canonical_sha256(relative: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def test_trace_helper_is_flags_zero_direct_and_terminal_only() -> None:
+def test_trace_helper_supports_bounded_widths_and_direct_terminal_only() -> None:
     trace = read("main/mesh/meshcore_trace.h")
     wire = read("main/mesh/meshcore_wire.h")
 
     assert "D1L_MESHCORE_PAYLOAD_TRACE 0x09U" in wire
     assert "D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS 30000U" in trace
     assert "D1L_MESHCORE_TRACE_DUPLICATE_WINDOW_MS 60000U" in trace
+    assert "D1L_MESHCORE_TRACE_MAX_HASH_BYTES 8U" in trace
+    assert "D1L_MESHCORE_TRACE_MAX_CONTACT_HASH_BYTES 2U" in trace
+    assert (
+        "D1L_MESHCORE_MAX_PACKET_PAYLOAD - D1L_MESHCORE_TRACE_FIXED_BYTES"
+        in trace
+    )
     assert 'D1L_MESHCORE_TRACE_RETAINED_TARGET "trace_last"' in trace
     assert "D1L_MESHCORE_ROUTE_DIRECT" in trace
-    assert "source.raw[raw_len++] = 0U" in trace
+    assert "d1l_meshcore_trace_flags_for_hash_width(path_hash_bytes)" in trace
+    assert "path_hash_bytes == 4U ? 2U : 3U" in trace
     assert "D1L_MESHCORE_TRACE_FRAME_SOURCE" in trace
     assert "D1L_MESHCORE_TRACE_FRAME_IN_FLIGHT" in trace
     assert "D1L_MESHCORE_TRACE_FRAME_UNSUPPORTED" in trace
     assert "D1L_MESHCORE_TRACE_FRAME_TERMINAL" in trace
     assert "packet.path_hops > explicit_hops" in trace
-    assert "if (flags != 0U)" in trace
+    assert "(flags & 0xfcU) != 0U" in trace
+    assert "explicit_path_bytes > D1L_MESHCORE_TRACE_MAX_PATH_BYTES" in trace
     assert "explicit_path_bytes == 0U" in trace
     assert "return D1L_MESHCORE_TRACE_FRAME_UNSUPPORTED" in trace
     assert "d1l_meshcore_trace_classify(raw, raw_len, out_terminal) ==" in trace
@@ -44,8 +52,8 @@ def test_trace_helper_is_flags_zero_direct_and_terminal_only() -> None:
     assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_TOO_LONG" in trace
     assert "(size_t)path_hops * 2U + 1U" in trace
     assert "(size_t)path_hops * 2U - 1U" in trace
-    assert "plan.path_hashes[write_index++] = contact_hash" in trace
-    assert "out_path[i - 1U]" in trace
+    assert "contact_hash, hash_bytes" in trace
+    assert "&out_path[(i - 1U) * hash_bytes]" in trace
 
 
 def test_trace_tracker_correlates_immutable_tag_auth_path_and_bounds_age() -> None:
@@ -53,7 +61,9 @@ def test_trace_tracker_correlates_immutable_tag_auth_path_and_bounds_age() -> No
 
     assert "tracker->pending_tag = tag" in trace
     assert "tracker->pending_auth_code = auth_code" in trace
-    assert "memcpy(tracker->pending_path_hashes, path_hashes, path_hops)" in trace
+    assert "tracker->pending_path_hash_bytes = path_hash_bytes" in trace
+    assert "memcpy(tracker->pending_path_hashes, path_hashes, path_bytes)" in trace
+    assert "terminal->path_hash_bytes == expected_hash_bytes" in trace
     assert "D1L_MESHCORE_TRACE_CORRELATION_AUTH_MISMATCH" in trace
     assert "D1L_MESHCORE_TRACE_CORRELATION_PATH_MISMATCH" in trace
     assert "D1L_MESHCORE_TRACE_CORRELATION_DUPLICATE" in trace
@@ -139,7 +149,9 @@ def test_runtime_owner_derives_contact_trace_from_one_current_proven_path() -> N
     assert 'strcmp(contact.type, "room") == 0' in send
     assert "d1l_meshcore_trace_plan_contact" in send
     assert "D1L_MESHCORE_CONTACT_TRACE_PLAN_UNSUPPORTED_WIDTH" in send
+    assert "contact_public_key, &plan" in send
     assert "d1l_meshcore_trace_build_source" in send
+    assert "tag, auth_code, plan.path_hash_bytes, plan.path_hashes" in send
     assert "d1l_meshcore_trace_tracker_expire_pending" in send
     assert "d1l_meshcore_trace_tracker_begin" in send
     assert "d1l_meshcore_trace_tracker_cancel" in send
@@ -172,6 +184,8 @@ def test_trace_snapshot_is_passive_and_does_not_expose_auth_code() -> None:
     assert "d1l_meshcore_trace_tracker_expire_pending" not in snapshot
     assert "snapshot.pending_expired" in snapshot
     assert "D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS" in snapshot
+    assert "snapshot.pending_path_hash_bytes" in snapshot
+    assert "snapshot.last_path_hash_bytes" in snapshot
     assert "snapshot.last_retention_attempted" in snapshot
     assert "snapshot.last_route_summary_accepted" in snapshot
     assert "snapshot.last_packet_preview_retained" in snapshot
@@ -196,7 +210,11 @@ def test_console_discloses_trace_boundary_and_keeps_dm_path_probe_truthful() -> 
     assert "operator_path_accepted" in console
     assert "operator_trace_path_accepted" in console
     assert "current_boot_proven_contact_path" in console
-    assert "one_byte_hash_only" in console
+    assert '"one_byte_hash_only\\":false' in console
+    assert '"trace_wire_hash_bytes_supported\\":[1,2,4,8]' in console
+    assert '"contact_trace_path_hash_bytes_supported\\":[1,2]' in console
+    assert '"contact_route_hash_bytes_rejected\\":[3]' in console
+    assert '"trace_flags_supported\\":[0,1,2,3]' in console
     assert "hardware_verified" in console
     assert "per_hop_complete" in console
     assert "route_summary_durable_verified" in console
@@ -227,7 +245,9 @@ def test_console_discloses_trace_boundary_and_keeps_dm_path_probe_truthful() -> 
     assert "real_trace_contact_supported=false" not in test_plan
     assert "routes trace contact <fingerprint>" in test_plan
     assert "operator_path_accepted=false" in test_plan
-    assert "one_byte_hash_only=true" in test_plan
+    assert "one_byte_hash_only=false" in test_plan
+    assert "trace_wire_hash_bytes_supported=[1,2,4,8]" in test_plan
+    assert "contact_trace_path_hash_bytes_supported=[1,2]" in test_plan
 
 
 def test_trace_helper_and_service_are_exact_production_binding_sources() -> None:
