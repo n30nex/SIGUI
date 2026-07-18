@@ -34,6 +34,14 @@ def job_block(name: str) -> str:
     return text[start : start + 1 + next_job.start()]
 
 
+def test_ci_avoids_duplicate_branch_push_and_pull_request_runs():
+    trigger = workflow_text().split("permissions:", 1)[0]
+
+    assert "  push:\n    branches:\n      - main\n" in trigger
+    assert "  pull_request:\n" in trigger
+    assert "workflow_dispatch:" in trigger
+
+
 def test_ci_host_checks_are_host_only_for_sd_bridge():
     host = job_block("host-checks")
 
