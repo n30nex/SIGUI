@@ -104,6 +104,20 @@ def test_ci_detects_when_sd_bridge_scope_is_required():
     assert "include_sd_bridge=true" in job
     assert "reason=manual_dispatch" in job
     assert "reason=sd_bridge_paths" in job
+    assert "core_sd_disabled=false" in job
+    assert (
+        """grep -Eq '^set\\(D1L_RELEASE_PROFILE "core_1_0" CACHE STRING' CMakeLists.txt"""
+        in job
+    )
+    assert (
+        """grep -Eq '^set\\(D1L_SD_HISTORY_MODE "disabled" CACHE STRING' CMakeLists.txt"""
+        in job
+    )
+    assert 'if [[ "$core_sd_disabled" == "true" ]]' in job
+    assert "reason=core_sd_disabled" in job
+    assert job.index("reason=manual_dispatch") < job.index(
+        'if [[ "$core_sd_disabled" == "true" ]]'
+    )
     assert "firmware/rp2040_sd_bridge/" in job
     assert "firmware/rp2040_sd_smoke/" in job
     assert "tools/rp2040_sd_protocol.py" in job

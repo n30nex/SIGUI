@@ -35,6 +35,11 @@ jobs:
 
           include_sd_bridge=false
           reason=esp32_only
+          core_sd_disabled=false
+          if grep -Eq '^set\(D1L_RELEASE_PROFILE "core_1_0" CACHE STRING' CMakeLists.txt \
+            && grep -Eq '^set\(D1L_SD_HISTORY_MODE "disabled" CACHE STRING' CMakeLists.txt; then
+            core_sd_disabled=true
+          fi
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.include_sd_bridge }}" == "true" ]]; then
             include_sd_bridge=true
@@ -56,8 +61,12 @@ jobs:
             fi
 
             if grep -E '^(firmware/rp2040_sd_bridge/|firmware/rp2040_sd_smoke/|tools/rp2040_sd_protocol.py|scripts/(rp2040_|sd_).*_d1l.py|scripts/flash_rp2040_sd_bridge_uf2.py|tests/test_rp2040_sd_bridge_target.py|tests/test_storage_status_contract.py|docs/(SD_BRIDGE_PROTOCOL_D1L|RP2040_SD_BRIDGE_FLASH_D1L|D1L_SD_CARD_GUIDED_INSTALL)\.md)' changed-files.txt >/dev/null; then
-              include_sd_bridge=true
-              reason=sd_bridge_paths
+              if [[ "$core_sd_disabled" == "true" ]]; then
+                reason=core_sd_disabled
+              else
+                include_sd_bridge=true
+                reason=sd_bridge_paths
+              fi
             fi
           fi
 
