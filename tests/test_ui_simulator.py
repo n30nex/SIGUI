@@ -169,6 +169,16 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert dm_history_empty["dm_thread_search_no_match"] is False
     trace = views["route_trace_sheet"]["metrics"]
     assert trace["route_trace_rendered_count"] <= 2
+    assert trace["route_trace_real_packet"] is True
+    assert trace["route_trace_requires_explicit_touch"] is True
+    assert trace["route_trace_current_boot_proven_path_required"] is True
+    assert trace["route_trace_one_byte_hash_only"] is False
+    assert trace["route_trace_contact_path_hash_bytes_supported"] == [1, 2]
+    assert trace["route_trace_wire_hash_bytes_supported"] == [1, 2, 4, 8]
+    assert trace["route_trace_flags_supported"] == [0, 1, 2, 3]
+    assert trace["route_trace_contact_route_hash_bytes_rejected"] == [3]
+    assert trace["route_trace_hardware_verified"] is False
+    assert trace["route_trace_public_rf_tx"] is False
 
     mesh_root = views["mesh_roles_sheet"]["metrics"]
     assert mesh_root["mesh_roles_rooms_source_count"] == 6
@@ -671,7 +681,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"DM Search", "Search this conversation", "Apply", "Clear", "Close"} <= labels_by_view["dm_search_sheet"]
     assert "No retained messages match this search." in labels_by_view["dm_thread_search_no_match"]
     assert "No retained messages in this conversation." in labels_by_view["dm_thread_empty_sheet"]
-    assert {"Route Trace", "YKF Corebot", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"} <= labels_by_view["route_trace_sheet"]
+    assert {"Route Trace", "YKF Corebot", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Trace"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
 
@@ -954,9 +964,12 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["contact_edit_sheet"]["save_contact_alias"]["destination"] == "contact_options_page"
     assert set(actions_by_view["contact_export_sheet"]) == {"close_contact_export"}
     assert actions_by_view["contact_export_sheet"]["close_contact_export"]["destination"] == "contact_options_page"
-    assert set(actions_by_view["route_trace_sheet"]) == {"close_route_trace", "send_path_probe"}
+    assert set(actions_by_view["route_trace_sheet"]) == {"close_route_trace", "send_contact_trace"}
     assert actions_by_view["route_trace_sheet"]["close_route_trace"]["destination"] == "contact_options_page"
-    assert actions_by_view["route_trace_sheet"]["send_path_probe"]["dm_tx"] is True
+    trace_target = actions_by_view["route_trace_sheet"]["send_contact_trace"]
+    assert trace_target["rf_tx"] is True
+    assert trace_target["public_rf_tx"] is False
+    assert trace_target["dm_tx"] is False
     assert set(actions_by_view["forget_contact_confirm_page"]) == {
         "close_forget_contact_confirm",
         "cancel_forget_contact",

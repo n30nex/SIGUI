@@ -762,6 +762,11 @@ esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
         fingerprint, out_token, out_token_size);
 }
 
+esp_err_t d1l_app_model_send_trace_contact(const char *fingerprint)
+{
+    return d1l_meshcore_service_send_trace_contact(fingerprint);
+}
+
 size_t d1l_app_model_query_dm_thread_page(const char *fingerprint,
                                           d1l_dm_entry_t *out_entries,
                                           bool *out_unread,

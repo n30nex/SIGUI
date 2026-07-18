@@ -195,8 +195,9 @@ def test_trace_snapshot_is_passive_and_does_not_expose_auth_code() -> None:
     assert "auth_code" not in snapshot_type
 
 
-def test_console_discloses_trace_boundary_and_keeps_dm_path_probe_truthful() -> None:
+def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     console = read("main/comms/usb_console.c")
+    app_header = read("main/app/app_model.h")
     app = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     test_plan = read("docs/TEST_PLAN_D1L.md")
@@ -239,7 +240,12 @@ def test_console_discloses_trace_boundary_and_keeps_dm_path_probe_truthful() -> 
     assert "real_trace_packet" in console
     assert "DM/PATH discovery probe queued" in console
     assert "d1l_meshcore_service_request_path_discovery_probe" in app
-    assert "DM/PATH discovery; not TRACE; no Public RF" in ui
+    assert "d1l_app_model_send_trace_contact" in app_header
+    assert "d1l_meshcore_service_send_trace_contact(fingerprint)" in app
+    assert "d1l_app_model_send_trace_contact(" in ui
+    assert "d1l_app_model_request_path_discovery_probe(" not in ui
+    assert '"Correlated TRACE; proven outbound path; no Public RF"' in ui
+    assert '"Authenticated TRACE' not in ui
     assert "routes trace send <loop-path-hex>" not in test_plan
     assert "contact_trace_supported=false" not in test_plan
     assert "real_trace_contact_supported=false" not in test_plan
