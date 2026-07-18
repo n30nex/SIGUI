@@ -190,6 +190,7 @@ static inline bool d1l_ui_messages_delivery_failure_latched(
         state == D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT;
 }
 
+bool d1l_ui_messages_action_available(d1l_ui_messages_action_t action);
 bool d1l_ui_messages_create(d1l_ui_messages_controller_t *controller,
                             lv_obj_t *parent);
 void d1l_ui_messages_render(d1l_ui_messages_controller_t *controller,
