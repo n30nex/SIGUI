@@ -441,3 +441,50 @@ release is authorized by the evidence currently recorded.
 - The operator's power cycle remains pre-candidate only. COM12 has not been
   opened, the full host suite and candidate workflow have not run, and no
   firmware build, flash, RF transmission, or SD operation occurred.
+
+### `2026-07-18T19:13:06-04:00`
+
+- Commit `e3f99a6` closes the retained private-channel runtime gap. Core RX
+  filters to the fixed Public key before secret copy/decrypt, non-Public TX
+  rejects before reconciliation/key access, and retained reconciliation does
+  not mutate private-channel state. Integrated validation passed 17 direct
+  boundary/store tests and 53 adjacent MeshCore/source-pin tests.
+- Commits `fa2fcf8` and `712c5a3` close three additional Core reachability
+  gaps found by the independent freeze review: `packets clear` and
+  `nodes clear` now reject before their persisted handlers and are absent from
+  Core help; the Core node projection emits no location/GPS fields; and the
+  disabled-SD `storage_card`/`storage_data` deep links return the exact
+  profile/feature rejection before UI dispatch. Integrated focused validation
+  passed 39 tests with one expected Windows fuzz skip.
+- Commit `7ba5592` adds strict recomputation of the retained authenticated
+  GitHub defect snapshot, including exact run/attempt aliases, raw API page
+  hashes and empty sentinels, duplicate-query stability, issue classification
+  transitions, critical Core P1 review, and the narrow issue #71 pre-tag
+  exception. Its integrated focused suite passed all 24 tests.
+- Commit `5260a5f` integrates the exact Actions capture, Core-only package,
+  non-erasing COM12 flash, Core smoke/UI runners, strict install review,
+  controlled DM/ACK/direct-route receipt, disabled-SD decision, and contiguous
+  60-minute active plus 30-minute idle soak audit. The integrated evidence
+  slice passed 167 focused tests with one expected Windows symlink-privilege
+  skip, and every new Python entrypoint compiled.
+- A final producer/audit alignment remains open before freeze:
+  `manual_ui_review_d1l.py` must emit the audit-required start/end timestamps
+  and explicit no-DM-RF field, refuse overwrite, and receive strict
+  recomputation coverage. A bounded follow-up owns that repair; the one full
+  host suite and candidate workflow remain unstarted until it lands and the
+  read-only freeze review completes.
+- Live GitHub refresh still reports `origin/main` at
+  `846f728dd3faded85451c6d39ba6a07cb8ca7f44`, reviewed PR #197 at
+  `79d3efae9c784d65b70b0d79fae352b3ad5199aa`, excluded draft PR #199 at
+  `6c854159dfc37525ff4df2d57ca216e4b2303bc2`, no release-branch `d1l-ci`
+  run, and no `v1.0.0` tag or release.
+- A transient all-zero Git worktree index/ref/write incident during one
+  cherry-pick was detected before commit by byte comparison. Only the exact
+  affected paths were restored from verified Git objects, the branch ref was
+  rebuilt from the already-pushed commit, object/ref connectivity passed, and
+  the bounded commit was then reapplied normally. No user work or source
+  change was lost.
+- The operator's power cycle remains pre-candidate only. COM12 and COM15 have
+  not been opened by this release flow, the full host suite and candidate
+  workflow have not run, and no firmware build, flash, RF transmission, or SD
+  operation occurred.
