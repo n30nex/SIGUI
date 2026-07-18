@@ -51,8 +51,8 @@ The authoritative product boundary, roadmap, and work graph are:
 - SD begins as conditional. It becomes `supported_optional` only after the
   exact paired-candidate matrix passes; otherwise it becomes `disabled`, the
   RP2040 payload is omitted, and retained NVS remains authoritative.
-- PR #197 will be integrated as reviewed `.c`/`.h`/native-test substance.
-  Generated manifests will be regenerated against this branch rather than
+- PR #197 was integrated as reviewed `.c`/`.h`/native-test substance.
+  Generated manifests were regenerated against this branch rather than
   accepting stale hashes from its conflicting branch.
 
 ## Current GitHub snapshot
@@ -91,10 +91,10 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 |---|---|---|
 | R0 | complete | Contract/roadmap/backlog and ledger committed as `c09c9b4e6ee0a7eb9ea4bc405369ffdc94544265` |
 | R1 | in progress | Lead central immutable profile, compile-time SD mode, and app snapshot binding implemented; version/health/package wiring remains |
-| R2 | in progress | Agent A isolated at `F:\SIGUI-worktrees\24h-core-ui` |
+| R2 | complete | Core UI boundary integrated as `bec47e249512662b2bfb645eff25cc22e89582f6`; 212 UI tests plus 19 profile/storage/map-pin tests passed |
 | R3 | in progress | Agent D isolated at `F:\SIGUI-worktrees\24h-core-admission` on integrated R1 |
 | R4 | complete | Reviewed PR #197 substance integrated as `2824d63c6c779560ce0ad1ca787e230634b5c3ff`; 47 storage tests and 7 integrated source-pin checks passed |
-| R5 | in progress | Agent B isolated at `F:\SIGUI-worktrees\24h-core-sd` on integrated R1/R4 |
+| R5 | complete | Profile-bound SD admission integrated as `0c72561`; Core conditional/disabled routes retained data to NVS and cannot activate SD |
 | R6 | complete | 109 focused Mesh/DM/contact/route tests passed; one Actions-only libFuzzer case skipped; no `main/mesh/**` P0 or code change |
 | R7 | pending | Agent E Core smoke/package/audit; depends on R1/R2/R3/R5 |
 | R8 | pending | Independent integrated diff/evidence review |
@@ -172,3 +172,21 @@ release is authorized by the evidence currently recorded.
 - R3 command admission and R5 conditional-SD/NVS fallback are now active in
   fresh worktrees based on the integrated profile. No firmware build, serial
   port, RF transmission, or SD operation has occurred.
+
+### `2026-07-18T14:41:48-04:00`
+
+- R5 integrated a release-profile admission check at the retained-store
+  boundary. In Core `conditional` or `disabled` mode, even a fully capable
+  bridge cannot claim or activate SD; retained reads, writes, and erases route
+  to NVS. `supported_optional` still requires every runtime prerequisite.
+- R2 integrated the exact Core dock (`Home`, `Messages`, `Nodes`, `Packets`,
+  `Settings`), Public-only channel projection, unavailable-screen/deep-link
+  rejection, NVS-only storage wording, and controller/timer admission gates
+  for excluded features.
+- Integrated R2 validation passed all 212 `test_ui_*` tests and 19 focused
+  release-profile, retained-store, and map-marker source-pin tests. The two
+  UI source hashes used by the map-marker oracle were regenerated from the
+  integrated files.
+- Read-only hardware preflight now sees `USB-SERIAL CH340 (COM12)` present and
+  OK. `COM16` is absent. No serial port has been opened, no firmware has been
+  flashed, no RF transmission has occurred, and no SD operation has occurred.
