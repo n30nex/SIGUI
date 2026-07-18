@@ -3127,7 +3127,7 @@ def render_nodes(s: Surface, snap: Snapshot):
         if node_dm_identity_reason(snap, node) == "ready":
             draw_button(
                 s, (384, y, 452, y + 44), "DM", GREEN,
-                action="open_dm_compose", destination="compose_sheet",
+                action="open_dm_compose", destination="compose_dm_sheet",
             )
         y += 48
         contacts_rendered += 1
@@ -3156,7 +3156,7 @@ def render_nodes(s: Surface, snap: Snapshot):
         if dm_ready:
             draw_button(
                 s, (384, y, 452, y + 44), "DM", GREEN,
-                action="open_node_dm", destination="compose_sheet",
+                action="open_node_dm", destination="compose_dm_sheet",
             )
         y += 48
         heard_rendered += 1
@@ -4099,6 +4099,7 @@ def render_compose_state(
         "Channel message"
     )
     send_action = "send_dm_text" if is_dm else "send_channel_text"
+    clear_action = "clear_dm_message" if is_dm else "clear_public_message"
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
     s.text(title, (16, 64, 240, 96), 22, TEXT, True)
@@ -4112,7 +4113,7 @@ def render_compose_state(
         dm_tx=send_enabled and is_dm,
         enabled=send_enabled,
     )
-    draw_button(s, (322, 64, 384, 108), "Clear", ACCENT, action="clear_public_message")
+    draw_button(s, (322, 64, 384, 108), "Clear", ACCENT, action=clear_action)
     draw_button(
         s, (392, 64, 464, 108), "Close", MUTED,
         action="close_compose",
@@ -4301,6 +4302,19 @@ def render_compose_dm_no_contact_sheet(s: Surface, snap: Snapshot):
         is_dm=True,
         contact_found=False,
         contact_sendable=False,
+    )
+
+
+def render_compose_dm_sheet(s: Surface, snap: Snapshot):
+    render_compose_state(
+        s,
+        snap,
+        sample="reply to YKF Corebot",
+        counter="20 chars | 20/138 B",
+        validation="valid",
+        byte_count=20,
+        character_count=20,
+        is_dm=True,
     )
 
 
@@ -4567,7 +4581,7 @@ def render_contact_detail_page(s: Surface, snap: Snapshot, dm_reason: str):
     if dm_available:
         draw_button(
             s, (16, 340, 464, 392), "Message", GREEN,
-            action="open_dm_compose", destination="compose_sheet",
+            action="open_dm_compose", destination="compose_dm_sheet",
         )
     else:
         s.text(f"DM unavailable [{dm_reason}]", (28, 338, 452, 358), 13, AMBER, True)
@@ -4665,7 +4679,7 @@ def render_node_detail_page(s: Surface, snap: Snapshot, node: Node):
             "DM",
             ACCENT,
             action="open_node_dm",
-            destination="compose_sheet",
+            destination="compose_dm_sheet",
         )
     else:
         draw_button(
@@ -5430,7 +5444,7 @@ def render_dm_thread_state(
         "Reply" if contact_available else "Contact unavailable",
         GREEN if contact_available else MUTED,
         action="open_dm_reply" if contact_available else None,
-        destination="compose_sheet" if contact_available else None,
+        destination="compose_dm_sheet" if contact_available else None,
         enabled=contact_available,
     )
     s.metrics.update(
@@ -5609,7 +5623,7 @@ def render_dm_thread_details_sheet(s: Surface, snap: Snapshot):
         details_y += 4
     draw_button(
         s, (16, 420, 464, 472), "Reply", GREEN,
-        action="open_dm_reply", destination="compose_sheet",
+        action="open_dm_reply", destination="compose_dm_sheet",
     )
     s.metrics.update(
         {
@@ -6011,6 +6025,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "compose_channel_private_sheet": render_compose_channel_private_sheet,
     "compose_channel_disabled_sheet": render_compose_channel_disabled_sheet,
     "compose_protocol_time_sheet": render_compose_protocol_time_sheet,
+    "compose_dm_sheet": render_compose_dm_sheet,
     "compose_dm_no_contact_sheet": render_compose_dm_no_contact_sheet,
     "compose_dm_active_sheet": render_compose_dm_active_sheet,
     "compose_incoming_public_refresh": render_compose_incoming_public_refresh,
@@ -6232,6 +6247,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "compose_channel_private_sheet": ("Compose Ops Café 東京", "private channel draft", "Send"),
     "compose_channel_disabled_sheet": ("Compose Disabled Lab", "Channel disabled | 19/138 B", "Send"),
     "compose_protocol_time_sheet": ("Compose Public", "Protocol time unavailable | 21/138 B", "Send"),
+    "compose_dm_sheet": ("DM YKF Corebot", "Direct message", "reply to YKF Corebot", "20 chars | 20/138 B", "Send"),
     "compose_dm_no_contact_sheet": ("DM YKF Corebot", "Direct message", "Contact unavailable | 22/138 B", "Send"),
     "compose_dm_active_sheet": ("DM YKF Corebot", "Prior DM still active | 20/138 B", "Send"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
@@ -6736,8 +6752,18 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
                 "destination": "dm_thread_sheet",
                 "rf_tx": False,
             },
-            {"view": "dm_thread_sheet", "action": "open_dm_reply", "destination": "compose_sheet"},
-            {"view": "dm_thread_sheet", "action": "close_dm_thread", "destination": "messages_dm"},
+            {
+                "view": "dm_thread_sheet",
+                "action": "open_dm_reply",
+                "destination": "compose_dm_sheet",
+            },
+            {"view": "compose_dm_sheet", "action": "edit_dm_message"},
+            {"view": "compose_dm_sheet", "action": "send_dm_text", "dm_tx": True},
+            {
+                "view": "compose_dm_sheet",
+                "action": "close_compose",
+                "destination": "messages_dm",
+            },
         ),
     },
     {
@@ -6801,7 +6827,11 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "contact_detail_options_hierarchy",
         "steps": (
             {"view": "nodes", "action": "open_contact_detail", "destination": "contact_detail_sheet"},
-            {"view": "contact_detail_sheet", "action": "open_dm_compose", "destination": "compose_sheet"},
+            {
+                "view": "contact_detail_sheet",
+                "action": "open_dm_compose",
+                "destination": "compose_dm_sheet",
+            },
             {
                 "view": "contact_detail_sheet",
                 "action": "open_contact_options",
