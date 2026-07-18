@@ -1,16 +1,16 @@
 import os
+from pathlib import Path
 import shutil
 import subprocess
-from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_channel_message_coordinator_retries_revision_races(tmp_path):
+def test_core_mesh_profile_boundary_native_matrix(tmp_path: Path) -> None:
     compiler = shutil.which("gcc") or shutil.which("clang")
     if compiler is None:
-        raise AssertionError("A C compiler is required for coordinator tests")
+        raise AssertionError("A C compiler is required for Core Mesh boundary tests")
 
     cases = (
         ("core", "D1L_RELEASE_PROFILE_CORE_1_0", "EXPECT_CORE=1"),
@@ -18,10 +18,10 @@ def test_channel_message_coordinator_retries_revision_races(tmp_path):
         ("full", "D1L_RELEASE_PROFILE_FULL_FEATURE", "EXPECT_CORE=0"),
     )
     for name, profile, expectation in cases:
-        executable = tmp_path / (
-            f"channel_message_coordinator_{name}.exe"
+        binary = tmp_path / (
+            f"core_mesh_profile_boundary_{name}.exe"
             if os.name == "nt"
-            else f"channel_message_coordinator_{name}"
+            else f"core_mesh_profile_boundary_{name}"
         )
         command = [
             compiler,
@@ -32,20 +32,24 @@ def test_channel_message_coordinator_retries_revision_races(tmp_path):
             "-I",
             str(ROOT / "tests/native/stubs"),
             "-I",
+            str(ROOT / "tests/native"),
+            "-I",
             str(ROOT / "main"),
             f"-DD1L_RELEASE_PROFILE={profile}",
             "-DD1L_SD_HISTORY_MODE=D1L_SD_HISTORY_MODE_DISABLED",
             f"-D{expectation}",
             str(ROOT / "main/app/release_profile.c"),
-            str(ROOT / "main/mesh/channel_message_coordinator.c"),
-            str(ROOT / "tests/native/channel_message_coordinator_test.c"),
+            str(ROOT / "main/mesh/channel_store.c"),
+            str(ROOT / "tests/native/esp_nvs_stubs.c"),
+            str(ROOT / "tests/native/mbedtls_md_stub.c"),
+            str(ROOT / "tests/native/core_mesh_profile_boundary_test.c"),
             "-o",
-            str(executable),
+            str(binary),
         ]
         subprocess.run(
             command, cwd=ROOT, check=True, capture_output=True, text=True
         )
         completed = subprocess.run(
-            [str(executable)], cwd=ROOT, check=True, capture_output=True, text=True
+            [str(binary)], cwd=ROOT, check=True, capture_output=True, text=True
         )
-        assert completed.stdout.strip() == "native channel-message coordinator: ok"
+        assert completed.stdout.strip() == "native Core Mesh profile boundary: ok"
