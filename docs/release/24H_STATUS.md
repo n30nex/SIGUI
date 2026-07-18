@@ -317,3 +317,25 @@ release is authorized by the evidence currently recorded.
   Core packages and generating exact Core install/recovery, support-matrix,
   and release README files. Final package review remains open until that
   commit is integrated.
+
+### `2026-07-18T15:35:50-04:00`
+
+- Independent command/documentation review found two incorrect Core console
+  spellings and unsafe repository-relative install/recovery examples. The
+  Core guide now uses the implemented `board` and `identity status` commands.
+  Install/recovery guidance permits only the checksum-verified, package-root
+  non-erasing `flash_project.ps1` on COM12 for a normal install; the separate
+  full-flash helper is destructive-recovery-only and typed-confirmed.
+- Focused package, documentation, and release-profile validation passed 32
+  tests with one documented Actions-only skip.
+- R8 also found that the package flash helper did not produce the exact flash
+  receipt required by the Core audit, and that the first R7 audit draft did
+  not verify raw reboot receipts or uninterrupted boot continuity across the
+  active-to-idle soak seam. R7 remains open while adding bounded fail-closed
+  evidence paths and tests; no candidate has been frozen.
+- Read-only PnP metadata identifies the separate present COM15 endpoint as an
+  `NRF52 DK` TinyUSB serial device. It is only a potential controlled RF peer:
+  the port has not been opened and cannot be admitted until the exact Core RF
+  runner validates its identity and policy. COM12 also remains unopened.
+- No firmware was built locally, no serial port was opened, no firmware was
+  flashed, no RF transmission occurred, and no SD operation occurred.
