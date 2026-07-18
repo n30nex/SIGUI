@@ -40,10 +40,48 @@ TARGET_IDS = (
     "route_path_parser",
 )
 EXPECTED_SEED_COUNTS = {
-    "decrypt_auth_path": 6,
+    "decrypt_auth_path": 7,
     "dm_session_transition_input": 5,
     "retained_envelope_decoder": 10,
     "route_path_parser": 12,
+}
+EXPECTED_SOURCE_PIN_PATHS = {
+    ".github/workflows/d1l-ci.yml",
+    "main/CMakeLists.txt",
+    "main/app/settings_envelope.c",
+    "main/app/settings_envelope.h",
+    "main/mesh/dm_delivery_state.c",
+    "main/mesh/dm_delivery_state.h",
+    "main/mesh/meshcore_crypto.c",
+    "main/mesh/meshcore_crypto.h",
+    "main/mesh/meshcore_path_dispatch.h",
+    "main/mesh/meshcore_path_state.c",
+    "main/mesh/meshcore_path_state.h",
+    "main/mesh/meshcore_route_selection.h",
+    "main/mesh/meshcore_service.c",
+    "main/mesh/meshcore_wire.c",
+    "main/mesh/meshcore_wire.h",
+    "scripts/meshcore_conformance_d1l.py",
+    "scripts/meshcore_remaining_fuzz_d1l.py",
+    "tests/fuzz/dm_delivery_transition_fuzz.c",
+    "tests/fuzz/meshcore_decrypt_auth_fuzz.c",
+    "tests/fuzz/meshcore_route_path_fuzz.c",
+    "tests/fuzz/settings_envelope_fuzz.c",
+    "tests/meshcore_oracle/stubs/AES.h",
+    "tests/meshcore_oracle/stubs/SHA256.h",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json",
+    "tests/meshcore_remaining_fuzz/crypto_host_adapter.cpp",
+    "tests/meshcore_remaining_fuzz/stubs/esp_err.h",
+    "tests/meshcore_remaining_fuzz/stubs/mbedtls/aes.h",
+    "tests/meshcore_remaining_fuzz/stubs/mbedtls/md.h",
+    "tests/native/dm_delivery_state_test.c",
+    "tests/native/meshcore_crypto_test.c",
+    "tests/native/meshcore_route_selection_test.c",
+    "tests/native/settings_envelope_test.c",
+    "tests/test_meshcore_conformance_contract.py",
+    "tests/test_meshcore_public_rf_contract.py",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h",
 }
 NATIVE_SPECS = {
     "decrypt_auth_path": {
@@ -197,8 +235,11 @@ def load_inputs() -> tuple[
         target_seeds[target] = seeds
 
     source_pins = manifest.get("source_pins")
-    if not isinstance(source_pins, dict) or not source_pins:
-        raise GateFailure("remaining WP-05 fuzz source pins are missing")
+    if (
+        not isinstance(source_pins, dict)
+        or set(source_pins) != EXPECTED_SOURCE_PIN_PATHS
+    ):
+        raise GateFailure("remaining WP-05 fuzz source pin allowlist drifted")
     verified: dict[str, str] = {}
     root = ROOT.resolve()
     for relative, expected in source_pins.items():

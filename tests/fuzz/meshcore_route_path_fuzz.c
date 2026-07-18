@@ -20,6 +20,35 @@ static uint32_t u32_at(const uint8_t *data, size_t size, size_t index)
     return value;
 }
 
+static void assert_same_path_plain(const d1l_meshcore_path_plain_t *left,
+                                   const d1l_meshcore_path_plain_t *right)
+{
+    assert(left->path_len == right->path_len);
+    assert(left->path == right->path);
+    assert(left->path_byte_len == right->path_byte_len);
+    assert(left->raw_extra_type == right->raw_extra_type);
+    assert(left->extra_type == right->extra_type);
+    assert(left->extra == right->extra);
+    assert(left->extra_len == right->extra_len);
+    assert(left->source == right->source);
+    assert(left->kind == right->kind);
+}
+
+static void assert_same_route_selection(
+    const d1l_meshcore_route_selection_t *left,
+    const d1l_meshcore_route_selection_t *right)
+{
+    assert(left->route == right->route);
+    assert(left->path_len == right->path_len);
+    assert(memcmp(left->path, right->path, sizeof(left->path)) == 0);
+    assert(left->path_byte_len == right->path_byte_len);
+    assert(left->path_hash_bytes == right->path_hash_bytes);
+    assert(left->path_hops == right->path_hops);
+    assert(left->path_age_ms == right->path_age_ms);
+    assert(left->path_generation == right->path_generation);
+    assert(left->reason == right->reason);
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     d1l_meshcore_path_plain_t first;
@@ -35,7 +64,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         assert(memcmp(&first, &first_before, sizeof(first)) == 0);
         assert(memcmp(&second, &second_before, sizeof(second)) == 0);
     } else {
-        assert(memcmp(&first, &second, sizeof(first)) == 0);
+        assert_same_path_plain(&first, &second);
         assert(d1l_meshcore_wire_path_len_valid(first.path_len));
         assert(first.path_byte_len ==
                d1l_meshcore_wire_path_byte_len(first.path_len));
@@ -87,7 +116,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     assert(d1l_meshcore_route_select(
         known, learned_this_boot, path, path_len, learned_at, now,
         flood_hash_bytes, &selection_b));
-    assert(memcmp(&selection_a, &selection_b, sizeof(selection_a)) == 0);
+    assert_same_route_selection(&selection_a, &selection_b);
     if (selection_a.route == D1L_MESHCORE_ROUTE_DIRECT) {
         assert(known && learned_this_boot);
         assert(d1l_meshcore_wire_path_len_valid(path_len));
@@ -134,7 +163,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     assert(d1l_meshcore_route_select_canonical(
         known, learned_this_boot, path, path_len, &path_state, now,
         flood_hash_bytes, &selection_b));
-    assert(memcmp(&selection_a, &selection_b, sizeof(selection_a)) == 0);
+    assert_same_route_selection(&selection_a, &selection_b);
     assert(selection_a.path_generation == path_state.generation);
     return 0;
 }

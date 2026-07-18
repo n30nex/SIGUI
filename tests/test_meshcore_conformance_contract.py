@@ -291,7 +291,9 @@ def test_wp05_semantic_matrix_accounts_for_declared_host_surface_fail_closed():
         }
 
 
-def test_remaining_wp05_fuzz_targets_are_pinned_and_fail_closed(tmp_path):
+def test_remaining_wp05_fuzz_targets_are_pinned_and_fail_closed(
+    tmp_path, monkeypatch
+):
     manifest, seeds, source_pins = remaining_fuzz.load_inputs()
 
     assert [item["id"] for item in manifest["targets"]] == list(
@@ -309,6 +311,7 @@ def test_remaining_wp05_fuzz_targets_are_pinned_and_fail_closed(tmp_path):
     assert source_pins["main/mesh/meshcore_crypto.c"] == canonical_lf_sha256(
         ROOT / "main/mesh/meshcore_crypto.c"
     )
+    assert set(source_pins) == remaining_fuzz.EXPECTED_SOURCE_PIN_PATHS
 
     native_crypto = read("tests/native/meshcore_crypto_test.c")
     assert "0x44U, 0xe4U, 0x29U, 0x8fU" in native_crypto
@@ -334,6 +337,18 @@ def test_remaining_wp05_fuzz_targets_are_pinned_and_fail_closed(tmp_path):
     assert report["wp05_closure_ready"] is False
     assert report["full_semantic_matrix_covered"] is False
     assert report["release_closure_ready"] is False
+
+    missing_crypto_pin = copy.deepcopy(manifest)
+    del missing_crypto_pin["source_pins"]["main/mesh/meshcore_crypto.c"]
+    missing_crypto_manifest = tmp_path / "missing_crypto_manifest.json"
+    missing_crypto_manifest.write_text(
+        json.dumps(missing_crypto_pin), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        remaining_fuzz, "MANIFEST_PATH", missing_crypto_manifest
+    )
+    with pytest.raises(remaining_fuzz.GateFailure, match="source pin allowlist"):
+        remaining_fuzz.load_inputs()
 
 
 def test_signed_advert_runtime_binding_is_exact_commit_and_canonical():
