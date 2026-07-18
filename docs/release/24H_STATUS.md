@@ -89,13 +89,13 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 
 | ID | Status | Evidence / next action |
 |---|---|---|
-| R0 | in progress | Clean integration worktree created at exact starting SHA; contract pack and this ledger are being committed |
-| R1 | pending | Lead central immutable release profile |
-| R2 | pending | Agent A Core UI surface |
+| R0 | complete | Contract/roadmap/backlog and ledger committed as `c09c9b4e6ee0a7eb9ea4bc405369ffdc94544265` |
+| R1 | in progress | Lead central immutable profile, compile-time SD mode, and app snapshot binding implemented; version/health/package wiring remains |
+| R2 | in progress | Agent A isolated at `F:\SIGUI-worktrees\24h-core-ui` |
 | R3 | pending | Agent D command/background-task admission; depends on R1 |
-| R4 | pending | Agent B bounded PR #197 substance |
+| R4 | in progress | Agent B isolated at `F:\SIGUI-worktrees\24h-core-storage` |
 | R5 | pending | Agent B conditional SD/NVS fallback; depends on R1 |
-| R6 | pending | Agent C focused DM/contact-path review |
+| R6 | in progress | Agent C isolated at `F:\SIGUI-worktrees\24h-core-mesh` |
 | R7 | pending | Agent E Core smoke/package/audit; depends on R1/R2/R3/R5 |
 | R8 | pending | Independent integrated diff/evidence review |
 | R9 | pending | Focused checks plus one full host suite and candidate freeze |
@@ -138,3 +138,17 @@ Current decision: **NO-GO / execution in progress**.
 
 `core_release_ready=false` and `full_feature_release_ready=false`. No tag or
 release is authorized by the evidence currently recorded.
+
+## Execution updates
+
+### `2026-07-18T14:10:06-04:00`
+
+- R0 froze the exact authority pack on the integration branch.
+- R1 added the deterministic `core_1_0` CMake default, immutable feature
+  authority, compile-time `conditional` SD mode, app-snapshot profile binding,
+  and a four-case native profile/SD matrix.
+- Focused R1 validation: 67 tests passed across release-profile, UI shell,
+  storage hierarchy, diagnostics, release metadata, CI workflow, and Actions
+  security contracts.
+- Three isolated worktrees are active for R2, R4, and R6. No firmware build,
+  serial port, RF transmission, or SD operation has occurred.

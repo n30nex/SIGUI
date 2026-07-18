@@ -1736,7 +1736,9 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "d1l_app_model_clear_wifi_profile()" in source
     assert "d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled)" in source
     assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false" in header
-    assert "snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED" in read("main/app/app_model.c")
+    app_model = read("main/app/app_model.c")
+    assert "D1L_RELEASE_FEATURE_BLE" in app_model
+    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED" in app_model
     assert "if (!controller->rendered.controls_available)" in wifi_module
     assert "lv_textarea_set_max_length(" in wifi_module
     assert "D1L_WIFI_SSID_LEN - 1U" in wifi_module

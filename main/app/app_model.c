@@ -309,6 +309,11 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
 
     snapshot->board_ready = s_model.board_ready;
     snapshot->ui_ready = s_model.ui_ready;
+    snapshot->release_profile_id = d1l_release_profile_id();
+    snapshot->release_profile = d1l_release_profile_name();
+    snapshot->sd_history_mode_id = d1l_release_sd_history_mode();
+    snapshot->sd_history_mode = d1l_release_sd_history_mode_name();
+    snapshot->release_capabilities = *d1l_release_capabilities();
     snapshot->identity_ready = settings.identity_ready || mesh.identity_ready;
     snapshot->settings_load_status = d1l_settings_load_status();
     snapshot->identity_state = d1l_settings_persisted_identity_state();
@@ -331,14 +336,19 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->observer_enabled = connectivity.observer_enabled_setting;
     snapshot->wifi_profile_saved = connectivity.wifi_profile_saved;
     snapshot->wifi_password_saved = connectivity.wifi_password_saved;
-    snapshot->wifi_scan_supported = connectivity.wifi_scan_supported;
+    snapshot->wifi_scan_supported =
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
+        connectivity.wifi_scan_supported;
     snapshot->wifi_stack_active = connectivity.wifi_stack_active;
     snapshot->wifi_connected = connectivity.wifi_connected;
     snapshot->wifi_connecting = connectivity.wifi_connecting;
     snapshot->onboarding_complete = settings.onboarding_complete;
     snapshot->wifi_build_enabled = connectivity.wifi_build_enabled;
     snapshot->ble_build_enabled = connectivity.ble_build_enabled;
-    snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED;
+    snapshot->ble_transport_supported =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE) &&
+        D1L_BLE_COMPANION_TRANSPORT_SUPPORTED;
     snapshot->wifi_state = connectivity.wifi_state;
     snapshot->wifi_last_error = connectivity.wifi_last_error;
     snapshot->wifi_rssi_dbm = connectivity.wifi_rssi_dbm;
@@ -367,7 +377,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->dm_store_persistence_degraded =
         retained_store_persistence_degraded(
             &storage, D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
-    snapshot->map_page_supported = true;
+    snapshot->map_page_supported =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
     snapshot->map_tile_render_supported = D1L_MAP_TILE_RENDER_SUPPORTED;
     snapshot->map_tile_sideload_supported = false;
@@ -385,7 +396,10 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
         snapshot->map_marker_reference_timestamp =
             (uint32_t)time_status.clock.wall_epoch_sec;
     }
-    snapshot->map_tile_download_supported = connectivity.wifi_build_enabled &&
+    snapshot->map_tile_download_supported = snapshot->map_page_supported &&
+                                            d1l_release_feature_available(
+                                                D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
+                                            connectivity.wifi_build_enabled &&
                                             connectivity.wifi_connected &&
                                             snapshot->map_tile_cache_ready &&
                                             snapshot->map_location_set &&
