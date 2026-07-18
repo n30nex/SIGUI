@@ -90,13 +90,13 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 | ID | Status | Evidence / next action |
 |---|---|---|
 | R0 | complete | Contract/roadmap/backlog and ledger committed as `c09c9b4e6ee0a7eb9ea4bc405369ffdc94544265` |
-| R1 | in progress | Lead central immutable profile, compile-time SD mode, and app snapshot binding implemented; version/health/package wiring remains |
-| R2 | complete | Core UI boundary integrated as `bec47e249512662b2bfb645eff25cc22e89582f6`; 212 UI tests plus 19 profile/storage/map-pin tests passed |
-| R3 | in progress | Agent D isolated at `F:\SIGUI-worktrees\24h-core-admission` on integrated R1 |
+| R1 | in progress | Central immutable profile, compile-time SD mode, app snapshot, version, health, settings, mesh, companion, and storage truth are wired; package wiring remains in R7 |
+| R2 | in progress | Initial Core UI boundary integrated as `bec47e249512662b2bfb645eff25cc22e89582f6`; independent review requested copy/capability/styling cleanup and stronger Core-compiled controller coverage |
+| R3 | complete | Profile-aware command admission integrated as `b356e45` plus disabled-SD fail-closed follow-up `cbbfbed`; 52 integrated command/profile/source-pin tests passed |
 | R4 | complete | Reviewed PR #197 substance integrated as `2824d63c6c779560ce0ad1ca787e230634b5c3ff`; 47 storage tests and 7 integrated source-pin checks passed |
 | R5 | complete | Profile-bound SD admission integrated as `0c72561`; Core conditional/disabled routes retained data to NVS and cannot activate SD |
 | R6 | complete | 109 focused Mesh/DM/contact/route tests passed; one Actions-only libFuzzer case skipped; no `main/mesh/**` P0 or code change |
-| R7 | pending | Agent E Core smoke/package/audit; depends on R1/R2/R3/R5 |
+| R7 | in progress | Agent E isolated at `F:\SIGUI-worktrees\24h-core-qa`; Core smoke/UI probe/audit/package and exact RF admission |
 | R8 | pending | Independent integrated diff/evidence review |
 | R9 | pending | Focused checks plus one full host suite and candidate freeze |
 | R10 | pending | One final `d1l-ci`, download all artifacts, verify all checksums |
@@ -190,3 +190,29 @@ release is authorized by the evidence currently recorded.
 - Read-only hardware preflight now sees `USB-SERIAL CH340 (COM12)` present and
   OK. `COM16` is absent. No serial port has been opened, no firmware has been
   flashed, no RF transmission has occurred, and no SD operation has occurred.
+- Independent R2 review found no crash, null-controller, or excluded-timer
+  blocker, but held completion for four contract-truth cleanups: remove a Core
+  room-conversation claim, avoid claiming a notification system, omit Map
+  storage rows when Map is unavailable, and avoid inherited SD warning styling
+  in NVS-only mode. The UI owner is implementing a bounded follow-up with
+  stronger Core-compiled controller coverage.
+
+### `2026-07-18T14:53:45-04:00`
+
+- R3 integrated an ordered profile-aware USB command allow/deny table before
+  command handlers, the exact `ESP_ERR_NOT_SUPPORTED`/profile/feature response,
+  truthful read-only unavailable-feature status, and release profile plus SD
+  mode fields in version, health, settings, mesh, companion, and storage
+  output.
+- A lead review follow-up added disabled-SD admission for media and RP2040
+  mutations while retaining conditional-mode qualification and bounded
+  read-only status/diagnostic probes. Core help no longer offers
+  `storage force-nvs off`.
+- The console's MeshCore-oracle and USB-parser canonical-LF SHA-256 pins were
+  regenerated from the integrated source. Integrated validation passed 32
+  command/profile/connectivity/channel/storage tests plus 20 USB-parser/oracle
+  tests; one documented Actions-only oracle execution was skipped.
+- R7 Core smoke, Core UI corruption probe, separate Core audit, package
+  capability truth, and exact COM12/firmware admission are active in an
+  isolated worktree. No build, serial-port open, hardware mutation, RF
+  transmission, or SD operation occurred.
