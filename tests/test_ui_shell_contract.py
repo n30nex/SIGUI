@@ -1467,7 +1467,8 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     assert "d1l_app_model_send_trace_contact(" in source
     assert 'create_button(s_route_trace_sheet, "Trace"' in source
     assert '"Alias only; retained history remains"' in contact_source
-    assert '"Authenticated TRACE; proven path; no Public RF"' in source
+    assert '"Correlated TRACE; proven outbound path; no Public RF"' in source
+    assert '"Authenticated TRACE' not in source
     assert '"Contact Export"' in contact_source
     assert '"MeshCore QR  %.16s  type %u"' in contact_source
     assert "lv_qrcode_create" in contact_source

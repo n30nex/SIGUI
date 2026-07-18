@@ -2820,7 +2820,7 @@ static void render_route_trace_sheet(void)
     }
 
     lv_obj_t *note = create_label(s_route_trace_sheet,
-                                  "Authenticated TRACE; proven path; no Public RF",
+                                  "Correlated TRACE; proven outbound path; no Public RF",
                                   0x8EA0AE);
     lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
     lv_obj_set_width(note, 448);

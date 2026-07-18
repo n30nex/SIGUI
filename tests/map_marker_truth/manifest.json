@@ -134,7 +134,7 @@
     "main/ui/ui_map.h": "35833cc85e96764c126cb311697f43c238bc742130b42c87d603d51ce8695176",
     "main/ui/ui_node_detail.c": "ce7c440a40d946d13537dd3474aee281f574355cbce3368a134428dacb1d3243",
     "main/ui/ui_node_detail.h": "320490b05cf56de0e60fbeefd5c052ba268c4a778f9b82338febf8cd5c75e659",
-    "main/ui/ui_phase1.c": "eb0e9f1af08a5b7749c5be5f7e4f989fc642d9623cdf58bc329043c88c47ec38",
-    "tools/ui_simulator.py": "f922ba0439d55135d3b55bd4862c9a5db43087511347fb28651545bfa4c16266"
+    "main/ui/ui_phase1.c": "f17819653a97cf3690df6f01f3c57e62fff6b30fe8f7b4716586093e29d63b5c",
+    "tools/ui_simulator.py": "7f9b916c247f6d350b03cfe81fa5729a0cddcd28a0a4ce8bbf2359d1e9a5b847"
   }
 }

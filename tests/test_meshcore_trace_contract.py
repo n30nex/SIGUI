@@ -244,7 +244,8 @@ def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     assert "d1l_meshcore_service_send_trace_contact(fingerprint)" in app
     assert "d1l_app_model_send_trace_contact(" in ui
     assert "d1l_app_model_request_path_discovery_probe(" not in ui
-    assert '"Authenticated TRACE; proven path; no Public RF"' in ui
+    assert '"Correlated TRACE; proven outbound path; no Public RF"' in ui
+    assert '"Authenticated TRACE' not in ui
     assert "routes trace send <loop-path-hex>" not in test_plan
     assert "contact_trace_supported=false" not in test_plan
     assert "real_trace_contact_supported=false" not in test_plan

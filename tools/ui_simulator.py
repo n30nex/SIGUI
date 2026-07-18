@@ -5686,7 +5686,7 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
         rendered += 1
     if not contact_routes:
         s.text("No recent trace evidence", (28, 322, 452, 348), 13, MUTED)
-    s.text("Authenticated TRACE; proven path; no Public RF", (28, 378, 452, 400), 11, MUTED, False, "center")
+    s.text("Correlated TRACE; proven outbound path; no Public RF", (28, 378, 452, 400), 11, MUTED, False, "center")
     draw_button(s, (16, 420, 464, 472), "Trace", BLUE, action="send_contact_trace", rf_tx=True)
     s.metrics.update(
         {
