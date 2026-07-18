@@ -1876,9 +1876,12 @@ static void cmd_identity_status(void)
     char fingerprint[17] = {0};
     hex_prefix(fingerprint, sizeof(fingerprint), settings->identity_public_key, 8U);
     ok_begin("identity status");
-    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"meshcore_local_identity\":\"stored_nvs_ed25519\",\"public_key_ready\":%s,\"fingerprint\":\"%s\"}\n",
+    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"meshcore_local_identity\":\"stored_nvs_ed25519\",\"public_key_ready\":%s,\"public_key\":",
            settings->node_name, d1l_settings_role_name(settings->role),
-           bool_json(settings->identity_ready), fingerprint);
+           bool_json(settings->identity_ready));
+    print_hex_bytes_json(settings->identity_public_key,
+                         sizeof(settings->identity_public_key));
+    printf(",\"fingerprint\":\"%s\"}\n", fingerprint);
 }
 
 static void cmd_i2c(void)
