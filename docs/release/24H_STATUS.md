@@ -117,13 +117,13 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 | R6 | complete | Public-only Core runtime boundary `e3f99a6` rejects private-channel RX/TX before decrypt/key/store/RF and prevents retained private-channel reconciliation; focused Mesh/DM/contact/route suites are green |
 | R7 | complete | Exact Actions capture, package/provenance/SBOM, non-erasing flash, Core smoke/UI, manual/install review, reboot, RF/DM, soak, defect, and final audit producers are integrated through `f9e26e0` |
 | R8 | complete | Three-lane final freeze review passed runtime and release-flow scope and closed its one evidence finding with deterministic provenance recomputation `f9e26e0`; no remaining concrete pre-freeze Core P0/P1 found |
-| R9 | in progress | Integrated focused suites are green; run the single full host suite, validate ledger/manifests/diff, then freeze the exact candidate SHA |
+| R9 | in progress | First full host suite exposed four test-contract failures after 1,495 passes; the bounded R15 repair is focused-green and one authorized post-repair full suite is next |
 | R10 | pending | One final `d1l-ci`, download all artifacts, verify all checksums |
 | R11 | pending | Exact non-erasing COM12 flash, UI/boot/persistence gates |
 | R12 | pending | Controlled peer RF/DM; `public_rf_tx=false` |
 | R13 | in progress | SD disabled/NVS fallback selected because COM16 is absent; exact package/device truth remains |
 | R14 | pending | 60-minute active plus 30-minute idle exact-candidate soak |
-| R15 | inactive | Activate only for a failed Core gate |
+| R15 | complete | Smallest repair changed tests only: exact reviewed Core port literals, a bounded native-fixture extraction marker, and retained-backup attention expectations; 107 focused tests passed |
 | R16 | pending | Final Core audit and tag/release or exact no-go |
 
 ## Exact-candidate evidence ledger
@@ -133,7 +133,7 @@ All rows remain fail-closed until an exact receipt is recorded.
 | Gate | Status | Exact evidence |
 |---|---|---|
 | Source/profile frozen | missing | — |
-| Full host suite | missing | — |
+| Full host suite | repair validation pending | First run: 1,495 passed, 7 skipped, 4 failed; no runtime failure; one R15-authorized post-repair suite remains |
 | Final Actions workflow | missing | — |
 | Artifact downloads/checksums | missing | — |
 | Profile/package/provenance/SBOM binding | missing | — |
@@ -522,4 +522,24 @@ release is authorized by the evidence currently recorded.
 - The user's power cycle remains pre-candidate availability only. COM12 and
   COM15 have not been opened by this release flow. No firmware was built
   locally, no firmware was flashed, no RF transmission occurred, and no SD
+  operation occurred.
+
+### `2026-07-18T19:53:17-04:00`
+
+- The first full host suite completed with 1,495 passed, 7 skipped, and four
+  failures. None exposed a firmware runtime defect: one 2026-06 generic
+  no-hardcoded-port test predated the authoritative Core port binding, one
+  native JSON fixture accidentally extracted the newly inserted command-policy
+  block, and two UI contract assertions still expected SD-only attention
+  instead of the correct combined retained-backup-or-SD attention state.
+- R15 was activated exactly as authorized. The smallest repair changed tests
+  only: the port scan now requires an exact closed allowlist of reviewed Core
+  release files and literal sets, the native fixture stops at the immediately
+  following policy typedef, and the UI assertions require
+  `storage_attention`. The runtime source and candidate behavior are
+  unchanged.
+- Focused validation passed all 107 affected port, flash, smoke, reboot,
+  RF/DM, soak, native JSON, and storage-attention tests. One new full suite is
+  now required by R15 before candidate freeze. No firmware was built locally,
+  no serial port was opened, no flash or RF transmission occurred, and no SD
   operation occurred.
