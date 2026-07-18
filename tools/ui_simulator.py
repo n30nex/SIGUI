@@ -5686,13 +5686,19 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
         rendered += 1
     if not contact_routes:
         s.text("No recent trace evidence", (28, 322, 452, 348), 13, MUTED)
-    s.text("DM/PATH discovery; not TRACE", (28, 378, 452, 400), 11, MUTED, False, "center")
-    draw_button(s, (16, 420, 464, 472), "Probe", BLUE, action="send_path_probe", dm_tx=True)
+    s.text("Authenticated TRACE; proven path; no Public RF", (28, 378, 452, 400), 11, MUTED, False, "center")
+    draw_button(s, (16, 420, 464, 472), "Trace", BLUE, action="send_contact_trace", rf_tx=True)
     s.metrics.update(
         {
             "route_trace_source_count": len(contact_routes),
             "route_trace_rendered_count": rendered,
             "contact_hierarchy_level": "route_trace",
+            "route_trace_real_packet": True,
+            "route_trace_requires_explicit_touch": True,
+            "route_trace_current_boot_proven_path_required": True,
+            "route_trace_one_byte_hash_only": True,
+            "route_trace_hardware_verified": False,
+            "route_trace_public_rf_tx": False,
         }
     )
 
@@ -6482,7 +6488,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Close",
     ),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
-    "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"),
+    "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Trace"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
     "mesh_roles_sheet": ("Mesh Roles", "Back", "Rooms", "Repeaters", "Large meshes stay bounded"),
@@ -6838,7 +6844,13 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
                 "destination": "contact_options_page",
             },
             {"view": "contact_options_page", "action": "open_route_trace", "destination": "route_trace_sheet"},
-            {"view": "route_trace_sheet", "action": "send_path_probe", "dm_tx": True},
+            {
+                "view": "route_trace_sheet",
+                "action": "send_contact_trace",
+                "rf_tx": True,
+                "public_rf_tx": False,
+                "dm_tx": False,
+            },
             {"view": "route_trace_sheet", "action": "close_route_trace", "destination": "contact_options_page"},
             {"view": "contact_options_page", "action": "open_contact_edit", "destination": "contact_edit_sheet"},
             {"view": "contact_edit_sheet", "action": "close_contact_edit", "destination": "contact_options_page"},

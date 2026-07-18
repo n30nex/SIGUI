@@ -107,8 +107,8 @@
     }
   ],
   "production_source_pins": {
-    "main/app/app_model.c": "3b29e3a89040116ac1dcedb606b5773f761b1bab8f20717e685bf614b841ae16",
-    "main/app/app_model.h": "b9e4bda685dc9c996c9f55f8a81eb38cd1eee4af9295f34c4dd3f5a08aef4070",
+    "main/app/app_model.c": "1caa663ad9826cc0898320f4812a16b70af703f8d53aa37f590b2dc59b78c0de",
+    "main/app/app_model.h": "3b9602a3c2b9bb9151f7f08ed45615afb15f1d9c120e63c8754c1b7278ecc2e9",
     "main/app/settings_model.c": "15a5d7baa096daa03c0369068282525baab1303e2ecbcc1010123d25bfeb6fa6",
     "main/app/settings_model.h": "17e976c5105e35978187c58cd81da756d8a20808cac0cce9cfffba2e97ce5795",
     "main/map/map_marker_truth.c": "cdcc05f02ee08b9e303efc7a63d4a28d9d00288b55527fce09b20436de9a6f7c",
@@ -134,7 +134,7 @@
     "main/ui/ui_map.h": "35833cc85e96764c126cb311697f43c238bc742130b42c87d603d51ce8695176",
     "main/ui/ui_node_detail.c": "ce7c440a40d946d13537dd3474aee281f574355cbce3368a134428dacb1d3243",
     "main/ui/ui_node_detail.h": "320490b05cf56de0e60fbeefd5c052ba268c4a778f9b82338febf8cd5c75e659",
-    "main/ui/ui_phase1.c": "8999f5fd3721220be06e8ceb18eb423c19c0223acb1fa41020531eb78f8fdd1f",
-    "tools/ui_simulator.py": "c7ae05575b7e852ca2d9fc317b5c8a209f30306852cc707d81ec93763a637809"
+    "main/ui/ui_phase1.c": "eb0e9f1af08a5b7749c5be5f7e4f989fc642d9623cdf58bc329043c88c47ec38",
+    "tools/ui_simulator.py": "f922ba0439d55135d3b55bd4862c9a5db43087511347fb28651545bfa4c16266"
   }
 }
