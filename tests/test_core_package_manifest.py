@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts import package_release_d1l
@@ -25,6 +27,7 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     monkeypatch.setenv("GITHUB_RUN_ID", "123456789")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
     monkeypatch.setenv("GITHUB_REPOSITORY", "n30nex/SIGUI")
+    monkeypatch.setenv("GITHUB_WORKFLOW", "d1l-ci")
     monkeypatch.setenv("GITHUB_REF", "refs/heads/release/24h-core")
     install_fake_source_identity(monkeypatch, commit)
 
@@ -110,6 +113,26 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
     assert "./rp2040/" not in (package / "SHA256SUMS.txt").read_text(
         encoding="ascii"
     )
+    provenance_path = package / manifest["provenance"]["path"]
+    provenance = json.loads(provenance_path.read_text(encoding="ascii"))
+    assert provenance["predicate"]["buildDefinition"]["externalParameters"] == {
+        "sourceRepository": "https://github.com/n30nex/SIGUI",
+        "sourceRevision": commit,
+        "releaseProfile": "core_1_0",
+        "workflowRepository": "n30nex/SIGUI",
+        "workflowName": "d1l-ci",
+        "workflowPath": ".github/workflows/d1l-ci.yml",
+        "workflowRunId": "123456789",
+        "workflowRunAttempt": "1",
+    }
+    assert manifest["provenance"]["release_profile"] == "core_1_0"
+    assert manifest["provenance"]["workflow_repository"] == "n30nex/SIGUI"
+    assert manifest["provenance"]["workflow_name"] == "d1l-ci"
+    assert manifest["provenance"]["workflow_path"] == (
+        ".github/workflows/d1l-ci.yml"
+    )
+    assert manifest["provenance"]["workflow_run_id"] == "123456789"
+    assert manifest["provenance"]["workflow_run_attempt"] == "1"
 
     capability_payload = package_release_d1l.load_required_json_object(
         package / manifest["capability_manifest"]["path"],
