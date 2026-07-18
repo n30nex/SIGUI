@@ -94,6 +94,12 @@ typedef struct {
     uint8_t pending_path_hash_bytes;
     uint8_t pending_path_hops;
     uint8_t pending_path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
+    bool last_attempt_valid;
+    d1l_meshcore_trace_outcome_t last_attempt_outcome;
+    uint32_t last_attempt_tag;
+    uint32_t last_attempt_age_ms;
+    bool cooldown_active;
+    uint32_t cooldown_remaining_ms;
     bool last_result_valid;
     uint32_t last_tag;
     uint32_t last_age_ms;
@@ -135,5 +141,7 @@ esp_err_t d1l_meshcore_service_request_path_discovery_probe(
     const char *fingerprint,
     char *out_token,
     size_t out_token_size);
+/* ESP_ERR_NOT_FINISHED means one TRACE is pending; ESP_ERR_NOT_ALLOWED means
+ * the bounded post-outcome cooldown is active. */
 esp_err_t d1l_meshcore_service_send_trace_contact(const char *fingerprint);
 const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state);
