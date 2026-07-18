@@ -29,6 +29,7 @@ def c_function(source: str, signature: str) -> str:
 
 def test_meshcore_service_builds_public_group_text_packets():
     source = read("main/mesh/meshcore_service.c")
+    crypto = read("main/mesh/meshcore_crypto.c")
     channel_store = read("main/mesh/channel_store.c")
     wire = read("main/mesh/meshcore_wire.h")
     assert "D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD" in source
@@ -36,8 +37,10 @@ def test_meshcore_service_builds_public_group_text_packets():
     assert "0x8b, 0x33, 0x87, 0xe9" in channel_store
     assert "s_public_secret" not in source
     assert "d1l_channel_store_copy_protocol_key" in source
-    assert "mbedtls_aes_crypt_ecb" in source
-    assert "mbedtls_md_hmac" in source
+    assert "d1l_meshcore_crypto_encrypt_then_mac(" in source
+    assert "d1l_meshcore_crypto_decrypt_after_mac(" in source
+    assert "mbedtls_aes_crypt_ecb" in crypto
+    assert "mbedtls_md_hmac" in crypto
     assert "meshcore_service_send_raw_kind(" in source
     assert "Radio.SendWithOrigin(" in source
     assert "cmd->raw, cmd->raw_len," in source

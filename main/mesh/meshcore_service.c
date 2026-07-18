@@ -12,7 +12,6 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "mbedtls/aes.h"
 #include "mbedtls/md.h"
 #include "ed_25519.h"
 #include "mesh/advert_data.h"
@@ -28,6 +27,7 @@
 #include "mesh/meshcore_packet_semantics.h"
 #include "mesh/meshcore_packet_hash.h"
 #include "mesh/meshcore_command_guard.h"
+#include "mesh/meshcore_crypto.h"
 #include "mesh/meshcore_dm_retry.h"
 #include "mesh/meshcore_identity_exchange.h"
 #include "mesh/meshcore_path_dispatch.h"
@@ -54,8 +54,7 @@
 #define D1L_MESHCORE_ADVERT_MIN_PAYLOAD \
     (D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_SIGNATURE_SIZE)
 #define D1L_MESHCORE_MAX_ADVERT_DATA D1L_ADVERT_DATA_MAX_LEN
-#define D1L_MESHCORE_CIPHER_BLOCK_SIZE 16U
-#define D1L_MESHCORE_CIPHER_MAC_SIZE 2U
+#define D1L_MESHCORE_CIPHER_MAC_SIZE D1L_MESHCORE_CRYPTO_MAC_SIZE
 #define D1L_MESHCORE_MAX_TEXT_BYTES 160U
 #define D1L_MESHCORE_USER_TEXT_MAX D1L_MESSAGE_MAX_CHARS
 #define D1L_MESHCORE_BW_INDEX_62K5 3U
@@ -2227,104 +2226,15 @@ static void apply_sx1262_lora_params(const d1l_radio_profile_t *profile, RadioLo
 static esp_err_t meshcore_encrypt_then_mac(const uint8_t *secret, uint8_t *dest, size_t dest_size,
                                            const uint8_t *src, size_t src_len, size_t *out_len)
 {
-    if (!secret || !dest || !src || !out_len || src_len == 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    const size_t enc_len = ((src_len + D1L_MESHCORE_CIPHER_BLOCK_SIZE - 1U) /
-                            D1L_MESHCORE_CIPHER_BLOCK_SIZE) *
-                           D1L_MESHCORE_CIPHER_BLOCK_SIZE;
-    if (D1L_MESHCORE_CIPHER_MAC_SIZE + enc_len > dest_size) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    mbedtls_aes_context aes;
-    mbedtls_aes_init(&aes);
-    int ret = mbedtls_aes_setkey_enc(&aes, secret, 128);
-    if (ret != 0) {
-        mbedtls_aes_free(&aes);
-        return ESP_FAIL;
-    }
-
-    uint8_t block[D1L_MESHCORE_CIPHER_BLOCK_SIZE];
-    uint8_t *ciphertext = dest + D1L_MESHCORE_CIPHER_MAC_SIZE;
-    size_t offset = 0;
-    while (offset < enc_len) {
-        memset(block, 0, sizeof(block));
-        const size_t remaining = src_len > offset ? src_len - offset : 0;
-        const size_t copy_len = remaining > sizeof(block) ? sizeof(block) : remaining;
-        if (copy_len > 0) {
-            memcpy(block, src + offset, copy_len);
-        }
-        ret = mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_ENCRYPT, block, ciphertext + offset);
-        if (ret != 0) {
-            mbedtls_aes_free(&aes);
-            secure_zero_bytes(block, sizeof(block));
-            return ESP_FAIL;
-        }
-        offset += sizeof(block);
-    }
-    mbedtls_aes_free(&aes);
-    secure_zero_bytes(block, sizeof(block));
-
-    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (md == NULL) {
-        return ESP_FAIL;
-    }
-    uint8_t hmac[32];
-    ret = mbedtls_md_hmac(md, secret, D1L_MESHCORE_PUB_KEY_SIZE, ciphertext, enc_len, hmac);
-    if (ret != 0) {
-        secure_zero_bytes(hmac, sizeof(hmac));
-        return ESP_FAIL;
-    }
-    memcpy(dest, hmac, D1L_MESHCORE_CIPHER_MAC_SIZE);
-    secure_zero_bytes(hmac, sizeof(hmac));
-    *out_len = D1L_MESHCORE_CIPHER_MAC_SIZE + enc_len;
-    return ESP_OK;
+    return d1l_meshcore_crypto_encrypt_then_mac(
+        secret, dest, dest_size, src, src_len, out_len);
 }
 
 static size_t meshcore_decrypt_after_mac(const uint8_t *secret, uint8_t *dest, size_t dest_size,
                                          const uint8_t *src, size_t src_len)
 {
-    if (!secret || !dest || !src || src_len <= D1L_MESHCORE_CIPHER_MAC_SIZE) {
-        return 0;
-    }
-    const size_t enc_len = src_len - D1L_MESHCORE_CIPHER_MAC_SIZE;
-    if ((enc_len % D1L_MESHCORE_CIPHER_BLOCK_SIZE) != 0 || enc_len > dest_size) {
-        return 0;
-    }
-
-    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (md == NULL) {
-        return 0;
-    }
-    uint8_t hmac[32];
-    int ret = mbedtls_md_hmac(md, secret, D1L_MESHCORE_PUB_KEY_SIZE,
-                              src + D1L_MESHCORE_CIPHER_MAC_SIZE, enc_len, hmac);
-    const bool mac_valid = ret == 0 &&
-        secure_bytes_equal(hmac, src, D1L_MESHCORE_CIPHER_MAC_SIZE);
-    secure_zero_bytes(hmac, sizeof(hmac));
-    if (!mac_valid) {
-        return 0;
-    }
-
-    mbedtls_aes_context aes;
-    mbedtls_aes_init(&aes);
-    ret = mbedtls_aes_setkey_dec(&aes, secret, 128);
-    if (ret != 0) {
-        mbedtls_aes_free(&aes);
-        return 0;
-    }
-
-    for (size_t offset = 0; offset < enc_len; offset += D1L_MESHCORE_CIPHER_BLOCK_SIZE) {
-        ret = mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_DECRYPT,
-                                    src + D1L_MESHCORE_CIPHER_MAC_SIZE + offset, dest + offset);
-        if (ret != 0) {
-            mbedtls_aes_free(&aes);
-            return 0;
-        }
-    }
-    mbedtls_aes_free(&aes);
-    return enc_len;
+    return d1l_meshcore_crypto_decrypt_after_mac(
+        secret, dest, dest_size, src, src_len);
 }
 
 static esp_err_t build_channel_text_packet(
