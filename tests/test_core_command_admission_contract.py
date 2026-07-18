@@ -285,6 +285,167 @@ def test_disabled_sd_mode_denies_exact_storage_deep_link_probes():
     assert "print_json_string(d1l_release_feature_name(feature))" in unsupported
 
 
+def test_ui_probe_aliases_are_normalized_and_classified_before_handlers():
+    alias_boundary = CONSOLE.split(
+        "typedef struct {\n"
+        "    const char *normalized_alias;\n"
+        "    d1l_release_feature_id_t feature;\n"
+        "} d1l_release_ui_probe_alias_t;",
+        1,
+    )[1].split("static bool release_command_token_matches(", 1)[0]
+
+    scroll_map = alias_boundary.split(
+        "static const d1l_release_ui_probe_alias_t "
+        "s_release_scroll_probe_aliases[] = {",
+        1,
+    )[1].split("};", 1)[0]
+    compose_map = alias_boundary.split(
+        "static const d1l_release_ui_probe_alias_t "
+        "s_release_compose_probe_aliases[] = {",
+        1,
+    )[1].split("};", 1)[0]
+
+    scroll_features = {
+        "storage_card": "SD_HISTORY",
+        "sd_card": "SD_HISTORY",
+        "storage_data": "SD_HISTORY",
+        "wifi": "WIFI_USER_CONTROL",
+        "wi_fi": "WIFI_USER_CONTROL",
+        "contact_route": "USER_TRACE",
+        "mesh_roles": "ADMIN",
+        "mesh_rooms": "ADMIN",
+        "mesh_repeaters": "ADMIN",
+        "map": "MAP",
+        "map_options": "MAP",
+        "map_options_sheet": "MAP",
+        "map_options_page": "MAP",
+        "map_menu": "MAP",
+        "map_location": "LOCATION",
+        "map_location_sheet": "LOCATION",
+        "map_location_page": "LOCATION",
+        "map_cache": "MAP",
+        "map_cache_page": "MAP",
+        "tile_cache": "MAP",
+    }
+    compose_features = {
+        "map_location": "LOCATION",
+        "wifi": "WIFI_USER_CONTROL",
+        "wifi_ssid": "WIFI_USER_CONTROL",
+        "wifi_password": "WIFI_USER_CONTROL",
+        "wifi_pass": "WIFI_USER_CONTROL",
+    }
+    for alias, feature in scroll_features.items():
+        assert (
+            f'{{"{alias}", D1L_RELEASE_FEATURE_{feature}}}' in scroll_map
+        ), alias
+    for alias, feature in compose_features.items():
+        assert (
+            f'{{"{alias}", D1L_RELEASE_FEATURE_{feature}}}' in compose_map
+        ), alias
+
+    normalizer = alias_boundary.split(
+        "static bool release_ui_probe_normalize_argument(", 1
+    )[1].split("static bool release_ui_probe_alias_feature(", 1)[0]
+    assert "(value == '-' || value == ' ')" in normalizer
+    assert "(char)tolower(value)" in normalizer
+    assert "first_token_only && value == ' '" in normalizer
+
+    classifier = alias_boundary.split(
+        "static bool release_ui_probe_feature(", 1
+    )[1]
+    assert '"ui scroll-probe "' in classifier
+    assert '"ui compose-probe "' in classifier
+    assert classifier.count("release_ui_probe_normalize_argument(") == 2
+    for forbidden in (
+        "d1l_ui_phase1_",
+        "xTaskCreate",
+        "xSemaphore",
+        "d1l_storage_",
+        "d1l_meshcore_service",
+    ):
+        assert forbidden not in alias_boundary
+
+    enforcement = CONSOLE.split(
+        "static bool enforce_release_command_policy(", 1
+    )[1].split("static void print_hex_bytes_json(", 1)[0]
+    assert enforcement.index(
+        "release_ui_probe_feature(command, &ui_probe_feature)"
+    ) < enforcement.index(
+        "const d1l_release_command_rule_t *rule"
+    )
+    assert "release_unsupported_result(command, ui_probe_feature);" in enforcement
+    assert "!release_command_feature_available(ui_probe_feature)" in enforcement
+
+    handler = CONSOLE.split("static void handle_line(", 1)[1].split(
+        "void d1l_usb_console_run(", 1
+    )[0]
+    policy_index = handler.index("enforce_release_command_policy(command)")
+    assert policy_index < handler.index('strncmp(line, "ui scroll-probe "')
+    assert policy_index < handler.index('strncmp(line, "ui compose-probe "')
+
+
+def test_ui_probe_alias_classifier_does_not_capture_valid_core_aliases():
+    alias_boundary = CONSOLE.split(
+        "typedef struct {\n"
+        "    const char *normalized_alias;\n"
+        "    d1l_release_feature_id_t feature;\n"
+        "} d1l_release_ui_probe_alias_t;",
+        1,
+    )[1].split("static bool release_command_token_matches(", 1)[0]
+    scroll_map = alias_boundary.split(
+        "static const d1l_release_ui_probe_alias_t "
+        "s_release_scroll_probe_aliases[] = {",
+        1,
+    )[1].split("};", 1)[0]
+    compose_map = alias_boundary.split(
+        "static const d1l_release_ui_probe_alias_t "
+        "s_release_compose_probe_aliases[] = {",
+        1,
+    )[1].split("};", 1)[0]
+
+    valid_scroll_aliases = (
+        "home",
+        "public",
+        "messages",
+        "public_messages",
+        "dm",
+        "dm_thread",
+        "nodes",
+        "contact",
+        "contact_detail",
+        "contact_options",
+        "contact_forget",
+        "forget_contact",
+        "packets",
+        "pkts",
+        "settings",
+        "set",
+        "storage",
+        "sd",
+    )
+    valid_compose_aliases = (
+        "public",
+        "public_short",
+        "public_long",
+        "dm",
+        "direct",
+        "dm_short",
+        "direct_short",
+        "dm_long",
+        "direct_long",
+        "public_search",
+        "dm_search",
+        "packet_search",
+        "contact_edit",
+        "onboarding",
+        "onboarding_name",
+    )
+    for alias in valid_scroll_aliases:
+        assert f'{{"{alias}",' not in scroll_map
+    for alias in valid_compose_aliases:
+        assert f'{{"{alias}",' not in compose_map
+
+
 def test_core_retained_canary_is_nvs_only_and_excluded_sd_canary_is_closed():
     table = CONSOLE.split(
         "static const d1l_release_command_rule_t s_release_command_rules[] = {",

@@ -523,6 +523,148 @@ static const d1l_release_command_rule_t s_release_command_rules[] = {
         D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI),
 };
 
+typedef struct {
+    const char *normalized_alias;
+    d1l_release_feature_id_t feature;
+} d1l_release_ui_probe_alias_t;
+
+/*
+ * Keep this alias map aligned with the canonicalizers in ui_navigation.c and
+ * ui_keyboard.c.  The console release boundary must classify every accepted
+ * spelling before a probe handler can navigate, create UI state, or touch a
+ * feature-specific service.
+ */
+static const d1l_release_ui_probe_alias_t s_release_scroll_probe_aliases[] = {
+    {"storage_card", D1L_RELEASE_FEATURE_SD_HISTORY},
+    {"sd_card", D1L_RELEASE_FEATURE_SD_HISTORY},
+    {"storage_data", D1L_RELEASE_FEATURE_SD_HISTORY},
+    {"wifi", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"wi_fi", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"contact_route", D1L_RELEASE_FEATURE_USER_TRACE},
+    {"mesh_roles", D1L_RELEASE_FEATURE_ADMIN},
+    {"mesh_rooms", D1L_RELEASE_FEATURE_ADMIN},
+    {"mesh_repeaters", D1L_RELEASE_FEATURE_ADMIN},
+    {"map", D1L_RELEASE_FEATURE_MAP},
+    {"map_options", D1L_RELEASE_FEATURE_MAP},
+    {"map_options_sheet", D1L_RELEASE_FEATURE_MAP},
+    {"map_options_page", D1L_RELEASE_FEATURE_MAP},
+    {"map_menu", D1L_RELEASE_FEATURE_MAP},
+    {"map_location", D1L_RELEASE_FEATURE_LOCATION},
+    {"map_location_sheet", D1L_RELEASE_FEATURE_LOCATION},
+    {"map_location_page", D1L_RELEASE_FEATURE_LOCATION},
+    {"map_cache", D1L_RELEASE_FEATURE_MAP},
+    {"map_cache_page", D1L_RELEASE_FEATURE_MAP},
+    {"tile_cache", D1L_RELEASE_FEATURE_MAP},
+};
+
+static const d1l_release_ui_probe_alias_t s_release_compose_probe_aliases[] = {
+    {"map_location", D1L_RELEASE_FEATURE_LOCATION},
+    {"wifi", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"wifi_ssid", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"wifi_password", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"wifi_pass", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+};
+
+static bool release_ui_probe_normalize_argument(
+    const d1l_usb_command_view_t *command, size_t prefix_length,
+    bool first_token_only, char *normalized, size_t normalized_capacity)
+{
+    if (!command || !command->text || !normalized ||
+        normalized_capacity == 0U || prefix_length >= command->length) {
+        return false;
+    }
+
+    size_t source_index = prefix_length;
+    while (source_index < command->length &&
+           command->text[source_index] == ' ') {
+        source_index++;
+    }
+
+    size_t output_index = 0U;
+    while (source_index < command->length) {
+        unsigned char value =
+            (unsigned char)command->text[source_index++];
+        if (first_token_only && value == ' ') {
+            break;
+        }
+        if (output_index + 1U >= normalized_capacity) {
+            normalized[0] = '\0';
+            return false;
+        }
+        normalized[output_index++] =
+            (value == '-' || value == ' ')
+                ? '_'
+                : (char)tolower(value);
+    }
+    normalized[output_index] = '\0';
+    return output_index > 0U;
+}
+
+static bool release_ui_probe_alias_feature(
+    const char *normalized,
+    const d1l_release_ui_probe_alias_t *aliases, size_t alias_count,
+    d1l_release_feature_id_t *out_feature)
+{
+    if (!normalized || !aliases || !out_feature) {
+        return false;
+    }
+    for (size_t i = 0U; i < alias_count; ++i) {
+        if (strcmp(normalized, aliases[i].normalized_alias) == 0) {
+            *out_feature = aliases[i].feature;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool release_ui_probe_feature(
+    const d1l_usb_command_view_t *command,
+    d1l_release_feature_id_t *out_feature)
+{
+    static const char scroll_prefix[] = "ui scroll-probe ";
+    static const char compose_prefix[] = "ui compose-probe ";
+    const d1l_release_ui_probe_alias_t *aliases = NULL;
+    size_t alias_count = 0U;
+    size_t prefix_length = 0U;
+
+    if (d1l_usb_command_has_argument(
+            command, scroll_prefix, sizeof(scroll_prefix) - 1U)) {
+        aliases = s_release_scroll_probe_aliases;
+        alias_count = sizeof(s_release_scroll_probe_aliases) /
+                      sizeof(s_release_scroll_probe_aliases[0]);
+        prefix_length = sizeof(scroll_prefix) - 1U;
+    } else if (d1l_usb_command_has_argument(
+                   command, compose_prefix,
+                   sizeof(compose_prefix) - 1U)) {
+        aliases = s_release_compose_probe_aliases;
+        alias_count = sizeof(s_release_compose_probe_aliases) /
+                      sizeof(s_release_compose_probe_aliases[0]);
+        prefix_length = sizeof(compose_prefix) - 1U;
+    } else {
+        return false;
+    }
+
+    char normalized[48] = {0};
+    if (release_ui_probe_normalize_argument(
+            command, prefix_length, false, normalized,
+            sizeof(normalized)) &&
+        release_ui_probe_alias_feature(
+            normalized, aliases, alias_count, out_feature)) {
+        return true;
+    }
+
+    /*
+     * Probe handlers consume one whitespace-delimited token.  Classify that
+     * token too, so adding an ignored suffix cannot smuggle an excluded alias
+     * through the pre-handler boundary.
+     */
+    return release_ui_probe_normalize_argument(
+               command, prefix_length, true, normalized,
+               sizeof(normalized)) &&
+           release_ui_probe_alias_feature(
+               normalized, aliases, alias_count, out_feature);
+}
+
 static bool release_command_token_matches(
     const d1l_usb_command_view_t *command,
     const char *pattern, size_t pattern_length)
@@ -641,6 +783,14 @@ static bool release_command_feature_available(
 static bool enforce_release_command_policy(
     const d1l_usb_command_view_t *command)
 {
+    d1l_release_feature_id_t ui_probe_feature =
+        D1L_RELEASE_FEATURE_COUNT;
+    if (release_ui_probe_feature(command, &ui_probe_feature) &&
+        !release_command_feature_available(ui_probe_feature)) {
+        release_unsupported_result(command, ui_probe_feature);
+        return false;
+    }
+
     if (d1l_release_profile_is_core()) {
         if (d1l_usb_command_equals(
                 command, "packets clear", sizeof("packets clear") - 1U)) {
