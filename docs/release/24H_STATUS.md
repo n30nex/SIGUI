@@ -92,10 +92,10 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 | R0 | complete | Contract/roadmap/backlog and ledger committed as `c09c9b4e6ee0a7eb9ea4bc405369ffdc94544265` |
 | R1 | in progress | Lead central immutable profile, compile-time SD mode, and app snapshot binding implemented; version/health/package wiring remains |
 | R2 | in progress | Agent A isolated at `F:\SIGUI-worktrees\24h-core-ui` |
-| R3 | pending | Agent D command/background-task admission; depends on R1 |
-| R4 | in progress | Agent B isolated at `F:\SIGUI-worktrees\24h-core-storage` |
-| R5 | pending | Agent B conditional SD/NVS fallback; depends on R1 |
-| R6 | in progress | Agent C isolated at `F:\SIGUI-worktrees\24h-core-mesh` |
+| R3 | in progress | Agent D isolated at `F:\SIGUI-worktrees\24h-core-admission` on integrated R1 |
+| R4 | complete | Reviewed PR #197 substance integrated as `2824d63c6c779560ce0ad1ca787e230634b5c3ff`; 47 storage tests and 7 integrated source-pin checks passed |
+| R5 | in progress | Agent B isolated at `F:\SIGUI-worktrees\24h-core-sd` on integrated R1/R4 |
+| R6 | complete | 109 focused Mesh/DM/contact/route tests passed; one Actions-only libFuzzer case skipped; no `main/mesh/**` P0 or code change |
 | R7 | pending | Agent E Core smoke/package/audit; depends on R1/R2/R3/R5 |
 | R8 | pending | Independent integrated diff/evidence review |
 | R9 | pending | Focused checks plus one full host suite and candidate freeze |
@@ -152,3 +152,23 @@ release is authorized by the evidence currently recorded.
   security contracts.
 - Three isolated worktrees are active for R2, R4, and R6. No firmware build,
   serial port, RF transmission, or SD operation has occurred.
+
+### `2026-07-18T14:20:43-04:00`
+
+- R4 integrated the reviewed runtime/header substance from PR #197, added
+  fail-safe regression coverage for NVS comparison-read failures, and
+  regenerated its transitive manifest pins from the integrated tree.
+- Integrator validation for R4 passed 47 retained/factory-reset/storage tests
+  plus seven exact source-pin checks. Initial pin failures correctly exposed
+  R1's `main/CMakeLists.txt` and app-model changes; the generated hashes were
+  refreshed from current canonical-LF sources and then passed.
+- R6 completed as a no-code result: 109 focused MeshCore, DM, ACK/retry,
+  duplicate/replay, contact authorization, route/PATH, and runner-contract
+  tests passed; one libFuzzer execution remains intentionally Actions-only.
+- R6 found an exact-evidence gap outside its ownership:
+  `rf_full_acceptance_d1l.py` accepts a commit argument without verifying the
+  device build and permits a non-`COM12` D1L port. R12 remains fail-closed;
+  the QA/package slice must add exact device-version and `COM12` admission.
+- R3 command admission and R5 conditional-SD/NVS fallback are now active in
+  fresh worktrees based on the integrated profile. No firmware build, serial
+  port, RF transmission, or SD operation has occurred.
