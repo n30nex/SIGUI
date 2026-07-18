@@ -460,6 +460,38 @@ static esp_err_t nvs_write_blob_to(const d1l_retained_blob_store_config_t *confi
         }
         return ret;
     }
+
+    /*
+     * NVS commits are a finite endurance budget. Store workers already
+     * coalesce dirty events, but a retry/reconcile pass can still present an
+     * identical fallback snapshot. Treat that as a successful no-op instead
+     * of issuing nvs_set_blob()/nvs_commit(). The existing telemetry keeps the
+     * request in write_attempt_count while write_commit_count remains stable,
+     * so callers can measure suppressed unchanged writes without pretending
+     * that a flash commit occurred.
+     *
+     * Comparison is best effort: an allocation/read failure preserves the
+     * prior write behavior instead of turning a recoverable commit into an
+     * error. The compare and possible write share one NVS handle, keeping the
+     * no-op decision inside the retained-store write boundary.
+     */
+    size_t existing_len = 0U;
+    ret = nvs_get_blob(handle, key, NULL, &existing_len);
+    if (ret == ESP_OK && existing_len == len) {
+        void *existing = malloc(existing_len);
+        if (existing) {
+            size_t read_len = existing_len;
+            ret = nvs_get_blob(handle, key, existing, &read_len);
+            const bool unchanged = ret == ESP_OK && read_len == len &&
+                memcmp(existing, src, len) == 0;
+            free(existing);
+            if (unchanged) {
+                nvs_close(handle);
+                return ESP_OK;
+            }
+        }
+    }
+
     ret = nvs_set_blob(handle, key, src, len);
     if (ret == ESP_OK) {
         ret = nvs_commit(handle);

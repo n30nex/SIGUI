@@ -122,6 +122,8 @@ static esp_err_t s_sentinel_commit_result = ESP_OK;
 static esp_err_t s_dedicated_commit_result = ESP_OK;
 static esp_err_t s_legacy_commit_result = ESP_OK;
 static esp_err_t s_nvs_stats_result = ESP_OK;
+static size_t s_nvs_get_attempt;
+static size_t s_nvs_get_fail_on_attempt;
 static size_t s_meta_write_attempt;
 static size_t s_meta_write_fail_on_attempt;
 static esp_err_t s_meta_erase_result = ESP_OK;
@@ -405,6 +407,8 @@ static void clear_nvs_case(void)
     s_sentinel_commit_result = ESP_OK;
     s_legacy_commit_result = ESP_OK;
     s_nvs_stats_result = ESP_OK;
+    s_nvs_get_attempt = 0U;
+    s_nvs_get_fail_on_attempt = 0U;
     s_partition_init_result = ESP_OK;
     s_meta_write_attempt = 0U;
     s_meta_write_fail_on_attempt = 0U;
@@ -650,6 +654,11 @@ esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out_value,
     assert(length);
     note_nvs_event(context->dedicated ? TEST_NVS_EVENT_GET_DEDICATED
                                       : TEST_NVS_EVENT_GET_LEGACY);
+    s_nvs_get_attempt++;
+    if (s_nvs_get_fail_on_attempt != 0U &&
+        s_nvs_get_attempt == s_nvs_get_fail_on_attempt) {
+        return ESP_ERR_INVALID_STATE;
+    }
     test_nvs_entry_t *entry = find_nvs_entry(
         context->dedicated, context->namespace_name, key);
     if (!entry) {
@@ -1778,6 +1787,108 @@ static void test_nvs_capacity_and_write_amplification_telemetry(void)
     s_nvs_stats_result = ESP_OK;
 }
 
+static void test_unchanged_nvs_fallback_write_skips_flash_commit(void)
+{
+    static const char original[] = "same retained snapshot";
+    static const char replacement[] = "new! retained snapshot";
+    static const uint32_t duplicate_requests = 64U;
+    d1l_retained_blob_store_nvs_telemetry_t telemetry = {0};
+
+    _Static_assert(sizeof(original) == sizeof(replacement),
+                   "same-length replacement must exercise byte comparison");
+
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               original, sizeof(original)) == ESP_OK);
+    const size_t sets_after_first =
+        count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED);
+    const size_t commits_after_first =
+        count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED);
+
+    for (uint32_t i = 0U; i < duplicate_requests; ++i) {
+        assert(d1l_retained_blob_store_write_nvs_fallback(
+                   D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+                   original, sizeof(original)) == ESP_OK);
+    }
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) ==
+           sets_after_first);
+    assert(count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) ==
+           commits_after_first);
+
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(telemetry.write_attempt_count == 1U + duplicate_requests);
+    assert(telemetry.write_commit_count == 1U);
+    assert(telemetry.write_fail_count == 0U);
+    assert(telemetry.write_bytes_attempted ==
+           sizeof(original) * (1U + duplicate_requests));
+    assert(telemetry.write_bytes_committed == sizeof(original));
+
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               replacement, sizeof(replacement)) == ESP_OK);
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) ==
+           sets_after_first + 1U);
+    assert(count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) ==
+           commits_after_first + 1U);
+
+    memset(&telemetry, 0, sizeof(telemetry));
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(telemetry.write_attempt_count == 2U + duplicate_requests);
+    assert(telemetry.write_commit_count == 2U);
+    assert(telemetry.write_fail_count == 0U);
+    assert(telemetry.write_bytes_attempted ==
+           sizeof(original) * (2U + duplicate_requests));
+    assert(telemetry.write_bytes_committed == sizeof(original) * 2U);
+}
+
+static void test_nvs_unchanged_compare_failure_fails_safe_to_write(void)
+{
+    static const char retained[] = "retained snapshot";
+    d1l_retained_blob_store_nvs_telemetry_t telemetry = {0};
+
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               retained, sizeof(retained)) == ESP_OK);
+
+    size_t expected_sets = count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED);
+    size_t expected_commits =
+        count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED);
+
+    s_nvs_get_fail_on_attempt = s_nvs_get_attempt + 1U;
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               retained, sizeof(retained)) == ESP_OK);
+    expected_sets++;
+    expected_commits++;
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) == expected_sets);
+    assert(count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) ==
+           expected_commits);
+
+    s_nvs_get_fail_on_attempt = s_nvs_get_attempt + 2U;
+    assert(d1l_retained_blob_store_write_nvs_fallback(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, "public",
+               retained, sizeof(retained)) == ESP_OK);
+    expected_sets++;
+    expected_commits++;
+    assert(count_nvs_event(TEST_NVS_EVENT_SET_DEDICATED) == expected_sets);
+    assert(count_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) ==
+           expected_commits);
+
+    assert(d1l_retained_blob_store_nvs_telemetry(&telemetry));
+    assert(telemetry.write_attempt_count == 3U);
+    assert(telemetry.write_commit_count == 3U);
+    assert(telemetry.write_fail_count == 0U);
+    assert(telemetry.write_bytes_attempted == sizeof(retained) * 3U);
+    assert(telemetry.write_bytes_committed == sizeof(retained) * 3U);
+}
+
 static void test_partition_init_failure_never_falls_back_or_resurrects(void)
 {
     static const char dedicated_blob[] = "dedicated current";
@@ -2212,6 +2323,8 @@ int main(void)
     test_dedicated_write_reclaims_legacy_only_after_commit();
     test_erase_clears_dedicated_and_legacy_copies();
     test_nvs_capacity_and_write_amplification_telemetry();
+    test_unchanged_nvs_fallback_write_skips_flash_commit();
+    test_nvs_unchanged_compare_failure_fails_safe_to_write();
     test_partition_init_failure_never_falls_back_or_resurrects();
     test_factory_reset_sd_recovery_end_to_end();
 

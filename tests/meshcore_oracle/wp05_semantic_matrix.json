@@ -530,7 +530,7 @@
     "main/platform/time_service_core.c": "005c5b75126104f410584e81396e573ee48553564bc94d4b45628192a26c94e3",
     "main/platform/time_service_core.h": "f3af332807f433d49344eaf45cee29473940a988c47e3c02c44fd44cd0306d75",
     "main/storage/map_tile_store.h": "a5e8f257ee2413a4a5446646f750c989e39a1df79d3f0876f6684ae61065cea7",
-    "main/storage/retained_blob_store.h": "2de19037857be8769da3ee005b175cf54ad3944b94fb8b5f870c629060391e4d",
+    "main/storage/retained_blob_store.h": "0301e8ad3c36c224d9dd5907035cf5b18af2fefa96d7572f82d6791c9d2e0972",
     "main/storage/storage_status.h": "9da4c29e51e6345de70770649f7e92b583edeb668cbb4017152130c20001700d",
     "tests/native/esp_nvs_stubs.c": "2ad701fb96d76e19518e193bcfafb7fada5d0e1a517a38406998fc386ad6b8ca",
     "tests/native/mbedtls_md_stub.c": "db5f82347ce2e70303a71a7b8dc0cae4c7de237e3a353605845763f6e61bda52",
