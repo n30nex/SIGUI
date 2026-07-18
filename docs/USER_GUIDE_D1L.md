@@ -134,11 +134,11 @@ The bounded USB console includes:
 - `version`
 - `health`
 - `crashlog`
-- `board status`
+- `board`
 - `settings get`
 - `mesh status`
 - `radio get`
-- `identity`
+- `identity status`
 - `messages public`
 - `messages dm`
 - `messages unread`
