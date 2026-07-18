@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from dataclasses import dataclass, replace
@@ -6989,6 +6990,185 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
 )
 
 
+# This cycle intentionally contains only RF-silent, non-destructive actions.  It
+# returns to Home so it can be repeated for a bounded navigation/lifecycle soak.
+# Each entry includes the expected current view so an incorrect destination
+# fails closed on the next dispatch rather than silently changing the test path.
+LIFECYCLE_TRANSITION_CYCLE: tuple[tuple[str, str], ...] = (
+    ("home", "open_messages_root"),
+    ("messages", "open_messages_public"),
+    ("messages_public", "open_public_compose"),
+    ("compose_sheet", "edit_public_message"),
+    ("compose_sheet", "clear_public_message"),
+    ("compose_sheet", "close_compose"),
+    ("messages_public", "open_messages_root"),
+    ("messages", "open_messages_dm"),
+    ("messages_dm", "open_dm_thread"),
+    ("dm_thread_sheet", "toggle_dm_details"),
+    ("dm_thread_details_sheet", "toggle_dm_details"),
+    ("dm_thread_sheet", "open_dm_search"),
+    ("dm_search_sheet", "edit_dm_search"),
+    ("dm_search_sheet", "close_dm_search"),
+    ("dm_thread_sheet", "open_dm_reply"),
+    ("compose_dm_sheet", "edit_dm_message"),
+    ("compose_dm_sheet", "clear_dm_message"),
+    ("compose_dm_sheet", "close_compose"),
+    ("messages_dm", "open_nodes"),
+    ("nodes", "open_node_detail"),
+    ("node_detail_sheet", "close_node_detail"),
+    ("nodes", "open_contact_detail"),
+    ("contact_detail_sheet", "open_contact_options"),
+    ("contact_options_page", "toggle_favorite"),
+    ("contact_options_page", "close_contact_options"),
+    ("contact_detail_sheet", "close_contact_detail"),
+    ("nodes", "open_map"),
+    ("map", "open_map_options"),
+    ("map_options", "open_map_location"),
+    ("map_location", "edit_map_latitude"),
+    ("map_location", "edit_map_longitude"),
+    ("map_location", "close_map_location"),
+    ("map_options", "open_map_cache"),
+    ("map_cache", "close_map_cache"),
+    ("map_options", "close_map_options"),
+    ("map", "open_settings"),
+    ("settings", "open_home"),
+    ("home", "open_radio_settings"),
+    ("radio_settings_sheet", "radio_freq_up"),
+    ("radio_settings_sheet", "close_radio_settings"),
+    ("home", "open_wifi_settings"),
+    ("wifi_setup_sheet", "edit_wifi_ssid"),
+    ("wifi_setup_sheet", "edit_wifi_password"),
+    ("wifi_setup_sheet", "close_wifi_setup"),
+    ("home", "open_ble_settings"),
+    ("ble_setup_sheet", "close_ble_setup"),
+    ("home", "open_storage_setup"),
+    ("storage_setup_sheet", "open_storage_card"),
+    ("storage_card_page", "close_storage_card"),
+    ("storage_setup_sheet", "open_storage_data"),
+    ("storage_data_page", "close_storage_data"),
+    ("storage_setup_sheet", "close_storage_setup"),
+    ("home", "open_diagnostics"),
+    ("diagnostics_sheet", "close_diagnostics"),
+)
+
+
+@dataclass(frozen=True)
+class LifecycleState:
+    current_view: str = "home"
+    active_tab: str = "home"
+    generation: int = 0
+    focused_action: str | None = None
+    modal_stack: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class LifecycleBinding:
+    generation: int
+    view: str
+    action: str
+    destination: str | None
+    kind: str
+    enabled: bool
+    rf_tx: bool
+    public_rf_tx: bool
+    dm_tx: bool
+    destructive: bool
+    formats_sd: bool
+
+
+@dataclass(frozen=True)
+class LifecycleDispatch:
+    accepted: bool
+    reason: str | None
+    state: LifecycleState
+
+
+def lifecycle_binding(generation: int, view: str, target: dict[str, object]) -> LifecycleBinding:
+    return LifecycleBinding(
+        generation=generation,
+        view=view,
+        action=str(target["action"]),
+        destination=str(target["destination"]) if target["destination"] is not None else None,
+        kind=str(target["kind"]),
+        enabled=bool(target["enabled"]),
+        rf_tx=bool(target["rf_tx"]),
+        public_rf_tx=bool(target["public_rf_tx"]),
+        dm_tx=bool(target["dm_tx"]),
+        destructive=bool(target["destructive"]),
+        formats_sd=bool(target["formats_sd"]),
+    )
+
+
+def lifecycle_active_tab(view: str) -> str | None:
+    if view == "home":
+        return "home"
+    if view not in DOCKED_VIEWS:
+        return None
+    if view.startswith("messages"):
+        return "messages"
+    if view == "nodes":
+        return "nodes"
+    if view == "map":
+        return "map"
+    if view == "packets" or view.startswith("settings"):
+        return "settings"
+    return None
+
+
+def dispatch_lifecycle_binding(state: LifecycleState, binding: LifecycleBinding) -> LifecycleDispatch:
+    """Apply one binding atomically, rejecting stale or unsafe callbacks."""
+
+    if binding.generation != state.generation or binding.view != state.current_view:
+        return LifecycleDispatch(False, "stale_callback", state)
+    if not binding.enabled:
+        return LifecycleDispatch(False, "disabled_target", state)
+    if binding.rf_tx or binding.public_rf_tx or binding.dm_tx:
+        return LifecycleDispatch(False, "rf_action_forbidden", state)
+    if binding.destructive:
+        return LifecycleDispatch(False, "destructive_action_forbidden", state)
+    if binding.formats_sd:
+        return LifecycleDispatch(False, "format_action_forbidden", state)
+
+    destination = binding.destination
+    if destination == "active_tab":
+        destination = state.active_tab
+    if destination is not None and destination not in RENDERERS:
+        return LifecycleDispatch(False, "unknown_destination", state)
+
+    focused_action = state.focused_action
+    if destination is None:
+        if binding.kind == "text_field":
+            focused_action = binding.action
+        return LifecycleDispatch(
+            True,
+            None,
+            replace(state, focused_action=focused_action),
+        )
+
+    next_active_tab = lifecycle_active_tab(destination) or state.active_tab
+    next_stack = state.modal_stack
+    if destination != state.current_view:
+        destination_is_root = destination == "home" or destination in DOCKED_VIEWS
+        if next_stack and destination == next_stack[-1]:
+            next_stack = next_stack[:-1]
+        elif destination_is_root:
+            next_stack = ()
+        else:
+            next_stack = (*next_stack, state.current_view)
+
+    return LifecycleDispatch(
+        True,
+        None,
+        LifecycleState(
+            current_view=destination,
+            active_tab=next_active_tab,
+            generation=state.generation,
+            focused_action=focused_action if destination == state.current_view else None,
+            modal_stack=next_stack,
+        ),
+    )
+
+
 def snapshot_counts(snap: Snapshot) -> dict[str, int]:
     return {
         "contacts": len(snap.contacts),
@@ -7194,7 +7374,481 @@ def build_incoming_event_report(
     }
 
 
-def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str = "default") -> dict[str, object]:
+def lifecycle_render_fingerprint(surface: Surface) -> str:
+    target_state = [
+        {
+            key: target[key]
+            for key in (
+                "action",
+                "destination",
+                "kind",
+                "enabled",
+                "selected",
+                "rf_tx",
+                "public_rf_tx",
+                "dm_tx",
+                "destructive",
+                "formats_sd",
+            )
+        }
+        for target in surface.touch_targets
+    ]
+    digest = hashlib.sha256()
+    digest.update(surface.image.tobytes())
+    digest.update(
+        json.dumps(
+            {"targets": target_state, "metrics": surface.metrics},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    return digest.hexdigest()
+
+
+def render_lifecycle_generation(
+    state: LifecycleState,
+    snap: Snapshot,
+) -> tuple[LifecycleState, Surface, dict[str, object], list[LifecycleBinding], list[dict[str, object]]]:
+    rendered_state = replace(state, generation=state.generation + 1)
+    surface = Surface(rendered_state.current_view)
+    RENDERERS[rendered_state.current_view](surface, snap)
+    required_labels = REQUIRED_LABELS.get(rendered_state.current_view, ())
+    summary = surface.summary(
+        Path("lifecycle") / f"{rendered_state.current_view}.png",
+        required_labels,
+    )
+    bindings = [
+        lifecycle_binding(rendered_state.generation, rendered_state.current_view, target)
+        for target in surface.touch_targets
+    ]
+    failures: list[dict[str, object]] = []
+    if summary["overflow"]:
+        failures.append(
+            {
+                "kind": "render_overflow",
+                "view": rendered_state.current_view,
+                "count": len(summary["overflow"]),
+            }
+        )
+    if summary["missing_required_labels"]:
+        failures.append(
+            {
+                "kind": "required_labels_missing",
+                "view": rendered_state.current_view,
+                "labels": summary["missing_required_labels"],
+            }
+        )
+    if summary["touch_target_issues"]:
+        failures.append(
+            {
+                "kind": "touch_target_issue",
+                "view": rendered_state.current_view,
+                "count": len(summary["touch_target_issues"]),
+            }
+        )
+    if not summary["dock_invariant_ok"]:
+        failures.append(
+            {
+                "kind": "dock_invariant",
+                "view": rendered_state.current_view,
+                "expected": summary["dock_expected"],
+                "rendered": summary["dock_rendered"],
+                "target_count": summary["dock_target_count"],
+            }
+        )
+
+    selected_dock = [
+        binding
+        for binding, target in zip(bindings, surface.touch_targets)
+        if target["kind"] == "dock_tab" and target["selected"]
+    ]
+    if rendered_state.current_view in DOCKED_VIEWS:
+        selected_destination = selected_dock[0].destination if len(selected_dock) == 1 else None
+        if len(selected_dock) != 1 or selected_destination != rendered_state.active_tab:
+            failures.append(
+                {
+                    "kind": "dock_selection",
+                    "view": rendered_state.current_view,
+                    "active_tab": rendered_state.active_tab,
+                    "selected_count": len(selected_dock),
+                    "selected_destination": selected_destination,
+                }
+            )
+        if rendered_state.modal_stack:
+            failures.append(
+                {
+                    "kind": "root_view_retained_modal_stack",
+                    "view": rendered_state.current_view,
+                    "modal_stack": list(rendered_state.modal_stack),
+                }
+            )
+    elif rendered_state.current_view == "home":
+        if rendered_state.active_tab != "home" or rendered_state.modal_stack:
+            failures.append(
+                {
+                    "kind": "home_state",
+                    "active_tab": rendered_state.active_tab,
+                    "modal_stack": list(rendered_state.modal_stack),
+                }
+            )
+    elif not rendered_state.modal_stack:
+        failures.append(
+            {
+                "kind": "modal_without_return_owner",
+                "view": rendered_state.current_view,
+            }
+        )
+
+    if rendered_state.focused_action is not None:
+        focused = [
+            binding
+            for binding in bindings
+            if binding.action == rendered_state.focused_action and binding.kind == "text_field" and binding.enabled
+        ]
+        if len(focused) != 1:
+            failures.append(
+                {
+                    "kind": "focus_binding_lost",
+                    "view": rendered_state.current_view,
+                    "focused_action": rendered_state.focused_action,
+                    "binding_count": len(focused),
+                }
+            )
+
+    return rendered_state, surface, summary, bindings, failures
+
+
+def lifecycle_incoming_event_probe(snap: Snapshot) -> tuple[dict[str, object], list[dict[str, object]]]:
+    report_views: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+    for expected in EXPECTED_INCOMING_EVENT_FLOWS:
+        view = str(expected["view"])
+        surface = Surface(view)
+        RENDERERS[view](surface, snap)
+        summary = surface.summary(Path("lifecycle") / f"{view}.png", REQUIRED_LABELS.get(view, ()))
+        report_views.append(summary)
+        if summary["overflow"] or summary["touch_target_issues"] or not summary["dock_invariant_ok"]:
+            failures.append(
+                {
+                    "kind": "incoming_event_render_invariant",
+                    "view": view,
+                    "overflow_count": len(summary["overflow"]),
+                    "touch_target_issue_count": len(summary["touch_target_issues"]),
+                    "dock_invariant_ok": summary["dock_invariant_ok"],
+                }
+            )
+    report = build_incoming_event_report(report_views)
+    if not report["ok"] or report["skipped_flows"]:
+        failures.append(
+            {
+                "kind": "incoming_event_state",
+                "failures": report["failures"],
+                "skipped_flows": report["skipped_flows"],
+            }
+        )
+    return report, failures
+
+
+def run_lifecycle_stress(
+    snap: Snapshot | None = None,
+    *,
+    transitions: int = 1000,
+    action_cycle: tuple[tuple[str, str], ...] = LIFECYCLE_TRANSITION_CYCLE,
+    scenario: str = "default",
+) -> dict[str, object]:
+    """Exercise rendered UI bindings through a bounded, stateful lifecycle run."""
+
+    if transitions < 1:
+        raise ValueError("transitions must be at least 1")
+    if not action_cycle:
+        raise ValueError("action_cycle must not be empty")
+    snapshot = snap or sample_snapshot()
+    failure_limit = 32
+    failures: list[dict[str, object]] = []
+
+    def add_failures(items: list[dict[str, object]]) -> None:
+        remaining = failure_limit - len(failures)
+        if remaining > 0:
+            failures.extend(items[:remaining])
+
+    incoming_event_report, incoming_failures = lifecycle_incoming_event_probe(snapshot)
+    add_failures(incoming_failures)
+
+    state = LifecycleState()
+    stale_binding: LifecycleBinding | None = None
+    completed = 0
+    render_count = 0
+    stale_callback_rejections = 0
+    stale_callback_unexpected_accepts = 0
+    modal_open_count = 0
+    modal_close_count = 0
+    dock_transition_count = 0
+    focus_entry_count = 0
+    focus_clear_count = 0
+    focus_binding_check_count = 0
+    max_modal_depth = 0
+    view_activation_counts: dict[str, int] = {}
+    action_counts: dict[str, int] = {}
+    render_fingerprints: dict[str, str] = {}
+    render_fingerprint_checks = 0
+
+    while completed < transitions and not failures:
+        cycle_index = completed % len(action_cycle)
+        expected_view, action = action_cycle[cycle_index]
+        if state.current_view != expected_view:
+            add_failures(
+                [
+                    {
+                        "kind": "unexpected_view",
+                        "transition": completed + 1,
+                        "expected": expected_view,
+                        "actual": state.current_view,
+                        "action": action,
+                    }
+                ]
+            )
+            break
+
+        try:
+            state, surface, _summary, bindings, render_failures = render_lifecycle_generation(state, snapshot)
+        except Exception as exc:
+            add_failures(
+                [
+                    {
+                        "kind": "render_exception",
+                        "transition": completed + 1,
+                        "view": state.current_view,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                ]
+            )
+            break
+        render_count += 1
+        view_activation_counts[state.current_view] = view_activation_counts.get(state.current_view, 0) + 1
+        if state.focused_action is not None:
+            focus_binding_check_count += 1
+        add_failures(render_failures)
+        if failures:
+            break
+
+        fingerprint = lifecycle_render_fingerprint(surface)
+        previous_fingerprint = render_fingerprints.setdefault(state.current_view, fingerprint)
+        render_fingerprint_checks += 1
+        if previous_fingerprint != fingerprint:
+            add_failures(
+                [
+                    {
+                        "kind": "render_state_drift",
+                        "transition": completed + 1,
+                        "view": state.current_view,
+                        "expected": previous_fingerprint,
+                        "actual": fingerprint,
+                    }
+                ]
+            )
+            break
+
+        if stale_binding is not None:
+            stale_probe = dispatch_lifecycle_binding(state, stale_binding)
+            if stale_probe.accepted or stale_probe.state != state or stale_probe.reason != "stale_callback":
+                stale_callback_unexpected_accepts += int(stale_probe.accepted)
+                add_failures(
+                    [
+                        {
+                            "kind": "stale_callback_not_rejected",
+                            "transition": completed + 1,
+                            "reason": stale_probe.reason,
+                            "state_changed": stale_probe.state != state,
+                        }
+                    ]
+                )
+                break
+            stale_callback_rejections += 1
+
+        matches = [binding for binding in bindings if binding.action == action]
+        if not matches:
+            add_failures(
+                [
+                    {
+                        "kind": "missing_action",
+                        "transition": completed + 1,
+                        "view": state.current_view,
+                        "action": action,
+                    }
+                ]
+            )
+            break
+        if len(set(matches)) != 1:
+            add_failures(
+                [
+                    {
+                        "kind": "ambiguous_action",
+                        "transition": completed + 1,
+                        "view": state.current_view,
+                        "action": action,
+                        "binding_count": len(matches),
+                    }
+                ]
+            )
+            break
+
+        binding = matches[0]
+        previous_state = state
+        dispatched = dispatch_lifecycle_binding(state, binding)
+        if not dispatched.accepted:
+            add_failures(
+                [
+                    {
+                        "kind": "dispatch_rejected",
+                        "transition": completed + 1,
+                        "view": state.current_view,
+                        "action": action,
+                        "reason": dispatched.reason,
+                    }
+                ]
+            )
+            break
+
+        state = dispatched.state
+        modal_depth_delta = len(state.modal_stack) - len(previous_state.modal_stack)
+        modal_open_count += max(0, modal_depth_delta)
+        modal_close_count += max(0, -modal_depth_delta)
+        max_modal_depth = max(max_modal_depth, len(state.modal_stack))
+        dock_transition_count += int(state.active_tab != previous_state.active_tab)
+        focus_entry_count += int(
+            state.focused_action is not None and state.focused_action != previous_state.focused_action
+        )
+        focus_clear_count += int(
+            previous_state.focused_action is not None and state.focused_action is None
+        )
+        action_counts[action] = action_counts.get(action, 0) + 1
+        stale_binding = binding
+        completed += 1
+
+    final_state_validated = False
+    if completed == transitions and not failures:
+        try:
+            state, final_surface, _summary, _bindings, render_failures = render_lifecycle_generation(state, snapshot)
+        except Exception as exc:
+            add_failures(
+                [
+                    {
+                        "kind": "final_render_exception",
+                        "view": state.current_view,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                ]
+            )
+        else:
+            render_count += 1
+            view_activation_counts[state.current_view] = view_activation_counts.get(state.current_view, 0) + 1
+            if state.focused_action is not None:
+                focus_binding_check_count += 1
+            add_failures(render_failures)
+            fingerprint = lifecycle_render_fingerprint(final_surface)
+            previous_fingerprint = render_fingerprints.setdefault(state.current_view, fingerprint)
+            render_fingerprint_checks += 1
+            if previous_fingerprint != fingerprint:
+                add_failures(
+                    [
+                        {
+                            "kind": "final_render_state_drift",
+                            "view": state.current_view,
+                            "expected": previous_fingerprint,
+                            "actual": fingerprint,
+                        }
+                    ]
+                )
+
+            expected_final_view = action_cycle[completed % len(action_cycle)][0]
+            if state.current_view != expected_final_view:
+                add_failures(
+                    [
+                        {
+                            "kind": "unexpected_final_view",
+                            "expected": expected_final_view,
+                            "actual": state.current_view,
+                        }
+                    ]
+                )
+            if stale_binding is not None:
+                stale_probe = dispatch_lifecycle_binding(state, stale_binding)
+                if stale_probe.accepted or stale_probe.state != state or stale_probe.reason != "stale_callback":
+                    stale_callback_unexpected_accepts += int(stale_probe.accepted)
+                    add_failures(
+                        [
+                            {
+                                "kind": "final_stale_callback_not_rejected",
+                                "reason": stale_probe.reason,
+                                "state_changed": stale_probe.state != state,
+                            }
+                        ]
+                    )
+                else:
+                    stale_callback_rejections += 1
+            final_state_validated = not failures
+
+    ok = (
+        not failures
+        and completed == transitions
+        and final_state_validated
+        and stale_callback_rejections == transitions
+        and stale_callback_unexpected_accepts == 0
+        and incoming_event_report["ok"]
+        and not incoming_event_report["skipped_flows"]
+    )
+    return {
+        "schema": 1,
+        "ok": ok,
+        "artifact_kind": "host_simulator_ui_runtime_safety_partial",
+        "source": "tools/ui_simulator.py",
+        "scenario": scenario,
+        "physical_acceptance_claimed": False,
+        "rf_acceptance_claimed": False,
+        "requested_transitions": transitions,
+        "completed_transitions": completed,
+        "cycle_length": len(action_cycle),
+        "cycles_completed": completed // len(action_cycle),
+        "cycle_position": completed % len(action_cycle),
+        "render_count": render_count,
+        "render_fingerprint_checks": render_fingerprint_checks,
+        "render_fingerprints": dict(sorted(render_fingerprints.items())),
+        "stale_callback_rejections": stale_callback_rejections,
+        "stale_callback_unexpected_accepts": stale_callback_unexpected_accepts,
+        "modal_open_count": modal_open_count,
+        "modal_close_count": modal_close_count,
+        "max_modal_depth": max_modal_depth,
+        "dock_transition_count": dock_transition_count,
+        "focus_entry_count": focus_entry_count,
+        "focus_clear_count": focus_clear_count,
+        "focus_binding_check_count": focus_binding_check_count,
+        "rf_actions_dispatched": 0,
+        "destructive_actions_dispatched": 0,
+        "format_actions_dispatched": 0,
+        "incoming_event_probe_count": len(incoming_event_report["flows"]),
+        "incoming_event_report": incoming_event_report,
+        "view_activation_counts": dict(sorted(view_activation_counts.items())),
+        "action_counts": dict(sorted(action_counts.items())),
+        "final_view": state.current_view,
+        "final_active_tab": state.active_tab,
+        "final_generation": state.generation,
+        "final_modal_depth": len(state.modal_stack),
+        "final_focused_action": state.focused_action,
+        "final_state_validated": final_state_validated,
+        "failure_limit": failure_limit,
+        "failure_limit_hit": len(failures) >= failure_limit,
+        "failures": failures,
+    }
+
+
+def generate(
+    out_dir: Path,
+    views: tuple[str, ...] | None = None,
+    scenario: str = "default",
+    lifecycle_transitions: int = 0,
+) -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     if scenario not in SCENARIOS:
         raise ValueError(f"unknown scenario: {scenario}")
@@ -7240,9 +7894,25 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
 
     flow_report = build_flow_report(report_views)
     incoming_event_report = build_incoming_event_report(report_views)
+    lifecycle_report = (
+        run_lifecycle_stress(
+            snap,
+            transitions=lifecycle_transitions,
+            scenario=scenario,
+        )
+        if lifecycle_transitions
+        else None
+    )
     report = {
         "schema": 2,
-        "ok": overflow_count == 0 and not required_missing and not dock_invariant_issues and flow_report["ok"] and incoming_event_report["ok"],
+        "ok": (
+            overflow_count == 0
+            and not required_missing
+            and not dock_invariant_issues
+            and flow_report["ok"]
+            and incoming_event_report["ok"]
+            and (lifecycle_report is None or lifecycle_report["ok"])
+        ),
         "display": {"width": WIDTH, "height": HEIGHT},
         "source": "tools/ui_simulator.py",
         "scenario": scenario,
@@ -7257,6 +7927,13 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
         "sibling_text_overlap_count": sibling_text_overlap_count,
         "required_labels_missing": required_missing,
     }
+    if lifecycle_report is not None:
+        report["lifecycle_report"] = lifecycle_report
+        lifecycle_path = out_dir / "ui-lifecycle-report.json"
+        lifecycle_path.write_text(
+            json.dumps(lifecycle_report, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     report_path = out_dir / "ui-sim-report.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
@@ -7267,15 +7944,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=Path, default=Path("artifacts/ui-sim"), help="output directory")
     parser.add_argument("--view", action="append", choices=tuple(RENDERERS), help="view to render; repeatable")
     parser.add_argument("--scenario", choices=tuple(SCENARIOS), default="default", help="snapshot scenario")
+    parser.add_argument(
+        "--lifecycle-transitions",
+        type=int,
+        default=0,
+        help="also run this many deterministic stateful UI transitions (use 1000 for WP-14)",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    report = generate(args.out, tuple(args.view) if args.view else None, scenario=args.scenario)
+    report = generate(
+        args.out,
+        tuple(args.view) if args.view else None,
+        scenario=args.scenario,
+        lifecycle_transitions=args.lifecycle_transitions,
+    )
+    lifecycle_report = report.get("lifecycle_report")
     print(
         json.dumps(
-            {"ok": report["ok"], "views": len(report["views"]), "out": args.out.as_posix(), "scenario": args.scenario},
+            {
+                "ok": report["ok"],
+                "views": len(report["views"]),
+                "out": args.out.as_posix(),
+                "scenario": args.scenario,
+                "lifecycle_transitions": (
+                    lifecycle_report["completed_transitions"] if lifecycle_report is not None else 0
+                ),
+            },
             sort_keys=True,
         )
     )
