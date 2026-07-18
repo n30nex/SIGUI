@@ -65,7 +65,11 @@ try:
         unavailable_ui_probe_plan,
     )
     from package_release_d1l import core_capability_truth
-    from provenance_d1l import validate_core_actions_binding
+    from provenance_d1l import (
+        discover_source_identity,
+        validate_against_inputs as validate_provenance_against_inputs,
+        validate_core_actions_binding,
+    )
     from release_gate_audit_d1l import (
         checksum_gate,
         esp32_flash_receipt_gate,
@@ -131,7 +135,11 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         unavailable_ui_probe_plan,
     )
     from scripts.package_release_d1l import core_capability_truth
-    from scripts.provenance_d1l import validate_core_actions_binding
+    from scripts.provenance_d1l import (
+        discover_source_identity,
+        validate_against_inputs as validate_provenance_against_inputs,
+        validate_core_actions_binding,
+    )
     from scripts.release_gate_audit_d1l import (
         checksum_gate,
         esp32_flash_receipt_gate,
@@ -777,6 +785,7 @@ def package_gate(
     manifest = read_json(manifest_path)
     truth = core_capability_truth(sd_history_mode)
     failures: list[str] = []
+    provenance_validation_errors: list[str] = []
 
     expected = {
         "release_profile": CORE_RELEASE_PROFILE,
@@ -875,17 +884,47 @@ def package_gate(
                 for field_name, expected_value in expected_provenance_metadata.items()
             ):
                 failures.append("provenance.metadata_binding")
-            provenance_errors = (
-                validate_core_actions_binding(
-                    read_json(target),
-                    commit,
-                    str(run_id),
-                    str(run_attempt),
+            provenance_statement = read_json(target)
+            if target is None:
+                provenance_validation_errors.append(
+                    "provenance statement is unavailable"
                 )
-                if target is not None
-                else ["provenance statement is unavailable"]
-            )
-            if provenance_errors:
+            else:
+                try:
+                    provenance_validation_errors.extend(
+                        validate_core_actions_binding(
+                            provenance_statement,
+                            commit,
+                            str(run_id),
+                            str(run_attempt),
+                        )
+                    )
+                    source_git = git_metadata(root)
+                    if not (
+                        exact_sha(source_git.get("commit")) == commit
+                        and source_git.get("dirty") is False
+                        and source_git.get("dirty_entries") == []
+                    ):
+                        provenance_validation_errors.append(
+                            "provenance verifier source is not the exact clean candidate"
+                        )
+                    else:
+                        source_identity = discover_source_identity(root, commit)
+                        provenance_validation_errors.extend(
+                            validate_provenance_against_inputs(
+                                provenance_statement,
+                                root,
+                                package,
+                                manifest,
+                                source_identity,
+                            )
+                        )
+                except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+                    provenance_validation_errors.append(
+                        "cannot recompute deterministic provenance: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+            if provenance_validation_errors:
                 failures.append("provenance.semantic_binding")
 
     if package:
@@ -922,7 +961,11 @@ def package_gate(
         package is not None and not failures,
         "Core package is bound to exact profile, commit, run, capabilities, and SD decision",
         path_text(manifest_path, root),
-        {"failures": failures, "package": str(package) if package else None},
+        {
+            "failures": failures,
+            "package": str(package) if package else None,
+            "provenance_validation_errors": provenance_validation_errors,
+        },
     )
 
 

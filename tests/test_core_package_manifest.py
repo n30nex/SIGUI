@@ -4,7 +4,9 @@ import json
 import pytest
 
 from scripts import core_release_gate_audit_d1l, package_release_d1l
+from scripts.verify_checksums import verify_checksum_tree
 from tests.test_package_release_d1l import (
+    fake_source_identity,
     install_fake_source_identity,
     write_fake_build,
     write_fake_config,
@@ -158,6 +160,20 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         "find_release_package",
         lambda _run_dir: package,
     )
+    monkeypatch.setattr(
+        core_release_gate_audit_d1l,
+        "git_metadata",
+        lambda _root: {
+            "commit": commit,
+            "dirty": False,
+            "dirty_entries": [],
+        },
+    )
+    monkeypatch.setattr(
+        core_release_gate_audit_d1l,
+        "discover_source_identity",
+        lambda _root, _expected: fake_source_identity(commit),
+    )
     assert core_release_gate_audit_d1l.package_gate(
         tmp_path,
         root,
@@ -198,6 +214,47 @@ def test_core_disabled_package_binds_truth_and_omits_rp2040(
         )
         assert gate.ok is False
         assert "provenance.semantic_binding" in gate.details["failures"]
+
+    for tamper in ("subject_digest", "material_digest"):
+        transplanted = copy.deepcopy(original_provenance)
+        if tamper == "subject_digest":
+            transplanted["subject"][0]["digest"]["sha256"] = "0" * 64
+        else:
+            material = next(
+                row
+                for row in transplanted["predicate"]["buildDefinition"][
+                    "resolvedDependencies"
+                ]
+                if "sha256" in row["digest"]
+            )
+            material["digest"]["sha256"] = "0" * 64
+        provenance_path.write_text(
+            package_release_d1l.canonical_json(transplanted),
+            encoding="ascii",
+        )
+        manifest["provenance"]["sha256"] = package_release_d1l.sha256_file(
+            provenance_path
+        )
+        (package / "manifest.json").write_text(
+            json.dumps(manifest, indent=2),
+            encoding="ascii",
+        )
+        package_release_d1l.write_sha256sums(package)
+        assert verify_checksum_tree(package) is True
+        gate = core_release_gate_audit_d1l.package_gate(
+            tmp_path,
+            root,
+            commit,
+            "123456789",
+            "1",
+            "disabled",
+        )
+        assert gate.ok is False
+        assert "provenance.semantic_binding" in gate.details["failures"]
+        assert (
+            "provenance does not match deterministic source and package inputs"
+            in gate.details["provenance_validation_errors"]
+        )
 
 
 def test_core_supported_optional_package_requires_paired_rp2040(
