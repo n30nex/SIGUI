@@ -18,6 +18,8 @@ extern "C" {
 #define D1L_MESHCORE_TRACE_MAX_PATH_BYTES \
     (D1L_MESHCORE_MAX_PACKET_PAYLOAD - D1L_MESHCORE_TRACE_FIXED_BYTES)
 #define D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS 30000U
+/* Rate-limit the next TRACE from the terminal matched/no-response outcome. */
+#define D1L_MESHCORE_TRACE_COOLDOWN_MS 30000U
 #define D1L_MESHCORE_TRACE_DUPLICATE_WINDOW_MS 60000U
 #define D1L_MESHCORE_TRACE_RETAINED_TARGET "trace_last"
 
@@ -40,6 +42,13 @@ typedef struct {
     int8_t path_snrs_quarter_db[D1L_MESHCORE_TRACE_MAX_HOPS];
 } d1l_meshcore_trace_terminal_t;
 
+typedef enum {
+    D1L_MESHCORE_TRACE_OUTCOME_NONE = 0,
+    D1L_MESHCORE_TRACE_OUTCOME_PENDING,
+    D1L_MESHCORE_TRACE_OUTCOME_MATCHED,
+    D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE,
+} d1l_meshcore_trace_outcome_t;
+
 typedef struct {
     bool pending;
     uint32_t pending_tag;
@@ -48,6 +57,16 @@ typedef struct {
     uint8_t pending_path_hash_bytes;
     uint8_t pending_path_hops;
     uint8_t pending_path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
+    bool expired_attempt_valid;
+    uint32_t expired_tag;
+    uint32_t expired_correlation_code;
+    uint32_t expired_at_ms;
+    uint8_t expired_path_hash_bytes;
+    uint8_t expired_path_hops;
+    uint8_t expired_path_hashes[D1L_MESHCORE_TRACE_MAX_PATH_BYTES];
+    bool attempt_valid;
+    d1l_meshcore_trace_outcome_t attempt_outcome;
+    uint32_t attempt_outcome_at_ms;
     bool completed;
     uint32_t completed_at_ms;
     d1l_meshcore_trace_terminal_t last_result;
@@ -342,6 +361,38 @@ static inline bool d1l_meshcore_trace_parse_terminal(
                D1L_MESHCORE_TRACE_FRAME_TERMINAL;
 }
 
+static inline const char *d1l_meshcore_trace_outcome_name(
+    d1l_meshcore_trace_outcome_t outcome)
+{
+    switch (outcome) {
+    case D1L_MESHCORE_TRACE_OUTCOME_PENDING:
+        return "pending";
+    case D1L_MESHCORE_TRACE_OUTCOME_MATCHED:
+        return "matched";
+    case D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE:
+        return "no_response";
+    case D1L_MESHCORE_TRACE_OUTCOME_NONE:
+    default:
+        return "none";
+    }
+}
+
+static inline uint32_t d1l_meshcore_trace_tracker_cooldown_remaining_ms(
+    const d1l_meshcore_trace_tracker_t *tracker,
+    uint32_t now_ms)
+{
+    if (!tracker || !tracker->attempt_valid ||
+        (tracker->attempt_outcome != D1L_MESHCORE_TRACE_OUTCOME_MATCHED &&
+         tracker->attempt_outcome !=
+             D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE)) {
+        return 0U;
+    }
+    const uint32_t elapsed =
+        (uint32_t)(now_ms - tracker->attempt_outcome_at_ms);
+    return elapsed >= D1L_MESHCORE_TRACE_COOLDOWN_MS ?
+        0U : D1L_MESHCORE_TRACE_COOLDOWN_MS - elapsed;
+}
+
 static inline bool d1l_meshcore_trace_tracker_expire_pending(
     d1l_meshcore_trace_tracker_t *tracker,
     uint32_t now_ms)
@@ -352,6 +403,18 @@ static inline bool d1l_meshcore_trace_tracker_expire_pending(
         return false;
     }
     tracker->pending = false;
+    tracker->expired_attempt_valid = true;
+    tracker->expired_tag = tracker->pending_tag;
+    tracker->expired_correlation_code = tracker->pending_auth_code;
+    tracker->expired_at_ms = now_ms;
+    tracker->expired_path_hash_bytes = tracker->pending_path_hash_bytes;
+    tracker->expired_path_hops = tracker->pending_path_hops;
+    memcpy(tracker->expired_path_hashes,
+           tracker->pending_path_hashes,
+           sizeof(tracker->expired_path_hashes));
+    tracker->attempt_valid = true;
+    tracker->attempt_outcome = D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE;
+    tracker->attempt_outcome_at_ms = now_ms;
     return true;
 }
 
@@ -366,6 +429,11 @@ static inline bool d1l_meshcore_trace_tracker_begin(
 {
     const size_t path_bytes = path_hops * path_hash_bytes;
     if (!tracker || tracker->pending ||
+        d1l_meshcore_trace_tracker_cooldown_remaining_ms(tracker, now_ms) > 0U ||
+        (tracker->attempt_valid &&
+         tracker->attempt_outcome != D1L_MESHCORE_TRACE_OUTCOME_MATCHED &&
+         tracker->attempt_outcome !=
+             D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE) ||
         path_hops > D1L_MESHCORE_TRACE_MAX_HOPS ||
         !d1l_meshcore_trace_hash_width_supported(path_hash_bytes) ||
         path_bytes > D1L_MESHCORE_TRACE_MAX_PATH_BYTES ||
@@ -378,6 +446,9 @@ static inline bool d1l_meshcore_trace_tracker_begin(
     tracker->pending_started_ms = now_ms;
     tracker->pending_path_hash_bytes = path_hash_bytes;
     tracker->pending_path_hops = (uint8_t)path_hops;
+    tracker->attempt_valid = true;
+    tracker->attempt_outcome = D1L_MESHCORE_TRACE_OUTCOME_PENDING;
+    tracker->attempt_outcome_at_ms = now_ms;
     memset(tracker->pending_path_hashes, 0,
            sizeof(tracker->pending_path_hashes));
     if (path_bytes > 0U) {
@@ -396,6 +467,16 @@ static inline bool d1l_meshcore_trace_tracker_cancel(
         return false;
     }
     tracker->pending = false;
+    tracker->attempt_valid = false;
+    tracker->attempt_outcome = D1L_MESHCORE_TRACE_OUTCOME_NONE;
+    tracker->attempt_outcome_at_ms = 0U;
+    tracker->pending_tag = 0U;
+    tracker->pending_auth_code = 0U;
+    tracker->pending_started_ms = 0U;
+    tracker->pending_path_hash_bytes = 0U;
+    tracker->pending_path_hops = 0U;
+    memset(tracker->pending_path_hashes, 0,
+           sizeof(tracker->pending_path_hashes));
     return true;
 }
 
@@ -426,6 +507,18 @@ d1l_meshcore_trace_tracker_consume(
         return D1L_MESHCORE_TRACE_CORRELATION_UNMATCHED;
     }
 
+    if (tracker->expired_attempt_valid &&
+        (uint32_t)(now_ms - tracker->expired_at_ms) <
+            D1L_MESHCORE_TRACE_DUPLICATE_WINDOW_MS &&
+        terminal->tag == tracker->expired_tag &&
+        terminal->auth_code == tracker->expired_correlation_code &&
+        d1l_meshcore_trace_path_matches(
+            terminal, tracker->expired_path_hash_bytes,
+            tracker->expired_path_hops,
+            tracker->expired_path_hashes)) {
+        return D1L_MESHCORE_TRACE_CORRELATION_EXPIRED;
+    }
+
     if (tracker->pending) {
         const bool expired =
             (uint32_t)(now_ms - tracker->pending_started_ms) >=
@@ -438,7 +531,7 @@ d1l_meshcore_trace_tracker_consume(
             tracker->pending_path_hops,
             tracker->pending_path_hashes);
         if (expired) {
-            tracker->pending = false;
+            (void)d1l_meshcore_trace_tracker_expire_pending(tracker, now_ms);
             if (tag_matches && auth_matches && path_matches) {
                 return D1L_MESHCORE_TRACE_CORRELATION_EXPIRED;
             }
@@ -450,6 +543,9 @@ d1l_meshcore_trace_tracker_consume(
                 return D1L_MESHCORE_TRACE_CORRELATION_PATH_MISMATCH;
             }
             tracker->pending = false;
+            tracker->attempt_valid = true;
+            tracker->attempt_outcome = D1L_MESHCORE_TRACE_OUTCOME_MATCHED;
+            tracker->attempt_outcome_at_ms = now_ms;
             tracker->completed = true;
             tracker->completed_at_ms = now_ms;
             tracker->last_result = *terminal;

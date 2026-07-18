@@ -3756,6 +3756,20 @@ path_candidate_cleanup:
     }
 }
 
+static bool meshcore_service_expire_trace_if_due(uint32_t now_ms)
+{
+    d1l_store_lock_take(&s_trace_lock);
+    const bool expired = d1l_meshcore_trace_tracker_expire_pending(
+        &s_trace_tracker, now_ms);
+    d1l_store_lock_give(&s_trace_lock);
+    if (expired) {
+        status_lock();
+        s_status.trace_pending_expired++;
+        status_unlock();
+    }
+    return expired;
+}
+
 static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
                                   int16_t rssi, int8_t snr)
 {
@@ -3804,10 +3818,8 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
     }
 
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    (void)meshcore_service_expire_trace_if_due(now_ms);
     d1l_store_lock_take(&s_trace_lock);
-    const bool pending_expired = s_trace_tracker.pending &&
-        (uint32_t)(now_ms - s_trace_tracker.pending_started_ms) >=
-            D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS;
     const d1l_meshcore_trace_correlation_t correlation =
         d1l_meshcore_trace_tracker_consume(&s_trace_tracker, &terminal, now_ms);
     bool retention_retry = false;
@@ -3841,9 +3853,6 @@ static void parse_rx_trace_packet(const uint8_t *payload, uint16_t size,
     d1l_store_lock_give(&s_trace_lock);
 
     status_lock();
-    if (pending_expired) {
-        s_status.trace_pending_expired++;
-    }
     switch (correlation) {
     case D1L_MESHCORE_TRACE_CORRELATION_MATCHED:
         s_status.trace_rx_matched++;
@@ -4371,6 +4380,8 @@ static void meshcore_service_run_owner_maintenance(void)
     (void)d1l_mesh_runtime_counter_increment_saturating(
         &s_runtime_owner_maintenance_runs);
     const uint64_t now_us = (uint64_t)esp_timer_get_time();
+    (void)meshcore_service_expire_trace_if_due(
+        (uint32_t)(now_us / 1000ULL));
     meshcore_service_handle_radio_tx_watchdog();
     (void)d1l_meshcore_admin_runtime_expire(now_us);
     d1l_meshcore_admin_context_t pending_admin = {0};
@@ -5253,6 +5264,20 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
     }
 
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    (void)meshcore_service_expire_trace_if_due(now_ms);
+    d1l_store_lock_take(&s_trace_lock);
+    const bool trace_pending = s_trace_tracker.pending;
+    const uint32_t cooldown_remaining_ms =
+        d1l_meshcore_trace_tracker_cooldown_remaining_ms(
+            &s_trace_tracker, now_ms);
+    d1l_store_lock_give(&s_trace_lock);
+    if (trace_pending) {
+        return ESP_ERR_NOT_FINISHED;
+    }
+    if (cooldown_remaining_ms > 0U) {
+        return ESP_ERR_NOT_ALLOWED;
+    }
+
     d1l_contact_entry_t contact = {0};
     esp_err_t ret = meshcore_service_resolve_trace_contact(
         cmd->trace_fingerprint, now_ms, &contact);
@@ -5313,18 +5338,11 @@ static esp_err_t meshcore_service_handle_send_trace_contact(
     }
 
     d1l_store_lock_take(&s_trace_lock);
-    const bool expired = d1l_meshcore_trace_tracker_expire_pending(
-        &s_trace_tracker, now_ms);
     const bool began = d1l_meshcore_trace_tracker_begin(
         &s_trace_tracker, tag, auth_code, plan.path_hash_bytes,
         plan.path_hashes,
         plan.path_hops, now_ms);
     d1l_store_lock_give(&s_trace_lock);
-    if (expired) {
-        status_lock();
-        s_status.trace_pending_expired++;
-        status_unlock();
-    }
     if (!began) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -6452,6 +6470,18 @@ void d1l_meshcore_service_trace_snapshot(
                (size_t)snapshot.pending_path_hash_bytes *
                    snapshot.pending_path_hops);
     }
+    if (s_trace_tracker.attempt_valid) {
+        snapshot.last_attempt_valid = true;
+        snapshot.last_attempt_outcome =
+            s_trace_tracker.attempt_outcome;
+        snapshot.last_attempt_tag = s_trace_tracker.pending_tag;
+        snapshot.last_attempt_age_ms =
+            (uint32_t)(now_ms - s_trace_tracker.pending_started_ms);
+    }
+    snapshot.cooldown_remaining_ms =
+        d1l_meshcore_trace_tracker_cooldown_remaining_ms(
+            &s_trace_tracker, now_ms);
+    snapshot.cooldown_active = snapshot.cooldown_remaining_ms > 0U;
     if (s_trace_tracker.completed) {
         snapshot.last_result_valid = true;
         snapshot.last_tag = s_trace_tracker.last_result.tag;

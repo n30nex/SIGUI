@@ -31,15 +31,15 @@
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/meshcore_packet_semantics.c": "f489be4535fecce3cd7023b97465f04ef9a10b3ef976c609c51fe82116843ae0",
     "main/mesh/meshcore_packet_semantics.h": "3515d04930c9554906c658a4f0cf8e9b70c6fc3d3889891aae2de71cfc10f192",
-    "main/mesh/meshcore_service.c": "1ccb818936b2f1483d29232379b757794edfd9f2cbe56e5720ed23bac4cb2580",
-    "main/mesh/meshcore_trace.h": "f9ecdb5861dfa258dd628aa1cfee8d820fde582f7eb80ce2cf3c4822e34cbc61",
+    "main/mesh/meshcore_service.c": "072f6d1f52f27f455f0a44eccb3c159b94a439e9f1636aee4de7ea9d0930694f",
+    "main/mesh/meshcore_trace.h": "776b5a2d69997e9d5400f3ca575acc2e5fb617dbb14fbe8fcfd6c6322d7ba51a",
     "main/mesh/meshcore_wire.c": "c4b9ed121360695fe6e31280f11fccd9ce1bba481e3028117f51a26a795a6451",
     "main/mesh/meshcore_wire.h": "f9d5a253329f7ff65defdfcac4250a84286329c51dfdcdb70411894c8be25bc6",
     "scripts/meshcore_conformance_d1l.py": "df0bf83fb823f70498eb46cfe5e86cd91d837f393ba4128f2bf6a0a43ce29646",
     "scripts/meshcore_semantic_packet_fuzz_d1l.py": "5765cddb1560f8355d26fd4e7dc1679858ae99aa5d3836b237e72fd523f04bd5",
     "tests/fuzz/meshcore_packet_semantics_fuzz.c": "49563874ea8b87f150153da28c0e9c86416a0908f744ff616d2921f8a1c4c9a8",
     "tests/native/meshcore_packet_semantics_test.c": "d3247c6df9d51aa9b8f7c3964e3241953aa62f1422d77c0f4bed4336e70fe622",
-    "tests/meshcore_oracle/wp05_semantic_matrix.json": "09428b55583ee995e8d199da6faeba2bde0dcb33d28c9549ee7fbc722a82f43f",
+    "tests/meshcore_oracle/wp05_semantic_matrix.json": "8eb36cc4a7e3f7314710af39a0b4ad2580b041e61d9d8d31406bc7a325136db8",
     "tests/test_meshcore_packet_semantics.py": "925ac7ab080c916c154e44d5962b6186af52379669df3ee8b0a8cafc91686243"
   },
   "accepted_families": [

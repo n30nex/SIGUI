@@ -21,6 +21,7 @@ def test_trace_helper_supports_bounded_widths_and_direct_terminal_only() -> None
 
     assert "D1L_MESHCORE_PAYLOAD_TRACE 0x09U" in wire
     assert "D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS 30000U" in trace
+    assert "D1L_MESHCORE_TRACE_COOLDOWN_MS 30000U" in trace
     assert "D1L_MESHCORE_TRACE_DUPLICATE_WINDOW_MS 60000U" in trace
     assert "D1L_MESHCORE_TRACE_MAX_HASH_BYTES 8U" in trace
     assert "D1L_MESHCORE_TRACE_MAX_CONTACT_HASH_BYTES 2U" in trace
@@ -69,8 +70,18 @@ def test_trace_tracker_correlates_immutable_tag_auth_path_and_bounds_age() -> No
     assert "D1L_MESHCORE_TRACE_CORRELATION_DUPLICATE" in trace
     assert "D1L_MESHCORE_TRACE_CORRELATION_EXPIRED" in trace
     assert "tracker->last_result = *terminal" in trace
+    assert "D1L_MESHCORE_TRACE_OUTCOME_PENDING" in trace
+    assert "D1L_MESHCORE_TRACE_OUTCOME_MATCHED" in trace
+    assert "D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE" in trace
+    assert "d1l_meshcore_trace_tracker_cooldown_remaining_ms" in trace
+    assert "tracker->attempt_outcome_at_ms = now_ms" in trace
+    assert "tracker->expired_attempt_valid = true" in trace
+    assert "tracker->expired_correlation_code = tracker->pending_auth_code" in trace
+    assert "terminal->auth_code == tracker->expired_correlation_code" in trace
+    assert "tracker->expired_path_hashes" in trace
     assert "(uint32_t)(now_ms - tracker->pending_started_ms)" in trace
     assert "(uint32_t)(now_ms - tracker->completed_at_ms)" in trace
+    assert "(uint32_t)(now_ms - tracker->attempt_outcome_at_ms)" in trace
 
 
 def test_service_retains_only_a_matched_trace_result() -> None:
@@ -85,7 +96,7 @@ def test_service_retains_only_a_matched_trace_result() -> None:
     assert "s_status.trace_rx_source_ignored++" in receive
     assert "s_status.trace_rx_in_flight_ignored++" in receive
     assert "s_status.trace_rx_unsupported++" in receive
-    assert "s_status.trace_pending_expired++" in receive
+    assert "meshcore_service_expire_trace_if_due(now_ms)" in receive
     assert "s_status.trace_rx_duplicates++" in receive
     assert "s_status.trace_rx_expired++" in receive
     assert "s_status.trace_rx_unmatched++" in receive
@@ -132,6 +143,12 @@ def test_runtime_owner_derives_contact_trace_from_one_current_proven_path() -> N
     wrapper = service.split(
         "esp_err_t d1l_meshcore_service_send_trace_contact", 1
     )[1].split("const char *d1l_meshcore_service_state_name", 1)[0]
+    helper = service.split(
+        "static bool meshcore_service_expire_trace_if_due", 1
+    )[1].split("static void parse_rx_trace_packet", 1)[0]
+    maintenance = service.split(
+        "static void meshcore_service_run_owner_maintenance", 1
+    )[1].split("static void meshcore_service_handle_radio_rx_done", 1)[0]
 
     assert "d1l_contact_store_copy_recent" in resolve
     assert "meshcore_service_fingerprint_equal(" in resolve
@@ -152,7 +169,10 @@ def test_runtime_owner_derives_contact_trace_from_one_current_proven_path() -> N
     assert "contact_public_key, &plan" in send
     assert "d1l_meshcore_trace_build_source" in send
     assert "tag, auth_code, plan.path_hash_bytes, plan.path_hashes" in send
-    assert "d1l_meshcore_trace_tracker_expire_pending" in send
+    assert "meshcore_service_expire_trace_if_due(now_ms)" in send
+    assert "d1l_meshcore_trace_tracker_cooldown_remaining_ms" in send
+    assert "return ESP_ERR_NOT_FINISHED;" in send
+    assert "return ESP_ERR_NOT_ALLOWED;" in send
     assert "d1l_meshcore_trace_tracker_begin" in send
     assert "d1l_meshcore_trace_tracker_cancel" in send
     assert "meshcore_service_handle_send_raw(&raw_cmd)" in send
@@ -172,6 +192,14 @@ def test_runtime_owner_derives_contact_trace_from_one_current_proven_path() -> N
     assert "path_hash" not in wrapper
     assert "d1l_meshcore_service_send_trace_loop" not in service
     assert "d1l_meshcore_service_send_trace_loop" not in header
+    assert "ESP_ERR_NOT_FINISHED means one TRACE is pending" in header
+    assert "ESP_ERR_NOT_ALLOWED means" in header
+    assert "d1l_meshcore_trace_tracker_expire_pending" in helper
+    assert "s_status.trace_pending_expired++" in helper
+    assert "meshcore_service_expire_trace_if_due" in maintenance
+    assert maintenance.index("meshcore_service_expire_trace_if_due") < (
+        maintenance.index("meshcore_service_handle_radio_tx_watchdog")
+    )
 
 
 def test_trace_snapshot_is_passive_and_does_not_expose_auth_code() -> None:
@@ -185,6 +213,9 @@ def test_trace_snapshot_is_passive_and_does_not_expose_auth_code() -> None:
     assert "snapshot.pending_expired" in snapshot
     assert "D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS" in snapshot
     assert "snapshot.pending_path_hash_bytes" in snapshot
+    assert "snapshot.last_attempt_outcome" in snapshot
+    assert "snapshot.cooldown_remaining_ms" in snapshot
+    assert "d1l_meshcore_trace_tracker_cooldown_remaining_ms" in snapshot
     assert "snapshot.last_path_hash_bytes" in snapshot
     assert "snapshot.last_retention_attempted" in snapshot
     assert "snapshot.last_route_summary_accepted" in snapshot
@@ -198,6 +229,12 @@ def test_trace_snapshot_is_passive_and_does_not_expose_auth_code() -> None:
 def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     console = read("main/comms/usb_console.c")
     app_header = read("main/app/app_model.h")
+    trace_contact = console.split(
+        "static void cmd_routes_trace_contact", 1
+    )[1].split("static void cmd_routes_trace_status", 1)[0]
+    trace_contact_failure = trace_contact.split(
+        "if (ret != ESP_OK)", 1
+    )[1].split("d1l_meshcore_trace_snapshot_t", 1)[0]
     app = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     test_plan = read("docs/TEST_PLAN_D1L.md")
@@ -224,9 +261,22 @@ def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     assert "trace_rx_in_flight_ignored" in console
     assert "trace_rx_unsupported" in console
     assert "trace_pending_expired" in console
+    assert "rx_correlation_code_mismatch" in console
+    assert '"rx_auth_mismatch\\":' not in console
+    assert "TRACE_PENDING" in console
+    assert "TRACE_COOLDOWN" in console
+    assert "ret == ESP_ERR_NOT_FINISHED" in trace_contact
+    assert "ret == ESP_ERR_NOT_ALLOWED" in trace_contact
+    assert 'code = "TRACE_PENDING"' in trace_contact
+    assert 'code = "TRACE_COOLDOWN"' in trace_contact
+    assert "d1l_meshcore_service_trace_snapshot" not in trace_contact_failure
+    assert '"no_response\\":%s' in console
+    assert '"cooldown\\":{' in console
+    assert "D1L_MESHCORE_TRACE_COOLDOWN_MS" in console
     assert 'retained_summary\\\":true' not in console
     assert "boot_local" in console
-    assert "tag_auth_immutable_contact_loop" in console
+    assert "tag_opaque_correlation_code_immutable_contact_loop" in console
+    assert "tag_auth_immutable_contact_loop" not in console
     assert "pending_auth" not in console
     assert "routes trace send <loop-path-hex>" not in console
     assert "parse_trace_loop_path" not in console
@@ -245,7 +295,7 @@ def test_console_and_ui_disclose_trace_boundaries_truthfully() -> None:
     assert "d1l_app_model_send_trace_contact(" in ui
     assert "d1l_app_model_request_path_discovery_probe(" not in ui
     assert '"Correlated TRACE; proven outbound path; no Public RF"' in ui
-    assert '"Authenticated TRACE' not in ui
+    assert "\"Authenticated TRACE" not in ui
     assert "routes trace send <loop-path-hex>" not in test_plan
     assert "contact_trace_supported=false" not in test_plan
     assert "real_trace_contact_supported=false" not in test_plan

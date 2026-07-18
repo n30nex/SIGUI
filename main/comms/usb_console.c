@@ -1713,10 +1713,11 @@ static void cmd_mesh_status(void)
            (unsigned long)status.runtime_task_heartbeat,
            (unsigned long)status.runtime_task_stack_free_words,
            (unsigned long long)status.runtime_last_event_monotonic_us);
-    printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"flags_zero_direct_only\":false,\"trace_flags_supported\":[0,1,2,3],\"trace_wire_hash_bytes_supported\":[1,2,4,8],\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":false,\"contact_trace_path_hash_bytes_supported\":[1,2],\"contact_route_hash_bytes_rejected\":[3],\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to a runtime-derived canonical contact loop, terminal parsing, and correlation\"}\n",
+    printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"no_response\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_correlation_code_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"timeout_ms\":%u,\"cooldown_ms\":%u,\"flags_zero_direct_only\":false,\"trace_flags_supported\":[0,1,2,3],\"trace_wire_hash_bytes_supported\":[1,2,4,8],\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":false,\"contact_trace_path_hash_bytes_supported\":[1,2],\"contact_route_hash_bytes_rejected\":[3],\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to a runtime-derived canonical contact loop, monotonic no-response timeout, cooldown, terminal parsing, and correlation\"}\n",
            (unsigned long)status.trace_tx_queued,
            (unsigned long)status.trace_rx_matched,
            (unsigned long)status.trace_rx_duplicates,
+           (unsigned long)status.trace_pending_expired,
            (unsigned long)status.trace_pending_expired,
            (unsigned long)status.trace_rx_expired,
            (unsigned long)status.trace_rx_unmatched,
@@ -1725,7 +1726,9 @@ static void cmd_mesh_status(void)
            (unsigned long)status.trace_rx_malformed,
            (unsigned long)status.trace_rx_source_ignored,
            (unsigned long)status.trace_rx_in_flight_ignored,
-           (unsigned long)status.trace_rx_unsupported);
+           (unsigned long)status.trace_rx_unsupported,
+           D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS,
+           D1L_MESHCORE_TRACE_COOLDOWN_MS);
 }
 
 static void cmd_mesh_advert(const char *cmd, bool flood)
@@ -5332,6 +5335,7 @@ static void cmd_routes_trace_contact(const char *line)
     const esp_err_t ret =
         d1l_meshcore_service_send_trace_contact(fingerprint);
     if (ret != ESP_OK) {
+        const char *code = esp_err_to_name(ret);
         const char *detail =
             ret == ESP_ERR_NOT_FOUND ?
                 "exact canonical contact not found" :
@@ -5339,10 +5343,19 @@ static void cmd_routes_trace_contact(const char *line)
                 "contact route has no traceable loop or uses an unsupported hash width" :
             ret == ESP_ERR_INVALID_SIZE ?
                 "derived contact route loop is too long" :
+            ret == ESP_ERR_NOT_FINISHED ?
+                "one contact TRACE is already pending; poll routes trace status" :
+            ret == ESP_ERR_NOT_ALLOWED ?
+                "contact TRACE cooldown is active; poll routes trace status for remaining_ms" :
             ret == ESP_ERR_INVALID_STATE ?
                 "contact/path is noncanonical, missing, expired, preboot, ambiguous, or another radio operation is active" :
                 "could not queue the contact-derived TRACE";
-        err_result("routes trace contact", esp_err_to_name(ret), detail);
+        if (ret == ESP_ERR_NOT_FINISHED) {
+            code = "TRACE_PENDING";
+        } else if (ret == ESP_ERR_NOT_ALLOWED) {
+            code = "TRACE_COOLDOWN";
+        }
+        err_result("routes trace contact", code, detail);
         return;
     }
 
@@ -5362,8 +5375,10 @@ static void cmd_routes_trace_contact(const char *line)
            (unsigned long)tag, (unsigned)path_hash_bytes,
            (unsigned)path_hops);
     print_hex_bytes_json(path_hashes, path_bytes);
-    printf(",\"route\":\"direct\",\"route_source\":\"current_boot_proven_contact_path\",\"flags\":%u,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"public_rf_tx\":false,\"targeted_trace_rf_tx\":true,\"hardware_verified\":false,\"note\":\"Runtime derived the immutable loop from the exact canonical contact and current proven path; repeater/room routes include the contact hash while chat/sensor routes pivot at the farthest proven repeater\"}\n",
-           path_hash_bytes == 2U ? 1U : 0U);
+    printf(",\"route\":\"direct\",\"route_source\":\"current_boot_proven_contact_path\",\"flags\":%u,\"timeout_ms\":%u,\"cooldown_ms\":%u,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"public_rf_tx\":false,\"targeted_trace_rf_tx\":true,\"hardware_verified\":false,\"note\":\"Runtime derived the immutable loop from the exact canonical contact and current proven path; repeater/room routes include the contact hash while chat/sensor routes pivot at the farthest proven repeater\"}\n",
+           path_hash_bytes == 2U ? 1U : 0U,
+           D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS,
+           D1L_MESHCORE_TRACE_COOLDOWN_MS);
 }
 
 static void cmd_routes_trace_status(void)
@@ -5385,10 +5400,11 @@ static void cmd_routes_trace_status(void)
             "Route summary and packet preview retention both failed";
 
     ok_begin("routes trace status");
-    printf(",\"counters\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu},\"pending\":{\"active\":%s,\"expired\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hash_bytes\":%u,\"path_hops\":%u,\"path_hashes_hex\":",
+    printf(",\"counters\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"no_response\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_correlation_code_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu},\"pending\":{\"active\":%s,\"expired\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hash_bytes\":%u,\"path_hops\":%u,\"path_hashes_hex\":",
            (unsigned long)status.trace_tx_queued,
            (unsigned long)status.trace_rx_matched,
            (unsigned long)status.trace_rx_duplicates,
+           (unsigned long)status.trace_pending_expired,
            (unsigned long)status.trace_pending_expired,
            (unsigned long)status.trace_rx_expired,
            (unsigned long)status.trace_rx_unmatched,
@@ -5406,7 +5422,17 @@ static void cmd_routes_trace_status(void)
     print_hex_bytes_json(
         trace.pending_path_hashes,
         (size_t)trace.pending_path_hash_bytes * trace.pending_path_hops);
-    printf("},\"last_result\":{\"valid\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hash_bytes\":%u,\"path_hops\":%u,\"path_hashes_hex\":",
+    printf("},\"last_attempt\":{\"valid\":%s,\"outcome\":\"%s\",\"no_response\":%s,\"tag\":%lu,\"age_ms\":%lu},\"cooldown\":{\"active\":%s,\"duration_ms\":%u,\"remaining_ms\":%lu},\"last_result\":{\"valid\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hash_bytes\":%u,\"path_hops\":%u,\"path_hashes_hex\":",
+           bool_json(trace.last_attempt_valid),
+           d1l_meshcore_trace_outcome_name(trace.last_attempt_outcome),
+           bool_json(
+               trace.last_attempt_outcome ==
+                   D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE),
+           (unsigned long)trace.last_attempt_tag,
+           (unsigned long)trace.last_attempt_age_ms,
+           bool_json(trace.cooldown_active),
+           D1L_MESHCORE_TRACE_COOLDOWN_MS,
+           (unsigned long)trace.cooldown_remaining_ms,
            bool_json(trace.last_result_valid), (unsigned long)trace.last_tag,
            (unsigned long)trace.last_age_ms, trace.last_path_hash_bytes,
            trace.last_path_hops);
@@ -5418,12 +5444,13 @@ static void cmd_routes_trace_status(void)
         printf("%s%d", i ? "," : "",
                (int)trace.last_path_snrs_quarter_db[i]);
     }
-    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,\"route_summary_durable_verified\":false,\"packet_preview_retained\":%s,\"per_hop_complete\":false,\"packet_preview_bytes\":%u},\"correlation_scope\":\"tag_auth_immutable_contact_loop\",\"last_detail_scope\":\"boot_local\",\"flags_zero_direct_only\":false,\"trace_flags_supported\":[0,1,2,3],\"trace_wire_hash_bytes_supported\":[1,2,4,8],\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":false,\"contact_trace_path_hash_bytes_supported\":[1,2],\"contact_route_hash_bytes_rejected\":[3],\"hardware_verified\":false,\"note\":\"%s; full per-hop detail is boot-local; two-byte contact TRACE and wider wire parsing remain hardware-unverified\"}\n",
+    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,\"route_summary_durable_verified\":false,\"packet_preview_retained\":%s,\"per_hop_complete\":false,\"packet_preview_bytes\":%u},\"correlation_scope\":\"tag_opaque_correlation_code_immutable_contact_loop\",\"last_detail_scope\":\"boot_local\",\"timeout_ms\":%u,\"flags_zero_direct_only\":false,\"trace_flags_supported\":[0,1,2,3],\"trace_wire_hash_bytes_supported\":[1,2,4,8],\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":false,\"contact_trace_path_hash_bytes_supported\":[1,2],\"contact_route_hash_bytes_rejected\":[3],\"hardware_verified\":false,\"note\":\"%s; timeout transitions to no_response under owner maintenance; cooldown is bounded after matched or no_response; full per-hop detail is boot-local; two-byte contact TRACE and wider wire parsing remain hardware-unverified\"}\n",
            trace.last_rssi_dbm, trace.last_radio_snr_quarter_db,
            bool_json(trace.last_retention_attempted),
            bool_json(trace.last_route_summary_accepted),
            bool_json(trace.last_packet_preview_retained),
-           D1L_PACKET_LOG_RAW_PREVIEW_BYTES, retention_note);
+           D1L_PACKET_LOG_RAW_PREVIEW_BYTES,
+           D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS, retention_note);
 }
 
 static void cmd_routes_trace(const char *line)

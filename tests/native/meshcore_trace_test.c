@@ -356,13 +356,37 @@ static int test_source_and_terminal(void)
 
 static int test_tracker(void)
 {
+    CHECK(strcmp(d1l_meshcore_trace_outcome_name(
+                     D1L_MESHCORE_TRACE_OUTCOME_NONE),
+                 "none") == 0);
+    CHECK(strcmp(d1l_meshcore_trace_outcome_name(
+                     D1L_MESHCORE_TRACE_OUTCOME_PENDING),
+                 "pending") == 0);
+    CHECK(strcmp(d1l_meshcore_trace_outcome_name(
+                     D1L_MESHCORE_TRACE_OUTCOME_MATCHED),
+                 "matched") == 0);
+    CHECK(strcmp(d1l_meshcore_trace_outcome_name(
+                     D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE),
+                 "no_response") == 0);
+
     const uint8_t hashes[] = {0x10U, 0x20U};
+    d1l_meshcore_trace_tracker_t invalid_tracker = {
+        .attempt_valid = true,
+        .attempt_outcome = D1L_MESHCORE_TRACE_OUTCOME_NONE,
+    };
+    CHECK(!d1l_meshcore_trace_tracker_begin(
+        &invalid_tracker, 1U, 2U, 1U, hashes, 2U, 0U));
+
     uint8_t mutable_hashes[] = {0x10U, 0x20U};
     d1l_meshcore_trace_tracker_t tracker = {0};
     CHECK(d1l_meshcore_trace_tracker_begin(
         &tracker, 7U, 9U, 1U, mutable_hashes, 2U, 100U));
     mutable_hashes[0] = 0xFFU;
     CHECK(tracker.pending_path_hashes[0] == 0x10U);
+    CHECK(tracker.attempt_valid);
+    CHECK(tracker.attempt_outcome == D1L_MESHCORE_TRACE_OUTCOME_PENDING);
+    CHECK(d1l_meshcore_trace_tracker_cooldown_remaining_ms(
+              &tracker, 100U) == 0U);
     CHECK(!d1l_meshcore_trace_tracker_begin(
         &tracker, 8U, 10U, 1U, hashes, 2U, 101U));
 
@@ -396,6 +420,12 @@ static int test_tracker(void)
     CHECK(d1l_meshcore_trace_tracker_consume(&tracker, &terminal, 113U) ==
           D1L_MESHCORE_TRACE_CORRELATION_MATCHED);
     CHECK(!tracker.pending && tracker.completed);
+    CHECK(tracker.attempt_valid);
+    CHECK(tracker.attempt_outcome == D1L_MESHCORE_TRACE_OUTCOME_MATCHED);
+    CHECK(tracker.attempt_outcome_at_ms == 113U);
+    CHECK(d1l_meshcore_trace_tracker_cooldown_remaining_ms(
+              &tracker, 114U) ==
+          D1L_MESHCORE_TRACE_COOLDOWN_MS - 1U);
     terminal.path_hashes[0] = 0xEEU;
     terminal.path_snrs_quarter_db[0] = 99;
     CHECK(tracker.last_result.path_hashes[0] == 0x10U);
@@ -407,6 +437,13 @@ static int test_tracker(void)
               &tracker, &terminal,
               113U + D1L_MESHCORE_TRACE_DUPLICATE_WINDOW_MS) ==
           D1L_MESHCORE_TRACE_CORRELATION_UNMATCHED);
+    CHECK(!d1l_meshcore_trace_tracker_begin(
+        &tracker, 8U, 10U, 1U, hashes, 2U,
+        113U + D1L_MESHCORE_TRACE_COOLDOWN_MS - 1U));
+    CHECK(d1l_meshcore_trace_tracker_begin(
+        &tracker, 8U, 10U, 1U, hashes, 2U,
+        113U + D1L_MESHCORE_TRACE_COOLDOWN_MS));
+    CHECK(d1l_meshcore_trace_tracker_cancel(&tracker, 8U, 10U));
 
     memset(&tracker, 0, sizeof(tracker));
     CHECK(d1l_meshcore_trace_tracker_begin(
@@ -418,6 +455,34 @@ static int test_tracker(void)
               100U + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS) ==
           D1L_MESHCORE_TRACE_CORRELATION_EXPIRED);
     CHECK(!tracker.pending && !tracker.completed);
+    CHECK(tracker.attempt_valid);
+    CHECK(tracker.attempt_outcome ==
+          D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE);
+    CHECK(tracker.attempt_outcome_at_ms ==
+          100U + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS);
+    CHECK(d1l_meshcore_trace_tracker_cooldown_remaining_ms(
+              &tracker,
+              100U + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS) ==
+          D1L_MESHCORE_TRACE_COOLDOWN_MS);
+    CHECK(d1l_meshcore_trace_tracker_consume(
+              &tracker, &terminal,
+              101U + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS) ==
+          D1L_MESHCORE_TRACE_CORRELATION_EXPIRED);
+    CHECK(!d1l_meshcore_trace_tracker_begin(
+        &tracker, 8U, 10U, 1U, hashes, 2U,
+        100U + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS +
+            D1L_MESHCORE_TRACE_COOLDOWN_MS - 1U));
+    CHECK(d1l_meshcore_trace_tracker_begin(
+        &tracker, 8U, 10U, 1U, hashes, 2U,
+        100U + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS +
+            D1L_MESHCORE_TRACE_COOLDOWN_MS));
+    CHECK(d1l_meshcore_trace_tracker_consume(
+              &tracker, &terminal,
+              101U + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS +
+                  D1L_MESHCORE_TRACE_COOLDOWN_MS) ==
+          D1L_MESHCORE_TRACE_CORRELATION_EXPIRED);
+    CHECK(tracker.pending && tracker.pending_tag == 8U);
+    CHECK(d1l_meshcore_trace_tracker_cancel(&tracker, 8U, 10U));
 
     memset(&tracker, 0, sizeof(tracker));
     const uint32_t wrap_start = UINT32_MAX - 10U;
@@ -427,6 +492,12 @@ static int test_tracker(void)
     CHECK(d1l_meshcore_trace_tracker_expire_pending(
         &tracker, wrap_start + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS));
     CHECK(!tracker.pending);
+    CHECK(tracker.attempt_outcome ==
+          D1L_MESHCORE_TRACE_OUTCOME_NO_RESPONSE);
+    CHECK(d1l_meshcore_trace_tracker_cooldown_remaining_ms(
+              &tracker,
+              wrap_start + D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS + 1U) ==
+          D1L_MESHCORE_TRACE_COOLDOWN_MS - 1U);
     CHECK(!d1l_meshcore_trace_tracker_cancel(&tracker, 1U, 2U));
 
     CHECK(d1l_meshcore_trace_tracker_begin(
@@ -434,6 +505,8 @@ static int test_tracker(void)
     CHECK(!d1l_meshcore_trace_tracker_cancel(&tracker, 3U, 5U));
     CHECK(d1l_meshcore_trace_tracker_cancel(&tracker, 3U, 4U));
     CHECK(!tracker.pending);
+    CHECK(!tracker.attempt_valid);
+    CHECK(tracker.attempt_outcome == D1L_MESHCORE_TRACE_OUTCOME_NONE);
 
     const uint8_t two_byte_hashes[] = {
         0x10U, 0x11U, 0x20U, 0x21U,
