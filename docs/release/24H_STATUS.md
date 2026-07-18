@@ -92,7 +92,7 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 |---|---|---|
 | R0 | complete | Contract/roadmap/backlog and ledger committed as `c09c9b4e6ee0a7eb9ea4bc405369ffdc94544265` |
 | R1 | in progress | Central immutable profile, compile-time SD mode, app snapshot, version, health, settings, mesh, companion, and storage truth are wired; package wiring remains in R7 |
-| R2 | in progress | Initial Core UI boundary integrated as `bec47e249512662b2bfb645eff25cc22e89582f6`; independent review requested copy/capability/styling cleanup and stronger Core-compiled controller coverage |
+| R2 | complete | Initial boundary `bec47e2` plus truth/profile-matrix follow-up `8b36d99`; 227 integrated UI/profile/map tests passed |
 | R3 | complete | Profile-aware command admission integrated as `b356e45` plus disabled-SD fail-closed follow-up `cbbfbed`; 52 integrated command/profile/source-pin tests passed |
 | R4 | complete | Reviewed PR #197 substance integrated as `2824d63c6c779560ce0ad1ca787e230634b5c3ff`; 47 storage tests and 7 integrated source-pin checks passed |
 | R5 | complete | Profile-bound SD admission integrated as `0c72561`; Core conditional/disabled routes retained data to NVS and cannot activate SD |
@@ -254,3 +254,16 @@ release is authorized by the evidence currently recorded.
   hardware check and cannot count toward the exact-candidate cold-boot gate.
 - No serial port was opened, no firmware was flashed, no RF transmission
   occurred, and no SD operation occurred.
+
+### `2026-07-18T15:11:31-04:00`
+
+- R2 follow-up `8b36d99` integrated accurate Core Home and unread-counter
+  wording, Map-location filtering when Map is unavailable, neutral NVS-only
+  storage presentation with real NVS faults preserved, centralized Public
+  channel projection, and Core/development native matrices.
+- The map-marker oracle pins for `ui_node_detail.c` and `ui_phase1.c` were
+  regenerated from the integrated canonical-LF sources. One legacy source
+  assertion was updated to require the new profile projector plus projected
+  channel lookup instead of the removed inline expression.
+- Integrated R2 validation passed all 227 UI, release-profile,
+  retained-profile, and map-marker tests.

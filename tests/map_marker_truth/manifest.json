@@ -132,9 +132,9 @@
     "main/platform/time_service_core.h": "f3af332807f433d49344eaf45cee29473940a988c47e3c02c44fd44cd0306d75",
     "main/ui/ui_map.c": "59eb333a957449392e8cef31e9a018f53268c2e7643e2873349a152dd8919ca7",
     "main/ui/ui_map.h": "35833cc85e96764c126cb311697f43c238bc742130b42c87d603d51ce8695176",
-    "main/ui/ui_node_detail.c": "45b651cfa32cce150dec67b9be1bce5f6095eba9a5f6546d2bf1f77c1b33335a",
+    "main/ui/ui_node_detail.c": "e7cc7839b902365bb6120a70cd1c556d06a8f93668f53481a4e1272948857a27",
     "main/ui/ui_node_detail.h": "320490b05cf56de0e60fbeefd5c052ba268c4a778f9b82338febf8cd5c75e659",
-    "main/ui/ui_phase1.c": "95c0873f7a98ebe914135b65d9ff2e817868674373eab476ca7566b73eafefff",
+    "main/ui/ui_phase1.c": "14ea9a14966ce924430b3102fdf790d9cb1d838b31ed942842bd1216d032dfa0",
     "tools/ui_simulator.py": "fd6803d9ec352eba0555209e33ed2c0ba70287bcbda0a225d99de57a018e59c5"
   }
 }
