@@ -412,3 +412,32 @@ release is authorized by the evidence currently recorded.
   deliberately unstarted.
 - No firmware was built locally, no firmware was flashed, no RF transmission
   occurred, and no SD operation occurred.
+
+### `2026-07-18T17:15:21-04:00`
+
+- GitHub state was refreshed again. `origin/main` remains
+  `846f728dd3faded85451c6d39ba6a07cb8ca7f44`; PR #197 remains at reviewed
+  head `79d3efae9c784d65b70b0d79fae352b3ad5199aa`; excluded draft PR #199 remains
+  at `6c854159dfc37525ff4df2d57ca216e4b2303bc2`; no `release/24h-core`
+  `d1l-ci` run, `v1.0.0` tag, or release exists.
+- Independent pre-freeze review found a real Core reachability blocker:
+  retained private-group channel keys could still be selected, decrypted,
+  reconciled, and persisted by the always-running Mesh task after a
+  non-erasing upgrade. A bounded R6 follow-up now owns a profile-aware
+  pre-decrypt Public-only admission boundary and Public-only retained
+  reconciliation. Candidate freeze remains prohibited until the integrated
+  focused tests prove zero private-channel mutation in Core.
+- The same review held the first R7 audit/RF draft for four fail-closed
+  evidence repairs: consume the raw exact 5-software/3-cold reboot matrix;
+  recompute the exact package-review receipt; recompute the paginated GitHub
+  defect snapshot and narrow issue #71 pre-tag exception; and correlate
+  ACK/PATH/direct-route evidence to the unique DM token and ACK hash rather
+  than accepting stale retained rows.
+- The active-soak COM15 adapter now has a green 44-test focused slice for
+  before/after raw listener captures, same-run identity, exact successful-send
+  counter deltas, zero ACK misses, the D1L sender prefix, a reply-triggering
+  `test` token, and the expected transmission floor. It is not integrated
+  until the complete bounded R7 suite and the remaining audit/RF repairs pass.
+- The operator's power cycle remains pre-candidate only. COM12 has not been
+  opened, the full host suite and candidate workflow have not run, and no
+  firmware build, flash, RF transmission, or SD operation occurred.
