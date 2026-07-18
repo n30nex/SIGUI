@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +20,8 @@ except ImportError:
 
 
 DEFAULT_TARGET_FINGERPRINT = "0BF0A701D5AE2DB6"
-DEFAULT_BOT_STATUS_PATH = r"F:\Meshcorebot\logs\meshcorebot.status.json"
+DM_PROBE_SCHEMA = 2
+FORBIDDEN_PORTS = {"COM" + str(number) for number in (8, 11, 29)}
 COUNTER_NAMES = (
     "rx_contact_total",
     "rx_log_total",
@@ -32,6 +33,35 @@ COUNTER_NAMES = (
 def default_token() -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return f"d1l_dm_probe_{stamp}"
+
+
+def normalize_port(value: str | None) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().upper().replace("/", "\\")
+    for prefix in ("\\\\.\\", "\\\\?\\"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            break
+    return normalized
+
+
+def enforce_port_policy(port: str, peer_port: str) -> tuple[str, str]:
+    normalized_port = normalize_port(port)
+    normalized_peer = normalize_port(peer_port)
+    if normalized_port in FORBIDDEN_PORTS:
+        raise ValueError(f"refusing forbidden D1L port {normalized_port}")
+    if normalized_peer in FORBIDDEN_PORTS:
+        raise ValueError(f"refusing forbidden controlled-peer port {normalized_peer}")
+    if normalized_port is None or normalized_peer is None:
+        raise ValueError("explicit D1L and controlled-peer ports are required")
+    if re.fullmatch(r"COM[1-9][0-9]*", normalized_port) is None:
+        raise ValueError(f"invalid D1L port {normalized_port}")
+    if re.fullmatch(r"COM[1-9][0-9]*", normalized_peer) is None:
+        raise ValueError(f"invalid controlled-peer port {normalized_peer}")
+    if normalized_port == normalized_peer:
+        raise ValueError("D1L and controlled-peer ports must be distinct")
+    return normalized_port, normalized_peer
 
 
 def build_probe_commands(fingerprint: str, token: str) -> list[str]:
@@ -48,15 +78,33 @@ def build_probe_commands(fingerprint: str, token: str) -> list[str]:
     ]
 
 
-def dry_run_report(fingerprint: str, token: str, bot_status_path: Path, bot_port: str) -> dict:
+def dry_run_report(
+    fingerprint: str,
+    token: str,
+    peer_status_path: Path,
+    peer_port: str,
+) -> dict:
     return {
-        "schema": 1,
+        "schema": DM_PROBE_SCHEMA,
         "mode": "dry-run-dm-probe",
         "hardware_required": False,
+        "physical_observed": False,
+        "dry_run": True,
+        "simulated": False,
+        "simulation": False,
+        "source_inspection": False,
+        "execution_complete": False,
+        "dm_rf_tx": False,
+        "public_rf_tx": False,
+        "formats_sd": False,
         "target_fingerprint": fingerprint,
         "token": token,
-        "bot_status_path": str(bot_status_path),
-        "bot_port": bot_port,
+        "controlled_peer": {
+            "fingerprint": fingerprint,
+            "evidence_source": "explicit_peer_status",
+            "port": peer_port,
+            "status_path": str(peer_status_path),
+        },
         "public_rf_transmit": False,
         "commands": build_probe_commands(fingerprint, token),
         "ok": True,
@@ -162,15 +210,15 @@ def build_report(
     *,
     port: str,
     baud: int,
-    bot_status_path: Path,
-    bot_port: str,
+    peer_status_path: Path,
+    peer_port: str,
     fingerprint: str,
     token: str,
     commands: list[str],
     steps: list[dict],
-    bot_before: dict | None,
-    bot_after_dm_wait: dict | None,
-    bot_after: dict | None,
+    peer_before: dict | None,
+    peer_after_dm_wait: dict | None,
+    peer_after: dict | None,
     min_contact_delta: int,
 ) -> dict:
     send_step = find_step(steps, "mesh send dm ")
@@ -178,43 +226,58 @@ def build_report(
     packets_step = find_step(steps, "packets search ")
     route_step = find_step(steps, "routes trace ")
     health_step = find_step(steps, "health")
-    deltas = counter_deltas(bot_before, bot_after)
-    wait_deltas = counter_deltas(bot_before, bot_after_dm_wait)
-    bot_connected_before = (
-        get_path(bot_before, "serial", "active_port") == bot_port
-        and get_path(bot_before, "serial", "meshcore_connected") is True
+    deltas = counter_deltas(peer_before, peer_after)
+    wait_deltas = counter_deltas(peer_before, peer_after_dm_wait)
+    peer_connected_before = (
+        normalize_port(get_path(peer_before, "serial", "active_port")) == peer_port
+        and get_path(peer_before, "serial", "meshcore_connected") is True
     )
-    bot_connected_after = (
-        get_path(bot_after, "serial", "active_port") == bot_port
-        and get_path(bot_after, "serial", "meshcore_connected") is True
+    peer_connected_after = (
+        normalize_port(get_path(peer_after, "serial", "active_port")) == peer_port
+        and get_path(peer_after, "serial", "meshcore_connected") is True
     )
 
     route_result = route_step.get("result", {}) if route_step else {}
     health_result = health_step.get("result", {}) if health_step else {}
     checks = {
-        "meshbot_on_expected_port": bot_connected_before or bot_connected_after,
+        "controlled_peer_status_connected": peer_connected_before or peer_connected_after,
         "send_ok": bool(send_step and send_step.get("result", {}).get("ok")),
         "messages_dm_has_token": bool(messages_step and contains_token(messages_step.get("result"), token)),
         "packets_search_has_token": bool(packets_step and contains_token(packets_step.get("result"), token)),
         "route_trace_has_target": bool(route_result.get("ok") and route_result.get("fingerprint") == fingerprint),
-        "meshbot_rx_contact_delta": (deltas.get("rx_contact_total") or 0) >= min_contact_delta,
+        "controlled_peer_rx_contact_delta": (deltas.get("rx_contact_total") or 0)
+        >= min_contact_delta,
         "health_ready": bool(health_result.get("ok") and health_result.get("board_ready") and health_result.get("ui_ready")),
         "no_public_commands": not any(command_has_public_tx(command) for command in commands),
     }
     return {
-        "schema": 1,
+        "schema": DM_PROBE_SCHEMA,
         "mode": "hardware-dm-probe",
+        "hardware_required": True,
+        "physical_observed": True,
+        "dry_run": False,
+        "simulated": False,
+        "simulation": False,
+        "source_inspection": False,
+        "execution_complete": True,
+        "dm_rf_tx": bool(send_step and send_step.get("result", {}).get("ok")),
+        "public_rf_tx": False,
+        "formats_sd": False,
         "port": port,
         "baud": baud,
-        "meshbot_status_path": str(bot_status_path),
-        "meshbot_expected_port": bot_port,
+        "controlled_peer": {
+            "fingerprint": fingerprint,
+            "evidence_source": "explicit_peer_status",
+            "port": peer_port,
+            "status_path": str(peer_status_path),
+        },
         "target_fingerprint": fingerprint,
         "token": token,
         "public_rf_transmit": False,
         "commands_sent": commands,
-        "bot_before": status_snapshot(bot_before),
-        "bot_after_dm_wait": status_snapshot(bot_after_dm_wait),
-        "bot_after": status_snapshot(bot_after),
+        "controlled_peer_before": status_snapshot(peer_before),
+        "controlled_peer_after_dm_wait": status_snapshot(peer_after_dm_wait),
+        "controlled_peer_after": status_snapshot(peer_after),
         "dm_wait_deltas": wait_deltas,
         "deltas": deltas,
         "checks": checks,
@@ -228,8 +291,8 @@ def run_serial_probe(
     port: str,
     baud: int,
     timeout: float,
-    bot_status_path: Path,
-    bot_port: str,
+    peer_status_path: Path,
+    peer_port: str,
     fingerprint: str,
     token: str,
     wait_sec: float,
@@ -242,9 +305,9 @@ def run_serial_probe(
         raise SystemExit("pyserial is required for hardware DM probe: python -m pip install pyserial") from exc
 
     commands = build_probe_commands(fingerprint, token)
-    bot_before = read_json(bot_status_path)
+    peer_before = read_json(peer_status_path)
     steps: list[dict] = []
-    bot_after_dm_wait: dict | None = None
+    peer_after_dm_wait: dict | None = None
 
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
@@ -253,27 +316,27 @@ def run_serial_probe(
             result = send_probe_command(ser, command, timeout)
             steps.append({"command": command, "result": result})
             if command.startswith("mesh send dm "):
-                bot_after_dm_wait = wait_for_bot_receive(
-                    bot_status_path,
-                    bot_before,
+                peer_after_dm_wait = wait_for_bot_receive(
+                    peer_status_path,
+                    peer_before,
                     wait_sec,
                     poll_sec,
                     min_contact_delta,
                 )
 
-    bot_after = read_json(bot_status_path)
+    peer_after = read_json(peer_status_path)
     return build_report(
         port=port,
         baud=baud,
-        bot_status_path=bot_status_path,
-        bot_port=bot_port,
+        peer_status_path=peer_status_path,
+        peer_port=peer_port,
         fingerprint=fingerprint,
         token=token,
         commands=commands,
         steps=steps,
-        bot_before=bot_before,
-        bot_after_dm_wait=bot_after_dm_wait or bot_after,
-        bot_after=bot_after,
+        peer_before=peer_before,
+        peer_after_dm_wait=peer_after_dm_wait or peer_after,
+        peer_after=peer_after,
         min_contact_delta=min_contact_delta,
     )
 
@@ -298,8 +361,18 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--fingerprint", default=os.environ.get("D1L_DM_TARGET", DEFAULT_TARGET_FINGERPRINT))
     parser.add_argument("--token", default=None)
-    parser.add_argument("--bot-status", default=os.environ.get("MESHCOREBOT_STATUS_PATH", DEFAULT_BOT_STATUS_PATH))
-    parser.add_argument("--bot-port", default=os.environ.get("MESHCOREBOT_PORT"))
+    parser.add_argument(
+        "--peer-status",
+        "--bot-status",
+        dest="peer_status",
+        default=os.environ.get("MESH_PEER_STATUS_PATH"),
+    )
+    parser.add_argument(
+        "--peer-port",
+        "--bot-port",
+        dest="peer_port",
+        default=os.environ.get("MESH_PEER_PORT"),
+    )
     parser.add_argument("--wait-sec", type=float, default=12.0)
     parser.add_argument("--poll-sec", type=float, default=0.75)
     parser.add_argument("--min-contact-delta", type=int, default=1)
@@ -308,24 +381,38 @@ def main() -> int:
     args = parser.parse_args()
 
     token = args.token or default_token()
-    bot_status_path = Path(args.bot_status)
+    if not args.port:
+        parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
+    if not args.peer_port:
+        parser.error("No controlled-peer port supplied. Set MESH_PEER_PORT or pass --peer-port.")
+    if not args.peer_status:
+        parser.error(
+            "No controlled-peer status file supplied. "
+            "Set MESH_PEER_STATUS_PATH or pass --peer-status."
+        )
+    try:
+        port, peer_port = enforce_port_policy(args.port, args.peer_port)
+    except ValueError as exc:
+        parser.error(str(exc))
+    peer_status_path = Path(args.peer_status)
     out_path = Path(args.out) if args.out else None
 
     if args.dry_run:
-        report = dry_run_report(args.fingerprint, token, bot_status_path, args.bot_port or "<bot-port>")
+        report = dry_run_report(
+            args.fingerprint,
+            token,
+            peer_status_path,
+            peer_port,
+        )
     else:
-        if not args.port:
-            parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
-        if not args.bot_port:
-            parser.error("No Meshcorebot port supplied. Set MESHCOREBOT_PORT or pass --bot-port.")
-        if not bot_status_path.exists():
-            parser.error(f"Meshcorebot status file not found: {bot_status_path}")
+        if not peer_status_path.exists():
+            parser.error(f"Controlled-peer status file not found: {peer_status_path}")
         report = run_serial_probe(
-            port=args.port,
+            port=port,
             baud=args.baud,
             timeout=args.timeout,
-            bot_status_path=bot_status_path,
-            bot_port=args.bot_port,
+            peer_status_path=peer_status_path,
+            peer_port=peer_port,
             fingerprint=args.fingerprint,
             token=token,
             wait_sec=args.wait_sec,

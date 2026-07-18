@@ -18,7 +18,8 @@ python .\scripts\ui_corruption_probe_d1l.py --dry-run --rounds 20
 python .\scripts\ui_capture_d1l.py --dry-run
 python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --dry-run
-python .\scripts\probe_d1l_dm.py --dry-run
+python .\scripts\probe_d1l_dm.py --dry-run --port COM12 --peer-port <explicit-allowed-peer-port> --peer-status <controlled-peer-status.json>
+python .\scripts\rf_full_acceptance_d1l.py --dry-run --port COM12
 python .\scripts\sd_reboot_remount_acceptance_d1l.py --dry-run --token dryrun
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-dm-fingerprint 0123456789ABCDEF --active-dm-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --sample-storage --sd-file-canary --allow-sd-unavailable
@@ -32,7 +33,7 @@ Coverage:
 - RP2040 bridge pin contract.
 - No hardcoded executable COM ports.
 - Smoke JSONL parser.
-- Targeted DM-only hardware probe can validate D1L-to-bot DM paths without Public-channel RF when the operator assigns both ports.
+- Targeted DM-only hardware probe can validate D1L-to-controlled-peer DM paths without Public-channel RF when the operator explicitly assigns two allowed, distinct ports.
 - Flash/monitor scripts require an explicit port.
 - Backup command builder.
 - Checksum verifier.
@@ -380,16 +381,15 @@ RF automation policy: transmit only through a controlled direct-message peer or
 the dedicated `#test` channel. Any later step that names `mesh send public`
 must first prove that `#test` is the selected channel; until #67 provides that
 selection, use the DM equivalent and do not transmit on the default Public
-channel. COM11 may be used only as the independent bot/radio endpoint, not as
-the D1L serial port.
+channel. Never use a forbidden local serial port for either the D1L or its
+controlled peer.
 
 ## Hardware Soak
 
 Use the soak runner for Phase 7 stability evidence after smoke passes. The runner writes a JSON artifact under `artifacts/soak` unless `--out` is supplied.
 
-Short active RF probe through a promoted controlled DM peer (for example the
-COM11 bot). Automated traffic must use DM or the dedicated `#test` channel,
-never the default Public channel:
+Short active RF probe through a promoted controlled DM peer. Automated traffic
+must use DM or the dedicated `#test` channel, never the default Public channel:
 
 ```powershell
 $env:D1L_PORT = "COMx"
@@ -486,38 +486,45 @@ Operator note: the other local MeshCore bot may be used as the controlled DM RF 
 4. Verify `messages dm` contains a TX row with the contact fingerprint, alias, text, `direction="tx"`, `persisted=true`, and a nonzero `ack_hash`.
 5. Verify `messages dm <fingerprint>` returns `filtered=true`, the same fingerprint, and only rows for that retained thread.
 6. When more than one serial page is retained, verify `messages dm offset 8` and `messages dm <fingerprint> offset 8` report page metadata and return older retained rows in chronological order.
-7. If the target contact is the local COM11 Meshcorebot, verify its status counters include fresh `rx_contact_total` movement. Use this targeted DM path instead of Public-channel RF when the operator asks to keep Public quiet.
+7. If the target contact exposes an explicit controlled-peer status receipt on an allowed, distinct local port, verify its status counters include fresh `rx_contact_total` movement. Use this targeted DM path instead of Public-channel RF when the operator asks to keep Public quiet.
 8. If the peer emits MeshCore ACK/PATH returns, verify `messages dm` marks the TX row `acked=true` and `contacts` shows `out_path_known=true`.
 9. Send a second DM to the same contact and verify `routes` records `kind="dm_text"`, `direction="tx"`, and `route="direct"`.
 10. Reboot.
 11. Verify `messages dm` and `messages dm <fingerprint>` retain the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
 
-Repeatable local COM11 DM proof:
+Repeatable local controlled-peer DM proof:
 
 ```powershell
 $env:D1L_PORT = "COM12"
-python .\scripts\probe_d1l_dm.py --port $env:D1L_PORT --bot-status F:\Meshcorebot\logs\meshcorebot.status.json --bot-port COM11 --out artifacts\smoke\d1l-dm-probe-COM12-COM11.json
+$env:MESH_PEER_PORT = "<explicit-allowed-peer-port>"
+$env:MESH_PEER_STATUS_PATH = "<controlled-peer-status.json>"
+python .\scripts\probe_d1l_dm.py --port $env:D1L_PORT --peer-status $env:MESH_PEER_STATUS_PATH --peer-port $env:MESH_PEER_PORT --out artifacts\hardware\com12\dm_probe_<full-commit>.json
 ```
 
-Success requires `public_rf_transmit=false`, no command beginning with `mesh send public`, `mesh send dm` returning `ok=true`, `messages dm <fingerprint>` and `packets search <token>` retaining the token, `routes trace <fingerprint>` matching the target, `health` ready, and the COM11 Meshcorebot status showing at least `rx_contact_total +1`.
+Success requires schema 2, exact clean-commit metadata, `mode=hardware-dm-probe`, `physical_observed=true`, `dry_run=false`, `simulated=false`, `dm_rf_tx=true`, `public_rf_tx=false`, `public_rf_transmit=false`, `formats_sd=false`, no command beginning with `mesh send public`, `mesh send dm` returning `ok=true`, `messages dm <fingerprint>` and `packets search <token>` retaining the token, `routes trace <fingerprint>` matching the target, `health` ready, and the explicitly allowed controlled-peer status showing at least `rx_contact_total +1`.
 
-Repeatable full COM11-controlled RF acceptance:
+Repeatable full controlled-peer RF acceptance:
 
 ```powershell
 $env:D1L_PORT = "COM12"
-python .\scripts\rf_full_acceptance_d1l.py --port $env:D1L_PORT --commit <short> --token rf_accept_<short> --bot-status F:\Meshcorebot\logs\meshcorebot.status.json --bot-port COM11 --out artifacts\hardware\com12\rf_full_acceptance_<short>.json
+python .\scripts\rf_full_acceptance_d1l.py --port $env:D1L_PORT --commit <full-commit> --token rf_accept_<short> --out artifacts\hardware\com12\rf_full_acceptance_<short>.json
 ```
 
 Keep the runner attached only to the D1L serial port. When it prints the
-`+dm <D1L public key> rf_accept_<short>_in` Discord command, send that command
-through the Meshcorebot control channel, the other Meshbot, or a separate
-allowlisted Discord sender to create the controlled inbound DM. Do not open the
-COM11 Meshcorebot serial port directly, and do not use Meshcorebot's own bot
-token because its runtime ignores its own messages. Success requires one
-complete newest `rf_full_acceptance_*.json` hardware artifact with
-`identity_public_key_matches`, `meshbot_on_expected_port`, `outbound_dm`,
-`inbound_dm`, `ack_path`, `direct_route`, `health_ready`, and
-`no_public_commands` all true, plus `public_rf_transmit=false`.
+controlled-peer inbound command, send that command through an independently
+controlled compatible peer. The default qualification path needs no local peer
+serial port: COM12 must itself retain the unique outbound and inbound tokens,
+an acknowledged TX, ACK/PATH packet evidence, and the proven direct route. If a
+local peer-status file is additionally used, pass `--peer-status` and an
+explicit `--peer-port`; the runner rejects a missing, same-as-D1L, or forbidden
+peer port. Success requires one complete newest schema-2
+`rf_full_acceptance_*.json` hardware artifact with clean exact-commit metadata,
+the real-hardware safety boundary, `identity_public_key_matches`,
+`controlled_peer_observed`, `outbound_dm`, `inbound_dm`, `ack_path`,
+`direct_route`, `health_ready`, and `no_public_commands` all true. The
+`outbound_dm_controlled_peer` and `full_rf_dm_acceptance` release gates reject
+schema-1, dry-run, simulated, source-inspection, predecessor, dirty-tree, and
+partial receipts.
 
 ## Touch DM Compose
 
@@ -691,7 +698,7 @@ For Phase 6 signal/room-server/repeater validation:
 1. Run `signal` and verify `sample_count` is nonzero after live RX, `latest.rssi_dbm` is nonzero, and RSSI/SNR values reflect recent packet, route, or heard-node evidence.
 2. Run `roomservers` and verify `total_known` and `entries` reflect signed heard-node adverts whose stored role is `room`.
 3. Run `repeaters` and verify entries are inferred only from nonzero path-hop route or heard-node evidence; Public route rows should not by themselves become repeater candidates.
-4. Run `mesh send dm <fingerprint> mesh_visibility_test`, wait for the controlled peer response, and verify D1L packet count increases while the separate COM11 bot status shows fresh DM/contact movement.
+4. Run `mesh send dm <fingerprint> mesh_visibility_test`, wait for the controlled peer response, and verify D1L packet count increases. If an explicitly allowed controlled-peer status receipt is used, also require fresh DM/contact movement there.
 5. Verify `health` remains `board_ready=true`, `ui_ready=true`, and reports nonzero task stack watermarks after the probe.
 6. For host proof, verify the simulator emits `mesh_roles_sheet`, `mesh_rooms_page`, and `mesh_repeaters_page`; each button target is at least 44x44, source rows stay contained in the list panel, and no Mesh Roles action is RF-capable or destructive.
 7. On exact Actions-built COM12 firmware with retained packet/route data still populated, capture the three read-only aliases `ui scroll-probe mesh_roles`, `ui scroll-probe mesh_rooms`, and `ui scroll-probe mesh_repeaters`. The probe timeout must accommodate rebuilding a full Packet view without timing out, static nested pages must synchronously flush the requested page before reporting completion, and a timed-out request must retain its in-flight owner until its late completion is published so no later request can consume stale evidence. Verify capture metadata reports matching firmware/host CRCs, `public_rf_tx=false`, and `formats_sd=false`.

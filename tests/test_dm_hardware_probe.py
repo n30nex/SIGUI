@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts import probe_d1l_dm
 from scripts.smoke_d1l import expected_command_name
 
@@ -16,11 +18,16 @@ def test_dm_probe_dry_run_is_dm_only():
     report = probe_d1l_dm.dry_run_report(
         "0BF0A701D5AE2DB6",
         "unit_token",
-        Path(r"F:\Meshcorebot\logs\meshcorebot.status.json"),
-        "COM11",
+        Path("peer-status.json"),
+        "COM17",
     )
 
     assert report["ok"] is True
+    assert report["schema"] == probe_d1l_dm.DM_PROBE_SCHEMA == 2
+    assert report["hardware_required"] is False
+    assert report["physical_observed"] is False
+    assert report["dry_run"] is True
+    assert report["dm_rf_tx"] is False
     assert report["public_rf_transmit"] is False
     assert any(command == "mesh send dm 0BF0A701D5AE2DB6 unit_token" for command in report["commands"])
     assert not any(command.startswith("mesh send public ") for command in report["commands"])
@@ -28,11 +35,11 @@ def test_dm_probe_dry_run_is_dm_only():
 
 def test_dm_probe_report_checks_d1l_and_meshbot_evidence():
     before = {
-        "serial": {"active_port": "COM11", "meshcore_connected": True},
+        "serial": {"active_port": "COM17", "meshcore_connected": True},
         "counters": {"rx_contact_total": 7, "rx_log_total": 20},
     }
     after = {
-        "serial": {"active_port": "COM11", "meshcore_connected": True},
+        "serial": {"active_port": "COM17", "meshcore_connected": True},
         "counters": {"rx_contact_total": 8, "rx_log_total": 23},
     }
     steps = [
@@ -53,21 +60,27 @@ def test_dm_probe_report_checks_d1l_and_meshbot_evidence():
     ]
 
     report = probe_d1l_dm.build_report(
-        port="COM7",
+        port="COM12",
         baud=115200,
-        bot_status_path=Path("status.json"),
-        bot_port="COM11",
+        peer_status_path=Path("status.json"),
+        peer_port="COM17",
         fingerprint="0BF0A701D5AE2DB6",
         token="unit_token",
         commands=[step["command"] for step in steps],
         steps=steps,
-        bot_before=before,
-        bot_after_dm_wait=after,
-        bot_after=after,
+        peer_before=before,
+        peer_after_dm_wait=after,
+        peer_after=after,
         min_contact_delta=1,
     )
 
     assert report["ok"] is True
+    assert report["schema"] == probe_d1l_dm.DM_PROBE_SCHEMA == 2
+    assert report["hardware_required"] is True
+    assert report["physical_observed"] is True
+    assert report["dry_run"] is False
+    assert report["dm_rf_tx"] is True
+    assert report["controlled_peer"]["port"] == "COM17"
     assert report["deltas"]["rx_contact_total"] == 1
     assert report["checks"]["no_public_commands"] is True
     assert report["checks"]["route_trace_has_target"] is True
@@ -117,3 +130,19 @@ def test_dm_probe_does_not_retry_dm_send_timeout(monkeypatch):
     assert result["ok"] is False
     assert calls == ["mesh send dm 0BF0A701D5AE2DB6 token"]
     assert ser.reset_count == 0
+
+
+@pytest.mark.parametrize(
+    "port",
+    ["COM8", " com11 ", r"\\.\COM29", "//?/COM11"],
+)
+def test_dm_probe_rejects_forbidden_d1l_or_peer_ports(port):
+    with pytest.raises(ValueError, match="forbidden"):
+        probe_d1l_dm.enforce_port_policy(port, "COM17")
+    with pytest.raises(ValueError, match="forbidden"):
+        probe_d1l_dm.enforce_port_policy("COM12", port)
+
+
+def test_dm_probe_rejects_non_serial_peer_port():
+    with pytest.raises(ValueError, match="invalid controlled-peer port"):
+        probe_d1l_dm.enforce_port_policy("COM12", "COM_DISABLED")

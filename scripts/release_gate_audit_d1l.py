@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -281,14 +282,31 @@ NESTED_COMMIT_FIELDS = (
 )
 COMMIT_METADATA_CONTAINERS = ("git", "artifact", "firmware", "build", "source", "workflow", "github", "metadata")
 GENERIC_SHA_COMMIT_CONTAINERS = {"git", "workflow", "github"}
+FORBIDDEN_PORTS = {"COM" + str(number) for number in (8, 11, 29)}
+REQUIRED_DM_PROBE_CHECKS = {
+    "controlled_peer_status_connected",
+    "send_ok",
+    "messages_dm_has_token",
+    "packets_search_has_token",
+    "route_trace_has_target",
+    "controlled_peer_rx_contact_delta",
+    "health_ready",
+    "no_public_commands",
+}
+REQUIRED_FULL_RF_CHECKS = {
+    "identity_public_key_matches",
+    "controlled_peer_observed",
+    "outbound_dm",
+    "inbound_dm",
+    "ack_path",
+    "direct_route",
+    "health_ready",
+    "no_public_commands",
+}
 
 
 def default_d1l_port() -> str:
     return "COM" + "12"
-
-
-def default_meshbot_port() -> str:
-    return "COM" + "11"
 
 
 def default_rp2040_port() -> str:
@@ -305,6 +323,26 @@ def default_rp2040_hardware_dir() -> str:
 
 def default_wp01_dir() -> str:
     return str(Path("artifacts") / "hardware" / "wp01")
+
+
+def normalize_port(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().upper().replace("/", "\\")
+    for prefix in ("\\\\.\\", "\\\\?\\"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            break
+    return normalized
+
+
+def allowed_port(value: object) -> bool:
+    normalized = normalize_port(value)
+    return (
+        normalized is not None
+        and re.fullmatch(r"COM[1-9][0-9]*", normalized) is not None
+        and normalized not in FORBIDDEN_PORTS
+    )
 
 
 @dataclass
@@ -1882,13 +1920,208 @@ def scroll_probe_ok(data: dict, expected_port: str) -> bool:
     )
 
 
-def dm_probe_ok(data: dict, expected_port: str, expected_bot_port: str) -> bool:
+def real_hardware_rf_boundary_ok(data: dict, expected_port: str) -> bool:
+    git = data.get("git") if isinstance(data.get("git"), dict) else {}
+    return (
+        data.get("schema") == 2
+        and data.get("hardware_required") is True
+        and data.get("physical_observed") is True
+        and data.get("dry_run") is False
+        and data.get("simulated") is False
+        and data.get("simulation") is False
+        and data.get("source_inspection") is False
+        and data.get("execution_complete") is True
+        and data.get("dm_rf_tx") is True
+        and data.get("public_rf_tx") is False
+        and data.get("public_rf_transmit") is False
+        and data.get("formats_sd") is False
+        and allowed_port(expected_port)
+        and normalize_port(data.get("port")) == normalize_port(expected_port)
+        and git.get("dirty") is False
+    )
+
+
+def controlled_peer_evidence_ok(
+    data: dict,
+    expected_port: str,
+    expected_peer_port: str | None,
+    *,
+    require_status: bool,
+) -> bool:
+    peer = data.get("controlled_peer")
+    if not isinstance(peer, dict):
+        return False
+    fingerprint = data.get("target_fingerprint")
+    if (
+        not isinstance(fingerprint, str)
+        or re.fullmatch(r"[0-9A-Fa-f]{16}", fingerprint) is None
+        or peer.get("fingerprint") != fingerprint
+    ):
+        return False
+    source = peer.get("evidence_source")
+    peer_port = normalize_port(peer.get("port"))
+    expected_peer = normalize_port(expected_peer_port)
+    if source == "d1l_bidirectional_rf":
+        return (
+            not require_status
+            and peer_port is None
+            and expected_peer is None
+        )
+    if source != "explicit_peer_status":
+        return False
+    return (
+        peer_port is not None
+        and allowed_port(peer_port)
+        and peer_port != normalize_port(expected_port)
+        and (expected_peer is None or peer_port == expected_peer)
+        and isinstance(peer.get("status_path"), str)
+        and bool(peer["status_path"].strip())
+    )
+
+
+def completed_hardware_steps_ok(data: dict, commands: list[str]) -> bool:
+    steps = data.get("steps")
+    return (
+        isinstance(steps, list)
+        and bool(steps)
+        and len(steps) == len(commands)
+        and all(
+            isinstance(step, dict)
+            and step.get("command") == command
+            and isinstance(step.get("result"), dict)
+            and step["result"].get("ok") is True
+            for step, command in zip(steps, commands, strict=True)
+        )
+    )
+
+
+def dm_probe_ok(
+    data: dict,
+    expected_port: str,
+    expected_peer_port: str | None = None,
+) -> bool:
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    commands = data.get("commands_sent")
     return (
         data.get("ok") is True
-        and data.get("port") == expected_port
-        and data.get("meshbot_expected_port") == expected_bot_port
-        and data.get("public_rf_transmit") is False
-        and all_checks_true(data)
+        and data.get("mode") == "hardware-dm-probe"
+        and real_hardware_rf_boundary_ok(data, expected_port)
+        and controlled_peer_evidence_ok(
+            data,
+            expected_port,
+            expected_peer_port,
+            require_status=True,
+        )
+        and isinstance(commands, list)
+        and bool(commands)
+        and all(isinstance(command, str) for command in commands)
+        and not any(command.strip().lower().startswith("mesh send public ") for command in commands)
+        and completed_hardware_steps_ok(data, commands)
+        and isinstance(data.get("token"), str)
+        and bool(data["token"])
+        and data["token"] in json.dumps(data["steps"], sort_keys=True)
+        and all(checks.get(name) is True for name in REQUIRED_DM_PROBE_CHECKS)
+    )
+
+
+def outbound_dm_gate(
+    hardware_dir: Path,
+    root: Path,
+    commit: str | None,
+    expected_port: str,
+    expected_peer_port: str | None,
+) -> GateResult:
+    artifact = newest_commit_json(
+        hardware_dir,
+        commit,
+        "rf_full_acceptance*.json",
+        "dm_probe_*.json",
+    )
+    data = read_json(artifact)
+    mode = data.get("mode") if data else None
+    if mode == "rf-full-acceptance":
+        valid = full_rf_acceptance_ok(data, expected_port, expected_peer_port)
+    else:
+        valid = dm_probe_ok(data, expected_port, expected_peer_port)
+    ok = bool(artifact and data and valid)
+    return GateResult(
+        "outbound_dm_controlled_peer",
+        "P0",
+        ok,
+        "D1L outbound DM proof with a controlled peer",
+        [rel(artifact, root)] if artifact else [],
+        "Exact-commit outbound D1L DM proof with a controlled peer passes."
+        if ok
+        else "No exact-commit, real-hardware outbound D1L DM proof with an allowed controlled peer was found.",
+        {
+            "path_found": bool(artifact),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": mode,
+            "port": data.get("port") if data else None,
+            "peer_evidence_source": (
+                data.get("controlled_peer", {}).get("evidence_source")
+                if isinstance(data.get("controlled_peer"), dict)
+                else None
+            ),
+        },
+    )
+
+
+def full_rf_acceptance_ok(
+    data: dict,
+    expected_port: str,
+    expected_peer_port: str | None = None,
+) -> bool:
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    steps = data.get("steps")
+    commands = [
+        step.get("command")
+        for step in steps
+        if isinstance(step, dict) and isinstance(step.get("command"), str)
+    ] if isinstance(steps, list) else []
+    source = (
+        data.get("controlled_peer", {}).get("evidence_source")
+        if isinstance(data.get("controlled_peer"), dict)
+        else None
+    )
+    require_status = source == "explicit_peer_status"
+    tokens = [
+        data.get("outbound_token"),
+        data.get("inbound_token"),
+        data.get("direct_token"),
+    ]
+    return (
+        data.get("ok") is True
+        and data.get("mode") == "rf-full-acceptance"
+        and real_hardware_rf_boundary_ok(data, expected_port)
+        and controlled_peer_evidence_ok(
+            data,
+            expected_port,
+            expected_peer_port,
+            require_status=require_status,
+        )
+        and isinstance(steps, list)
+        and bool(steps)
+        and len(commands) == len(steps)
+        and completed_hardware_steps_ok(data, commands)
+        and not any(command.strip().lower().startswith("mesh send public ") for command in commands)
+        and all(
+            any(command.startswith(prefix) for command in commands)
+            for prefix in (
+                "identity status",
+                "mesh send dm ",
+                "messages dm ",
+                "packets",
+                "routes trace ",
+                "health",
+            )
+        )
+        and all(isinstance(token, str) and bool(token) for token in tokens)
+        and len(set(tokens)) == len(tokens)
+        and all(token in json.dumps(steps, sort_keys=True) for token in tokens)
+        and isinstance(data.get("inbound_seen_at"), str)
+        and bool(data["inbound_seen_at"].strip())
+        and all(checks.get(name) is True for name in REQUIRED_FULL_RF_CHECKS)
     )
 
 
@@ -3864,7 +4097,13 @@ def manual_evidence_gate(hardware_dir: Path, root: Path, commit: str | None) -> 
     )
 
 
-def full_rf_gate(hardware_dir: Path, root: Path, commit: str | None) -> GateResult:
+def full_rf_gate(
+    hardware_dir: Path,
+    root: Path,
+    commit: str | None,
+    expected_port: str,
+    expected_peer_port: str | None,
+) -> GateResult:
     candidates = [
         newest_commit_json(hardware_dir, commit, "rf_full_acceptance*.json", "*ack_path*.json", "*direct_route*.json", "*inbound_dm*.json")
     ]
@@ -3872,10 +4111,10 @@ def full_rf_gate(hardware_dir: Path, root: Path, commit: str | None) -> GateResu
     passing = False
     for path in evidence_paths:
         data = read_json(path)
-        checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
-        passing = data.get("ok") is True and all(
-            checks.get(name) is True
-            for name in ("inbound_dm", "ack_path", "direct_route")
+        passing = full_rf_acceptance_ok(
+            data,
+            expected_port,
+            expected_peer_port,
         )
         if passing:
             break
@@ -3887,7 +4126,12 @@ def full_rf_gate(hardware_dir: Path, root: Path, commit: str | None) -> GateResu
         [rel(path, root) for path in evidence_paths],
         "Full RF/DM acceptance evidence is present."
         if passing else "Only partial RF/DM evidence is present; inbound DM, ACK/PATH, and direct-route proof remain open.",
-        {"candidate_count": len(evidence_paths)},
+        {
+            "candidate_count": len(evidence_paths),
+            "strict_schema": 2,
+            "expected_port": normalize_port(expected_port),
+            "expected_peer_port": normalize_port(expected_peer_port),
+        },
     )
 
 
@@ -4518,14 +4762,12 @@ def build_audit(args: argparse.Namespace) -> dict:
         )
     )
     gates.append(
-        simple_json_ok_gate(
-            "outbound_dm_com11",
-            "D1L outbound DM proof against meshbot",
-            newest_commit_json(hardware_dir, args.commit, "dm_probe_*.json"),
+        outbound_dm_gate(
+            hardware_dir,
             root,
-            lambda data: dm_probe_ok(data, args.d1l_port, args.meshbot_port),
-            "Outbound D1L-to-meshbot DM proof passes.",
-            "No passing outbound D1L-to-meshbot DM proof artifact was found.",
+            args.commit,
+            args.d1l_port,
+            args.mesh_peer_port,
         )
     )
     gates.append(route_probe_gate(hardware_dir, root, args.commit, args.d1l_port))
@@ -4557,7 +4799,15 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(sd_32gb_matrix_gate(sd_matrix_roots, root, args.commit, args.d1l_port))
     gates.append(full_soak_gate(soak_dir, root, args.commit))
     gates.append(manual_evidence_gate(hardware_dir, root, args.commit))
-    gates.append(full_rf_gate(hardware_dir, root, args.commit))
+    gates.append(
+        full_rf_gate(
+            hardware_dir,
+            root,
+            args.commit,
+            args.d1l_port,
+            args.mesh_peer_port,
+        )
+    )
     gates.append(docs_freshness_gate(root, args.commit, args.github_run_id))
 
     p0_gates = [gate for gate in gates if gate.severity == "P0"]
@@ -4595,7 +4845,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--commit")
     parser.add_argument("--d1l-port", default=default_d1l_port())
     parser.add_argument("--rp2040-port", default=default_rp2040_port())
-    parser.add_argument("--meshbot-port", default=default_meshbot_port())
+    parser.add_argument(
+        "--mesh-peer-port",
+        "--meshbot-port",
+        dest="mesh_peer_port",
+        default=os.environ.get("MESH_PEER_PORT"),
+        help="Optional explicit, allowed local serial port for controlled-peer status evidence.",
+    )
     parser.add_argument("--hardware-dir", default=default_hardware_dir())
     parser.add_argument("--rp2040-hardware-dir", default=default_rp2040_hardware_dir())
     parser.add_argument("--wp01-dir", default=default_wp01_dir())

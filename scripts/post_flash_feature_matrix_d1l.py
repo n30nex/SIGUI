@@ -88,7 +88,7 @@ UNCOVERED_FULL_FEATURE_GATES = (
     "ui_corruption_probe",
     "ui_pixel_capture",
     "ui_compose_keyboard_capture",
-    "outbound_dm_com11",
+    "outbound_dm_controlled_peer",
     "controlled_peer_rf_and_admin_acceptance",
     "ble_companion_transport_acceptance",
     "live_map_pan_zoom_cache_acceptance",

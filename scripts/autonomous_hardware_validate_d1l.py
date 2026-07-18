@@ -2168,8 +2168,6 @@ def release_gate_command(ctx: RunContext, out: Path) -> list[str]:
         ctx.d1l_port,
         "--rp2040-port",
         ctx.rp2040_port,
-        "--meshbot-port",
-        "COM_DISABLED",
         "--hardware-dir",
         str(ctx.hardware_dir),
         "--rp2040-hardware-dir",
