@@ -339,3 +339,31 @@ release is authorized by the evidence currently recorded.
   runner validates its identity and policy. COM12 also remains unopened.
 - No firmware was built locally, no serial port was opened, no firmware was
   flashed, no RF transmission occurred, and no SD operation occurred.
+
+### `2026-07-18T16:04:58-04:00`
+
+- The controlled peer on COM15 was identified through its already-running
+  OpenClaw listener status rather than by taking over the port. The listener
+  reports `serial.port=COM15`, `mesh_connected=true`, public-key prefix
+  `024999dedfd2`, and deterministic direct-message handling: a DM containing
+  `test` receives `Test OK DM.`. A bounded direct open attempt was denied
+  before the port opened because the listener owns it; no RF action occurred.
+- The release workflow now writes
+  `d1l-host-artifacts/build-inputs/d1l-candidate-scope.json` before the exact
+  host build-input checksum manifest. The receipt binds the source commit,
+  run ID and attempt, canonical repository/workflow, manual-dispatch event,
+  ESP32-only scope, `release_profile=core_1_0`, and disabled SD history. A
+  manual false dispatch cannot be changed by last-commit path inference.
+- The host workflow also runs the separate Core audit in explicitly
+  non-closing dry-run mode and passes explicit Core/disabled arguments to the
+  package generator. Focused workflow validation passed all eight contract
+  tests. Commit `8901b42` is pushed; branch pushes do not trigger `d1l-ci`.
+- R8 still holds candidate freeze for fail-closed QA gaps under active repair:
+  executable COM15/OpenClaw RF adaptation, raw/manual/cold-cycle and operator
+  receipt producers, package-path containment and license-notice checks, and
+  the narrow pre-tag sequencing rule for release-tracking issue #71. No full
+  host suite or final Actions candidate has run.
+- COM12 remains present after the operator's pre-candidate power cycle. That
+  cycle is not release evidence. No firmware was built locally, COM12 was not
+  opened or flashed, no RF transmission occurred, and no SD operation
+  occurred.
