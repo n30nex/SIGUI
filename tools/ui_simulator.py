@@ -5696,7 +5696,11 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
             "route_trace_real_packet": True,
             "route_trace_requires_explicit_touch": True,
             "route_trace_current_boot_proven_path_required": True,
-            "route_trace_one_byte_hash_only": True,
+            "route_trace_one_byte_hash_only": False,
+            "route_trace_contact_path_hash_bytes_supported": [1, 2],
+            "route_trace_wire_hash_bytes_supported": [1, 2, 4, 8],
+            "route_trace_flags_supported": [0, 1, 2, 3],
+            "route_trace_contact_route_hash_bytes_rejected": [3],
             "route_trace_hardware_verified": False,
             "route_trace_public_rf_tx": False,
         }

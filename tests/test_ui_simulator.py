@@ -172,7 +172,11 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert trace["route_trace_real_packet"] is True
     assert trace["route_trace_requires_explicit_touch"] is True
     assert trace["route_trace_current_boot_proven_path_required"] is True
-    assert trace["route_trace_one_byte_hash_only"] is True
+    assert trace["route_trace_one_byte_hash_only"] is False
+    assert trace["route_trace_contact_path_hash_bytes_supported"] == [1, 2]
+    assert trace["route_trace_wire_hash_bytes_supported"] == [1, 2, 4, 8]
+    assert trace["route_trace_flags_supported"] == [0, 1, 2, 3]
+    assert trace["route_trace_contact_route_hash_bytes_rejected"] == [3]
     assert trace["route_trace_hardware_verified"] is False
     assert trace["route_trace_public_rf_tx"] is False
 
