@@ -248,6 +248,24 @@ def test_console_discloses_trace_boundary_and_keeps_dm_path_probe_truthful() -> 
     assert "one_byte_hash_only=false" in test_plan
     assert "trace_wire_hash_bytes_supported=[1,2,4,8]" in test_plan
     assert "contact_trace_path_hash_bytes_supported=[1,2]" in test_plan
+    regression = test_plan.split(
+        "For the current contact-targeted TRACE software regression", 1
+    )[1].split("\n\n", 1)[0]
+    physical = test_plan.split(
+        "`routes probe` remains a DM token/PATH helper", 1
+    )[1].split("\n\n", 1)[0]
+    assert "opaque correlation code" in regression
+    assert "opaque authentication" not in regression
+    assert "one- and two-byte hash widths with request flags 0 and 1" in physical
+    assert (
+        "flags 0 through 3, representing 1-, 2-, 4-, and 8-byte hashes"
+        in physical
+    )
+    assert "three-byte contact route must fail closed" in physical
+    assert "opaque correlation code" in physical
+    assert "opaque authentication" not in physical
+    assert "controlled multi-hop official-peer RF" in physical
+    assert "exact-candidate hardware acceptance" in physical
 
 
 def test_trace_helper_and_service_are_exact_production_binding_sources() -> None:
