@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
+
 enum {
     COLOR_TEXT = 0xF4F7FB,
     COLOR_MUTED = 0x8EA0AE,
@@ -21,6 +23,40 @@ _Static_assert(sizeof(d1l_ui_more_view_model_t) <= D1L_UI_MORE_VIEW_MODEL_MAX_BY
 static bool text_equals(const char *value, const char *expected)
 {
     return value && expected && strcmp(value, expected) == 0;
+}
+
+void d1l_ui_more_view_apply_release_profile(
+    d1l_ui_more_view_input_t *input)
+{
+    if (!input) {
+        return;
+    }
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL)) {
+        input->wifi_build_enabled = false;
+        input->wifi_enabled = false;
+        input->wifi_connected = false;
+        input->wifi_connecting = false;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE)) {
+        input->ble_build_enabled = false;
+        input->ble_transport_supported = false;
+        input->ble_companion_enabled = false;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        input->map_location_set = false;
+        input->map_tile_cache_ready = false;
+        input->map_tile_render_supported = false;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+        input->storage_sd_present = false;
+        input->storage_sd_data_root_ready = false;
+        input->storage_sd_needs_fat32 = false;
+        input->storage_setup_required = false;
+        input->storage_retained_sd_degraded = false;
+        input->storage_sd_state = "internal";
+        input->storage_setup_action = "forced_nvs";
+    }
 }
 
 static void copy_text(char *destination, size_t capacity, const char *source)
@@ -196,7 +232,7 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
     const bool storage_ready = input->storage_data_enabled ||
         input->storage_sd_data_root_ready;
     const char *storage_status = storage_reconnecting ? "Reconnecting" :
-        (sd_attention ? "Needs attention" :
+        (storage_attention ? "Needs attention" :
          (storage_ready ? "Ready" :
           (input->storage_setup_required ? "Needs setup" :
            (input->storage_sd_present ? "Detected" : "Internal storage"))));
@@ -236,10 +272,10 @@ bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
                             storage_attention ? COLOR_WARNING_TEXT : COLOR_AMBER,
                             storage_attention, 2U);
     set_item(&category->items[0], "SD Card", storage_status,
-             sd_attention ? COLOR_RED :
+             storage_attention ? COLOR_RED :
              (storage_reconnecting ? COLOR_AMBER :
               (storage_ready ? COLOR_GREEN : COLOR_TEXT)),
-             D1L_UI_SETTINGS_ACTION_STORAGE, sd_attention);
+             D1L_UI_SETTINGS_ACTION_STORAGE, storage_attention);
     set_item(&category->items[1], "Map options", map_status,
              input->map_tile_cache_ready ? COLOR_GREEN : COLOR_TEXT,
              D1L_UI_SETTINGS_ACTION_MAP_TILES, false);

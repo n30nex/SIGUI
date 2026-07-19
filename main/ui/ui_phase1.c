@@ -16,6 +16,7 @@
 #include "rom/cache.h"
 
 #include "app/app_model.h"
+#include "app/release_profile.h"
 #include "app/settings_model.h"
 #include "bsp_lcd.h"
 #include "d1l_config.h"
@@ -118,6 +119,7 @@ static bool s_onboarding_probe_suppressed;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
+static bool s_compose_probe_send_suppressed;
 static uint64_t s_compose_channel_id;
 static char s_compose_channel_name[D1L_CHANNEL_NAME_LEN];
 static d1l_ui_messages_mode_t s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
@@ -241,9 +243,31 @@ static const d1l_ui_dock_item_t k_dock_items[] = {
     {D1L_UI_TAB_SETTINGS, "Tools", LV_SYMBOL_SETTINGS},
 };
 
+static const d1l_ui_dock_item_t k_core_dock_items[] = {
+    {D1L_UI_TAB_HOME, "Home", LV_SYMBOL_HOME},
+    {D1L_UI_TAB_MESSAGES, "Messages", LV_SYMBOL_ENVELOPE},
+    {D1L_UI_TAB_NODES, "Nodes", LV_SYMBOL_LIST},
+    {D1L_UI_TAB_PACKETS, "Packets", LV_SYMBOL_LIST},
+    {D1L_UI_TAB_SETTINGS, "Settings", LV_SYMBOL_SETTINGS},
+};
+
 _Static_assert(sizeof(s_dock_buttons) / sizeof(s_dock_buttons[0]) ==
                    sizeof(k_dock_items) / sizeof(k_dock_items[0]),
                "dock button and item counts must match");
+_Static_assert(sizeof(k_core_dock_items) / sizeof(k_core_dock_items[0]) ==
+                   sizeof(k_dock_items) / sizeof(k_dock_items[0]),
+               "Core and development docks must have matching item counts");
+
+static const d1l_ui_dock_item_t *active_dock_items(size_t *out_count)
+{
+    const d1l_ui_dock_item_t *items =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP) ?
+            k_dock_items : k_core_dock_items;
+    if (out_count) {
+        *out_count = sizeof(k_dock_items) / sizeof(k_dock_items[0]);
+    }
+    return items;
+}
 
 typedef struct {
     uint32_t rx_packets;
@@ -526,6 +550,9 @@ static bool map_render_input_changed_from_rendered(const d1l_app_snapshot_t *sna
 
 static void request_tab_switch(d1l_ui_tab_t tab)
 {
+    if (!d1l_ui_screen_available(tab)) {
+        return;
+    }
     d1l_ui_navigation_request(tab);
 }
 
@@ -776,6 +803,42 @@ static bool compose_probe_target_from_name(const char *name, char *out_target,
                                            size_t out_target_len)
 {
     return d1l_ui_keyboard_normalize_probe_target(name, out_target, out_target_len);
+}
+
+static bool compose_probe_target_available(const char *target)
+{
+    if (!target) {
+        return false;
+    }
+    if (strcmp(target, "public") == 0 ||
+        strcmp(target, "public_long") == 0 ||
+        strcmp(target, "public_search") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_PUBLIC_MESSAGES);
+    }
+    if (strcmp(target, "dm") == 0 ||
+        strcmp(target, "dm_long") == 0 ||
+        strcmp(target, "dm_search") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_DIRECT_MESSAGES);
+    }
+    if (strcmp(target, "packet_search") == 0) {
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_PACKETS);
+    }
+    if (strcmp(target, "contact_edit") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_BASIC_CONTACTS);
+    }
+    if (strcmp(target, "map_location") == 0) {
+        return d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP) &&
+               d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION);
+    }
+    if (strcmp(target, "wifi_ssid") == 0 ||
+        strcmp(target, "wifi_password") == 0) {
+        return d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL);
+    }
+    return strcmp(target, "onboarding") == 0;
 }
 
 static void request_full_screen_repaint(void)
@@ -1263,11 +1326,13 @@ static lv_obj_t *create_dock_button(lv_obj_t *parent,
 static void update_dock_selected_state(void)
 {
     const d1l_ui_tab_t active = d1l_ui_navigation_active();
-    for (size_t i = 0; i < sizeof(k_dock_items) / sizeof(k_dock_items[0]); ++i) {
+    size_t item_count = 0U;
+    const d1l_ui_dock_item_t *items = active_dock_items(&item_count);
+    for (size_t i = 0; i < item_count; ++i) {
         if (!s_dock_buttons[i]) {
             continue;
         }
-        if (k_dock_items[i].tab == active) {
+        if (items[i].tab == active) {
             lv_obj_add_state(s_dock_buttons[i], LV_STATE_CHECKED);
         } else {
             lv_obj_clear_state(s_dock_buttons[i], LV_STATE_CHECKED);
@@ -1390,6 +1455,7 @@ static void hide_compose_sheet(void)
 {
     d1l_ui_modal_hide(s_compose_sheet);
     s_onboarding_probe_suppressed = false;
+    s_compose_probe_send_suppressed = false;
     restore_dock_for_active_tab();
     s_compose_dm = false;
     s_compose_channel_id = 0U;
@@ -1644,6 +1710,7 @@ static void home_view_input_from_snapshot(
         .storage_sd_state = snapshot->storage_sd_state,
         .storage_setup_action = snapshot->storage_setup_action,
     };
+    d1l_ui_home_view_apply_release_profile(out_input);
 }
 
 static void more_view_input_from_snapshot(
@@ -1686,6 +1753,7 @@ static void more_view_input_from_snapshot(
         .timezone_label = snapshot->timezone_label,
         .firmware_version = D1L_FIRMWARE_VERSION,
     };
+    d1l_ui_more_view_apply_release_profile(out_input);
 }
 
 static void storage_view_input_from_snapshot(
@@ -1749,10 +1817,25 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
                   snapshot->mesh_state ? snapshot->mesh_state : "starting");
     d1l_ui_home_view_input_t home_input = {0};
     home_view_input_from_snapshot(snapshot, &home_input);
-    label_set_fmt(s_identity_label, "Wi-Fi %s  BLE %s  SD %s",
-                  snapshot->wifi_state ? snapshot->wifi_state : "off",
-                  snapshot->ble_state ? snapshot->ble_state : "off",
-                  d1l_ui_home_sd_state(&home_input));
+    const bool connectivity_controls_available =
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) ||
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
+    if (!connectivity_controls_available) {
+        if (d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+            label_set_fmt(s_identity_label, "NVS retained  SD %s",
+                          d1l_ui_home_sd_state(&home_input));
+        } else {
+            label_set_fmt(s_identity_label, "NVS %s  USB recovery",
+                          snapshot->storage_data_enabled ?
+                              "retained" : "ready");
+        }
+    } else {
+        label_set_fmt(s_identity_label, "Wi-Fi %s  BLE %s  SD %s",
+                      snapshot->wifi_state ? snapshot->wifi_state : "off",
+                      snapshot->ble_state ? snapshot->ble_state : "off",
+                      d1l_ui_home_sd_state(&home_input));
+    }
 }
 
 static void format_snr_tenths(char *dest, size_t dest_size, int snr_tenths)
@@ -1932,6 +2015,9 @@ static bool radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
 static void handle_home_action(d1l_ui_home_action_t action, void *context)
 {
     (void)context;
+    if (!d1l_ui_home_action_available(action)) {
+        return;
+    }
     switch (action) {
     case D1L_UI_HOME_ACTION_MESSAGES:
         s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
@@ -1946,6 +2032,9 @@ static void handle_home_action(d1l_ui_home_action_t action, void *context)
         break;
     case D1L_UI_HOME_ACTION_MORE:
         request_tab_switch(D1L_UI_TAB_SETTINGS);
+        break;
+    case D1L_UI_HOME_ACTION_PACKETS:
+        request_tab_switch(D1L_UI_TAB_PACKETS);
         break;
     case D1L_UI_HOME_ACTION_RADIO:
         open_radio_settings_event_cb(NULL);
@@ -1980,6 +2069,9 @@ static void render_home_screen(lv_obj_t *content, const d1l_app_snapshot_t *snap
 static void handle_settings_action(d1l_ui_settings_action_t action, void *context)
 {
     (void)context;
+    if (!d1l_ui_settings_action_available(action)) {
+        return;
+    }
     switch (action) {
     case D1L_UI_SETTINGS_ACTION_PACKETS:
         request_tab_switch(D1L_UI_TAB_PACKETS);
@@ -2163,15 +2255,15 @@ static d1l_ui_compose_eligibility_t compose_eligibility_for_text(
     d1l_channel_info_t channel = {0};
     const bool channel_found = s_compose_dm || snapshot_find_channel(
         &s_snapshot, s_compose_channel_id, &channel);
-    const bool channel_sendable = s_compose_dm ||
-        (channel_found && channel.enabled);
+    const bool channel_sendable = !s_compose_probe_send_suppressed &&
+        (s_compose_dm || (channel_found && channel.enabled));
     bool contact_found = !s_compose_dm;
     bool contact_sendable = !s_compose_dm;
     if (s_compose_dm && s_compose_contact.fingerprint[0] != '\0') {
         d1l_contact_entry_t current = {0};
         contact_found = d1l_app_model_find_contact(
             s_compose_contact.fingerprint, &current) == ESP_OK;
-        contact_sendable = contact_found &&
+        contact_sendable = !s_compose_probe_send_suppressed && contact_found &&
             d1l_contact_store_can_dm(&current);
         if (contact_sendable) {
             s_compose_contact = current;
@@ -2275,6 +2367,11 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
                                        const char *title,
                                        const char *placeholder)
 {
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT) &&
+        channel_id != D1L_CHANNEL_PUBLIC_ID) {
+        return false;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     d1l_channel_info_t channel = {0};
     if (!snapshot_find_channel(&s_snapshot, channel_id, &channel)) {
@@ -2301,6 +2398,7 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
+    s_compose_probe_send_suppressed = false;
     s_compose_dm = false;
     s_compose_channel_id = channel.channel_id;
     snprintf(s_compose_channel_name, sizeof(s_compose_channel_name), "%s",
@@ -2357,16 +2455,10 @@ static void mark_public_read_event_cb(lv_event_t *event)
     }
 }
 
-static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
+static void present_dm_compose_sheet(const d1l_contact_entry_t *selected,
+                                     bool probe_only)
 {
-    d1l_contact_entry_t selected = {0};
-    if (entry) {
-        selected = *entry;
-    }
-    const d1l_ui_dm_identity_eligibility_t eligibility =
-        dm_identity_for_contact(entry, &selected);
-    if (!eligibility.can_open_compose) {
-        show_dm_identity_reason(eligibility);
+    if (!selected) {
         return;
     }
     hide_sheet();
@@ -2384,15 +2476,16 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
+    s_compose_probe_send_suppressed = probe_only;
     s_compose_dm = true;
     s_compose_channel_id = 0U;
     s_compose_channel_name[0] = '\0';
     s_compose_last_send_error = ESP_OK;
-    s_compose_contact = selected;
+    s_compose_contact = *selected;
     if (s_compose_title) {
         char title[48];
         snprintf(title, sizeof(title), "DM %.32s",
-                 selected.alias[0] ? selected.alias : selected.fingerprint);
+                 selected->alias[0] ? selected->alias : selected->fingerprint);
         lv_label_set_text(s_compose_title, title);
     }
     if (s_compose_sheet) {
@@ -2406,6 +2499,21 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         update_compose_counter();
     }
     request_full_screen_repaint();
+}
+
+static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
+{
+    d1l_contact_entry_t selected = {0};
+    if (entry) {
+        selected = *entry;
+    }
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        dm_identity_for_contact(entry, &selected);
+    if (!eligibility.can_open_compose) {
+        show_dm_identity_reason(eligibility);
+        return;
+    }
+    present_dm_compose_sheet(&selected, false);
 }
 
 static void open_node_dm_for(const d1l_node_view_t *view)
@@ -2545,7 +2653,7 @@ static void contact_sheets_action_handler(
     void *context)
 {
     (void)context;
-    if (!event) {
+    if (!event || !d1l_ui_contact_action_available(event->action)) {
         return;
     }
     const d1l_contact_entry_t *contact = event->contact;
@@ -2704,6 +2812,9 @@ static void close_route_trace_event_cb(lv_event_t *event)
 static void route_trace_request_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return;
+    }
     if (s_route_trace_contact.fingerprint[0] == '\0') {
         show_toast("TRACE", ESP_ERR_INVALID_STATE);
         return;
@@ -2830,6 +2941,9 @@ static void render_route_trace_sheet(void)
 static void open_route_trace_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        return;
+    }
     const d1l_contact_entry_t *contact = selected_contact();
     if (!contact) {
         show_toast("Trace", ESP_ERR_INVALID_STATE);
@@ -3829,6 +3943,9 @@ static void render_mesh_roles_sheet(void)
 static void open_mesh_roles_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        return;
+    }
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -3870,6 +3987,10 @@ static void clear_compose_event_cb(lv_event_t *event)
 static void send_compose_text(void)
 {
     if (!s_compose_textarea) {
+        return;
+    }
+    if (s_compose_probe_send_suppressed) {
+        update_compose_counter();
         return;
     }
     const char *text = lv_textarea_get_text(s_compose_textarea);
@@ -4432,17 +4553,26 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
     view_model->dm_store_state =
         messages_store_state_from_snapshot(snapshot, true);
 
-    view_model->channel_store_loaded = snapshot->channel_store_loaded;
-    view_model->channel_count = snapshot->channel_count;
-    if (view_model->channel_count > D1L_CHANNEL_STORE_CAPACITY) {
-        view_model->channel_count = D1L_CHANNEL_STORE_CAPACITY;
+    const bool channel_management_available =
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
+    view_model->channel_store_loaded =
+        channel_management_available && snapshot->channel_store_loaded;
+    if (channel_management_available) {
+        view_model->channel_count = snapshot->channel_count;
+        if (view_model->channel_count > D1L_CHANNEL_STORE_CAPACITY) {
+            view_model->channel_count = D1L_CHANNEL_STORE_CAPACITY;
+        }
+        memcpy(view_model->channels, snapshot->channels,
+               view_model->channel_count * sizeof(view_model->channels[0]));
     }
-    memcpy(view_model->channels, snapshot->channels,
-           view_model->channel_count * sizeof(view_model->channels[0]));
-    view_model->active_channel_id = snapshot->active_channel_id;
     d1l_channel_info_t active_channel = {0};
-    if (snapshot_find_channel(snapshot, snapshot->active_channel_id,
-                              &active_channel)) {
+    bool active_channel_found = false;
+    view_model->active_channel_id = d1l_ui_messages_projected_channel_id(
+        snapshot->active_channel_id);
+    active_channel_found = snapshot_find_channel(
+        snapshot, view_model->active_channel_id, &active_channel);
+    if (active_channel_found) {
         snprintf(view_model->active_channel_name,
                  sizeof(view_model->active_channel_name), "%s",
                  active_channel.name);
@@ -4484,6 +4614,10 @@ static void messages_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot
 
 static bool show_channel_selector_sheet(void)
 {
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
+        return false;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     messages_view_model_from_snapshot(
         &s_snapshot, &s_messages_controller.rendered);
@@ -4670,7 +4804,9 @@ static void channel_management_action_handler(
     void *context)
 {
     (void)context;
-    if (!event) {
+    if (!event ||
+        !d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
         return;
     }
     const d1l_channel_info_t *channel = event->channel;
@@ -4793,7 +4929,7 @@ static void handle_messages_action(const d1l_ui_messages_action_event_t *event,
                                    void *context)
 {
     (void)context;
-    if (!event) {
+    if (!event || !d1l_ui_messages_action_available(event->action)) {
         return;
     }
     switch (event->action) {
@@ -5031,6 +5167,9 @@ static void close_map_location_sheet_event_cb(lv_event_t *event)
 
 static void map_location_textarea_event_cb(lv_event_t *event)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return;
+    }
     lv_obj_t *keyboard =
         d1l_ui_map_location_keyboard(&s_map_sheets_controller);
     lv_obj_t *latitude =
@@ -5047,6 +5186,9 @@ static void map_location_textarea_event_cb(lv_event_t *event)
 static void map_location_save_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return;
+    }
     lv_obj_t *latitude =
         d1l_ui_map_latitude_textarea(&s_map_sheets_controller);
     lv_obj_t *longitude =
@@ -5084,6 +5226,9 @@ static void map_location_save_event_cb(lv_event_t *event)
 static void map_location_clear_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return;
+    }
     esp_err_t ret = d1l_app_model_clear_map_location();
     if (ret == ESP_OK) {
         s_map_location_returns_to_options = false;
@@ -5099,6 +5244,10 @@ static void map_location_clear_event_cb(lv_event_t *event)
 
 static bool render_map_location_sheet(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP) ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return false;
+    }
     return d1l_ui_map_sheets_render_location(
         &s_map_sheets_controller, &s_snapshot, s_map_location_lat_e7,
         s_map_location_lon_e7, &callbacks);
@@ -5107,6 +5256,10 @@ static bool render_map_location_sheet(void)
 static void open_map_location_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP) ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        return;
+    }
     s_map_location_returns_to_options = false;
     d1l_app_model_snapshot(&s_snapshot);
     map_location_from_snapshot(&s_snapshot);
@@ -5146,6 +5299,9 @@ static void open_map_location_from_options_event_cb(lv_event_t *event)
 
 static bool render_map_options_sheet(d1l_ui_map_options_page_t page)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        return false;
+    }
     return d1l_ui_map_sheets_render_options(
         &s_map_sheets_controller, &s_snapshot, page, &callbacks);
 }
@@ -5153,6 +5309,9 @@ static bool render_map_options_sheet(d1l_ui_map_options_page_t page)
 static void close_map_options_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        return;
+    }
     hide_map_options_sheet();
     set_map_interactive_touch_authorized(true);
     request_tab_switch(D1L_UI_TAB_MAP);
@@ -5161,6 +5320,9 @@ static void close_map_options_sheet_event_cb(lv_event_t *event)
 static void open_map_cache_status_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        return;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     if (!render_map_options_sheet(D1L_UI_MAP_OPTIONS_CACHE_STATUS)) {
         show_toast_text("Map options unavailable", false);
@@ -5170,6 +5332,9 @@ static void open_map_cache_status_event_cb(lv_event_t *event)
 static void back_to_map_options_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        return;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     if (!render_map_options_sheet(D1L_UI_MAP_OPTIONS_ROOT)) {
         show_toast_text("Map options unavailable", false);
@@ -5179,6 +5344,9 @@ static void back_to_map_options_event_cb(lv_event_t *event)
 static void open_map_options_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        return;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     hide_sheet();
     hide_public_history_sheet();
@@ -5317,13 +5485,15 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         y += 54;
     }
 
-    y += 10;
-    lv_obj_t *roles = create_button(content, "Mesh Roles", 18, y, 130, 36,
-                                    open_mesh_roles_event_cb, NULL);
-    if (roles) {
-        lv_obj_set_style_bg_color(roles, lv_color_hex(0x12362F), 0);
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        y += 10;
+        lv_obj_t *roles = create_button(content, "Mesh Roles", 18, y, 130, 36,
+                                        open_mesh_roles_event_cb, NULL);
+        if (roles) {
+            lv_obj_set_style_bg_color(roles, lv_color_hex(0x12362F), 0);
+        }
+        y += 48;
     }
-    y += 48;
     if (snapshot->recent_route_count > 0) {
         lv_obj_t *routes = create_label(content, "Routes", 0x8EA0AE);
         lv_obj_set_pos(routes, 26, y);
@@ -5388,6 +5558,10 @@ static void radio_settings_action_handler(
 
 static bool render_radio_settings_sheet(void)
 {
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_RADIO_SETTINGS)) {
+        return false;
+    }
     return d1l_ui_radio_settings_render(
         &s_radio_settings_controller,
         s_snapshot.radio_applied,
@@ -5399,6 +5573,10 @@ static bool render_radio_settings_sheet(void)
 static void open_radio_settings_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_RADIO_SETTINGS)) {
+        return;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     if (!radio_edit_from_snapshot(&s_snapshot)) {
         hide_radio_settings_sheet();
@@ -5448,6 +5626,9 @@ static void storage_subpage_back_event_cb(lv_event_t *event)
 static void open_storage_card_status_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+        return;
+    }
     s_storage_page = D1L_STORAGE_PAGE_CARD_STATUS;
     render_storage_sheet();
     show_modal(s_storage_sheet);
@@ -5456,6 +5637,9 @@ static void open_storage_card_status_event_cb(lv_event_t *event)
 static void open_storage_data_locations_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+        return;
+    }
     s_storage_page = D1L_STORAGE_PAGE_DATA_LOCATIONS;
     render_storage_sheet();
     show_modal(s_storage_sheet);
@@ -5502,10 +5686,50 @@ static void render_storage_root(void)
     const d1l_ui_storage_hero_view_t *hero = &s_storage_view.hero;
     render_storage_header("Storage", close_storage_sheet_event_cb);
     lv_obj_t *subtitle = create_label(s_storage_sheet,
-                                      "Card and saved-data overview", 0x8EA0AE);
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY) ?
+            "Card and saved-data overview" : "Retained internal storage",
+        0x8EA0AE);
     lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
     lv_obj_set_width(subtitle, 360);
     lv_obj_set_pos(subtitle, 104, 40);
+
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+        lv_obj_t *internal = create_panel(s_storage_sheet, 16, 76, 448, 120);
+        if (internal) {
+            lv_obj_set_style_pad_all(internal, 12, 0);
+            lv_obj_t *eyebrow = create_label(
+                internal, "Current storage", 0x8EA0AE);
+            lv_obj_set_pos(eyebrow, 0, 0);
+            lv_obj_t *state = create_label(
+                internal, "Internal NVS", 0x5EEAD4);
+            lv_obj_set_style_text_font(state, &lv_font_montserrat_24, 0);
+            lv_obj_set_pos(state, 0, 26);
+            lv_obj_t *detail = create_label(
+                internal,
+                "Settings, contacts, Public and direct messages, routes, and "
+                "read markers use the retained Core store.",
+                0xE5EDF5);
+            lv_label_set_long_mode(detail, LV_LABEL_LONG_WRAP);
+            lv_obj_set_size(detail, 424, 58);
+            lv_obj_set_pos(detail, 0, 58);
+        }
+        lv_obj_t *recovery = create_panel(s_storage_sheet, 16, 212, 448, 92);
+        if (recovery) {
+            lv_obj_set_style_pad_all(recovery, 12, 0);
+            lv_obj_t *title = create_label(
+                recovery, "Recovery", 0x93C5FD);
+            lv_obj_set_pos(title, 0, 0);
+            lv_obj_t *copy = create_label(
+                recovery,
+                "Use the checksum-verified USB install and recovery guide. "
+                "Normal upgrades preserve retained state.",
+                0xE5EDF5);
+            lv_label_set_long_mode(copy, LV_LABEL_LONG_WRAP);
+            lv_obj_set_size(copy, 424, 56);
+            lv_obj_set_pos(copy, 0, 26);
+        }
+        return;
+    }
 
     lv_obj_t *hero_panel = create_panel(s_storage_sheet, 16, 64, 448, 92);
     if (hero_panel) {
@@ -5546,6 +5770,9 @@ static void render_storage_root(void)
 
 static void render_storage_card_status(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+        return;
+    }
     const d1l_ui_storage_card_view_t *card = &s_storage_view.card;
 
     render_storage_header("Card status", storage_subpage_back_event_cb);
@@ -5589,6 +5816,9 @@ static void render_storage_location_row(lv_obj_t *parent, int y,
 
 static void render_storage_data_locations(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+        return;
+    }
     render_storage_header("Data locations", storage_subpage_back_event_cb);
     lv_obj_t *subtitle = create_label(s_storage_sheet,
                                       "Where saved data is kept", 0x8EA0AE);
@@ -5609,17 +5839,23 @@ static void render_storage_data_locations(void)
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
 
+    size_t visible_index = 0U;
     for (size_t index = 0U; index < s_storage_view.location_count; ++index) {
         const d1l_ui_storage_location_view_t *location =
             &s_storage_view.locations[index];
-        render_storage_location_row(list, (int)(index * 56U), location->name,
+        if (!d1l_ui_storage_location_available(location->location)) {
+            continue;
+        }
+        render_storage_location_row(list, (int)(visible_index * 56U), location->name,
                                     location->value, location->accent);
+        visible_index++;
     }
 }
 
 static void render_storage_sheet(void)
 {
-    if (!s_storage_sheet) {
+    if (!s_storage_sheet ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_RETAINED_NVS)) {
         return;
     }
     d1l_app_model_snapshot(&s_snapshot);
@@ -5643,12 +5879,17 @@ static void render_storage_sheet(void)
         render_storage_root();
         break;
     }
-    render_storage_safety_copy();
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_SD_HISTORY)) {
+        render_storage_safety_copy();
+    }
 }
 
 static void open_storage_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_RETAINED_NVS)) {
+        return;
+    }
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -5689,6 +5930,10 @@ static void wifi_action_handler(d1l_ui_wifi_action_t action,
                                 void *context)
 {
     (void)context;
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL)) {
+        return;
+    }
     esp_err_t ret = ESP_OK;
     switch (action) {
     case D1L_UI_WIFI_ACTION_CLOSE:
@@ -5760,6 +6005,9 @@ static void map_location_keyboard_event_cb(lv_event_t *event)
 static void ble_action_handler(d1l_ui_ble_action_t action, void *context)
 {
     (void)context;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE)) {
+        return;
+    }
     switch (action) {
     case D1L_UI_BLE_ACTION_CLOSE:
         hide_ble_sheet();
@@ -5786,6 +6034,10 @@ static void ble_action_handler(d1l_ui_ble_action_t action, void *context)
 
 static bool render_wifi_sheet(void)
 {
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL)) {
+        return false;
+    }
     if (!d1l_ui_wifi_sheet(&s_wifi_controller)) {
         return false;
     }
@@ -5820,6 +6072,9 @@ static bool render_wifi_sheet(void)
 }
 static bool render_ble_sheet(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE)) {
+        return false;
+    }
     if (!d1l_ui_ble_sheet(&s_ble_controller)) {
         return false;
     }
@@ -5866,6 +6121,9 @@ static bool render_display_sheet(void)
 
 static bool render_diagnostics_sheet(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_DIAGNOSTICS)) {
+        return false;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     return d1l_ui_device_sheets_render_diagnostics(
         &s_device_sheets_controller, &s_snapshot,
@@ -5875,6 +6133,10 @@ static bool render_diagnostics_sheet(void)
 static void open_wifi_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL)) {
+        return;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     hide_sheet();
     hide_public_history_sheet();
@@ -5907,6 +6169,9 @@ static void open_wifi_sheet_event_cb(lv_event_t *event)
 static void open_ble_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE)) {
+        return;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     hide_sheet();
     hide_public_history_sheet();
@@ -5967,6 +6232,9 @@ static void open_display_sheet_event_cb(lv_event_t *event)
 static void open_diagnostics_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_DIAGNOSTICS)) {
+        return;
+    }
     d1l_app_model_snapshot(&s_snapshot);
     hide_sheet();
     hide_public_history_sheet();
@@ -5998,6 +6266,10 @@ static void open_diagnostics_sheet_event_cb(lv_event_t *event)
 static void advert_zero_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_ADVANCED)) {
+        return;
+    }
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -6007,6 +6279,10 @@ static void advert_zero_event_cb(lv_event_t *event)
 static void advert_flood_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_ADVANCED)) {
+        return;
+    }
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -6016,6 +6292,10 @@ static void advert_flood_event_cb(lv_event_t *event)
 static void open_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
+    if (!d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_ADVANCED)) {
+        return;
+    }
     if (s_sheet) {
         hide_public_history_sheet();
         hide_public_search_sheet();
@@ -6094,6 +6374,9 @@ esp_err_t d1l_ui_phase1_request_tab(const char *name)
     if (!tab_from_name(name, &tab)) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!d1l_ui_screen_available(tab)) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (!s_started || !s_content) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -6116,6 +6399,9 @@ esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
     uint32_t request_id = 0U;
     if (!result || !scroll_surface_from_name(surface, canonical, sizeof(canonical), &tab)) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!d1l_ui_scroll_surface_available(canonical, tab)) {
+        return ESP_ERR_NOT_SUPPORTED;
     }
     if (!s_started || !s_content || !s_scroll_probe_done_sem) {
         return ESP_ERR_INVALID_STATE;
@@ -6175,6 +6461,9 @@ esp_err_t d1l_ui_phase1_compose_probe(const char *target,
     uint32_t request_id = 0U;
     if (!result || !compose_probe_target_from_name(target, canonical, sizeof(canonical))) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (!compose_probe_target_available(canonical)) {
+        return ESP_ERR_NOT_SUPPORTED;
     }
     if (!s_started || !s_content || !s_compose_probe_done_sem) {
         return ESP_ERR_INVALID_STATE;
@@ -6378,7 +6667,7 @@ static void request_tab_event_cb(lv_event_t *event)
         return;
     }
     const d1l_ui_tab_t *tab = (const d1l_ui_tab_t *)lv_event_get_user_data(event);
-    if (tab) {
+    if (tab && d1l_ui_screen_available(*tab)) {
         set_map_interactive_touch_authorized(*tab == D1L_UI_TAB_MAP);
         if (*tab == D1L_UI_TAB_MESSAGES) {
             s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
@@ -6644,11 +6933,17 @@ static void measure_scroll_probe_target(lv_obj_t *target,
     result->after_y = (int32_t)lv_obj_get_scroll_y(target);
     result->scroll_top_after = (int32_t)lv_obj_get_scroll_top(target);
     result->scroll_bottom_after = (int32_t)lv_obj_get_scroll_bottom(target);
+    result->movement_required =
+        result->scroll_top_before > 0 ||
+        result->scroll_bottom_before > 0 ||
+        result->scroll_top_after > 0 ||
+        result->scroll_bottom_after > 0;
     result->moved = result->before_y != result->after_y ||
         result->scroll_top_before != result->scroll_top_after ||
         result->scroll_bottom_before != result->scroll_bottom_after;
     result->ok = result->surface_supported && result->target_found &&
-        result->scrollable && result->moved;
+        result->scrollable &&
+        (!result->movement_required || result->moved);
 }
 
 static lv_obj_t *scroll_probe_open_surface(const char *surface)
@@ -6710,12 +7005,12 @@ static void run_scroll_probe_on_ui_task(const char *surface,
 {
     d1l_ui_tab_t tab = D1L_UI_TAB_HOME;
     char canonical[24] = {0};
-    set_map_interactive_touch_authorized(false);
-    d1l_ui_map_viewport_set_suppressed(true);
-    if (!scroll_surface_from_name(surface, canonical, sizeof(canonical), &tab)) {
-        d1l_ui_map_viewport_set_suppressed(false);
+    if (!scroll_surface_from_name(surface, canonical, sizeof(canonical), &tab) ||
+        !d1l_ui_scroll_surface_available(canonical, tab)) {
         return;
     }
+    set_map_interactive_touch_authorized(false);
+    d1l_ui_map_viewport_set_suppressed(true);
 
     result->surface_supported = true;
     snprintf(result->surface, sizeof(result->surface), "%s", canonical);
@@ -6940,10 +7235,11 @@ static void open_compose_probe_on_ui_task(const char *target)
         snprintf(contact.fingerprint, sizeof(contact.fingerprint), "%s", "0000000000000000");
         snprintf(contact.public_key_hex, sizeof(contact.public_key_hex), "%s", "00");
         snprintf(contact.alias, sizeof(contact.alias), "%s", "Probe DM");
-        open_dm_compose_for_contact(&contact);
+        present_dm_compose_sheet(&contact, true);
     } else {
         (void)show_channel_compose_sheet(
             D1L_CHANNEL_PUBLIC_ID, "Compose Public", "Public message");
+        s_compose_probe_send_suppressed = true;
     }
 
     if (s_compose_textarea) {
@@ -7113,12 +7409,12 @@ static void run_compose_probe_on_ui_task(const char *target,
                                          d1l_ui_compose_probe_result_t *result)
 {
     char canonical[16] = {0};
-    set_map_interactive_touch_authorized(false);
-    d1l_ui_map_viewport_set_suppressed(true);
-    if (!compose_probe_target_from_name(target, canonical, sizeof(canonical))) {
-        d1l_ui_map_viewport_set_suppressed(false);
+    if (!compose_probe_target_from_name(target, canonical, sizeof(canonical)) ||
+        !compose_probe_target_available(canonical)) {
         return;
     }
+    set_map_interactive_touch_authorized(false);
+    d1l_ui_map_viewport_set_suppressed(true);
     result->target_supported = true;
     snprintf(result->target, sizeof(result->target), "%s", canonical);
 
@@ -7137,6 +7433,14 @@ static void run_compose_probe_on_ui_task(const char *target,
     result->dm_mode = s_compose_dm ||
         (strcmp(canonical, "dm_search") == 0 &&
          s_messages_mode == D1L_UI_MESSAGES_MODE_DIRECT);
+    result->tx_suppressed = s_compose_probe_send_suppressed;
+    if (d1l_ui_keyboard_probe_target_is_compose(canonical)) {
+        const char *text = s_compose_textarea ?
+            lv_textarea_get_text(s_compose_textarea) : "";
+        const d1l_user_text_info_t info = d1l_user_text_validate(text);
+        result->send_enabled =
+            compose_eligibility_for_text(&info).send_enabled;
+    }
     fill_compose_probe_geometry(result, sheet, textarea, keyboard);
 
     const bool sheet_inside_screen =
@@ -7167,6 +7471,9 @@ static void run_compose_probe_on_ui_task(const char *target,
         (!d1l_ui_keyboard_probe_target_is_compose(canonical) &&
          strcmp(canonical, "dm_search") != 0) ||
         result->dm_mode == d1l_ui_keyboard_probe_target_is_dm(canonical);
+    const bool compose_send_suppressed =
+        !d1l_ui_keyboard_probe_target_is_compose(canonical) ||
+        (result->tx_suppressed && !result->send_enabled);
 
     result->ok = result->target_supported &&
         result->sheet_visible &&
@@ -7175,6 +7482,7 @@ static void run_compose_probe_on_ui_task(const char *target,
         onboarding_state_ok &&
         dock_state_ok &&
         dm_state_ok &&
+        compose_send_suppressed &&
         result->keyboard_w >= d1l_ui_keyboard_probe_min_width(canonical) &&
         result->keyboard_h >= d1l_ui_keyboard_probe_min_height(canonical) &&
         sheet_inside_screen &&
@@ -7347,9 +7655,11 @@ static void create_dock(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_dock, 0, 0);
     lv_obj_clear_flag(s_dock, LV_OBJ_FLAG_SCROLLABLE);
 
-    for (size_t i = 0; i < sizeof(k_dock_items) / sizeof(k_dock_items[0]); ++i) {
+    size_t item_count = 0U;
+    const d1l_ui_dock_item_t *items = active_dock_items(&item_count);
+    for (size_t i = 0; i < item_count; ++i) {
         s_dock_buttons[i] = create_dock_button(
-            s_dock, &k_dock_items[i], 4 + (int)i * 96, dock_event_cb);
+            s_dock, &items[i], 4 + (int)i * 96, dock_event_cb);
     }
     update_dock_selected_state();
 }
@@ -7798,9 +8108,16 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     lv_obj_set_width(preset, 424);
     lv_obj_set_pos(preset, 8, 152);
 
-    lv_obj_t *role = create_label(s_onboarding_sheet,
-                                  "Role Desk Companion  Wi-Fi off  BLE off  Observer off",
-                                  0x8EA0AE);
+    const bool optional_transports_available =
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) ||
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE) ||
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_OBSERVER_MQTT);
+    const char *role_text = optional_transports_available ?
+        "Role Desk Companion  Wi-Fi off  BLE off  Observer off" :
+        "Role Desk Companion  Core radio profile";
+    lv_obj_t *role = create_label(s_onboarding_sheet, role_text, 0x8EA0AE);
     lv_label_set_long_mode(role, LV_LABEL_LONG_DOT);
     lv_obj_set_width(role, 424);
     lv_obj_set_pos(role, 8, 180);
@@ -7908,7 +8225,10 @@ esp_err_t d1l_ui_phase1_show_home(void)
     d1l_ui_screen_configure_content_root(s_content, true);
 
     create_dock(s_screen);
-    create_sheet(s_screen);
+    if (d1l_ui_settings_action_available(
+            D1L_UI_SETTINGS_ACTION_ADVANCED)) {
+        create_sheet(s_screen);
+    }
     create_compose_sheet(s_screen);
     create_public_history_sheet(s_screen);
     create_public_search_sheet(s_screen);
@@ -7922,40 +8242,57 @@ esp_err_t d1l_ui_phase1_show_home(void)
         return ESP_ERR_NO_MEM;
     }
     create_storage_sheet(s_screen);
-    if (!d1l_ui_wifi_create(&s_wifi_controller, s_screen)) {
-        return ESP_ERR_NO_MEM;
+    if (d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_WIFI_USER_CONTROL)) {
+        if (!d1l_ui_wifi_create(&s_wifi_controller, s_screen)) {
+            return ESP_ERR_NO_MEM;
+        }
     }
-    if (!d1l_ui_ble_create(&s_ble_controller, s_screen)) {
-        return ESP_ERR_NO_MEM;
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE)) {
+        if (!d1l_ui_ble_create(&s_ble_controller, s_screen)) {
+            return ESP_ERR_NO_MEM;
+        }
     }
     if (!d1l_ui_device_sheets_create(&s_device_sheets_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
     }
-    if (!d1l_ui_map_sheets_create(&s_map_sheets_controller, s_screen)) {
-        return ESP_ERR_NO_MEM;
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        if (!d1l_ui_map_sheets_create(&s_map_sheets_controller, s_screen)) {
+            return ESP_ERR_NO_MEM;
+        }
     }
     if (!d1l_ui_contact_sheets_create(
             &s_contact_sheets_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
     }
-    if (!d1l_ui_channel_sheets_create(
-            &s_channel_sheets_controller, s_screen)) {
-        return ESP_ERR_NO_MEM;
+    if (d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
+        if (!d1l_ui_channel_sheets_create(
+                &s_channel_sheets_controller, s_screen)) {
+            return ESP_ERR_NO_MEM;
+        }
     }
     if (!d1l_ui_node_detail_create(&s_node_detail_controller, s_screen)) {
         return ESP_ERR_NO_MEM;
     }
     create_route_detail_sheet(s_screen);
-    create_route_trace_sheet(s_screen);
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        create_route_trace_sheet(s_screen);
+    }
     create_packet_detail_sheet(s_screen);
     create_packet_search_sheet(s_screen);
-    create_mesh_roles_sheet(s_screen);
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        create_mesh_roles_sheet(s_screen);
+    }
     create_toast(s_screen);
     create_lock_overlay(s_screen);
     create_onboarding_sheet(s_screen);
 
     render_active_tab();
-    lv_timer_create(map_viewport_timer_cb, D1L_UI_MAP_VIEWPORT_REFRESH_MS, NULL);
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        lv_timer_create(map_viewport_timer_cb,
+                        D1L_UI_MAP_VIEWPORT_REFRESH_MS, NULL);
+    }
     lv_timer_create(refresh_timer_cb, 2000, NULL);
     lv_scr_load(s_screen);
     return ESP_OK;

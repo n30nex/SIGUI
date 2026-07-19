@@ -11,6 +11,7 @@ idf_component_register(
         "app_main.c"
         "app/app_model.c"
         "app/dm_conversation_list.c"
+        "app/release_profile.c"
         "app/settings_envelope.c"
         "app/settings_model.c"
         "app/settings_protocol_migration.c"
@@ -146,8 +147,30 @@ if(NOT DEFINED D1L_BUILD_EPOCH_SEC OR
         "Root D1L provenance resolution did not supply a safe build epoch")
 endif()
 
+if(D1L_RELEASE_PROFILE STREQUAL "development")
+    set(D1L_RELEASE_PROFILE_DEFINE D1L_RELEASE_PROFILE_DEVELOPMENT)
+elseif(D1L_RELEASE_PROFILE STREQUAL "core_1_0")
+    set(D1L_RELEASE_PROFILE_DEFINE D1L_RELEASE_PROFILE_CORE_1_0)
+elseif(D1L_RELEASE_PROFILE STREQUAL "full_feature")
+    set(D1L_RELEASE_PROFILE_DEFINE D1L_RELEASE_PROFILE_FULL_FEATURE)
+else()
+    message(FATAL_ERROR "Root CMake did not provide a valid D1L release profile")
+endif()
+
+if(D1L_SD_HISTORY_MODE STREQUAL "disabled")
+    set(D1L_SD_HISTORY_MODE_DEFINE D1L_SD_HISTORY_MODE_DISABLED)
+elseif(D1L_SD_HISTORY_MODE STREQUAL "conditional")
+    set(D1L_SD_HISTORY_MODE_DEFINE D1L_SD_HISTORY_MODE_CONDITIONAL)
+elseif(D1L_SD_HISTORY_MODE STREQUAL "supported_optional")
+    set(D1L_SD_HISTORY_MODE_DEFINE D1L_SD_HISTORY_MODE_SUPPORTED_OPTIONAL)
+else()
+    message(FATAL_ERROR "Root CMake did not provide a valid SD history mode")
+endif()
+
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     MESHCORE_CA_DESK_MODE=1
     D1L_BUILD_GIT_COMMIT="${D1L_BUILD_GIT_COMMIT}"
     D1L_BUILD_EPOCH_SEC=${D1L_BUILD_EPOCH_SEC}ULL
+    D1L_RELEASE_PROFILE=${D1L_RELEASE_PROFILE_DEFINE}
+    D1L_SD_HISTORY_MODE=${D1L_SD_HISTORY_MODE_DEFINE}
 )

@@ -69,7 +69,7 @@ def test_every_rx_family_uses_semantic_authority_before_hash_suppression():
     channel = receiver(
         service, "static void parse_rx_channel_packet", "static bool parse_rx_dm_packet"
     )
-    assert channel.index("d1l_channel_store_copy_hash_matches(") < channel.index(
+    assert channel.index("d1l_channel_store_copy_rx_hash_matches(") < channel.index(
         "meshcore_decrypt_after_mac("
     ) < channel.index("d1l_meshcore_channel_dispatch_finish(") < channel.index(
         "d1l_meshcore_text_plaintext_view("

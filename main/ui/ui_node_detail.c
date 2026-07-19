@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "lvgl.h"
 #include "ui_modal.h"
 
@@ -423,7 +424,7 @@ bool d1l_ui_node_detail_render(
     snprintf(line, sizeof(line), "Public key %s  %s  %s",
              view->keyed ? "retained" : "missing",
              view->favorite ? "favorite" : "normal",
-             view->muted ? "muted" : "audible");
+             view->muted ? "unread excluded" : "unread counted");
     lv_obj_t *key = create_label(controller->sheet, line, 0x8EA0AE);
     configure_dot_label(key, 392, 8, 150);
     complete = key != NULL && complete;
@@ -445,19 +446,21 @@ bool d1l_ui_node_detail_render(
     configure_dot_label(path, 392, 8, 218);
     complete = path != NULL && complete;
 
-    if (entry->location_valid) {
-        char latitude[16];
-        char longitude[16];
-        format_advert_coordinate(latitude, sizeof(latitude), entry->lat_e6);
-        format_advert_coordinate(longitude, sizeof(longitude), entry->lon_e6);
-        snprintf(line, sizeof(line), "Advert location %s, %s", latitude,
-                 longitude);
-    } else {
-        snprintf(line, sizeof(line), "Advert location not provided");
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        if (entry->location_valid) {
+            char latitude[16];
+            char longitude[16];
+            format_advert_coordinate(latitude, sizeof(latitude), entry->lat_e6);
+            format_advert_coordinate(longitude, sizeof(longitude), entry->lon_e6);
+            snprintf(line, sizeof(line), "Advert location %s, %s", latitude,
+                     longitude);
+        } else {
+            snprintf(line, sizeof(line), "Advert location not provided");
+        }
+        lv_obj_t *location = create_label(controller->sheet, line, 0x93C5FD);
+        configure_dot_label(location, 392, 8, 242);
+        complete = location != NULL && complete;
     }
-    lv_obj_t *location = create_label(controller->sheet, line, 0x93C5FD);
-    configure_dot_label(location, 392, 8, 242);
-    complete = location != NULL && complete;
 
     snprintf(line, sizeof(line), "Last heard %lums  first %lums  count %lu",
              (unsigned long)entry->last_heard_ms,
@@ -481,7 +484,8 @@ bool d1l_ui_node_detail_render(
     } else {
         complete = false;
     }
-    if (controller->rendered.management_gated) {
+    if (controller->rendered.management_gated &&
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
         lv_obj_t *managed = create_label(controller->sheet, "Manage locked",
                                          0x8EA0AE);
         if (managed) {

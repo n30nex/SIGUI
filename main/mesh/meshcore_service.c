@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "app/release_profile.h"
 #include "app/settings_model.h"
 #include "bsp_sx126x.h"
 #include "esp_log.h"
@@ -1129,6 +1130,13 @@ static bool channel_protocol_keys_equal(
         lhs->secret_len == rhs->secret_len &&
         lhs->secret_len <= sizeof(lhs->secret) &&
         secure_bytes_equal(lhs->secret, rhs->secret, lhs->secret_len);
+}
+
+static bool channel_available_in_release_profile(uint64_t channel_id)
+{
+    return channel_id == D1L_CHANNEL_PUBLIC_ID ||
+        d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
 }
 
 static esp_err_t derive_local_identity_shared_secret(
@@ -3005,7 +3013,7 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     }
     d1l_channel_protocol_key_t
         candidates[D1L_CHANNEL_STORE_CAPACITY] = {0};
-    const size_t candidate_count = d1l_channel_store_copy_hash_matches(
+    const size_t candidate_count = d1l_channel_store_copy_rx_hash_matches(
         packet.payload[0], candidates, D1L_CHANNEL_STORE_CAPACITY);
     d1l_meshcore_channel_dispatch_t dispatch = {0};
     if (!d1l_meshcore_channel_dispatch_begin(&dispatch, candidate_count)) {
@@ -3068,7 +3076,8 @@ static void parse_rx_channel_packet(const uint8_t *payload, uint16_t size,
     const uint64_t channel_id = selected_key.channel_id;
     secure_zero_channel_key(&current_key);
     secure_zero_channel_key(&selected_key);
-    if (!selected_current) {
+    if (!selected_current ||
+        !channel_available_in_release_profile(channel_id)) {
         secure_zero_bytes(plain, sizeof(plain));
         s_status.channel_rx_decrypt_failed++;
         return;
@@ -6625,6 +6634,10 @@ static esp_err_t meshcore_service_send_channel_owned(uint64_t channel_id,
     if (channel_id == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!channel_available_in_release_profile(channel_id)) {
+        s_status.rejected_commands++;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     if (!channel_message_generation_ready()) {
         s_status.rejected_commands++;
         return ESP_ERR_INVALID_STATE;
@@ -6748,6 +6761,10 @@ esp_err_t d1l_meshcore_service_send_channel(uint64_t channel_id,
 
 esp_err_t d1l_meshcore_service_send_active_channel(const char *text)
 {
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
+        return d1l_meshcore_service_send_public(text);
+    }
     d1l_channel_info_t active = {0};
     if (!d1l_channel_store_find_default(&active)) {
         s_status.rejected_commands++;

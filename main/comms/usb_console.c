@@ -15,7 +15,9 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "mbedtls/md.h"
 
+#include "ed_25519.h"
 #include "d1l_config.h"
 #include "app/app_model.h"
 #include "app/settings_model.h"
@@ -47,6 +49,7 @@
 #include "storage/export_store.h"
 #include "storage/factory_reset.h"
 #include "storage/map_tile_store.h"
+#include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
 
@@ -194,6 +197,637 @@ static void print_json_string(const char *text)
         }
     }
     putchar('"');
+}
+
+typedef enum {
+    D1L_RELEASE_COMMAND_EXACT = 0,
+    D1L_RELEASE_COMMAND_TOKEN_OR_ARGUMENT,
+} d1l_release_command_match_t;
+
+typedef enum {
+    D1L_RELEASE_COMMAND_READ_ONLY = 0,
+    D1L_RELEASE_COMMAND_MUTATION,
+} d1l_release_command_access_t;
+
+typedef struct {
+    const char *pattern;
+    size_t pattern_length;
+    d1l_release_command_match_t match;
+    d1l_release_command_access_t access;
+    d1l_release_feature_id_t feature;
+} d1l_release_command_rule_t;
+
+#define D1L_RELEASE_RULE_EXACT(literal, command_access, feature_id)            \
+    {                                                                          \
+        .pattern = (literal), .pattern_length = sizeof(literal) - 1U,          \
+        .match = D1L_RELEASE_COMMAND_EXACT, .access = (command_access),         \
+        .feature = (feature_id),                                                \
+    }
+
+#define D1L_RELEASE_RULE_TOKEN(literal, command_access, feature_id)            \
+    {                                                                          \
+        .pattern = (literal), .pattern_length = sizeof(literal) - 1U,          \
+        .match = D1L_RELEASE_COMMAND_TOKEN_OR_ARGUMENT,                         \
+        .access = (command_access), .feature = (feature_id),                    \
+    }
+
+/*
+ * Rules are ordered from narrow read-only exceptions to broad fail-closed
+ * families.  The table is consulted before handle_line() invokes any command
+ * handler, so a Core-only denial cannot parse secrets, persist settings,
+ * create a task, touch storage, or transmit RF.
+ */
+static const d1l_release_command_rule_t s_release_command_rules[] = {
+    D1L_RELEASE_RULE_EXACT(
+        "wifi status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
+    D1L_RELEASE_RULE_TOKEN(
+        "wifi", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
+    D1L_RELEASE_RULE_EXACT(
+        "ble status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_BLE),
+    D1L_RELEASE_RULE_TOKEN(
+        "ble", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_BLE),
+
+    /*
+     * SD qualification is allowed while the immutable mode is conditional,
+     * but every bridge/media mutation fails closed once the candidate is
+     * frozen with SD history disabled.  Keep the narrow read-only probes
+     * ahead of the mutation rules so their admission remains explicit.
+     */
+    D1L_RELEASE_RULE_EXACT(
+        "storage status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage diag", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage diag raw", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage setup", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 ping", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 stock-probe", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "ui scroll-probe storage_card", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "ui scroll-probe storage_data", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage mount", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage remount", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage reset-bridge", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage filecanary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage export-canary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage export-diagnostics", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage export-data", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage retained-canary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "storage force-nvs off", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "rp2040 set-baud", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "rp2040 baud-probe", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 bootloader", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_EXACT(
+        "rp2040 reset", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "rp2040 double-reset", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SD_HISTORY),
+    D1L_RELEASE_RULE_TOKEN(
+        "core retained-canary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_RETAINED_NVS),
+
+    D1L_RELEASE_RULE_EXACT(
+        "map center", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_LOCATION),
+    D1L_RELEASE_RULE_EXACT(
+        "map tiles status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_EXACT(
+        "storage map-policy", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_TOKEN(
+        "map", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_TOKEN(
+        "settings set location", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_LOCATION),
+    D1L_RELEASE_RULE_EXACT(
+        "settings clear location", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_LOCATION),
+    D1L_RELEASE_RULE_TOKEN(
+        "location", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_LOCATION),
+    D1L_RELEASE_RULE_TOKEN(
+        "gps", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_LOCATION),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage map-tile-canary", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage map-tile-check", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+
+    D1L_RELEASE_RULE_TOKEN(
+        "ui tab map", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui tab wifi", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui tab ble", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_BLE),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe map", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe map_options", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe map_location", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_LOCATION),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe map_cache", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MAP),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe wifi", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui compose-probe map-location", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_LOCATION),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui compose-probe map_location", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_LOCATION),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui compose-probe wifi-ssid", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui compose-probe wifi-password", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL),
+
+    D1L_RELEASE_RULE_EXACT(
+        "channels", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT),
+    D1L_RELEASE_RULE_TOKEN(
+        "channels", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT),
+    D1L_RELEASE_RULE_TOKEN(
+        "channel", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT),
+    D1L_RELEASE_RULE_TOKEN(
+        "messages channel", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT),
+    D1L_RELEASE_RULE_TOKEN(
+        "mesh send channel", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT),
+
+    D1L_RELEASE_RULE_EXACT(
+        "routes trace status", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_TOKEN(
+        "routes trace contact", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_TOKEN(
+        "routes probe", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_EXACT(
+        "routes clear", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_TOKEN(
+        "settings set pathhash", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_TOKEN(
+        "trace", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_TOKEN(
+        "path", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe contact_route", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_USER_TRACE),
+
+    D1L_RELEASE_RULE_EXACT(
+        "roomservers", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_EXACT(
+        "repeaters", D1L_RELEASE_COMMAND_READ_ONLY,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "admin", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "room", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "repeater", D1L_RELEASE_COMMAND_MUTATION, D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "mesh admin", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "mesh room", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "mesh repeater", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe mesh_roles", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe mesh_rooms", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADMIN),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui scroll-probe mesh_repeaters", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADMIN),
+
+    D1L_RELEASE_RULE_TOKEN(
+        "observer", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_OBSERVER_MQTT),
+    D1L_RELEASE_RULE_TOKEN(
+        "mqtt", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_OBSERVER_MQTT),
+    D1L_RELEASE_RULE_TOKEN(
+        "settings set observer", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_OBSERVER_MQTT),
+
+    D1L_RELEASE_RULE_TOKEN(
+        "update", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SIGNED_UPDATE),
+    D1L_RELEASE_RULE_TOKEN(
+        "ota", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SIGNED_UPDATE),
+    D1L_RELEASE_RULE_TOKEN(
+        "install", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SIGNED_UPDATE),
+    D1L_RELEASE_RULE_TOKEN(
+        "firmware update", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SIGNED_UPDATE),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage install", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SIGNED_UPDATE),
+    D1L_RELEASE_RULE_TOKEN(
+        "storage update", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_SIGNED_UPDATE),
+
+    D1L_RELEASE_RULE_TOKEN(
+        "terminal", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MUTABLE_TERMINAL),
+    D1L_RELEASE_RULE_TOKEN(
+        "shell", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MUTABLE_TERMINAL),
+    D1L_RELEASE_RULE_TOKEN(
+        "log level", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MUTABLE_TERMINAL),
+    D1L_RELEASE_RULE_TOKEN(
+        "logs", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_MUTABLE_TERMINAL),
+
+    D1L_RELEASE_RULE_TOKEN(
+        "qr", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI),
+    D1L_RELEASE_RULE_TOKEN(
+        "emoji", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui compose-probe qr", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI),
+    D1L_RELEASE_RULE_TOKEN(
+        "ui compose-probe emoji", D1L_RELEASE_COMMAND_MUTATION,
+        D1L_RELEASE_FEATURE_ADVANCED_QR_EMOJI),
+};
+
+typedef struct {
+    const char *normalized_alias;
+    d1l_release_feature_id_t feature;
+} d1l_release_ui_probe_alias_t;
+
+/*
+ * Keep this alias map aligned with the canonicalizers in ui_navigation.c and
+ * ui_keyboard.c.  The console release boundary must classify every accepted
+ * spelling before a probe handler can navigate, create UI state, or touch a
+ * feature-specific service.
+ */
+static const d1l_release_ui_probe_alias_t s_release_scroll_probe_aliases[] = {
+    {"storage_card", D1L_RELEASE_FEATURE_SD_HISTORY},
+    {"sd_card", D1L_RELEASE_FEATURE_SD_HISTORY},
+    {"storage_data", D1L_RELEASE_FEATURE_SD_HISTORY},
+    {"wifi", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"wi_fi", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"contact_route", D1L_RELEASE_FEATURE_USER_TRACE},
+    {"mesh_roles", D1L_RELEASE_FEATURE_ADMIN},
+    {"mesh_rooms", D1L_RELEASE_FEATURE_ADMIN},
+    {"mesh_repeaters", D1L_RELEASE_FEATURE_ADMIN},
+    {"map", D1L_RELEASE_FEATURE_MAP},
+    {"map_options", D1L_RELEASE_FEATURE_MAP},
+    {"map_options_sheet", D1L_RELEASE_FEATURE_MAP},
+    {"map_options_page", D1L_RELEASE_FEATURE_MAP},
+    {"map_menu", D1L_RELEASE_FEATURE_MAP},
+    {"map_location", D1L_RELEASE_FEATURE_LOCATION},
+    {"map_location_sheet", D1L_RELEASE_FEATURE_LOCATION},
+    {"map_location_page", D1L_RELEASE_FEATURE_LOCATION},
+    {"map_cache", D1L_RELEASE_FEATURE_MAP},
+    {"map_cache_page", D1L_RELEASE_FEATURE_MAP},
+    {"tile_cache", D1L_RELEASE_FEATURE_MAP},
+};
+
+static const d1l_release_ui_probe_alias_t s_release_compose_probe_aliases[] = {
+    {"map_location", D1L_RELEASE_FEATURE_LOCATION},
+    {"wifi", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"wifi_ssid", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"wifi_password", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+    {"wifi_pass", D1L_RELEASE_FEATURE_WIFI_USER_CONTROL},
+};
+
+static bool release_ui_probe_normalize_argument(
+    const d1l_usb_command_view_t *command, size_t prefix_length,
+    bool first_token_only, char *normalized, size_t normalized_capacity)
+{
+    if (!command || !command->text || !normalized ||
+        normalized_capacity == 0U || prefix_length >= command->length) {
+        return false;
+    }
+
+    size_t source_index = prefix_length;
+    while (source_index < command->length &&
+           command->text[source_index] == ' ') {
+        source_index++;
+    }
+
+    size_t output_index = 0U;
+    while (source_index < command->length) {
+        unsigned char value =
+            (unsigned char)command->text[source_index++];
+        if (first_token_only && value == ' ') {
+            break;
+        }
+        if (output_index + 1U >= normalized_capacity) {
+            normalized[0] = '\0';
+            return false;
+        }
+        normalized[output_index++] =
+            (value == '-' || value == ' ')
+                ? '_'
+                : (char)tolower(value);
+    }
+    normalized[output_index] = '\0';
+    return output_index > 0U;
+}
+
+static bool release_ui_probe_alias_feature(
+    const char *normalized,
+    const d1l_release_ui_probe_alias_t *aliases, size_t alias_count,
+    d1l_release_feature_id_t *out_feature)
+{
+    if (!normalized || !aliases || !out_feature) {
+        return false;
+    }
+    for (size_t i = 0U; i < alias_count; ++i) {
+        if (strcmp(normalized, aliases[i].normalized_alias) == 0) {
+            *out_feature = aliases[i].feature;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool release_ui_probe_feature(
+    const d1l_usb_command_view_t *command,
+    d1l_release_feature_id_t *out_feature)
+{
+    static const char scroll_prefix[] = "ui scroll-probe ";
+    static const char compose_prefix[] = "ui compose-probe ";
+    const d1l_release_ui_probe_alias_t *aliases = NULL;
+    size_t alias_count = 0U;
+    size_t prefix_length = 0U;
+
+    if (d1l_usb_command_has_argument(
+            command, scroll_prefix, sizeof(scroll_prefix) - 1U)) {
+        aliases = s_release_scroll_probe_aliases;
+        alias_count = sizeof(s_release_scroll_probe_aliases) /
+                      sizeof(s_release_scroll_probe_aliases[0]);
+        prefix_length = sizeof(scroll_prefix) - 1U;
+    } else if (d1l_usb_command_has_argument(
+                   command, compose_prefix,
+                   sizeof(compose_prefix) - 1U)) {
+        aliases = s_release_compose_probe_aliases;
+        alias_count = sizeof(s_release_compose_probe_aliases) /
+                      sizeof(s_release_compose_probe_aliases[0]);
+        prefix_length = sizeof(compose_prefix) - 1U;
+    } else {
+        return false;
+    }
+
+    char normalized[48] = {0};
+    if (release_ui_probe_normalize_argument(
+            command, prefix_length, false, normalized,
+            sizeof(normalized)) &&
+        release_ui_probe_alias_feature(
+            normalized, aliases, alias_count, out_feature)) {
+        return true;
+    }
+
+    /*
+     * Probe handlers consume one whitespace-delimited token.  Classify that
+     * token too, so adding an ignored suffix cannot smuggle an excluded alias
+     * through the pre-handler boundary.
+     */
+    return release_ui_probe_normalize_argument(
+               command, prefix_length, true, normalized,
+               sizeof(normalized)) &&
+           release_ui_probe_alias_feature(
+               normalized, aliases, alias_count, out_feature);
+}
+
+static bool release_command_token_matches(
+    const d1l_usb_command_view_t *command,
+    const char *pattern, size_t pattern_length)
+{
+    if (!command || !command->text || !pattern || pattern_length == 0U) {
+        return false;
+    }
+    size_t command_index = 0U;
+    size_t pattern_index = 0U;
+    while (pattern_index < pattern_length) {
+        if (pattern[pattern_index] == ' ') {
+            if (command_index >= command->length ||
+                command->text[command_index] != ' ') {
+                return false;
+            }
+            while (pattern_index < pattern_length &&
+                   pattern[pattern_index] == ' ') {
+                pattern_index++;
+            }
+            while (command_index < command->length &&
+                   command->text[command_index] == ' ') {
+                command_index++;
+            }
+            continue;
+        }
+        if (command_index >= command->length ||
+            tolower((unsigned char)command->text[command_index]) !=
+                tolower((unsigned char)pattern[pattern_index])) {
+            return false;
+        }
+        command_index++;
+        pattern_index++;
+    }
+    return command_index == command->length ||
+           command->text[command_index] == ' ';
+}
+
+static bool release_command_rule_matches(
+    const d1l_usb_command_view_t *command,
+    const d1l_release_command_rule_t *rule)
+{
+    if (!command || !rule) {
+        return false;
+    }
+    if (rule->match == D1L_RELEASE_COMMAND_EXACT) {
+        return d1l_usb_command_equals(
+            command, rule->pattern, rule->pattern_length);
+    }
+    return release_command_token_matches(
+        command, rule->pattern, rule->pattern_length);
+}
+
+static const d1l_release_command_rule_t *release_command_rule(
+    const d1l_usb_command_view_t *command)
+{
+    for (size_t i = 0U;
+         i < sizeof(s_release_command_rules) /
+                 sizeof(s_release_command_rules[0]);
+         ++i) {
+        if (release_command_rule_matches(
+                command, &s_release_command_rules[i])) {
+            return &s_release_command_rules[i];
+        }
+    }
+    return NULL;
+}
+
+static void print_release_profile_fields(void)
+{
+    printf(",\"build_commit\":");
+    print_json_string(D1L_BUILD_GIT_COMMIT);
+    printf(",\"release_profile\":");
+    print_json_string(d1l_release_profile_name());
+    printf(",\"release_profile_id\":%u,\"sd_history_mode\":",
+           (unsigned)d1l_release_profile_id());
+    print_json_string(d1l_release_sd_history_mode_name());
+    printf(",\"sd_history_mode_id\":%u",
+           (unsigned)d1l_release_sd_history_mode());
+}
+
+static void release_unavailable_status(
+    const char *command, d1l_release_feature_id_t feature)
+{
+    ok_begin(command);
+    printf(",\"available\":false");
+    print_release_profile_fields();
+    printf(",\"feature\":");
+    print_json_string(d1l_release_feature_name(feature));
+    printf(",\"mutation_allowed\":false,"
+           "\"reason\":\"unavailable_in_release_profile\"}\n");
+}
+
+static void release_unsupported_result(
+    const d1l_usb_command_view_t *command,
+    d1l_release_feature_id_t feature)
+{
+    printf("{\"schema\":%d,\"ok\":false,\"cmd\":", D1L_CONSOLE_SCHEMA);
+    print_json_string(command && command->text ? command->text : "");
+    printf(",\"code\":\"ESP_ERR_NOT_SUPPORTED\",\"release_profile\":");
+    print_json_string(d1l_release_profile_name());
+    printf(",\"feature\":");
+    print_json_string(d1l_release_feature_name(feature));
+    printf("}\n");
+}
+
+static bool release_command_feature_available(
+    d1l_release_feature_id_t feature)
+{
+    if (feature == D1L_RELEASE_FEATURE_SD_HISTORY) {
+        return d1l_release_sd_history_mode() !=
+               D1L_SD_HISTORY_MODE_DISABLED;
+    }
+    return d1l_release_feature_available(feature);
+}
+
+static bool enforce_release_command_policy(
+    const d1l_usb_command_view_t *command)
+{
+    d1l_release_feature_id_t ui_probe_feature =
+        D1L_RELEASE_FEATURE_COUNT;
+    if (release_ui_probe_feature(command, &ui_probe_feature) &&
+        !release_command_feature_available(ui_probe_feature)) {
+        release_unsupported_result(command, ui_probe_feature);
+        return false;
+    }
+
+    if (d1l_release_profile_is_core()) {
+        if (d1l_usb_command_equals(
+                command, "packets clear", sizeof("packets clear") - 1U)) {
+            release_unsupported_result(
+                command, D1L_RELEASE_FEATURE_PACKETS);
+            return false;
+        }
+        if (d1l_usb_command_equals(
+                command, "nodes clear", sizeof("nodes clear") - 1U)) {
+            release_unsupported_result(
+                command, D1L_RELEASE_FEATURE_NODES);
+            return false;
+        }
+    }
+    const d1l_release_command_rule_t *rule = release_command_rule(command);
+    if (d1l_release_profile_is_core() && rule &&
+        rule->feature == D1L_RELEASE_FEATURE_SD_HISTORY &&
+        rule->access == D1L_RELEASE_COMMAND_READ_ONLY &&
+        d1l_release_sd_history_mode() == D1L_SD_HISTORY_MODE_DISABLED &&
+        !d1l_usb_command_equals(
+            command, "storage status", sizeof("storage status") - 1U)) {
+        /*
+         * A disabled-SD Core build must not actively interrogate the excluded
+         * RP2040 bridge or media and must not imply that either is supported.
+         * Keep storage status as the one passive NVS-authority projection.
+         */
+        release_unavailable_status(
+            command && command->text ? command->text : rule->pattern,
+            D1L_RELEASE_FEATURE_SD_HISTORY);
+        return false;
+    }
+    if (!rule || release_command_feature_available(rule->feature) ||
+        rule->access == D1L_RELEASE_COMMAND_READ_ONLY) {
+        return true;
+    }
+    release_unsupported_result(command, rule->feature);
+    return false;
 }
 
 static void print_hex_bytes_json(const uint8_t *bytes, size_t len)
@@ -599,7 +1233,9 @@ static void cmd_version(void)
     const char *tx_block = time_protocol_tx_block(&time_status);
     ok_begin("version");
     printf(",\"firmware\":\"%s\",\"version\":\"%s\",\"build_commit\":\"%s\","
-           "\"idf\":\"%s\",\"meshcore_ca_desk_mode\":true,"
+           "\"idf\":\"%s\",\"release_profile\":\"%s\","
+           "\"release_profile_id\":%u,\"sd_history_mode\":\"%s\","
+           "\"sd_history_mode_id\":%u,\"meshcore_ca_desk_mode\":true,"
            "\"time\":{\"build_epoch_sec\":%lu,\"wall_valid\":%s,"
            "\"wall_epoch_sec\":%" PRId64 ",\"validity\":\"%s\","
            "\"source\":\"%s\",\"display_time_valid\":%s,"
@@ -640,7 +1276,10 @@ static void cmd_version(void)
            "\"failure_count\":%lu,\"retry_not_before_us\":%" PRIu64
            "}}}\n",
            D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION, D1L_BUILD_GIT_COMMIT,
-           esp_get_idf_version(),
+           esp_get_idf_version(), d1l_release_profile_name(),
+           (unsigned)d1l_release_profile_id(),
+           d1l_release_sd_history_mode_name(),
+           (unsigned)d1l_release_sd_history_mode(),
            (unsigned long)time_status.clock.build_epoch_sec,
            bool_json(time_status.clock.wall_valid),
            time_status.clock.wall_epoch_sec,
@@ -792,31 +1431,67 @@ static void cmd_settings_get(void)
     (void)d1l_time_display_timezone_label(
         settings->timezone_offset_minutes, timezone_label,
         sizeof(timezone_label));
+    const bool wifi_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL);
+    const bool ble_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_BLE);
+    const bool observer_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_OBSERVER_MQTT);
+    const bool map_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_MAP);
+    const bool location_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_LOCATION);
+    const bool location_set =
+        location_available && settings->map_location_set;
     ok_begin("settings get");
-    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,\"timezone\":{\"settings_ready\":%s,\"settings_error\":\"%s\",\"schema_version\":%u,\"model\":\"fixed_utc_offset\",\"offset_minutes\":%d,\"label\":\"%s\",\"auto_dst\":false},\"map_location\":{\"set\":%s,\"lat\":",
+    print_release_profile_fields();
+    printf(",\"capabilities\":{\"wifi_user_control\":%s,\"ble\":%s,"
+           "\"observer_mqtt\":%s,\"map\":%s,\"location\":%s},"
+           "\"node_name\":\"%s\",\"role\":\"%s\","
+           "\"onboarding_complete\":%s,\"wifi_enabled\":%s,"
+           "\"ble_companion_enabled\":%s,\"observer_enabled\":%s,"
+           "\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,"
+           "\"timezone\":{\"settings_ready\":%s,\"settings_error\":\"%s\","
+           "\"schema_version\":%u,\"model\":\"fixed_utc_offset\","
+           "\"offset_minutes\":%d,\"label\":\"%s\",\"auto_dst\":false},"
+           "\"map_location\":{\"available\":%s,\"set\":%s,\"lat\":",
+           bool_json(wifi_available), bool_json(ble_available),
+           bool_json(observer_available), bool_json(map_available),
+           bool_json(location_available),
            settings->node_name, d1l_settings_role_name(settings->role),
            bool_json(settings->onboarding_complete),
-           bool_json(settings->wifi_enabled), bool_json(settings->ble_companion_enabled),
-           bool_json(settings->observer_enabled), bool_json(settings->high_contrast),
+           bool_json(wifi_available && settings->wifi_enabled),
+           bool_json(ble_available && settings->ble_companion_enabled),
+           bool_json(observer_available && settings->observer_enabled),
+           bool_json(settings->high_contrast),
            bool_json(settings->night_mode), settings->path_hash_bytes,
            bool_json(settings_snapshot_error == ESP_OK),
            esp_err_to_name(settings_snapshot_error),
            (unsigned)settings->timezone_schema_version,
            (int)settings->timezone_offset_minutes, timezone_label,
-           bool_json(settings->map_location_set));
-    print_e7_json(settings->map_location_set ? settings->map_lat_e7 : 0);
+           bool_json(location_available), bool_json(location_set));
+    print_e7_json(location_set ? settings->map_lat_e7 : 0);
     printf(",\"lon\":");
-    print_e7_json(settings->map_location_set ? settings->map_lon_e7 : 0);
-    printf(",\"source\":\"%s\"},\"map_tiles\":{\"source\":",
-           settings->map_location_set ? "manual" : "unset");
-    print_json_string(D1L_MAP_TILE_SOURCE_ID);
-    printf(",\"built_in\":true,\"zoom\":%u,\"url_template\":",
-           (unsigned)settings->map_tile_zoom);
-    print_json_string(D1L_MAP_TILE_SOURCE_URL_TEMPLATE);
+    print_e7_json(location_set ? settings->map_lon_e7 : 0);
+    printf(",\"source\":");
+    print_json_string(!location_available ? "unavailable_in_release_profile" :
+                      location_set ? "manual" : "unset");
+    printf("},\"map_tiles\":{\"available\":%s,\"source\":",
+           bool_json(map_available));
+    print_json_string(map_available ? D1L_MAP_TILE_SOURCE_ID : "");
+    printf(",\"built_in\":%s,\"zoom\":%u,\"url_template\":",
+           bool_json(map_available),
+           map_available ? (unsigned)settings->map_tile_zoom : 0U);
+    print_json_string(map_available ? D1L_MAP_TILE_SOURCE_URL_TEMPLATE : "");
     printf(",\"attribution\":");
-    print_json_string(D1L_MAP_TILE_ATTRIBUTION);
-    printf(",\"policy\":\"%s\"},\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":%s,\"radio_apply_pending\":%s,\"radio_apply_error\":\"%s\"}}\n",
-           D1L_MAP_TILE_PROVIDER_POLICY,
+    print_json_string(map_available ? D1L_MAP_TILE_ATTRIBUTION : "");
+    printf(",\"policy\":");
+    print_json_string(map_available ? D1L_MAP_TILE_PROVIDER_POLICY :
+                      "unavailable_in_release_profile");
+    printf("},\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,"
+           "\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,"
+           "\"tcxo\":\"%s\",\"applied_to_radio\":%s,"
+           "\"radio_apply_pending\":%s,\"radio_apply_error\":\"%s\"}}\n",
            (unsigned long)settings->frequency_hz,
            ((float)settings->bandwidth_tenths_khz) / 10.0f,
            settings->spreading_factor, settings->coding_rate, settings->tx_power_dbm,
@@ -849,10 +1524,25 @@ static void cmd_settings_onboarding_status(void)
     (void)d1l_settings_public_snapshot(&settings_snapshot);
     const d1l_settings_t *settings = &settings_snapshot;
     ok_begin("settings onboarding status");
-    printf(",\"complete\":%s,\"node_name\":\"%s\",\"role\":\"%s\",\"region\":\"Canada/USA\",\"radio_profile\":\"uscan-meshcore-default\",\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s}\n",
+    print_release_profile_fields();
+    printf(",\"complete\":%s,\"node_name\":\"%s\",\"role\":\"%s\","
+           "\"region\":\"Canada/USA\","
+           "\"radio_profile\":\"uscan-meshcore-default\","
+           "\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,"
+           "\"observer_enabled\":%s}\n",
            bool_json(settings->onboarding_complete), settings->node_name,
-           d1l_settings_role_name(settings->role), bool_json(settings->wifi_enabled),
-           bool_json(settings->ble_companion_enabled), bool_json(settings->observer_enabled));
+           d1l_settings_role_name(settings->role),
+           bool_json(
+               d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
+               settings->wifi_enabled),
+           bool_json(
+               d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE) &&
+               settings->ble_companion_enabled),
+           bool_json(
+               d1l_release_feature_available(
+                   D1L_RELEASE_FEATURE_OBSERVER_MQTT) &&
+               settings->observer_enabled));
 }
 
 static void cmd_settings_onboarding_reset(void)
@@ -1061,6 +1751,11 @@ static void cmd_settings_clear_location(void)
 
 static void cmd_map_center(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_LOCATION)) {
+        release_unavailable_status(
+            "map center", D1L_RELEASE_FEATURE_LOCATION);
+        return;
+    }
     d1l_settings_t settings = {0};
     (void)d1l_settings_public_snapshot(&settings);
     print_map_location_result("map center", &settings, false);
@@ -1080,6 +1775,7 @@ static void cmd_map_center_clear(void)
 static void cmd_ui_status(void)
 {
     ok_begin("ui status");
+    print_release_profile_fields();
     printf(",\"started\":true,\"active_tab\":");
     print_json_string(d1l_ui_phase1_active_tab_name());
     printf(",\"pending\":%s,\"pending_tab\":",
@@ -1295,9 +1991,11 @@ static void cmd_ui_scroll_probe(const char *line)
     print_json_string(probe.surface);
     printf(",\"tab\":");
     print_json_string(probe.tab);
-    printf(",\"surface_supported\":%s,\"target_found\":%s,\"scrollable\":%s,\"moved\":%s",
+    printf(",\"surface_supported\":%s,\"target_found\":%s,\"scrollable\":%s,"
+           "\"movement_required\":%s,\"moved\":%s",
            bool_json(probe.surface_supported), bool_json(probe.target_found),
-           bool_json(probe.scrollable), bool_json(probe.moved));
+           bool_json(probe.scrollable), bool_json(probe.movement_required),
+           bool_json(probe.moved));
     printf(",\"before_y\":%ld,\"after_y\":%ld",
            (long)probe.before_y, (long)probe.after_y);
     printf(",\"scroll_top_before\":%ld,\"scroll_bottom_before\":%ld",
@@ -1341,14 +2039,18 @@ static void cmd_ui_compose_probe(const char *line)
     print_json_string(probe.target);
     printf(",\"target_supported\":%s,\"sheet_visible\":%s,\"textarea_visible\":%s,"
            "\"keyboard_visible\":%s,\"onboarding_visible\":%s,"
-           "\"dock_hidden\":%s,\"dm_mode\":%s,\"active_tab\":",
+           "\"dock_hidden\":%s,\"dm_mode\":%s,\"tx_suppressed\":%s,"
+           "\"send_enabled\":%s,"
+           "\"active_tab\":",
            bool_json(probe.target_supported),
            bool_json(probe.sheet_visible),
            bool_json(probe.textarea_visible),
            bool_json(probe.keyboard_visible),
            bool_json(probe.onboarding_visible),
            bool_json(probe.dock_hidden),
-           bool_json(probe.dm_mode));
+           bool_json(probe.dm_mode),
+           bool_json(probe.tx_suppressed),
+           bool_json(probe.send_enabled));
     print_json_string(probe.active_tab);
     printf(",\"sheet\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
            "\"textarea\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
@@ -1375,9 +2077,12 @@ static void cmd_identity_status(void)
     char fingerprint[17] = {0};
     hex_prefix(fingerprint, sizeof(fingerprint), settings->identity_public_key, 8U);
     ok_begin("identity status");
-    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"meshcore_local_identity\":\"stored_nvs_ed25519\",\"public_key_ready\":%s,\"fingerprint\":\"%s\"}\n",
+    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"meshcore_local_identity\":\"stored_nvs_ed25519\",\"public_key_ready\":%s,\"public_key\":",
            settings->node_name, d1l_settings_role_name(settings->role),
-           bool_json(settings->identity_ready), fingerprint);
+           bool_json(settings->identity_ready));
+    print_hex_bytes_json(settings->identity_public_key,
+                         sizeof(settings->identity_public_key));
+    printf(",\"fingerprint\":\"%s\"}\n", fingerprint);
 }
 
 static void cmd_i2c(void)
@@ -1669,7 +2374,10 @@ static void cmd_radio_set_rxboost(const char *line)
 static void cmd_mesh_status(void)
 {
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
+    const bool user_trace_available =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE);
     ok_begin("mesh status");
+    print_release_profile_fields();
     printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"ack_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,\"duplicate_rows_suppressed\":%lu,\"last_hash\":%lu,\"last_error\":\"%s\"},\"dm_route\":{\"direct_selected\":%lu,\"flood_selected\":%lu,\"missing_fallback\":%lu,\"preboot_fallback\":%lu,\"stale_fallback\":%lu,\"malformed_fallback\":%lu,\"expired_fallback\":%lu,\"failed_fallback\":%lu,\"direct_retry_fallback\":%lu,\"last_reason\":\"%s\",\"last_path_age_ms\":%lu}",
            d1l_meshcore_service_state_name(status.state), bool_json(status.identity_ready),
            bool_json(status.radio_ready), bool_json(status.companion_framing_ready),
@@ -1713,7 +2421,25 @@ static void cmd_mesh_status(void)
            (unsigned long)status.runtime_task_heartbeat,
            (unsigned long)status.runtime_task_stack_free_words,
            (unsigned long long)status.runtime_last_event_monotonic_us);
-    printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"no_response\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_correlation_code_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"timeout_ms\":%u,\"cooldown_ms\":%u,\"flags_zero_direct_only\":false,\"trace_flags_supported\":[0,1,2,3],\"trace_wire_hash_bytes_supported\":[1,2,4,8],\"requires_current_boot_proven_contact_path\":true,\"contact_trace_supported\":true,\"operator_path_accepted\":false,\"one_byte_hash_only\":false,\"contact_trace_path_hash_bytes_supported\":[1,2],\"contact_route_hash_bytes_rejected\":[3],\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to a runtime-derived canonical contact loop, monotonic no-response timeout, cooldown, terminal parsing, and correlation\"}\n",
+    printf(",\"trace\":{\"available\":%s,\"internal_dm_route_only\":%s,"
+           "\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,"
+           "\"pending_expired\":%lu,\"no_response\":%lu,"
+           "\"rx_expired\":%lu,\"rx_unmatched\":%lu,"
+           "\"rx_correlation_code_mismatch\":%lu,"
+           "\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,"
+           "\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,"
+           "\"rx_unsupported\":%lu,\"timeout_ms\":%u,\"cooldown_ms\":%u,"
+           "\"flags_zero_direct_only\":false,"
+           "\"trace_flags_supported\":%s,"
+           "\"trace_wire_hash_bytes_supported\":%s,"
+           "\"requires_current_boot_proven_contact_path\":%s,"
+           "\"contact_trace_supported\":%s,"
+           "\"operator_path_accepted\":false,\"one_byte_hash_only\":false,"
+           "\"contact_trace_path_hash_bytes_supported\":%s,"
+           "\"contact_route_hash_bytes_rejected\":%s,"
+           "\"hardware_verified\":false},\"note\":\"%s\"}\n",
+           bool_json(user_trace_available),
+           bool_json(!user_trace_available),
            (unsigned long)status.trace_tx_queued,
            (unsigned long)status.trace_rx_matched,
            (unsigned long)status.trace_rx_duplicates,
@@ -1728,7 +2454,21 @@ static void cmd_mesh_status(void)
            (unsigned long)status.trace_rx_in_flight_ignored,
            (unsigned long)status.trace_rx_unsupported,
            D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS,
-           D1L_MESHCORE_TRACE_COOLDOWN_MS);
+           D1L_MESHCORE_TRACE_COOLDOWN_MS,
+           user_trace_available ? "[0,1,2,3]" : "[]",
+           user_trace_available ? "[1,2,4,8]" : "[]",
+           bool_json(user_trace_available),
+           bool_json(user_trace_available),
+           user_trace_available ? "[1,2]" : "[]",
+           user_trace_available ? "[3]" : "[]",
+           user_trace_available ?
+               "Public group text TX/RX and signed advert TX/RX enabled; "
+               "inbound DM ACK dispatch and route selection enabled; TRACE is "
+               "bounded to a runtime-derived canonical contact loop, monotonic "
+               "no-response timeout, cooldown, terminal parsing, and correlation" :
+               "Public and direct messaging, ACK/PATH handling, and internal "
+               "route selection are enabled; user TRACE/PATH tooling is "
+               "unavailable in Core 1.0");
 }
 
 static void cmd_mesh_advert(const char *cmd, bool flood)
@@ -1779,14 +2519,41 @@ static void cmd_companion_status(void)
 {
     d1l_connectivity_status_t connectivity = {0};
     d1l_connectivity_status(&connectivity);
+    const bool wifi_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL);
+    const bool ble_available =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
     ok_begin("companion status");
-    printf(",\"usb_console\":\"ready\",\"framing\":\"meshcore-3byte\",\"header_bytes\":%u,\"app_to_radio\":\"%c\",\"radio_to_app\":\"%c\",\"length\":\"uint16_le\",\"max_payload_bytes\":%u,\"transport_codec\":\"ready\",\"meshcore_bridge\":\"ready\",\"wifi\":{\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"},\"ble\":{\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"},\"coexistence_policy\":\"%s\",\"path_hash_bytes_supported\":[1,2,3],\"default_path_hash_bytes\":1}\n",
+    print_release_profile_fields();
+    printf(",\"usb_console\":\"ready\",\"framing\":\"meshcore-3byte\","
+           "\"header_bytes\":%u,\"app_to_radio\":\"%c\","
+           "\"radio_to_app\":\"%c\",\"length\":\"uint16_le\","
+           "\"max_payload_bytes\":%u,\"transport_codec\":\"ready\","
+           "\"meshcore_bridge\":\"ready\","
+           "\"wifi\":{\"available\":%s,\"setting_enabled\":%s,"
+           "\"configured_setting_enabled\":%s,\"build_enabled\":%s,"
+           "\"stack_active\":%s,\"state\":\"%s\"},"
+           "\"ble\":{\"available\":%s,\"setting_enabled\":%s,"
+           "\"configured_setting_enabled\":%s,\"build_enabled\":%s,"
+           "\"stack_active\":%s,\"state\":\"%s\"},"
+           "\"coexistence_policy\":\"%s\","
+           "\"path_hash_bytes_supported\":[1,2,3],"
+           "\"default_path_hash_bytes\":1}\n",
            D1L_COMPANION3_HEADER_SIZE, D1L_COMPANION3_APP_TO_RADIO,
            D1L_COMPANION3_RADIO_TO_APP, D1L_COMPANION3_MAX_FRAME_SIZE,
+           bool_json(wifi_available),
+           bool_json(wifi_available && connectivity.wifi_enabled_setting),
            bool_json(connectivity.wifi_enabled_setting),
-           bool_json(connectivity.wifi_build_enabled), connectivity.wifi_state,
+           bool_json(connectivity.wifi_build_enabled),
+           bool_json(connectivity.wifi_stack_active),
+           connectivity.wifi_state,
+           bool_json(ble_available),
+           bool_json(
+               ble_available && connectivity.ble_companion_enabled_setting),
            bool_json(connectivity.ble_companion_enabled_setting),
-           bool_json(connectivity.ble_build_enabled), connectivity.ble_state,
+           bool_json(connectivity.ble_build_enabled),
+           bool_json(connectivity.ble_stack_active),
+           connectivity.ble_state,
            connectivity.coexistence_policy);
 }
 
@@ -2037,7 +2804,10 @@ static void cmd_storage_status(void)
     d1l_retained_store_worker_status(&retained_scheduler);
     d1l_retained_blob_store_nvs_telemetry_t retained_nvs_telemetry = {0};
     (void)d1l_retained_blob_store_nvs_telemetry(&retained_nvs_telemetry);
+    const bool map_available =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP);
     ok_begin("storage status");
+    print_release_profile_fields();
     printf(",\"manager\":{\"running\":%s,\"state\":",
            bool_json(status.manager_running));
     print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
@@ -2099,24 +2869,37 @@ static void cmd_storage_status(void)
     printf(",\"route_store_backend\":");
     print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
     printf(",\"map_tile_backend\":");
-    print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    print_json_string(
+        map_available && status.map_tile_backend ?
+            status.map_tile_backend : "unavailable");
     printf(",\"map_tile_cache_ready\":%s,\"map_tile_cache_policy\":",
-           bool_json(d1l_map_tile_store_sd_ready(&status)));
-    print_json_string(D1L_MAP_TILE_CACHE_POLICY);
+           bool_json(
+               map_available && d1l_map_tile_store_sd_ready(&status)));
+    print_json_string(
+        map_available ? D1L_MAP_TILE_CACHE_POLICY :
+                        "unavailable_in_release_profile");
     printf(",\"map_tile_cache_path_template\":");
-    print_json_string(D1L_MAP_TILE_CACHE_PATH_TEMPLATE);
+    print_json_string(
+        map_available ? D1L_MAP_TILE_CACHE_PATH_TEMPLATE : "");
     printf(",\"map_tile_download_supported\":%s,\"map_tile_source\":",
-           bool_json(connectivity.wifi_build_enabled &&
-                     d1l_map_tile_store_sd_ready(&status)));
-    print_json_string(D1L_MAP_TILE_SOURCE_ID);
+           bool_json(map_available &&
+                     d1l_release_feature_available(
+                         D1L_RELEASE_FEATURE_WIFI_USER_CONTROL) &&
+                     connectivity.wifi_build_enabled &&
+                      d1l_map_tile_store_sd_ready(&status)));
+    print_json_string(map_available ? D1L_MAP_TILE_SOURCE_ID : "");
     printf(",\"map_tile_download_state\":");
-    print_json_string(!d1l_map_tile_store_sd_ready(&status) ? "sd_cache_required" :
-                      !connectivity.wifi_connected ? "wifi_required" :
-                      D1L_MAP_TILE_DOWNLOAD_STATE);
+    print_json_string(
+        !map_available ? "unavailable_in_release_profile" :
+        !d1l_map_tile_store_sd_ready(&status) ? "sd_cache_required" :
+        !connectivity.wifi_connected ? "wifi_required" :
+        D1L_MAP_TILE_DOWNLOAD_STATE);
     printf(",\"map_tile_policy\":");
-    print_json_string(D1L_MAP_TILE_PROVIDER_POLICY);
+    print_json_string(
+        map_available ? D1L_MAP_TILE_PROVIDER_POLICY :
+                        "unavailable_in_release_profile");
     printf(",\"map_tile_attribution\":");
-    print_json_string(D1L_MAP_TILE_ATTRIBUTION);
+    print_json_string(map_available ? D1L_MAP_TILE_ATTRIBUTION : "");
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
     printf(",\"retained_nvs\":{\"partition\":\"d1l_retained\",\"marker_ready\":%s,\"markers_complete\":%s,\"anchor_ready\":%s,\"sentinel_ready\":%s,\"external_init_required\":%s,\"initialized_this_boot\":%s,\"ready\":%s,\"init_error\":\"%s\",\"migrated_keys\":%lu,\"migration_error\":\"%s\",\"telemetry\":",
@@ -2161,7 +2944,9 @@ static void cmd_storage_status(void)
     printf(",\"routes\":");
     print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
     printf(",\"contacts\":\"nvs\",\"read_state\":\"nvs\",\"crashlog\":\"nvs\",\"map_tiles\":");
-    print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    print_json_string(
+        map_available && status.map_tile_backend ?
+            status.map_tile_backend : "unavailable");
     printf(",\"exports\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
     printf("},\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
@@ -2366,6 +3151,11 @@ static void cmd_storage_diag_raw(void)
 
 static void cmd_storage_map_policy(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        release_unavailable_status(
+            "storage map-policy", D1L_RELEASE_FEATURE_MAP);
+        return;
+    }
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     d1l_connectivity_status_t connectivity = {0};
@@ -2423,6 +3213,24 @@ static void cmd_map_tiles_status(void)
 {
     d1l_map_view_status_t status = {0};
     d1l_map_view_service_status(&status);
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_MAP)) {
+        ok_begin("map tiles status");
+        printf(",\"available\":false");
+        print_release_profile_fields();
+        printf(",\"feature\":\"map\",\"initialized\":%s,\"visible\":%s,"
+               "\"worker_running\":%s,\"network_requests\":%u,"
+               "\"runtime_policy_violation\":%s,"
+               "\"mutation_allowed\":false,"
+               "\"reason\":\"unavailable_in_release_profile\","
+               "\"public_rf_tx\":false,\"formats_sd\":false}\n",
+               bool_json(status.initialized), bool_json(status.visible),
+               bool_json(status.worker_running),
+               (unsigned)status.network_requests,
+               bool_json(
+                   status.initialized || status.visible ||
+                   status.worker_running || status.network_requests > 0U));
+        return;
+    }
     ok_begin("map tiles status");
     printf(",\"source\":");
     print_json_string(D1L_MAP_TILE_SOURCE_ID);
@@ -4641,7 +5449,9 @@ static void cmd_messages_read(const char *line)
 static void cmd_nodes(void)
 {
     d1l_node_store_stats_t stats = d1l_node_store_stats();
-    const uint32_t marker_generation = d1l_node_store_marker_generation();
+    const bool include_location = !d1l_release_profile_is_core();
+    const uint32_t marker_generation = include_location ?
+        d1l_node_store_marker_generation() : 0U;
     static d1l_node_view_t entries[8];
     const d1l_node_query_t query = {
         .filter = D1L_NODE_FILTER_ALL,
@@ -4652,28 +5462,42 @@ static void cmd_nodes(void)
     };
     size_t copied = d1l_node_store_query(&query, entries, 8);
     ok_begin("nodes");
-    printf(",\"count\":%u,\"capacity\":%u,\"active_capacity\":%u,\"sd_history_capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"marker_generation\":%lu,\"filter\":\"all\",\"sort\":\"last_heard\",\"entries\":[",
+    printf(",\"count\":%u,\"capacity\":%u,\"active_capacity\":%u,\"sd_history_capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu",
            (unsigned)stats.count, (unsigned)stats.capacity,
            (unsigned)D1L_NODE_RAM_ACTIVE_CAPACITY,
            (unsigned)D1L_NODE_SD_HISTORY_CAPACITY,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
-           (unsigned long)marker_generation);
+           (unsigned long)stats.total_written,
+           (unsigned long)stats.dropped_oldest);
+    if (include_location) {
+        printf(",\"marker_generation\":%lu",
+               (unsigned long)marker_generation);
+    }
+    printf(",\"filter\":\"all\",\"sort\":\"last_heard\",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         const d1l_node_view_t *view = &entries[i];
         const d1l_node_entry_t *e = &view->node;
-        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"display_name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"favorite\":%s,\"muted\":%s,\"keyed\":%s,\"reachable\":%s,\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"location_valid\":%s,\"lat_e6\":%ld,\"lon_e6\":%ld,\"location_advert_timestamp\":%lu,\"location_seq\":%lu}",
+        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"display_name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"favorite\":%s,\"muted\":%s,\"keyed\":%s,\"reachable\":%s,\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->first_heard_ms,
                (unsigned long)e->last_heard_ms, (unsigned long)e->advert_timestamp,
                (unsigned long)e->heard_count, e->fingerprint, e->public_key_hex,
                e->name, view->display_name, e->type, view->role,
                bool_json(view->favorite), bool_json(view->muted),
                bool_json(view->keyed), bool_json(view->reachable),
-               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
-               bool_json(e->location_valid), (long)e->lat_e6, (long)e->lon_e6,
-               (unsigned long)e->location_advert_timestamp,
-               (unsigned long)e->location_seq);
+               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops);
+        if (include_location) {
+            printf(",\"location_valid\":%s,\"lat_e6\":%ld,\"lon_e6\":%ld,\"location_advert_timestamp\":%lu,\"location_seq\":%lu",
+                   bool_json(e->location_valid), (long)e->lat_e6,
+                   (long)e->lon_e6,
+                   (unsigned long)e->location_advert_timestamp,
+                   (unsigned long)e->location_seq);
+        }
+        printf("}");
     }
-    printf("],\"persisted\":true,\"note\":\"Verified MeshCore adverts populate this bounded heard-node store; enriched query rows expose role, favorite, keyed, and reachability state\"}\n");
+    if (include_location) {
+        printf("],\"persisted\":true,\"note\":\"Verified MeshCore adverts populate this bounded heard-node store; enriched query rows expose role, favorite, keyed, and reachability state\"}\n");
+    } else {
+        printf("],\"persisted\":true,\"note\":\"Core node projection exposes verified identity, role, favorite, keyed, reachability, route, and signal fields\"}\n");
+    }
 }
 
 static void cmd_nodes_clear(void)
@@ -4723,6 +5547,12 @@ static void print_channel_metadata_json(const d1l_channel_info_t *entry,
 
 static void cmd_channels(void)
 {
+    if (!d1l_release_feature_available(
+            D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT)) {
+        release_unavailable_status(
+            "channels", D1L_RELEASE_FEATURE_MULTI_CHANNEL_MANAGEMENT);
+        return;
+    }
     static d1l_channel_info_t entries[D1L_CHANNEL_STORE_CAPACITY];
     size_t count = 0U;
     uint64_t active_channel_id = 0U;
@@ -4806,9 +5636,13 @@ static void cmd_contacts(void)
                (unsigned long)e->verified_at_ms,
                (unsigned long)e->signed_advert_timestamp,
                (unsigned long)e->last_heard_ms,
-               bool_json(d1l_contact_store_is_canonical(e)),
-               bool_json(d1l_contact_store_can_dm(e)),
-               bool_json(d1l_contact_store_can_admin(e)), e->last_rssi_dbm,
+                bool_json(d1l_contact_store_is_canonical(e)),
+                bool_json(d1l_contact_store_can_dm(e)),
+                bool_json(
+                    d1l_release_feature_available(
+                        D1L_RELEASE_FEATURE_ADMIN) &&
+                    d1l_contact_store_can_admin(e)),
+                e->last_rssi_dbm,
                e->last_snr_tenths, e->path_hash_bytes, e->path_hops,
                bool_json(e->out_path_valid), e->out_path_len,
                (unsigned long)e->out_path_updated_ms, bool_json(e->favorite),
@@ -4963,6 +5797,212 @@ static void cmd_contacts_import(const char *line)
            bool_json(d1l_contact_store_is_canonical(&contact)),
            bool_json(d1l_contact_store_can_dm(&contact)),
            bool_json(d1l_contact_store_can_admin(&contact)));
+}
+
+static bool core_retained_canary_nvs_only(void)
+{
+    for (size_t i = 0U; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
+        d1l_retained_blob_store_backend_state_t state = {0};
+        if (!d1l_retained_blob_store_backend_state(
+                (d1l_retained_blob_store_id_t)i, &state) ||
+            state.enabled) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool core_retained_canary_public_key(
+    const char *token,
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN])
+{
+    static const char prefix[] = "sigui-core-retained-canary:";
+    static const char hex[] = "0123456789abcdef";
+    char material[sizeof(prefix) + 31U] = {0};
+    uint8_t seed[32] = {0};
+    uint8_t public_key[32] = {0};
+    uint8_t private_key[64] = {0};
+    const int material_len = snprintf(
+        material, sizeof(material), "%s%s", prefix, token ? token : "");
+    const mbedtls_md_info_t *md =
+        mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    bool ok =
+        token && public_key_hex && material_len > 0 &&
+        (size_t)material_len < sizeof(material) && md &&
+        mbedtls_md(md, (const unsigned char *)material,
+                   (size_t)material_len, seed) == 0;
+    if (ok) {
+        ed25519_create_keypair(public_key, private_key, seed);
+        for (size_t i = 0U; i < sizeof(public_key); ++i) {
+            public_key_hex[i * 2U] =
+                hex[(public_key[i] >> 4U) & 0x0FU];
+            public_key_hex[i * 2U + 1U] =
+                hex[public_key[i] & 0x0FU];
+        }
+        public_key_hex[sizeof(public_key) * 2U] = '\0';
+    }
+    wipe_console_bytes(seed, sizeof(seed));
+    wipe_console_bytes(private_key, sizeof(private_key));
+    wipe_console_bytes(public_key, sizeof(public_key));
+    wipe_console_bytes(material, sizeof(material));
+    return ok;
+}
+
+/*
+ * Core release persistence evidence must create its own exact-candidate
+ * canaries.  This diagnostic mutates only the retained NVS stores and the
+ * contact NVS store: it never calls the MeshCore send path, storage manager,
+ * SD status refresh, or RP2040 bridge.
+ */
+static void cmd_core_retained_canary(const char *line)
+{
+    static const char prefix[] = "core retained-canary ";
+    char token[32] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !copy_storage_canary_token(
+            token, sizeof(token), line + strlen(prefix))) {
+        err_result("core retained-canary", "INVALID_TOKEN",
+                   "usage: core retained-canary <token-with-a-z-0-9-dot-dash-underscore>");
+        return;
+    }
+
+    if (!d1l_release_profile_is_core() ||
+        d1l_release_sd_history_mode() != D1L_SD_HISTORY_MODE_DISABLED) {
+        err_result("core retained-canary", "ESP_ERR_NOT_SUPPORTED",
+                   "requires the Core 1.0 release profile with SD history disabled");
+        return;
+    }
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_RETAINED_NVS) ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_PUBLIC_MESSAGES) ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_DIRECT_MESSAGES) ||
+        !d1l_release_feature_available(D1L_RELEASE_FEATURE_BASIC_CONTACTS)) {
+        err_result("core retained-canary", "ESP_ERR_NOT_SUPPORTED",
+                   "required retained Core capabilities are unavailable");
+        return;
+    }
+    if (!d1l_retained_blob_store_nvs_ready() ||
+        !d1l_retained_blob_store_nvs_marker_ready() ||
+        !d1l_retained_blob_store_nvs_markers_complete() ||
+        !d1l_retained_blob_store_nvs_anchor_ready() ||
+        !d1l_retained_blob_store_nvs_sentinel_ready() ||
+        !core_retained_canary_nvs_only()) {
+        err_result("core retained-canary", "RETAINED_NVS_NOT_READY",
+                   "all retained stores must be ready on NVS with SD backends disabled");
+        return;
+    }
+
+    char public_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    if (!core_retained_canary_public_key(token, public_key)) {
+        err_result("core retained-canary", "ESP_FAIL",
+                   "could not derive the deterministic local contact key");
+        return;
+    }
+    char contact_uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
+    const int uri_len = snprintf(
+        contact_uri, sizeof(contact_uri),
+        "meshcore://contact/add?name=Core+Canary&public_key=%s&type=1",
+        public_key);
+    if (uri_len <= 0 || (size_t)uri_len >= sizeof(contact_uri)) {
+        err_result("core retained-canary", "ESP_ERR_INVALID_SIZE",
+                   "local contact URI exceeded its fixed bound");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        return;
+    }
+
+    d1l_contact_import_result_t contact_result = D1L_CONTACT_IMPORT_NONE;
+    d1l_contact_entry_t contact = {0};
+    esp_err_t ret = d1l_contact_store_import_uri(
+        contact_uri, (size_t)uri_len, &contact_result, &contact);
+    wipe_console_bytes(contact_uri, sizeof(contact_uri));
+    if (ret != ESP_OK ||
+        !d1l_contact_store_is_canonical(&contact) ||
+        !d1l_contact_store_can_dm(&contact)) {
+        err_result("core retained-canary",
+                   ret == ESP_OK ? "CONTACT_NOT_CANONICAL" :
+                                   esp_err_to_name(ret),
+                   "could not persist the deterministic canonical Core contact");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    char text[D1L_MESSAGE_TEXT_LEN] = {0};
+    snprintf(text, sizeof(text), "core-retained-canary %s", token);
+    const uint32_t public_seq = d1l_message_store_stats().next_seq;
+    ret = d1l_message_store_append_public(
+        "rx", "Core Canary", text, 0, 0, 1, 0, true);
+    d1l_message_store_stats_t public_stats = d1l_message_store_stats();
+    if (ret != ESP_OK || public_seq == 0U ||
+        public_stats.next_seq != public_seq + 1U) {
+        err_result("core retained-canary",
+                   ret == ESP_OK ? "PUBLIC_SEQUENCE_RACE" :
+                                   esp_err_to_name(ret),
+                   "could not persist one exact local Public canary row");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    const uint32_t dm_seq = d1l_dm_store_stats().next_seq;
+    ret = d1l_dm_store_append(
+        contact.fingerprint, "Core Canary", "rx", text,
+        0, 0, 1, 0, 0, true, false, retained_canary_hash(token));
+    d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
+    if (ret != ESP_OK || dm_seq == 0U ||
+        dm_stats.next_seq != dm_seq + 1U) {
+        err_result("core retained-canary",
+                   ret == ESP_OK ? "DM_SEQUENCE_RACE" :
+                                   esp_err_to_name(ret),
+                   "could not persist one exact local DM canary row");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    ret = d1l_route_store_worker_force_flush(
+        D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
+    public_stats = d1l_message_store_stats();
+    dm_stats = d1l_dm_store_stats();
+    const d1l_contact_store_stats_t contact_stats =
+        d1l_contact_store_stats();
+    if (ret != ESP_OK || public_stats.persistence_dirty ||
+        public_stats.nvs_fallback_dirty ||
+        public_stats.sd_primary_required ||
+        dm_stats.persistence_dirty || dm_stats.nvs_fallback_dirty ||
+        dm_stats.sd_primary_required || contact_stats.persistence_dirty ||
+        !core_retained_canary_nvs_only()) {
+        err_result("core retained-canary",
+                   ret == ESP_OK ? "RETAINED_NVS_NOT_CLEAN" :
+                                   esp_err_to_name(ret),
+                   "candidate-local Core canaries are not clean on NVS");
+        wipe_console_bytes(public_key, sizeof(public_key));
+        wipe_console_bytes(&contact, sizeof(contact));
+        return;
+    }
+
+    ok_begin("core retained-canary");
+    printf(",\"token\":");
+    print_json_string(token);
+    printf(",\"message_text\":");
+    print_json_string(text);
+    printf(",\"fingerprint\":");
+    print_json_string(contact.fingerprint);
+    printf(",\"public_key\":");
+    print_json_string(public_key);
+    printf(",\"public_seq\":%lu,\"dm_seq\":%lu,\"contact_seq\":%lu,"
+           "\"contact_result\":",
+           (unsigned long)public_seq,
+           (unsigned long)dm_seq,
+           (unsigned long)contact.seq);
+    print_json_string(contact_import_result_name(contact_result));
+    printf(",\"persisted\":true,\"retention\":\"nvs\","
+           "\"backend_mode\":\"nvs_disabled\",\"synthetic_local\":true,"
+           "\"retained_flush\":\"ESP_OK\",\"public_rf_tx\":false,"
+           "\"dm_rf_tx\":false,\"sd_access\":false,"
+           "\"rp2040_access\":false,\"formats_sd\":false,"
+           "\"predecessor_evidence_used\":false}\n");
+    wipe_console_bytes(public_key, sizeof(public_key));
+    wipe_console_bytes(&contact, sizeof(contact));
 }
 
 static void cmd_contacts_clear(void)
@@ -5383,6 +6423,11 @@ static void cmd_routes_trace_contact(const char *line)
 
 static void cmd_routes_trace_status(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        release_unavailable_status(
+            "routes trace status", D1L_RELEASE_FEATURE_USER_TRACE);
+        return;
+    }
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
     d1l_meshcore_trace_snapshot_t trace = {0};
     d1l_meshcore_service_trace_snapshot(&trace);
@@ -5499,7 +6544,30 @@ static void cmd_routes_trace(const char *line)
         printf("%s", i ? "," : "");
         print_route_entry_json(&entries[i]);
     }
-    printf("],\"path_discovery_probe_supported\":true,\"path_discovery_probe_command\":\"routes probe <fingerprint>\",\"real_trace_contact_supported\":true,\"contact_trace_command\":\"routes trace contact <fingerprint>\",\"contact_trace_requires_current_boot_proven_path\":true,\"contact_trace_hash_bytes\":1,\"operator_trace_path_accepted\":false,\"hardware_verified\":false,\"note\":\"This view combines retained route/contact evidence; routes probe sends a labelled DM/PATH discovery request while routes trace contact sends a real contact-derived TRACE packet\"}\n");
+    if (d1l_release_feature_available(D1L_RELEASE_FEATURE_USER_TRACE)) {
+        printf("],\"path_discovery_probe_supported\":true,"
+               "\"path_discovery_probe_command\":\"routes probe <fingerprint>\","
+               "\"real_trace_contact_supported\":true,"
+               "\"contact_trace_command\":\"routes trace contact <fingerprint>\","
+               "\"contact_trace_requires_current_boot_proven_path\":true,"
+               "\"contact_trace_hash_bytes\":1,"
+               "\"operator_trace_path_accepted\":false,"
+               "\"hardware_verified\":false,"
+               "\"note\":\"This view combines retained route/contact evidence; "
+               "routes probe sends a labelled DM/PATH discovery request while "
+               "routes trace contact sends a real contact-derived TRACE packet\"}\n");
+    } else {
+        printf("],\"release_profile\":");
+        print_json_string(d1l_release_profile_name());
+        printf(",\"feature\":\"route_signal_read_only\","
+               "\"available\":true,\"read_only\":true,"
+               "\"path_discovery_probe_supported\":false,"
+               "\"real_trace_contact_supported\":false,"
+               "\"operator_trace_path_accepted\":false,"
+               "\"user_trace_available\":false,\"hardware_verified\":false,"
+               "\"note\":\"Retained route and contact evidence only; Core 1.0 "
+               "does not expose user TRACE or PATH mutations\"}\n");
+    }
 }
 
 static void cmd_routes_probe(const char *line)
@@ -5593,6 +6661,11 @@ static void cmd_signal(void)
 
 static void cmd_roomservers(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        release_unavailable_status(
+            "roomservers", D1L_RELEASE_FEATURE_ADMIN);
+        return;
+    }
     d1l_mesh_signal_summary_t summary = {0};
     d1l_mesh_inspector_signal_summary(&summary);
     static d1l_mesh_room_server_t entries[8];
@@ -5609,6 +6682,11 @@ static void cmd_roomservers(void)
 
 static void cmd_repeaters(void)
 {
+    if (!d1l_release_feature_available(D1L_RELEASE_FEATURE_ADMIN)) {
+        release_unavailable_status(
+            "repeaters", D1L_RELEASE_FEATURE_ADMIN);
+        return;
+    }
     d1l_mesh_signal_summary_t summary = {0};
     d1l_mesh_inspector_signal_summary(&summary);
     static d1l_mesh_repeater_candidate_t entries[8];
@@ -5663,6 +6741,7 @@ static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
     ok_begin("health");
+    print_release_profile_fields();
     printf(",\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"retained_task_stack_free_bytes\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
            (unsigned long)h.boot_nonce,
            (unsigned long)h.uptime_ms,
@@ -5690,13 +6769,33 @@ static void print_wifi_status_result(const char *command)
 {
     d1l_connectivity_status_t status = {0};
     d1l_connectivity_status(&status);
+    const bool available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_WIFI_USER_CONTROL);
+    const bool runtime_policy_violation =
+        !available &&
+        (status.wifi_stack_active || status.wifi_connected ||
+         status.wifi_connecting);
     ok_begin(command);
-    printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"connected\":%s,\"connecting\":%s,\"scan_supported\":%s,\"profile_saved\":%s,\"password_saved\":%s,\"ssid\":",
-            bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
+    printf(",\"available\":%s", bool_json(available));
+    print_release_profile_fields();
+    printf(",\"feature\":\"wifi_user_control\","
+           "\"mutation_allowed\":%s,\"setting_enabled\":%s,"
+           "\"configured_setting_enabled\":%s,\"build_enabled\":%s,"
+           "\"stack_active\":%s,\"connected\":%s,\"connecting\":%s,"
+           "\"scan_supported\":%s,\"profile_saved\":%s,"
+           "\"password_saved\":%s,\"runtime_policy_violation\":%s,\"ssid\":",
+            bool_json(available),
+            bool_json(available && status.wifi_enabled_setting),
+            bool_json(status.wifi_enabled_setting),
+            bool_json(status.wifi_build_enabled),
             bool_json(status.wifi_stack_active), bool_json(status.wifi_connected),
-            bool_json(status.wifi_connecting), bool_json(status.wifi_scan_supported),
-            bool_json(status.wifi_profile_saved), bool_json(status.wifi_password_saved));
-    print_json_string(status.wifi_profile_saved ? status.wifi_ssid : "");
+            bool_json(status.wifi_connecting),
+            bool_json(available && status.wifi_scan_supported),
+            bool_json(available && status.wifi_profile_saved),
+            bool_json(available && status.wifi_password_saved),
+            bool_json(runtime_policy_violation));
+    print_json_string(
+        available && status.wifi_profile_saved ? status.wifi_ssid : "");
     printf(",\"state\":");
     print_json_string(status.wifi_state ? status.wifi_state : "off");
     printf(",\"ip\":");
@@ -5891,10 +6990,24 @@ static void cmd_ble_status(void)
 {
     d1l_connectivity_status_t status = {0};
     d1l_connectivity_status(&status);
+    const bool available =
+        d1l_release_feature_available(D1L_RELEASE_FEATURE_BLE);
     ok_begin("ble status");
-    printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"state\":\"%s\",\"policy\":\"%s\"}\n",
-           bool_json(status.ble_companion_enabled_setting), bool_json(status.ble_build_enabled),
-           bool_json(status.ble_stack_active), status.ble_state, status.coexistence_policy);
+    printf(",\"available\":%s", bool_json(available));
+    print_release_profile_fields();
+    printf(",\"feature\":\"ble\",\"mutation_allowed\":%s,"
+           "\"setting_enabled\":%s,\"configured_setting_enabled\":%s,"
+           "\"build_enabled\":%s,\"stack_active\":%s,"
+           "\"runtime_policy_violation\":%s,\"state\":\"%s\","
+           "\"policy\":\"%s\"}\n",
+           bool_json(available),
+           bool_json(
+               available && status.ble_companion_enabled_setting),
+           bool_json(status.ble_companion_enabled_setting),
+           bool_json(status.ble_build_enabled),
+           bool_json(status.ble_stack_active),
+           bool_json(!available && status.ble_stack_active),
+           status.ble_state, status.coexistence_policy);
 }
 
 static void cmd_ble_off(void)
@@ -5932,6 +7045,73 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
+    if (d1l_release_profile_is_core()) {
+        print_release_profile_fields();
+        printf(",\"commands\":[\"help\",\"version\",\"board\","
+               "\"settings get\",\"settings reset\","
+               "\"time migration status\","
+               "\"time migrate-legacy <expected-mesh-ts> "
+               "<confirmed-upper-bound> "
+               D1L_TIME_PROTOCOL_MIGRATION_CONFIRMATION "\","
+               "\"settings set name <name>\","
+               "\"settings set timezone <UTC|UTC+HH:MM|UTC-HH:MM>\","
+               "\"settings onboarding status\","
+               "\"settings onboarding complete <name>\","
+               "\"settings onboarding reset\",\"identity status\",\"i2c\","
+               "\"display test\",\"touch test\",\"touch raw\",\"button\","
+               "\"backlight <0-100>\",\"radiohw\",\"radio get\","
+               "\"radio set preset uscan\",\"radio set freq 910.525\","
+               "\"radio set bw 62.5\",\"radio set sf 7\","
+               "\"radio set cr 5\",\"radio set txpower 20\","
+               "\"radio set rxboost <0|1>\",\"ui status\","
+               "\"ui tab <home|messages|nodes|packets|settings>\","
+               "\"ui scroll-probe "
+               "<home|public_messages|dm_thread|nodes|contact_detail|"
+               "contact_options|contact_forget|packets|settings|storage>\","
+               "\"ui compose-probe "
+               "<public|public-long|dm|dm-long|public-search|dm-search|"
+               "packet-search|contact-edit|onboarding>\","
+               "\"ui data-canary <token>\",\"ui capture status\","
+               "\"ui capture begin\",\"ui capture chunk <offset> <len>\","
+               "\"ui capture end\",\"mesh status\",\"companion status\","
+               "\"storage status\",\"storage force-nvs [on]\","
+               "\"core retained-canary <token>\","
+               "\"mesh advert zero\",\"mesh advert flood\","
+               "\"mesh send public <text>\","
+               "\"mesh send dm <fingerprint> <text>\","
+               "\"messages public [offset <n>]\","
+               "\"messages public search <text> [offset <n>]\","
+               "\"messages dm [offset <n>]\","
+               "\"messages dm <fingerprint> [offset <n>]\","
+               "\"messages unread\","
+               "\"messages read <public|dm|dm <fingerprint>|all>\","
+               "\"messages clear\",\"messages dm clear\",\"nodes\",\"contacts\","
+               "\"contacts export [fingerprint]\","
+               "\"contacts import <meshcore-uri>\","
+               "\"contacts add <fingerprint> [alias]\","
+               "\"contacts rename <fingerprint> <alias>\","
+               "\"contacts delete <fingerprint>\","
+               "\"contacts set <fingerprint> <favorite|mute> <0|1>\","
+               "\"contacts clear\",\"routes\",\"routes detail <seq>\","
+               "\"routes trace <fingerprint>\",\"signal\",\"packets\","
+               "\"packets filter <any|rx|tx> <any|text|kind>\","
+               "\"packets search <text>\",\"packets detail <seq>\","
+               "\"packets raw <seq>\",\"health\","
+               "\"crashlog\",\"crashlog clear\",\"reboot\","
+               "\"factory-reset-status\",\"factory-reset-confirm\"],"
+               "\"unavailable_status_commands\":[\"wifi status\","
+               "\"ble status\",\"map center\",\"map tiles status\","
+               "\"channels\",\"routes trace status\",\"roomservers\","
+               "\"repeaters\"],\"unavailable_features\":[\"map\","
+               "\"wifi_user_control\",\"ble\","
+               "\"multi_channel_management\",\"admin\","
+               "\"observer_mqtt\",\"signed_update\","
+               "\"mutable_terminal\",\"location\","
+               "\"advanced_qr_emoji\",\"user_trace\"],"
+               "\"fixed_default_public\":true,"
+               "\"public_rf_tx\":false,\"formats_sd\":false}\n");
+        return;
+    }
     printf(",\"contact_probe_surfaces\":[\"contact_detail\",\"contact_options\","
            "\"contact_forget\",\"contact_route\"]");
     printf(",\"storage_probe_surfaces\":[\"storage\",\"storage_card\",\"storage_data\"]");
@@ -6254,6 +7434,9 @@ static void handle_line(const d1l_usb_command_view_t *command)
                    "command admission did not produce a canonical view");
         return;
     }
+    if (!enforce_release_command_policy(command)) {
+        return;
+    }
     const char *line = command->text;
     if (strcmp(line, "help") == 0) {
         cmd_help();
@@ -6401,6 +7584,8 @@ static void handle_line(const d1l_usb_command_view_t *command)
         cmd_storage_export_data(line);
     } else if (strncmp(line, "storage retained-canary ", strlen("storage retained-canary ")) == 0) {
         cmd_storage_retained_canary(line);
+    } else if (strncmp(line, "core retained-canary ", strlen("core retained-canary ")) == 0) {
+        cmd_core_retained_canary(line);
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
     } else if (strncmp(line, "packets filter ", 15) == 0) {

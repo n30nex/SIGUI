@@ -7,6 +7,7 @@
 #include "esp_err.h"
 
 #include "app/settings_model.h"
+#include "app/release_profile.h"
 #include "comms/connectivity_manager.h"
 #include "map/map_marker_truth.h"
 #include "mesh/channel_store.h"
@@ -75,6 +76,11 @@ typedef struct {
 typedef struct {
     bool board_ready;
     bool ui_ready;
+    d1l_release_profile_id_t release_profile_id;
+    const char *release_profile;
+    d1l_sd_history_mode_t sd_history_mode_id;
+    const char *sd_history_mode;
+    d1l_release_capabilities_t release_capabilities;
     bool identity_ready;
     bool radio_ready;
     bool radio_applied;

@@ -209,6 +209,7 @@ def expected_command_name(command: str) -> str:
         "storage export-diagnostics ",
         "storage export-data ",
         "storage retained-canary ",
+        "core retained-canary ",
         "backlight ",
         "mesh send public ",
         "mesh send dm ",

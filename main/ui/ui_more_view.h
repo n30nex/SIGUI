@@ -95,4 +95,6 @@ typedef struct {
 
 bool d1l_ui_more_view(const d1l_ui_more_view_input_t *input,
                       d1l_ui_more_view_model_t *out_view);
+void d1l_ui_more_view_apply_release_profile(
+    d1l_ui_more_view_input_t *input);
 bool d1l_ui_more_view_model_is_valid(const d1l_ui_more_view_model_t *view_model);

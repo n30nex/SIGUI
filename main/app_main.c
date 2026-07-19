@@ -5,6 +5,7 @@
 #include "nvs_flash.h"
 
 #include "d1l_config.h"
+#include "app/release_profile.h"
 #include "app/settings_model.h"
 #include "diagnostics/crash_log.h"
 #include "diagnostics/health_monitor.h"
@@ -105,8 +106,10 @@ void app_main(void)
                  esp_err_to_name(time_ret));
     }
 
-    printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\",\"boot_nonce\":%lu,\"secure_random_ready\":%s,\"secure_random_error\":\"%s\",\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"retained_nvs_marker_ready\":%s,\"retained_nvs_markers_complete\":%s,\"retained_nvs_anchor_ready\":%s,\"retained_nvs_sentinel_ready\":%s,\"retained_nvs_external_init_required\":%s,\"retained_nvs_initialized_this_boot\":%s,\"retained_nvs_ready\":%s,\"retained_nvs_init_error\":\"%s\",\"retained_nvs_migration_error\":\"%s\"}\n",
+    printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\",\"release_profile\":\"%s\",\"sd_history_mode\":\"%s\",\"boot_nonce\":%lu,\"secure_random_ready\":%s,\"secure_random_error\":\"%s\",\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"retained_nvs_marker_ready\":%s,\"retained_nvs_markers_complete\":%s,\"retained_nvs_anchor_ready\":%s,\"retained_nvs_sentinel_ready\":%s,\"retained_nvs_external_init_required\":%s,\"retained_nvs_initialized_this_boot\":%s,\"retained_nvs_ready\":%s,\"retained_nvs_init_error\":\"%s\",\"retained_nvs_migration_error\":\"%s\"}\n",
            D1L_CONSOLE_SCHEMA, D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION,
+           d1l_release_profile_name(),
+           d1l_release_sd_history_mode_name(),
            (unsigned long)d1l_health_monitor_boot_nonce(),
            d1l_secure_random_ready() ? "true" : "false",
            esp_err_to_name(d1l_secure_random_status()),
@@ -126,16 +129,25 @@ void app_main(void)
     if (storage_ret != ESP_OK) {
         ESP_LOGW(TAG, "storage status init failed: %s", esp_err_to_name(storage_ret));
     }
-    esp_err_t rp2040_ret = d1l_rp2040_bridge_init();
-    d1l_storage_status_note_rp2040(rp2040_ret);
-    if (rp2040_ret == ESP_OK) {
-        esp_err_t sd_probe_ret =
-            d1l_storage_boot_prepare(D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
-        if (sd_probe_ret != ESP_OK && sd_probe_ret != ESP_ERR_TIMEOUT) {
-            ESP_LOGW(TAG, "boot SD prepare failed: %s", esp_err_to_name(sd_probe_ret));
+    const bool sd_history_available = d1l_release_feature_available(
+        D1L_RELEASE_FEATURE_SD_HISTORY);
+    if (sd_history_available) {
+        esp_err_t rp2040_ret = d1l_rp2040_bridge_init();
+        d1l_storage_status_note_rp2040(rp2040_ret);
+        if (rp2040_ret == ESP_OK) {
+            esp_err_t sd_probe_ret = d1l_storage_boot_prepare(
+                D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+            if (sd_probe_ret != ESP_OK && sd_probe_ret != ESP_ERR_TIMEOUT) {
+                ESP_LOGW(TAG, "boot SD prepare failed: %s",
+                         esp_err_to_name(sd_probe_ret));
+            }
+        } else {
+            ESP_LOGW(TAG, "RP2040 bridge UART init failed: %s",
+                     esp_err_to_name(rp2040_ret));
         }
     } else {
-        ESP_LOGW(TAG, "RP2040 bridge UART init failed: %s", esp_err_to_name(rp2040_ret));
+        d1l_storage_manager_force_nvs(true);
+        ESP_LOGI(TAG, "SD history unavailable in release profile; using NVS");
     }
     esp_err_t crash_log_ret = d1l_crash_log_init();
     if (crash_log_ret != ESP_OK) {
@@ -190,9 +202,12 @@ void app_main(void)
         ESP_LOGW(TAG, "retained persistence worker start failed: %s",
                  esp_err_to_name(route_worker_ret));
     }
-    esp_err_t storage_manager_ret = d1l_storage_manager_start();
-    if (storage_manager_ret != ESP_OK) {
-        ESP_LOGW(TAG, "storage manager start failed: %s", esp_err_to_name(storage_manager_ret));
+    if (sd_history_available) {
+        esp_err_t storage_manager_ret = d1l_storage_manager_start();
+        if (storage_manager_ret != ESP_OK) {
+            ESP_LOGW(TAG, "storage manager start failed: %s",
+                     esp_err_to_name(storage_manager_ret));
+        }
     }
     d1l_meshcore_service_init();
 
