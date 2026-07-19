@@ -400,6 +400,12 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_tab" in console
     assert "cmd_ui_scroll_probe" in console
     assert "cmd_ui_compose_probe" in console
+    assert "movement_required" in header
+    assert "movement_required" in console
+    assert "tx_suppressed" in header
+    assert "tx_suppressed" in console
+    assert "send_enabled" in header
+    assert "send_enabled" in console
     assert "cmd_ui_data_canary" in console
     assert "cmd_ui_capture_status" in console
     assert "cmd_ui_capture_begin" in console
@@ -591,8 +597,8 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
     channel_compose = source.split("static bool show_channel_compose_sheet", 1)[1].split(
         "static void open_compose_event_cb", 1
     )[0]
-    dm_compose = source.split("static void open_dm_compose_for_contact", 1)[1].split(
-        "static bool contact_from_node_view", 1
+    dm_compose = source.split("static void present_dm_compose_sheet", 1)[1].split(
+        "static void open_dm_compose_for_contact", 1
     )[0]
     assert "request_full_screen_repaint();" in channel_compose
     assert "request_full_screen_repaint();" in dm_compose
@@ -984,7 +990,7 @@ def test_dm_composer_opens_from_contact_rows():
     assert "selected = *entry" in source
     assert "dm_identity_for_contact(entry, &selected)" in source
     assert "if (!eligibility.can_open_compose)" in source
-    assert "s_compose_contact = selected" in source
+    assert "s_compose_contact = *selected" in source
     assert 'lv_label_set_text(s_compose_title, title)' in source
     assert 'lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message")' in source
     assert 'show_toast(s_compose_dm ? "DM" : "Channel message", ret)' in source
@@ -1859,3 +1865,35 @@ def test_live_packet_receive_store_reads_are_serialized_for_ui_snapshots():
     assert "node_total_written" in ui_source
     assert "route_total_written" in ui_source
     assert "packet_total_written" in ui_source
+
+
+def test_compose_probe_is_tx_suppressed_without_weakening_dm_admission():
+    source = read("main/ui/ui_phase1.c")
+
+    production = source.split(
+        "static void open_dm_compose_for_contact", 1
+    )[1].split("static void open_node_dm_for", 1)[0]
+    assert "dm_identity_for_contact(entry, &selected)" in production
+    assert production.index("if (!eligibility.can_open_compose)") < (
+        production.index("present_dm_compose_sheet(&selected, false)")
+    )
+
+    probe = source.split(
+        "static void open_compose_probe_on_ui_task", 1
+    )[1].split("static void open_keyboard_probe_on_ui_task", 1)[0]
+    assert "present_dm_compose_sheet(&contact, true)" in probe
+    assert "open_dm_compose_for_contact(&contact)" not in probe
+    assert "s_compose_probe_send_suppressed = true" in probe
+
+    send = source.split("static void send_compose_text(void)", 1)[1].split(
+        "static void send_compose_event_cb", 1
+    )[0]
+    suppression = send.index("if (s_compose_probe_send_suppressed)")
+    assert suppression < send.index("d1l_app_model_send_dm_text")
+    assert suppression < send.index("d1l_app_model_send_channel_text")
+    assert "return;" in send[suppression:send.index("const char *text")]
+
+    hide = source.split("static void hide_compose_sheet(void)", 1)[1].split(
+        "static void hide_public_history_sheet", 1
+    )[0]
+    assert "s_compose_probe_send_suppressed = false" in hide

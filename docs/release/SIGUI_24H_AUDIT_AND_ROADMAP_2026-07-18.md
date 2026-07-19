@@ -879,6 +879,11 @@ python .\scripts\core_ui_corruption_probe_d1l.py `
 
 python .\scripts\scroll_probe_d1l.py `
   --port COM12 `
+  --release-profile core_1_0 `
+  --expected-firmware-commit <40-hex-sha> `
+  --github-actions-run <run-id> `
+  --workflow-run-attempt <attempt> `
+  --expected-sd-history-mode disabled `
   --screens home,public_messages,dm_thread,nodes,packets,settings `
   --manual-touch `
   --clear-crashlog-before-start `

@@ -74,6 +74,40 @@ CORE_COMPOSE_TARGETS = (
     "contact-edit",
     "onboarding",
 )
+CORE_SCROLL_TABS = {
+    "home": "home",
+    "public_messages": "messages",
+    "dm_thread": "messages",
+    "nodes": "nodes",
+    "packets": "packets",
+    "settings": "settings",
+}
+CORE_COMPOSE_TABS = {
+    "public": "messages",
+    "public-long": "messages",
+    "dm": "messages",
+    "dm-long": "messages",
+    "public-search": "messages",
+    "dm-search": "messages",
+    "packet-search": "packets",
+    "contact-edit": "nodes",
+    "onboarding": "home",
+}
+CORE_DM_COMPOSE_TARGETS = frozenset({"dm", "dm-long", "dm-search"})
+CORE_SEND_SUPPRESSED_TARGETS = frozenset(
+    {"public", "public-long", "dm", "dm-long"}
+)
+CORE_COMPOSE_MIN_KEYBOARD = {
+    "public": (440, 250),
+    "public-long": (440, 250),
+    "dm": (440, 250),
+    "dm-long": (440, 250),
+    "public-search": (400, 180),
+    "dm-search": (400, 180),
+    "packet-search": (400, 180),
+    "contact-edit": (400, 170),
+    "onboarding": (400, 150),
+}
 RELEASE_MIN_ROUNDS = 20
 CORE_UNAVAILABLE_UI_PROBES = (
     ("ui tab map", "map"),
@@ -87,6 +121,122 @@ CORE_UNAVAILABLE_UI_PROBES = (
 DISABLED_SD_UNAVAILABLE_UI_PROBES = (
     ("ui scroll-probe storage-card", "sd_history"),
 )
+
+
+def _plain_int(value: object) -> bool:
+    return type(value) is int
+
+
+def core_scroll_result_ok(result: object, surface: str) -> bool:
+    if not isinstance(result, dict) or surface not in CORE_SCROLL_TABS:
+        return False
+    coordinate_fields = (
+        "before_y",
+        "after_y",
+        "scroll_top_before",
+        "scroll_bottom_before",
+        "scroll_top_after",
+        "scroll_bottom_after",
+    )
+    if not all(_plain_int(result.get(field)) for field in coordinate_fields):
+        return False
+    movement_required = any(
+        result[field] > 0
+        for field in (
+            "scroll_top_before",
+            "scroll_bottom_before",
+            "scroll_top_after",
+            "scroll_bottom_after",
+        )
+    )
+    moved = (
+        result["before_y"] != result["after_y"]
+        or result["scroll_top_before"] != result["scroll_top_after"]
+        or result["scroll_bottom_before"] != result["scroll_bottom_after"]
+    )
+    return (
+        result.get("schema") == 1
+        and result.get("ok") is True
+        and result.get("cmd") == "ui scroll-probe"
+        and result.get("surface") == surface
+        and result.get("tab") == CORE_SCROLL_TABS[surface]
+        and result.get("surface_supported") is True
+        and result.get("target_found") is True
+        and result.get("scrollable") is True
+        and result.get("movement_required") is movement_required
+        and result.get("moved") is moved
+        and (not movement_required or moved)
+    )
+
+
+def core_compose_result_ok(result: object, target: str) -> bool:
+    if not isinstance(result, dict) or target not in CORE_COMPOSE_TABS:
+        return False
+    canonical = target.replace("-", "_")
+    geometry: dict[str, dict] = {}
+    for name in ("sheet", "textarea", "keyboard"):
+        row = result.get(name)
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"x", "y", "w", "h"}
+            or not all(_plain_int(row.get(field)) for field in row)
+        ):
+            return False
+        geometry[name] = row
+    sheet = geometry["sheet"]
+    textarea = geometry["textarea"]
+    keyboard = geometry["keyboard"]
+    sheet_inside_screen = (
+        sheet["w"] > 0
+        and sheet["h"] > 0
+        and sheet["x"] >= 0
+        and sheet["y"] >= 0
+        and sheet["x"] + sheet["w"] <= 480
+        and sheet["y"] + sheet["h"] <= 480
+    )
+    keyboard_inside_sheet = (
+        keyboard["w"] > 0
+        and keyboard["h"] > 0
+        and keyboard["x"] >= 0
+        and keyboard["y"] >= 0
+        and keyboard["x"] + keyboard["w"] <= sheet["w"]
+        and keyboard["y"] + keyboard["h"] <= sheet["h"]
+    )
+    textarea_inside_sheet = (
+        textarea["w"] > 0
+        and textarea["h"] > 0
+        and textarea["x"] >= 0
+        and textarea["y"] >= 0
+        and textarea["x"] + textarea["w"] <= sheet["w"]
+        and textarea["y"] + textarea["h"] <= keyboard["y"]
+    )
+    min_keyboard_width, min_keyboard_height = (
+        CORE_COMPOSE_MIN_KEYBOARD[target]
+    )
+    send_probe = target in CORE_SEND_SUPPRESSED_TARGETS
+    return (
+        result.get("schema") == 1
+        and result.get("ok") is True
+        and result.get("cmd") == "ui compose-probe"
+        and result.get("target") == canonical
+        and result.get("active_tab") == CORE_COMPOSE_TABS[target]
+        and result.get("target_supported") is True
+        and result.get("sheet_visible") is True
+        and result.get("textarea_visible") is True
+        and result.get("keyboard_visible") is True
+        and result.get("onboarding_visible") is (target == "onboarding")
+        and result.get("dock_hidden") is True
+        and result.get("dm_mode") is (target in CORE_DM_COMPOSE_TARGETS)
+        and result.get("tx_suppressed") is send_probe
+        and result.get("send_enabled") is False
+        and result.get("public_rf_tx") is False
+        and result.get("formats_sd") is False
+        and keyboard["w"] >= min_keyboard_width
+        and keyboard["h"] >= min_keyboard_height
+        and sheet_inside_screen
+        and keyboard_inside_sheet
+        and textarea_inside_sheet
+    )
 
 
 def core_tab_sequence_ok(tabs: object) -> bool:
@@ -466,12 +616,16 @@ def run_probe(
     scroll_failures = [
         event
         for event in scroll_events
-        if event.get("result", {}).get("ok") is not True
+        if not core_scroll_result_ok(
+            event.get("result"), event.get("surface", "")
+        )
     ]
     compose_failures = [
         event
         for event in compose_events
-        if event.get("result", {}).get("ok") is not True
+        if not core_compose_result_ok(
+            event.get("result"), event.get("target", "")
+        )
     ]
     unavailable_failures = [
         {

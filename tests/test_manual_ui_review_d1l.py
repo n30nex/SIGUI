@@ -42,6 +42,57 @@ def crashlog() -> dict:
     return {"schema": 1, "ok": True, "cmd": "crashlog", "entries": []}
 
 
+def scroll_probe_result(surface: str) -> dict:
+    overflow = {
+        "public_messages": 6,
+        "nodes": 896,
+        "packets": 366,
+    }.get(surface, 0)
+    bottom = -50 if surface == "settings" else overflow
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "ui scroll-probe",
+        "surface": surface,
+        "tab": core_ui.CORE_SCROLL_TABS[surface],
+        "surface_supported": True,
+        "target_found": True,
+        "scrollable": True,
+        "movement_required": overflow > 0,
+        "moved": overflow > 0,
+        "before_y": 0,
+        "after_y": overflow,
+        "scroll_top_before": 0,
+        "scroll_bottom_before": bottom,
+        "scroll_top_after": overflow,
+        "scroll_bottom_after": 0 if overflow > 0 else bottom,
+    }
+
+
+def compose_probe_result(target: str) -> dict:
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "ui compose-probe",
+        "target": target.replace("-", "_"),
+        "active_tab": core_ui.CORE_COMPOSE_TABS[target],
+        "target_supported": True,
+        "sheet_visible": True,
+        "textarea_visible": True,
+        "keyboard_visible": True,
+        "onboarding_visible": target == "onboarding",
+        "dock_hidden": True,
+        "dm_mode": target in core_ui.CORE_DM_COMPOSE_TARGETS,
+        "tx_suppressed": target in core_ui.CORE_SEND_SUPPRESSED_TARGETS,
+        "send_enabled": False,
+        "sheet": {"x": 0, "y": 56, "w": 480, "h": 424},
+        "textarea": {"x": 16, "y": 58, "w": 448, "h": 78},
+        "keyboard": {"x": 16, "y": 158, "w": 448, "h": 258},
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+
+
 def core_ui_receipt() -> dict:
     checks = {name: True for name in review.REQUIRED_UI_CHECKS}
     events = []
@@ -174,7 +225,7 @@ def core_ui_receipt() -> dict:
             {
                 "surface": surface,
                 "command": f"ui scroll-probe {surface}",
-                "result": {"ok": True},
+                "result": scroll_probe_result(surface),
             }
             for surface in review.CORE_SCROLL_SURFACES
         ],
@@ -182,7 +233,7 @@ def core_ui_receipt() -> dict:
             {
                 "target": target,
                 "command": f"ui compose-probe {target}",
-                "result": {"ok": True},
+                "result": compose_probe_result(target),
             }
             for target in review.CORE_COMPOSE_TARGETS
         ],

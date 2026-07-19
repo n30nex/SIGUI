@@ -12,10 +12,27 @@ from pathlib import Path
 
 try:
     from smoke_d1l import open_d1l_serial, send_console_command
-    from artifact_metadata import stamp_report
+    from artifact_metadata import git_metadata, stamp_report
+    from core_smoke_d1l import (
+        SD_HISTORY_MODES,
+        enforce_core_port,
+        exact_identity,
+        exact_version_identity,
+    )
+    from smoke_d1l import exact_commit
 except ModuleNotFoundError:
-    from scripts.artifact_metadata import stamp_report
-    from scripts.smoke_d1l import open_d1l_serial, send_console_command
+    from scripts.artifact_metadata import git_metadata, stamp_report
+    from scripts.core_smoke_d1l import (
+        SD_HISTORY_MODES,
+        enforce_core_port,
+        exact_identity,
+        exact_version_identity,
+    )
+    from scripts.smoke_d1l import (
+        exact_commit,
+        open_d1l_serial,
+        send_console_command,
+    )
 
 
 SCROLL_SURFACES = {
@@ -66,6 +83,72 @@ MAP_READ_ONLY_SURFACES = frozenset({
     "map_cache",
 })
 SCROLL_MOVEMENT_OPTIONAL = {"home", "storage", "storage_card", *MAP_READ_ONLY_SURFACES}
+CORE_RELEASE_PROFILE = "core_1_0"
+RELEASE_PROFILES = ("development", "full_feature", CORE_RELEASE_PROFILE)
+CORE_SCROLL_SEQUENCE = (
+    "home",
+    "public_messages",
+    "dm_thread",
+    "nodes",
+    "packets",
+    "settings",
+)
+CORE_SCROLL_SURFACES = frozenset(CORE_SCROLL_SEQUENCE)
+
+
+def _positive_decimal(value: object) -> str | None:
+    normalized = str(value).strip() if value is not None else ""
+    if not normalized.isdigit() or int(normalized) < 1:
+        return None
+    return normalized
+
+
+def validate_core_evidence_inputs(
+    *,
+    port: object,
+    expected_firmware_commit: object,
+    github_actions_run: object,
+    workflow_run_attempt: object,
+    expected_sd_history_mode: object,
+    root: Path,
+) -> dict:
+    normalized_port = enforce_core_port(port)
+    normalized_commit = exact_commit(expected_firmware_commit)
+    run_id = _positive_decimal(github_actions_run)
+    run_attempt = _positive_decimal(workflow_run_attempt)
+    if normalized_commit is None:
+        raise ValueError(
+            "Core scroll evidence requires an exact 40-hex firmware commit"
+        )
+    if run_id is None:
+        raise ValueError(
+            "Core scroll evidence requires a positive GitHub Actions run ID"
+        )
+    if run_attempt is None:
+        raise ValueError(
+            "Core scroll evidence requires a positive workflow run attempt"
+        )
+    if expected_sd_history_mode not in SD_HISTORY_MODES:
+        raise ValueError(
+            "Core scroll evidence requires an exact SD history mode"
+        )
+    source = git_metadata(root)
+    if (
+        exact_commit(source.get("commit")) != normalized_commit
+        or source.get("dirty") is not False
+        or source.get("dirty_entries") != []
+    ):
+        raise ValueError(
+            "Core scroll evidence requires the clean exact candidate source"
+        )
+    return {
+        "port": normalized_port,
+        "expected_firmware_commit": normalized_commit,
+        "github_actions_run": run_id,
+        "workflow_run_attempt": run_attempt,
+        "expected_sd_history_mode": expected_sd_history_mode,
+        "git": source,
+    }
 
 
 def probe_safety(*, clear_crashlog_before_start: bool) -> dict[str, bool | int]:
@@ -94,6 +177,19 @@ def validate_setup_actions(screens: list[str], clear_crashlog_before_start: bool
         raise ValueError(
             "--clear-crashlog-before-start is not allowed with network-suppressed Map probes"
         )
+
+
+def validate_release_profile_screens(
+    screens: list[str], release_profile: str
+) -> None:
+    if release_profile not in RELEASE_PROFILES:
+        raise ValueError(f"invalid release profile: {release_profile}")
+    if release_profile == CORE_RELEASE_PROFILE:
+        if tuple(screens) != CORE_SCROLL_SEQUENCE:
+            raise ValueError(
+                "Core scroll evidence requires the exact ordered surfaces: "
+                + ",".join(CORE_SCROLL_SEQUENCE)
+            )
 
 
 def utc_stamp() -> str:
@@ -151,7 +247,21 @@ def summarize_map_network_evidence(
     }
 
 
-def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> dict:
+def dry_run_report(
+    screens: list[str],
+    dwell_sec: float,
+    manual_touch: bool,
+    release_profile: str = "full_feature",
+) -> dict:
+    validate_release_profile_screens(screens, release_profile)
+    profile_evidence = (
+        {
+            "release_profile": release_profile,
+            "scroll_movement_policy": "positive_raw_overflow",
+        }
+        if release_profile == CORE_RELEASE_PROFILE
+        else {}
+    )
     plan = surface_plan(screens)
     commands: list[str] = []
     map_probe_requested = bool(MAP_READ_ONLY_SURFACES.intersection(screens))
@@ -183,6 +293,7 @@ def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> 
             "before": None,
             "after": None,
         },
+        **profile_evidence,
         **probe_safety(clear_crashlog_before_start=False),
     }
 
@@ -195,13 +306,81 @@ def crashlog_has_crash_like_entries(row: dict) -> bool:
     )
 
 
-def event_failed(event: dict) -> bool:
+def _plain_int(value: object) -> bool:
+    return type(value) is int
+
+
+def core_probe_result_ok(probe: object, screen: str) -> bool:
+    if not isinstance(probe, dict) or screen not in CORE_SCROLL_SURFACES:
+        return False
+    fields = (
+        "before_y",
+        "after_y",
+        "scroll_top_before",
+        "scroll_bottom_before",
+        "scroll_top_after",
+        "scroll_bottom_after",
+    )
+    if not all(_plain_int(probe.get(field)) for field in fields):
+        return False
+    movement_required = any(
+        probe[field] > 0
+        for field in (
+            "scroll_top_before",
+            "scroll_bottom_before",
+            "scroll_top_after",
+            "scroll_bottom_after",
+        )
+    )
+    moved = (
+        probe["before_y"] != probe["after_y"]
+        or probe["scroll_top_before"] != probe["scroll_top_after"]
+        or probe["scroll_bottom_before"] != probe["scroll_bottom_after"]
+    )
+    return (
+        probe.get("schema") == 1
+        and probe.get("ok") is True
+        and probe.get("cmd") == "ui scroll-probe"
+        and probe.get("surface") == screen
+        and probe.get("tab") == SCROLL_SURFACES[screen]["tab"]
+        and probe.get("surface_supported") is True
+        and probe.get("target_found") is True
+        and probe.get("scrollable") is True
+        and probe.get("movement_required") is movement_required
+        and probe.get("moved") is moved
+        and (not movement_required or moved)
+    )
+
+
+def event_failed(
+    event: dict,
+    release_profile: str = "full_feature",
+    expected_firmware_commit: str | None = None,
+    expected_sd_history_mode: str | None = None,
+) -> bool:
     probe = event.get("probe") if isinstance(event.get("probe"), dict) else {}
     screen = str(event.get("screen") or "")
-    movement_ok = screen in SCROLL_MOVEMENT_OPTIONAL or (
-        probe.get("scrollable") is True and probe.get("moved") is True
-    )
-    probe_ok = probe.get("ok") is True or (screen in SCROLL_MOVEMENT_OPTIONAL and movement_ok)
+    if release_profile == CORE_RELEASE_PROFILE:
+        movement_ok = core_probe_result_ok(probe, screen)
+        probe_ok = movement_ok
+        profile_ok = (
+            expected_firmware_commit is not None
+            and expected_sd_history_mode is not None
+            and exact_identity(
+                event.get("health"),
+                expected_firmware_commit,
+                expected_sd_history_mode,
+            )
+            and event.get("health", {}).get("cmd") == "health"
+        )
+    else:
+        movement_ok = screen in SCROLL_MOVEMENT_OPTIONAL or (
+            probe.get("scrollable") is True and probe.get("moved") is True
+        )
+        probe_ok = probe.get("ok") is True or (
+            screen in SCROLL_MOVEMENT_OPTIONAL and movement_ok
+        )
+        profile_ok = True
     return (
         not event["request"].get("ok")
         or not event["tab_active"]
@@ -212,6 +391,7 @@ def event_failed(event: dict) -> bool:
         or not movement_ok
         or event["status"].get("active_tab") != event["tab"]
         or not event["health"].get("ok")
+        or not profile_ok
         or crashlog_has_crash_like_entries(event["crashlog"])
     )
 
@@ -241,8 +421,34 @@ def run_scroll_probe(
     manual_touch: bool,
     clear_crashlog_before_start: bool,
     poll_sec: float,
+    release_profile: str = "full_feature",
+    expected_firmware_commit: str | None = None,
+    github_actions_run: str | None = None,
+    workflow_run_attempt: str | None = None,
+    expected_sd_history_mode: str | None = None,
 ) -> dict:
     validate_setup_actions(screens, clear_crashlog_before_start)
+    validate_release_profile_screens(screens, release_profile)
+    root = Path(__file__).resolve().parents[1]
+    core_evidence: dict = {}
+    if release_profile == CORE_RELEASE_PROFILE:
+        core_evidence = validate_core_evidence_inputs(
+            port=port,
+            expected_firmware_commit=expected_firmware_commit,
+            github_actions_run=github_actions_run,
+            workflow_run_attempt=workflow_run_attempt,
+            expected_sd_history_mode=expected_sd_history_mode,
+            root=root,
+        )
+        port = core_evidence["port"]
+        expected_firmware_commit = core_evidence[
+            "expected_firmware_commit"
+        ]
+        github_actions_run = core_evidence["github_actions_run"]
+        workflow_run_attempt = core_evidence["workflow_run_attempt"]
+        expected_sd_history_mode = core_evidence[
+            "expected_sd_history_mode"
+        ]
     try:
         import serial
     except ImportError as exc:
@@ -263,6 +469,71 @@ def run_scroll_probe(
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
+
+        if release_profile == CORE_RELEASE_PROFILE:
+            version = send_console_command(ser, "version", timeout)
+            health_preflight = send_console_command(ser, "health", timeout)
+            setup_events.extend(
+                (
+                    {"cmd": "version", "result": version},
+                    {"cmd": "health", "result": health_preflight},
+                )
+            )
+            preflight_ok = (
+                exact_version_identity(
+                    version,
+                    expected_firmware_commit,
+                    expected_sd_history_mode,
+                )
+                and exact_identity(
+                    health_preflight,
+                    expected_firmware_commit,
+                    expected_sd_history_mode,
+                )
+                and health_preflight.get("cmd") == "health"
+            )
+            if not preflight_ok:
+                ended_at = datetime.now(timezone.utc)
+                return {
+                    "schema": 1,
+                    "mode": "hardware",
+                    "ok": False,
+                    "closure_eligible": False,
+                    "hardware_required": True,
+                    "physical_observed": True,
+                    "port": port,
+                    "baud": baud,
+                    "started_at": started_at.isoformat().replace(
+                        "+00:00", "Z"
+                    ),
+                    "ended_at": ended_at.isoformat().replace(
+                        "+00:00", "Z"
+                    ),
+                    "release_profile": release_profile,
+                    "expected_firmware_commit":
+                        expected_firmware_commit,
+                    "github_actions_run": github_actions_run,
+                    "workflow_run_attempt": workflow_run_attempt,
+                    "expected_sd_history_mode":
+                        expected_sd_history_mode,
+                    "firmware_identity_ok": False,
+                    "clear_crashlog_before_start": False,
+                    "clear_crashlog_requested":
+                        clear_crashlog_before_start,
+                    "failure_count": 1,
+                    "failures": [
+                        {
+                            "kind": "firmware_identity_preflight",
+                            "code": "IDENTITY_MISMATCH",
+                        }
+                    ],
+                    "setup_events": setup_events,
+                    "events": [],
+                    "git": core_evidence["git"],
+                    **probe_safety(
+                        clear_crashlog_before_start=False
+                    ),
+                }
 
         if clear_crashlog_before_start:
             setup_events.append(
@@ -328,10 +599,19 @@ def run_scroll_probe(
             "expected_active_tab": event["tab"],
             "health_ok": event["health"].get("ok"),
             "crashlog_crash_like_entries": crashlog_has_crash_like_entries(event["crashlog"]),
-            "movement_required": event["screen"] not in SCROLL_MOVEMENT_OPTIONAL,
+            "movement_required": (
+                event["probe"].get("movement_required")
+                if release_profile == CORE_RELEASE_PROFILE
+                else event["screen"] not in SCROLL_MOVEMENT_OPTIONAL
+            ),
         }
         for event in events
-        if event_failed(event)
+        if event_failed(
+            event,
+            release_profile,
+            expected_firmware_commit,
+            expected_sd_history_mode,
+        )
     ]
     map_network_evidence = summarize_map_network_evidence(
         map_tiles_before,
@@ -361,6 +641,35 @@ def run_scroll_probe(
     safety = probe_safety(clear_crashlog_before_start=clear_crashlog_before_start)
     safety["network_tx"] = network_assertion
     safety["map_network_requests"] = network_assertion
+    profile_evidence = {}
+    if release_profile == CORE_RELEASE_PROFILE:
+        firmware_identity_ok = all(
+            exact_identity(
+                event.get("health"),
+                expected_firmware_commit,
+                expected_sd_history_mode,
+            )
+            and event.get("health", {}).get("cmd") == "health"
+            for event in events
+        )
+        profile_evidence = {
+            "closure_eligible": True,
+            "hardware_required": True,
+            "physical_observed": True,
+            "identity_preflight_only": False,
+            "release_profile": release_profile,
+            "expected_firmware_commit": expected_firmware_commit,
+            "github_actions_run": github_actions_run,
+            "workflow_run_attempt": workflow_run_attempt,
+            "expected_sd_history_mode": expected_sd_history_mode,
+            "device_build_commit": (
+                setup_events[0]
+                .get("result", {})
+                .get("build_commit")
+            ),
+            "firmware_identity_ok": firmware_identity_ok,
+            "scroll_movement_policy": "positive_raw_overflow",
+        }
     return {
         "schema": 1,
         "mode": "hardware",
@@ -372,8 +681,13 @@ def run_scroll_probe(
         "surface_plan": surface_plan(screens),
         "dwell_sec": dwell_sec,
         "manual_touch": manual_touch,
+        **profile_evidence,
         "clear_crashlog_before_start": clear_crashlog_before_start,
-        "scroll_movement_optional": sorted(SCROLL_MOVEMENT_OPTIONAL),
+        "scroll_movement_optional": (
+            []
+            if release_profile == CORE_RELEASE_PROFILE
+            else sorted(SCROLL_MOVEMENT_OPTIONAL)
+        ),
         "ok": not failures and not setup_failures,
         "failure_count": len(failures) + len(setup_failures),
         "failures": failures,
@@ -405,6 +719,18 @@ def main() -> int:
     parser.add_argument("--poll-sec", type=float, default=0.05)
     parser.add_argument("--manual-touch", action="store_true")
     parser.add_argument("--clear-crashlog-before-start", action="store_true")
+    parser.add_argument(
+        "--release-profile",
+        choices=RELEASE_PROFILES,
+        default="full_feature",
+    )
+    parser.add_argument("--expected-firmware-commit")
+    parser.add_argument("--github-actions-run")
+    parser.add_argument("--workflow-run-attempt")
+    parser.add_argument(
+        "--expected-sd-history-mode",
+        choices=sorted(SD_HISTORY_MODES),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -421,25 +747,43 @@ def main() -> int:
         parser.error("--screens must include at least one screen")
     try:
         validate_setup_actions(screens, args.clear_crashlog_before_start)
+        validate_release_profile_screens(screens, args.release_profile)
     except ValueError as exc:
         parser.error(str(exc))
 
     if args.dry_run:
-        report = dry_run_report(screens, args.dwell_sec, args.manual_touch)
+        report = dry_run_report(
+            screens,
+            args.dwell_sec,
+            args.manual_touch,
+            args.release_profile,
+        )
         mode = "dry-run"
     else:
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
-        report = run_scroll_probe(
-            port=args.port,
-            baud=args.baud,
-            timeout=args.timeout,
-            screens=screens,
-            dwell_sec=args.dwell_sec,
-            manual_touch=args.manual_touch,
-            clear_crashlog_before_start=args.clear_crashlog_before_start,
-            poll_sec=args.poll_sec,
-        )
+        try:
+            report = run_scroll_probe(
+                port=args.port,
+                baud=args.baud,
+                timeout=args.timeout,
+                screens=screens,
+                dwell_sec=args.dwell_sec,
+                manual_touch=args.manual_touch,
+                clear_crashlog_before_start=args.clear_crashlog_before_start,
+                poll_sec=args.poll_sec,
+                release_profile=args.release_profile,
+                expected_firmware_commit=(
+                    args.expected_firmware_commit
+                ),
+                github_actions_run=args.github_actions_run,
+                workflow_run_attempt=args.workflow_run_attempt,
+                expected_sd_history_mode=(
+                    args.expected_sd_history_mode
+                ),
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
         mode = "hardware"
 
     out_path = resolve_out_path(args.out, mode)

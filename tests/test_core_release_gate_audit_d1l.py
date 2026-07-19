@@ -322,6 +322,65 @@ def passing_core_ui() -> dict:
             "entries": [],
         }
 
+    def scroll_result(surface: str) -> dict:
+        overflow = {
+            "public_messages": 6,
+            "nodes": 896,
+            "packets": 366,
+        }.get(surface, 0)
+        bottom = -50 if surface == "settings" else overflow
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": "ui scroll-probe",
+            "surface": surface,
+            "tab": core_ui_corruption_probe_d1l.CORE_SCROLL_TABS[
+                surface
+            ],
+            "surface_supported": True,
+            "target_found": True,
+            "scrollable": True,
+            "movement_required": overflow > 0,
+            "moved": overflow > 0,
+            "before_y": 0,
+            "after_y": overflow,
+            "scroll_top_before": 0,
+            "scroll_bottom_before": bottom,
+            "scroll_top_after": overflow,
+            "scroll_bottom_after": 0 if overflow > 0 else bottom,
+        }
+
+    def compose_result(target: str) -> dict:
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": "ui compose-probe",
+            "target": target.replace("-", "_"),
+            "active_tab": (
+                core_ui_corruption_probe_d1l.CORE_COMPOSE_TABS[target]
+            ),
+            "target_supported": True,
+            "sheet_visible": True,
+            "textarea_visible": True,
+            "keyboard_visible": True,
+            "onboarding_visible": target == "onboarding",
+            "dock_hidden": True,
+            "dm_mode": (
+                target
+                in core_ui_corruption_probe_d1l.CORE_DM_COMPOSE_TARGETS
+            ),
+            "tx_suppressed": (
+                target
+                in core_ui_corruption_probe_d1l.CORE_SEND_SUPPRESSED_TARGETS
+            ),
+            "send_enabled": False,
+            "sheet": {"x": 0, "y": 56, "w": 480, "h": 424},
+            "textarea": {"x": 16, "y": 58, "w": 448, "h": 78},
+            "keyboard": {"x": 16, "y": 158, "w": 448, "h": 258},
+            "public_rf_tx": False,
+            "formats_sd": False,
+        }
+
     events = []
     for round_number in range(
         1, core_ui_corruption_probe_d1l.RELEASE_MIN_ROUNDS + 1
@@ -437,7 +496,7 @@ def passing_core_ui() -> dict:
             {
                 "surface": surface,
                 "command": f"ui scroll-probe {surface}",
-                "result": {"schema": 1, "ok": True},
+                "result": scroll_result(surface),
             }
             for surface in core_ui_corruption_probe_d1l.CORE_SCROLL_SURFACES
         ],
@@ -448,7 +507,7 @@ def passing_core_ui() -> dict:
             {
                 "target": target,
                 "command": f"ui compose-probe {target}",
-                "result": {"schema": 1, "ok": True},
+                "result": compose_result(target),
             }
             for target in core_ui_corruption_probe_d1l.CORE_COMPOSE_TARGETS
         ],
@@ -498,6 +557,50 @@ def test_core_ui_gate_recomputes_unavailable_deep_link_events(tmp_path):
     wrong_feature = passing_core_ui()
     wrong_feature["unavailable_events"][1]["result"]["feature"] = "map"
     write_json(path, wrong_feature)
+    assert not audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+
+def test_core_ui_gate_recomputes_raw_scroll_and_compose_results(tmp_path):
+    path = write_json(tmp_path / "core-ui.json", passing_core_ui())
+    assert audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+    forged_scroll = passing_core_ui()
+    forged_scroll["scroll_events"][0]["result"][
+        "movement_required"
+    ] = True
+    write_json(path, forged_scroll)
+    assert not audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+    forged_scroll = passing_core_ui()
+    public_result = forged_scroll["scroll_events"][1]["result"]
+    public_result["after_y"] = 0
+    public_result["scroll_top_after"] = 0
+    public_result["moved"] = False
+    write_json(path, forged_scroll)
+    assert not audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+    forged_compose = passing_core_ui()
+    forged_compose["compose_events"][2]["result"][
+        "tx_suppressed"
+    ] = False
+    write_json(path, forged_compose)
+    assert not audit.core_ui_gate(
+        path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
+    ).ok
+
+    forged_compose = passing_core_ui()
+    forged_compose["compose_events"][2]["result"][
+        "send_enabled"
+    ] = True
+    write_json(path, forged_compose)
     assert not audit.core_ui_gate(
         path, tmp_path, COMMIT, "disabled", RUN_ID, RUN_ATTEMPT
     ).ok

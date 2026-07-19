@@ -22,8 +22,8 @@ The authoritative product boundary, roadmap, and work graph are:
 | Release profile | `core_1_0` |
 | Core readiness | `false` |
 | Full-feature readiness | `false` |
-| Candidate SHA | not frozen |
-| Candidate Actions run | not started |
+| Candidate SHA | the single status-bearing R15 freeze commit containing this ledger; exact Git SHA is recorded in PR/Actions evidence after commit |
+| Candidate Actions run | pending replacement workflow dispatch; run `29667030146`, attempt 1, is superseded |
 | SD history mode | `disabled` |
 
 ## Immutable safety rules
@@ -58,16 +58,16 @@ The authoritative product boundary, roadmap, and work graph are:
 
 ## Current GitHub snapshot
 
-Snapshot refreshed at `2026-07-18T19:40:03-04:00`.
+Snapshot refreshed at `2026-07-18T21:50:26-04:00`.
 
 | Item | State |
 |---|---|
 | `origin/main` | `846f728dd3faded85451c6d39ba6a07cb8ca7f44` |
 | Main `d1l-ci` | run `29652673963`, success |
+| PR #200 | open draft; the single Core integration PR; head `a9f14afe…` pending the final R15 push |
 | PR #197 | open, non-draft, conflicting; Actions `29650366501` success |
 | PR #199 | open draft, conflicting; Actions `29650450872` firmware failure; excluded |
 | Open release-blocker P0 issues | 21; all classified for Core 1.0 |
-| Existing `release/24h-core` before sprint | none |
 | Existing `v1.0.0` tag/release | none |
 | Active/queued Actions runs at snapshot | none |
 
@@ -117,13 +117,13 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 | R6 | complete | Public-only Core runtime boundary `e3f99a6` rejects private-channel RX/TX before decrypt/key/store/RF and prevents retained private-channel reconciliation; focused Mesh/DM/contact/route suites are green |
 | R7 | complete | Exact Actions capture, package/provenance/SBOM, non-erasing flash, Core smoke/UI, manual/install review, reboot, RF/DM, soak, defect, and final audit producers are integrated through `f9e26e0` |
 | R8 | complete | Three-lane final freeze review passed runtime and release-flow scope and closed its one evidence finding with deterministic provenance recomputation `f9e26e0`; no remaining concrete pre-freeze Core P0/P1 found |
-| R9 | in progress | First repaired candidate passed 1,499 tests but exposed a Windows mixed-case artifact-inventory ordering defect before flash; a second bounded R15 source repair is in progress |
-| R10 | in progress | Run `29666410430` was green and all five artifacts verified, but is superseded because its local strict receipt could not pass the cross-platform tree-order check |
-| R11 | pending | Exact non-erasing COM12 flash, UI/boot/persistence gates |
+| R9 | complete | Final R15 source is review-clean; the complete repaired-tree host suite passed 1,507 tests with seven skips; this status-bearing commit is the replacement freeze |
+| R10 | pending | Dispatch final `d1l-ci` with `include_sd_bridge=false`, then capture and checksum every artifact from the exact replacement SHA |
+| R11 | pending | Flash only the new exact verified package to COM12 and rerun smoke, Core UI, standalone scroll, reboot, and persistence gates from scratch |
 | R12 | pending | Controlled peer RF/DM; `public_rf_tx=false` |
 | R13 | in progress | SD disabled/NVS fallback selected because COM16 is absent; exact package/device truth remains |
 | R14 | pending | 60-minute active plus 30-minute idle exact-candidate soak |
-| R15 | in progress | Second activation: canonicalize extracted artifact inventory by POSIX path and add a mixed-case ZIP/tree regression; new full suite and Actions candidate required |
+| R15 | complete | Raw positive-overflow scroll semantics, probe-only DM presentation, hard TX suppression, independent evidence recomputation, exact runner admission, source pins, and stale receipt fixtures are repaired; final review found no Core P0/P1 |
 | R16 | pending | Final Core audit and tag/release or exact no-go |
 
 ## Exact-candidate evidence ledger
@@ -132,15 +132,15 @@ All rows remain fail-closed until an exact receipt is recorded.
 
 | Gate | Status | Exact evidence |
 |---|---|---|
-| Source/profile frozen | missing | — |
-| Full host suite | superseded pass | Candidate `8ff4d765…`: 1,499 passed, 7 skipped; a new suite is required after the release-script repair |
-| Final Actions workflow | superseded pass | Run `29666410430` succeeded at `8ff4d765…`; never flashed and ineligible after the release-script change |
-| Artifact downloads/checksums | superseded pass | Five archive GitHub digests and extracted checksum trees verified; exact new-run artifacts required |
-| Profile/package/provenance/SBOM binding | missing | — |
-| Non-erasing COM12 flash | missing | — |
-| Core smoke/display/touch | missing | — |
-| 20-round Core UI probe | missing | — |
-| Compose/scroll surfaces | missing | — |
+| Source/profile frozen | pass at this commit | Final R15 diff and canonical source pins are review-clean; the exact resolved SHA is bound by the post-push PR and Actions receipts |
+| Full host suite | pass | Repaired tree: 1,507 passed, 7 skipped in 446.45 seconds |
+| Final Actions workflow | pending | Run `29667030146`, attempt 1, succeeded only for superseded `a9f14afe…`; exact replacement dispatch required |
+| Artifact downloads/checksums | pending | The superseded five-archive capture is retained only as history; a fresh exact replacement directory and checksum receipt are required |
+| Profile/package/provenance/SBOM binding | superseded pass | Exact run/package trees verified for `a9f14afe…`; new SHA/run binding required |
+| Non-erasing COM12 flash | superseded pass | `esp32_flash_bootstrap_a9f14af_actions_29667030146_attempt_1_COM12.json`; exact identity passed, no erase |
+| Core smoke/display/touch | superseded pass | `core_smoke_post_baseline_a9f14afe58aaa307a40e90378c64db7a464e59bc_run_29667030146_attempt_1_COM12.json`; all 13 checks passed after preserving and clearing predecessor-only crashlog history |
+| 20-round Core UI probe | exact failed / superseded | `core_ui_corruption_probe_a9f14afe58aaa307a40e90378c64db7a464e59bc_run_29667030146_attempt_1_COM12.json`: 20 rounds and 120 events had zero navigation, identity, telemetry, or crash failures, but five raw probe checks failed |
+| Compose/scroll surfaces | implementation pass / physical pending | Raw positive overflow independently controls movement applicability; probe-only DM sheets retain strict production identity admission and cannot enable or reach either RF send path |
 | Five software reboots | missing | — |
 | Three cold boots | missing | — |
 | Retained state | missing | — |
@@ -568,3 +568,76 @@ release is authorized by the evidence currently recorded.
   run `29666726329` was canceled.
 - No serial port was opened, no firmware was flashed, no RF transmission
   occurred, and no SD operation occurred.
+
+### `2026-07-18T21:07:52-04:00`
+
+- R15's mixed-case inventory repair produced candidate
+  `a9f14afe58aaa307a40e90378c64db7a464e59bc`. Its complete host suite passed
+  1,500 tests with seven skips. Exact workflow-dispatch run `29667030146`,
+  attempt 1, succeeded with `include_sd_bridge=false`; its five downloaded
+  archives and every embedded checksum tree matched the GitHub API and package
+  manifests.
+- The exact package was flashed non-erasing to COM12. The first smoke receipt
+  found two persisted panic rows that predated the candidate's first POWERON
+  boot. Their sequence chronology and the candidate's later POWERON/SW rows
+  were preserved in a one-time baseline-clear receipt before the ring was
+  cleared. A fresh unique Core smoke then passed all 13 checks, including an
+  empty crashlog, exact candidate/profile/IDF identity, disabled-SD/NVS truth,
+  and software-reboot persistence.
+- The exact 20-round UI receipt completed all 120 navigation/data-refresh
+  events with zero tab, identity, telemetry, health, or crash failure. It
+  failed five raw diagnostic checks: Home, an empty DM thread, and compact
+  Core Settings were correctly present but had no positive vertical overflow;
+  DM and DM-long geometry sheets were rejected because the diagnostic used a
+  fabricated key through strict production full-key admission.
+- The candidate failed closed before reboot, RF, or soak qualification. No
+  Public RF, network transmission, SD formatting, or SD/RP2040 action
+  occurred. Candidate `a9f14afe…`, run `29667030146`, and their physical
+  receipts are superseded and cannot qualify the repaired SHA.
+- R15 is activated for the smallest diagnostic repair. Firmware now emits
+  `movement_required` from the raw LVGL bounds; the Core producer and final
+  audit independently recompute overflow and movement, so positive overflow
+  still requires real motion while a fit-only surface is not mislabeled as
+  corrupt. The generic Full Feature runner remains unchanged.
+- Production contact-to-DM admission still resolves and validates the exact
+  full key before opening compose. Only the static diagnostic path presents a
+  synthetic geometry sheet, with an explicit `tx_suppressed=true`,
+  `send_enabled=false`, and a pre-send hard return before either channel or DM
+  transmission call. The producer and final audit recompute the raw target,
+  tab, mode, geometry, RF/format flags, and suppression state.
+- Focused R15 validation currently passes 88 producer, audit, UI, modal,
+  identity, eligibility, hardware-script, and Core-profile tests. Independent
+  review, affected source-pin checks, the new full host suite, and a fresh
+  Actions candidate remain required before COM12 can be flashed again.
+
+### `2026-07-18T21:50:26-04:00`
+
+- R15 is complete. Firmware emits explicit scroll applicability from raw LVGL
+  bounds, while both the Core producer and final audit independently require
+  real motion whenever positive overflow exists. Fit-only Home, empty DM, and
+  compact Settings surfaces are no longer mislabeled as corrupt.
+- Production contact-to-DM admission remains bound to an exact full key.
+  Only the static diagnostic path may present its synthetic geometry sheet;
+  that path sets `tx_suppressed=true`, keeps send disabled, and returns before
+  either Public-channel or direct-message transmission call.
+- The standalone scroll runner now has an explicit `core_1_0` mode with the
+  exact ordered six-surface plan, clean 40-hex candidate and Actions identity,
+  disabled-SD truth, COM12 admission before serial open, and read-only
+  identity preflight before any crashlog/UI mutation. Generic Full Feature
+  behavior and output remain unchanged by default.
+- Final focused validation passed 100 tests; the integrated manual/audit/UI
+  evidence slice passed 77 tests. Canonical source hashes were recomputed and
+  `git diff --check` passed. Three independent reviews found no remaining
+  concrete Core P0/P1 in the final R15 delta.
+- The complete repaired-tree host suite passed 1,507 tests with seven expected
+  skips in 446.45 seconds. A prior diagnostic run exposed only one stale
+  strict-receipt fixture; after that fixture was repaired, the clean required
+  suite passed without failures.
+- GitHub was refreshed after the suite. `origin/main` remains
+  `846f728dd3faded85451c6d39ba6a07cb8ca7f44`; PR #197 remains open at
+  `79d3efae9c784d65b70b0d79fae352b3ad5199aa`; excluded draft PR #199 remains
+  open at `6c854159dfc37525ff4df2d57ca216e4b2303bc2`; PR #200 remains the only
+  Core integration PR; no `v1.0.0` tag or release exists; and no Actions run
+  is active or queued.
+- No local firmware build occurred. The superseded candidate remains on
+  COM12; no new serial, RF, SD, or RP2040 operation occurred during R15.

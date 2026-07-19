@@ -119,6 +119,7 @@ static bool s_onboarding_probe_suppressed;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
+static bool s_compose_probe_send_suppressed;
 static uint64_t s_compose_channel_id;
 static char s_compose_channel_name[D1L_CHANNEL_NAME_LEN];
 static d1l_ui_messages_mode_t s_messages_mode = D1L_UI_MESSAGES_MODE_ROOT;
@@ -1454,6 +1455,7 @@ static void hide_compose_sheet(void)
 {
     d1l_ui_modal_hide(s_compose_sheet);
     s_onboarding_probe_suppressed = false;
+    s_compose_probe_send_suppressed = false;
     restore_dock_for_active_tab();
     s_compose_dm = false;
     s_compose_channel_id = 0U;
@@ -2253,15 +2255,15 @@ static d1l_ui_compose_eligibility_t compose_eligibility_for_text(
     d1l_channel_info_t channel = {0};
     const bool channel_found = s_compose_dm || snapshot_find_channel(
         &s_snapshot, s_compose_channel_id, &channel);
-    const bool channel_sendable = s_compose_dm ||
-        (channel_found && channel.enabled);
+    const bool channel_sendable = !s_compose_probe_send_suppressed &&
+        (s_compose_dm || (channel_found && channel.enabled));
     bool contact_found = !s_compose_dm;
     bool contact_sendable = !s_compose_dm;
     if (s_compose_dm && s_compose_contact.fingerprint[0] != '\0') {
         d1l_contact_entry_t current = {0};
         contact_found = d1l_app_model_find_contact(
             s_compose_contact.fingerprint, &current) == ESP_OK;
-        contact_sendable = contact_found &&
+        contact_sendable = !s_compose_probe_send_suppressed && contact_found &&
             d1l_contact_store_can_dm(&current);
         if (contact_sendable) {
             s_compose_contact = current;
@@ -2396,6 +2398,7 @@ static bool show_channel_compose_sheet(uint64_t channel_id,
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
+    s_compose_probe_send_suppressed = false;
     s_compose_dm = false;
     s_compose_channel_id = channel.channel_id;
     snprintf(s_compose_channel_name, sizeof(s_compose_channel_name), "%s",
@@ -2452,16 +2455,10 @@ static void mark_public_read_event_cb(lv_event_t *event)
     }
 }
 
-static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
+static void present_dm_compose_sheet(const d1l_contact_entry_t *selected,
+                                     bool probe_only)
 {
-    d1l_contact_entry_t selected = {0};
-    if (entry) {
-        selected = *entry;
-    }
-    const d1l_ui_dm_identity_eligibility_t eligibility =
-        dm_identity_for_contact(entry, &selected);
-    if (!eligibility.can_open_compose) {
-        show_dm_identity_reason(eligibility);
+    if (!selected) {
         return;
     }
     hide_sheet();
@@ -2479,15 +2476,16 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
+    s_compose_probe_send_suppressed = probe_only;
     s_compose_dm = true;
     s_compose_channel_id = 0U;
     s_compose_channel_name[0] = '\0';
     s_compose_last_send_error = ESP_OK;
-    s_compose_contact = selected;
+    s_compose_contact = *selected;
     if (s_compose_title) {
         char title[48];
         snprintf(title, sizeof(title), "DM %.32s",
-                 selected.alias[0] ? selected.alias : selected.fingerprint);
+                 selected->alias[0] ? selected->alias : selected->fingerprint);
         lv_label_set_text(s_compose_title, title);
     }
     if (s_compose_sheet) {
@@ -2501,6 +2499,21 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         update_compose_counter();
     }
     request_full_screen_repaint();
+}
+
+static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
+{
+    d1l_contact_entry_t selected = {0};
+    if (entry) {
+        selected = *entry;
+    }
+    const d1l_ui_dm_identity_eligibility_t eligibility =
+        dm_identity_for_contact(entry, &selected);
+    if (!eligibility.can_open_compose) {
+        show_dm_identity_reason(eligibility);
+        return;
+    }
+    present_dm_compose_sheet(&selected, false);
 }
 
 static void open_node_dm_for(const d1l_node_view_t *view)
@@ -3974,6 +3987,10 @@ static void clear_compose_event_cb(lv_event_t *event)
 static void send_compose_text(void)
 {
     if (!s_compose_textarea) {
+        return;
+    }
+    if (s_compose_probe_send_suppressed) {
+        update_compose_counter();
         return;
     }
     const char *text = lv_textarea_get_text(s_compose_textarea);
@@ -6916,11 +6933,17 @@ static void measure_scroll_probe_target(lv_obj_t *target,
     result->after_y = (int32_t)lv_obj_get_scroll_y(target);
     result->scroll_top_after = (int32_t)lv_obj_get_scroll_top(target);
     result->scroll_bottom_after = (int32_t)lv_obj_get_scroll_bottom(target);
+    result->movement_required =
+        result->scroll_top_before > 0 ||
+        result->scroll_bottom_before > 0 ||
+        result->scroll_top_after > 0 ||
+        result->scroll_bottom_after > 0;
     result->moved = result->before_y != result->after_y ||
         result->scroll_top_before != result->scroll_top_after ||
         result->scroll_bottom_before != result->scroll_bottom_after;
     result->ok = result->surface_supported && result->target_found &&
-        result->scrollable && result->moved;
+        result->scrollable &&
+        (!result->movement_required || result->moved);
 }
 
 static lv_obj_t *scroll_probe_open_surface(const char *surface)
@@ -7212,10 +7235,11 @@ static void open_compose_probe_on_ui_task(const char *target)
         snprintf(contact.fingerprint, sizeof(contact.fingerprint), "%s", "0000000000000000");
         snprintf(contact.public_key_hex, sizeof(contact.public_key_hex), "%s", "00");
         snprintf(contact.alias, sizeof(contact.alias), "%s", "Probe DM");
-        open_dm_compose_for_contact(&contact);
+        present_dm_compose_sheet(&contact, true);
     } else {
         (void)show_channel_compose_sheet(
             D1L_CHANNEL_PUBLIC_ID, "Compose Public", "Public message");
+        s_compose_probe_send_suppressed = true;
     }
 
     if (s_compose_textarea) {
@@ -7409,6 +7433,14 @@ static void run_compose_probe_on_ui_task(const char *target,
     result->dm_mode = s_compose_dm ||
         (strcmp(canonical, "dm_search") == 0 &&
          s_messages_mode == D1L_UI_MESSAGES_MODE_DIRECT);
+    result->tx_suppressed = s_compose_probe_send_suppressed;
+    if (d1l_ui_keyboard_probe_target_is_compose(canonical)) {
+        const char *text = s_compose_textarea ?
+            lv_textarea_get_text(s_compose_textarea) : "";
+        const d1l_user_text_info_t info = d1l_user_text_validate(text);
+        result->send_enabled =
+            compose_eligibility_for_text(&info).send_enabled;
+    }
     fill_compose_probe_geometry(result, sheet, textarea, keyboard);
 
     const bool sheet_inside_screen =
@@ -7439,6 +7471,9 @@ static void run_compose_probe_on_ui_task(const char *target,
         (!d1l_ui_keyboard_probe_target_is_compose(canonical) &&
          strcmp(canonical, "dm_search") != 0) ||
         result->dm_mode == d1l_ui_keyboard_probe_target_is_dm(canonical);
+    const bool compose_send_suppressed =
+        !d1l_ui_keyboard_probe_target_is_compose(canonical) ||
+        (result->tx_suppressed && !result->send_enabled);
 
     result->ok = result->target_supported &&
         result->sheet_visible &&
@@ -7447,6 +7482,7 @@ static void run_compose_probe_on_ui_task(const char *target,
         onboarding_state_ok &&
         dock_state_ok &&
         dm_state_ok &&
+        compose_send_suppressed &&
         result->keyboard_w >= d1l_ui_keyboard_probe_min_width(canonical) &&
         result->keyboard_h >= d1l_ui_keyboard_probe_min_height(canonical) &&
         sheet_inside_screen &&

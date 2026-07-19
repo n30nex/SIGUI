@@ -60,6 +60,8 @@ try:
         CORE_SCROLL_SURFACES,
         CORE_TAB_SEQUENCE,
         RELEASE_MIN_ROUNDS,
+        core_compose_result_ok,
+        core_scroll_result_ok,
         core_tab_sequence_ok,
         unavailable_ui_events_ok,
         unavailable_ui_probe_plan,
@@ -130,6 +132,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         CORE_SCROLL_SURFACES,
         CORE_TAB_SEQUENCE,
         RELEASE_MIN_ROUNDS,
+        core_compose_result_ok,
+        core_scroll_result_ok,
         core_tab_sequence_ok,
         unavailable_ui_events_ok,
         unavailable_ui_probe_plan,
@@ -1487,7 +1491,7 @@ def core_ui_gate(
             isinstance(event, dict)
             and event.get("surface") == surface
             and event.get("command") == f"ui scroll-probe {surface}"
-            and event.get("result", {}).get("ok") is True
+            and core_scroll_result_ok(event.get("result"), surface)
             for event, surface in zip(scroll_events, CORE_SCROLL_SURFACES)
         )
     )
@@ -1499,7 +1503,7 @@ def core_ui_gate(
             isinstance(event, dict)
             and event.get("target") == target
             and event.get("command") == f"ui compose-probe {target}"
-            and event.get("result", {}).get("ok") is True
+            and core_compose_result_ok(event.get("result"), target)
             for event, target in zip(compose_events, CORE_COMPOSE_TARGETS)
         )
     )

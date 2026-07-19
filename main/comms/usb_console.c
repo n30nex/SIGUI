@@ -1991,9 +1991,11 @@ static void cmd_ui_scroll_probe(const char *line)
     print_json_string(probe.surface);
     printf(",\"tab\":");
     print_json_string(probe.tab);
-    printf(",\"surface_supported\":%s,\"target_found\":%s,\"scrollable\":%s,\"moved\":%s",
+    printf(",\"surface_supported\":%s,\"target_found\":%s,\"scrollable\":%s,"
+           "\"movement_required\":%s,\"moved\":%s",
            bool_json(probe.surface_supported), bool_json(probe.target_found),
-           bool_json(probe.scrollable), bool_json(probe.moved));
+           bool_json(probe.scrollable), bool_json(probe.movement_required),
+           bool_json(probe.moved));
     printf(",\"before_y\":%ld,\"after_y\":%ld",
            (long)probe.before_y, (long)probe.after_y);
     printf(",\"scroll_top_before\":%ld,\"scroll_bottom_before\":%ld",
@@ -2037,14 +2039,18 @@ static void cmd_ui_compose_probe(const char *line)
     print_json_string(probe.target);
     printf(",\"target_supported\":%s,\"sheet_visible\":%s,\"textarea_visible\":%s,"
            "\"keyboard_visible\":%s,\"onboarding_visible\":%s,"
-           "\"dock_hidden\":%s,\"dm_mode\":%s,\"active_tab\":",
+           "\"dock_hidden\":%s,\"dm_mode\":%s,\"tx_suppressed\":%s,"
+           "\"send_enabled\":%s,"
+           "\"active_tab\":",
            bool_json(probe.target_supported),
            bool_json(probe.sheet_visible),
            bool_json(probe.textarea_visible),
            bool_json(probe.keyboard_visible),
            bool_json(probe.onboarding_visible),
            bool_json(probe.dock_hidden),
-           bool_json(probe.dm_mode));
+           bool_json(probe.dm_mode),
+           bool_json(probe.tx_suppressed),
+           bool_json(probe.send_enabled));
     print_json_string(probe.active_tab);
     printf(",\"sheet\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
            "\"textarea\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
