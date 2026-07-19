@@ -42,9 +42,11 @@ def api_fixture(*, unsafe: bool = False):
     for index, name in enumerate(capture.EXPECTED_ACTIONS_ARTIFACTS, 1):
         files = (
             {
+                "build-inputs/SHA256SUMS.txt": b"fixture checksum manifest",
                 "build-inputs/d1l-candidate-scope.json": (
                     json.dumps(scope, sort_keys=True).encode("ascii")
-                )
+                ),
+                "build-inputs/lowercase.json": b"lowercase fixture",
             }
             if name == "d1l-host-artifacts"
             else {f"{name}.txt": name.encode("ascii")}
@@ -150,6 +152,24 @@ def test_capture_downloads_api_bound_archives_and_revalidates(
             run_id=RUN_ID,
             run_attempt=RUN_ATTEMPT,
         )
+
+
+def test_zip_and_extracted_inventory_use_the_same_mixed_case_order(tmp_path):
+    archive = tmp_path / "mixed-case.zip"
+    archive.write_bytes(
+        zip_bytes(
+            {
+                "build-inputs/lowercase.json": b"lower",
+                "build-inputs/SHA256SUMS.txt": b"upper",
+            }
+        )
+    )
+    extracted = tmp_path / "extracted"
+    capture.safe_extract(archive, extracted)
+
+    assert capture.zip_inventory(archive) == capture.tree_inventory(
+        extracted, tmp_path
+    )["files"]
 
 
 def test_capture_rejects_unsafe_zip_and_refuses_overwrite(

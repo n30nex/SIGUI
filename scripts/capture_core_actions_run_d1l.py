@@ -109,7 +109,10 @@ def tree_inventory(directory: Path, root: Path) -> dict:
     if not directory.is_dir() or is_link_or_reparse(directory):
         raise ValueError(f"Artifact directory is missing or linked: {directory}")
     rows: list[dict] = []
-    for path in sorted(directory.rglob("*")):
+    for path in sorted(
+        directory.rglob("*"),
+        key=lambda candidate: candidate.relative_to(directory).as_posix(),
+    ):
         if is_link_or_reparse(path):
             raise ValueError(f"Artifact tree contains a link/reparse point: {path}")
         if not path.is_file():

@@ -117,13 +117,13 @@ The lead reviews and cherry-picks each bounded commit in dependency order.
 | R6 | complete | Public-only Core runtime boundary `e3f99a6` rejects private-channel RX/TX before decrypt/key/store/RF and prevents retained private-channel reconciliation; focused Mesh/DM/contact/route suites are green |
 | R7 | complete | Exact Actions capture, package/provenance/SBOM, non-erasing flash, Core smoke/UI, manual/install review, reboot, RF/DM, soak, defect, and final audit producers are integrated through `f9e26e0` |
 | R8 | complete | Three-lane final freeze review passed runtime and release-flow scope and closed its one evidence finding with deterministic provenance recomputation `f9e26e0`; no remaining concrete pre-freeze Core P0/P1 found |
-| R9 | in progress | First full host suite exposed four test-contract failures after 1,495 passes; the bounded R15 repair is focused-green and one authorized post-repair full suite is next |
-| R10 | pending | One final `d1l-ci`, download all artifacts, verify all checksums |
+| R9 | in progress | First repaired candidate passed 1,499 tests but exposed a Windows mixed-case artifact-inventory ordering defect before flash; a second bounded R15 source repair is in progress |
+| R10 | in progress | Run `29666410430` was green and all five artifacts verified, but is superseded because its local strict receipt could not pass the cross-platform tree-order check |
 | R11 | pending | Exact non-erasing COM12 flash, UI/boot/persistence gates |
 | R12 | pending | Controlled peer RF/DM; `public_rf_tx=false` |
 | R13 | in progress | SD disabled/NVS fallback selected because COM16 is absent; exact package/device truth remains |
 | R14 | pending | 60-minute active plus 30-minute idle exact-candidate soak |
-| R15 | complete | Smallest repair changed tests only: exact reviewed Core port literals, a bounded native-fixture extraction marker, and retained-backup attention expectations; 107 focused tests passed |
+| R15 | in progress | Second activation: canonicalize extracted artifact inventory by POSIX path and add a mixed-case ZIP/tree regression; new full suite and Actions candidate required |
 | R16 | pending | Final Core audit and tag/release or exact no-go |
 
 ## Exact-candidate evidence ledger
@@ -133,9 +133,9 @@ All rows remain fail-closed until an exact receipt is recorded.
 | Gate | Status | Exact evidence |
 |---|---|---|
 | Source/profile frozen | missing | — |
-| Full host suite | repair validation pending | First run: 1,495 passed, 7 skipped, 4 failed; no runtime failure; one R15-authorized post-repair suite remains |
-| Final Actions workflow | missing | — |
-| Artifact downloads/checksums | missing | — |
+| Full host suite | superseded pass | Candidate `8ff4d765…`: 1,499 passed, 7 skipped; a new suite is required after the release-script repair |
+| Final Actions workflow | superseded pass | Run `29666410430` succeeded at `8ff4d765…`; never flashed and ineligible after the release-script change |
+| Artifact downloads/checksums | superseded pass | Five archive GitHub digests and extracted checksum trees verified; exact new-run artifacts required |
 | Profile/package/provenance/SBOM binding | missing | — |
 | Non-erasing COM12 flash | missing | — |
 | Core smoke/display/touch | missing | — |
@@ -543,3 +543,28 @@ release is authorized by the evidence currently recorded.
   now required by R15 before candidate freeze. No firmware was built locally,
   no serial port was opened, no flash or RF transmission occurred, and no SD
   operation occurred.
+
+### `2026-07-18T20:20:36-04:00`
+
+- Candidate `8ff4d765272791796f8f08d0a1fa044024f652e3` passed the complete
+  host suite with 1,499 passed and 7 skipped. Workflow-dispatch Actions run
+  `29666410430` then passed host, MeshCore conformance, ESP-IDF firmware,
+  package, provenance, and SBOM jobs with `include_sd_bridge=false`.
+- The strict capture downloaded exactly five archives. Each archive SHA-256
+  matched its GitHub API digest, all 343 extracted files received immutable
+  per-file and aggregate hashes, and all embedded firmware, build-input, and
+  package checksum trees passed.
+- Before COM12 was opened, the flash runner revalidated the receipt and found
+  a release-script defect: ZIP members were ordered by canonical POSIX text,
+  while extracted paths used host-native `Path` ordering. On Windows,
+  mixed-case names such as `SHA256SUMS.txt` therefore compared in a different
+  order despite identical paths, sizes, hashes, counts, and sets.
+- The fail-closed gate worked: no flash occurred. Candidate `8ff4d765…` and
+  run `29666410430` are superseded and will not be reused as release evidence.
+  R15 is activated again for the smallest repair: sort extracted inventory by
+  repository-relative POSIX path and cover the exact mixed-case ZIP/tree
+  regression. A new focused suite, full suite, and Actions candidate are
+  required. PR #200 remains the single integration PR; its automatic duplicate
+  run `29666726329` was canceled.
+- No serial port was opened, no firmware was flashed, no RF transmission
+  occurred, and no SD operation occurred.
